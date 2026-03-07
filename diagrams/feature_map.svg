@@ -1,0 +1,386 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1020" font-family="Arial, sans-serif">
+
+  <!-- Background -->
+  <rect width="1400" height="1020" fill="#F8F9FA"/>
+
+  <!-- Title -->
+  <text x="700" y="38" text-anchor="middle" font-size="20" font-weight="bold" fill="#1A2B4A">Town Meeting Manager — Feature Map</text>
+  <text x="700" y="58" text-anchor="middle" font-size="12" fill="#6B7280">New England Select Board / Town Meeting Form of Government</text>
+  <line x1="60" y1="68" x2="1340" y2="68" stroke="#CBD5E0" stroke-width="1"/>
+
+  <!-- ═══════════════════ COLUMN 1: ONBOARDING & CONFIG ═══════════════════ -->
+  <rect x="30" y="82" width="240" height="32" rx="4" fill="#1A2B4A"/>
+  <text x="150" y="103" text-anchor="middle" font-size="13" font-weight="bold" fill="white">1. Onboarding &amp; Config</text>
+
+  <!-- Setup Wizard -->
+  <rect x="30" y="122" width="240" height="22" rx="3" fill="#2D4A7A"/>
+  <text x="150" y="137" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Setup Wizard</text>
+  <rect x="30" y="148" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="161" font-size="10" fill="#374151">Town name, type, population tier</text>
+  <rect x="30" y="168" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="181" font-size="10" fill="#374151">Board name, size, election method</text>
+  <rect x="30" y="188" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="201" font-size="10" fill="#374151">Role titles (1st Selectman etc.)</text>
+  <rect x="30" y="208" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="221" font-size="10" fill="#374151">Who presides / who records minutes</text>
+  <rect x="30" y="228" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="241" font-size="10" fill="#374151">Formality default (formal/informal)</text>
+  <rect x="30" y="248" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="261" font-size="10" fill="#374151">Minutes style (action/summary/narrative)</text>
+  <rect x="30" y="268" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="281" font-size="10" fill="#374151">Boards &amp; committees inventory</text>
+
+  <!-- Town Profile -->
+  <rect x="30" y="294" width="240" height="22" rx="3" fill="#2D4A7A"/>
+  <text x="150" y="309" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Town Profile (editable)</text>
+  <rect x="30" y="320" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="333" font-size="10" fill="#374151">Municipal configuration (all wizard settings)</text>
+  <rect x="30" y="340" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="353" font-size="10" fill="#374151">Staff roles &amp; user accounts</text>
+  <rect x="30" y="360" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="373" font-size="10" fill="#374151">Notice templates</text>
+  <rect x="30" y="380" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="393" font-size="10" fill="#374151">Minutes approval workflow</text>
+  <rect x="30" y="400" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="413" font-size="10" fill="#374151">Public portal settings &amp; branding</text>
+  <rect x="30" y="420" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="433" font-size="10" fill="#374151">Retention policy acknowledgment</text>
+
+  <!-- Member Management -->
+  <rect x="30" y="446" width="240" height="22" rx="3" fill="#2D4A7A"/>
+  <text x="150" y="461" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Member Management</text>
+  <rect x="30" y="472" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="485" font-size="10" fill="#374151">Elected vs. appointed classification</text>
+  <rect x="30" y="492" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="505" font-size="10" fill="#374151">Board assignment &amp; term tracking</text>
+  <rect x="30" y="512" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="525" font-size="10" fill="#374151">Role title per seat (if role-titled board)</text>
+  <rect x="30" y="532" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="545" font-size="10" fill="#374151">District assignment (if district-based)</text>
+  <rect x="30" y="552" width="240" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="42" y="565" font-size="10" fill="#374151">Attendance &amp; voting history</text>
+  <rect x="30" y="572" width="240" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="42" y="585" font-size="10" fill="#374151">Public roster display</text>
+
+  <!-- ═══════════════════ COLUMN 2: AGENDA BUILDING ═══════════════════ -->
+  <rect x="286" y="82" width="240" height="32" rx="4" fill="#1A5C3A"/>
+  <text x="406" y="103" text-anchor="middle" font-size="13" font-weight="bold" fill="white">2. Agenda Building</text>
+
+  <!-- Meeting Setup -->
+  <rect x="286" y="122" width="240" height="22" rx="3" fill="#267A50"/>
+  <text x="406" y="137" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Meeting Setup</text>
+  <rect x="286" y="148" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="161" font-size="10" fill="#374151">Meeting type (regular/special/public hearing)</text>
+  <rect x="286" y="168" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="181" font-size="10" fill="#374151">Board assignment</text>
+  <rect x="286" y="188" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="201" font-size="10" fill="#374151">Date, time, location</text>
+  <rect x="286" y="208" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="221" font-size="10" fill="#374151">Presiding officer override</text>
+  <rect x="286" y="228" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="241" font-size="10" fill="#374151">Formality mode override</text>
+  <rect x="286" y="248" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="261" font-size="10" fill="#374151">Expected attendees</text>
+
+  <!-- Notice Management -->
+  <rect x="286" y="274" width="240" height="22" rx="3" fill="#267A50"/>
+  <text x="406" y="289" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Notice Management</text>
+  <rect x="286" y="300" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="313" font-size="10" fill="#374151">Notice text from template</text>
+  <rect x="286" y="320" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="333" font-size="10" fill="#374151">Posted date &amp; posting location(s)</text>
+  <rect x="286" y="340" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="353" font-size="10" fill="#374151">3-day rule compliance check</text>
+  <rect x="286" y="360" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="373" font-size="10" fill="#374151">Notice document generation &amp; publish</text>
+
+  <!-- Agenda Item Builder -->
+  <rect x="286" y="386" width="240" height="22" rx="3" fill="#267A50"/>
+  <text x="406" y="401" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Agenda Item Builder</text>
+  <rect x="286" y="412" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="425" font-size="10" fill="#374151">Item types: discussion/action/hearing/exec session</text>
+  <rect x="286" y="432" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="445" font-size="10" fill="#374151">Drag-and-drop ordering</text>
+  <rect x="286" y="452" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="465" font-size="10" fill="#374151">Staff report / memo attachment per item</text>
+  <rect x="286" y="472" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="485" font-size="10" fill="#374151">Supporting documents per item</text>
+  <rect x="286" y="492" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="505" font-size="10" fill="#374151">Requested action text</text>
+  <rect x="286" y="512" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="525" font-size="10" fill="#374151">Item submitter (dept/staff/applicant)</text>
+
+  <!-- Agenda Publishing -->
+  <rect x="286" y="538" width="240" height="22" rx="3" fill="#267A50"/>
+  <text x="406" y="553" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Agenda Publishing</text>
+  <rect x="286" y="564" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="577" font-size="10" fill="#374151">Draft → review → approved → published workflow</text>
+  <rect x="286" y="584" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="597" font-size="10" fill="#374151">Agenda packet PDF generation</text>
+  <rect x="286" y="604" width="240" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="298" y="617" font-size="10" fill="#374151">Automatic public portal publish</text>
+  <rect x="286" y="624" width="240" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="298" y="637" font-size="10" fill="#374151">Email notification to subscribers</text>
+
+  <!-- ═══════════════════ COLUMN 3: LIVE MEETING ═══════════════════ -->
+  <rect x="542" y="82" width="240" height="32" rx="4" fill="#6B2D0E"/>
+  <text x="662" y="103" text-anchor="middle" font-size="13" font-weight="bold" fill="white">3. Live Meeting Manager</text>
+
+  <!-- Call to Order -->
+  <rect x="542" y="122" width="240" height="22" rx="3" fill="#8B3E18"/>
+  <text x="662" y="137" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Call to Order</text>
+  <rect x="542" y="148" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="161" font-size="10" fill="#374151">Roll call / attendance recording</text>
+  <rect x="542" y="168" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="181" font-size="10" fill="#374151">Quorum check (auto-calculated)</text>
+  <rect x="542" y="188" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="201" font-size="10" fill="#374151">Meeting called to order timestamp</text>
+  <rect x="542" y="208" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="221" font-size="10" fill="#374151">Open meetings law compliance check</text>
+
+  <!-- Item Execution -->
+  <rect x="542" y="234" width="240" height="22" rx="3" fill="#8B3E18"/>
+  <text x="662" y="249" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Item Execution</text>
+  <rect x="542" y="260" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="273" font-size="10" fill="#374151">Advance through agenda items</text>
+  <rect x="542" y="280" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="293" font-size="10" fill="#374151">Discussion notes per item</text>
+  <rect x="542" y="300" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="313" font-size="10" fill="#374151">Motion capture (text, mover, seconder)</text>
+  <rect x="542" y="320" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="333" font-size="10" fill="#374151">Vote recording (yes/no/abstain per member)</text>
+  <rect x="542" y="340" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="353" font-size="10" fill="#374151">Add items (informal mode)</text>
+  <rect x="542" y="360" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="373" font-size="10" fill="#374151">Tabled / continued item handling</text>
+
+  <!-- Public Participation -->
+  <rect x="542" y="386" width="240" height="22" rx="3" fill="#8B3E18"/>
+  <text x="662" y="401" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Public Participation</text>
+  <rect x="542" y="412" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="425" font-size="10" fill="#374151">Speaker sign-in / queue</text>
+  <rect x="542" y="432" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="445" font-size="10" fill="#374151">Timer per speaker (public hearing)</text>
+  <rect x="542" y="452" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="465" font-size="10" fill="#374151">Comment associated to agenda item</text>
+  <rect x="542" y="472" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="485" font-size="10" fill="#374151">Informal open comment (any item)</text>
+
+  <!-- Executive Session -->
+  <rect x="542" y="498" width="240" height="22" rx="3" fill="#8B3E18"/>
+  <text x="662" y="513" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Executive Session</text>
+  <rect x="542" y="524" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="537" font-size="10" fill="#374151">1 MRSA §405 statutory cite picklist</text>
+  <rect x="542" y="544" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="557" font-size="10" fill="#374151">Entry / return to open session timestamps</text>
+  <rect x="542" y="564" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="577" font-size="10" fill="#374151">No-vote-taken confirmation</text>
+
+  <!-- Adjournment -->
+  <rect x="542" y="590" width="240" height="22" rx="3" fill="#8B3E18"/>
+  <text x="662" y="605" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Adjournment</text>
+  <rect x="542" y="616" width="240" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="554" y="629" font-size="10" fill="#374151">Adjournment timestamp</text>
+  <rect x="542" y="636" width="240" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="554" y="649" font-size="10" fill="#374151">Trigger AI minutes draft generation</text>
+
+  <!-- ═══════════════════ COLUMN 4: MINUTES & RECORDS ═══════════════════ -->
+  <rect x="798" y="82" width="240" height="32" rx="4" fill="#4A1A6B"/>
+  <text x="918" y="103" text-anchor="middle" font-size="13" font-weight="bold" fill="white">4. Minutes &amp; Records</text>
+
+  <!-- AI Minutes Drafting -->
+  <rect x="798" y="122" width="240" height="22" rx="3" fill="#6B2D9A"/>
+  <text x="918" y="137" text-anchor="middle" font-size="11" font-weight="bold" fill="white">AI Minutes Drafting</text>
+  <rect x="798" y="148" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="161" font-size="10" fill="#374151">Pre-populated structure from agenda</text>
+  <rect x="798" y="168" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="181" font-size="10" fill="#374151">Auto-drafted language per item type</text>
+  <rect x="798" y="188" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="201" font-size="10" fill="#374151">Motion/vote language inserted verbatim</text>
+  <rect x="798" y="208" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="221" font-size="10" fill="#374151">Board-specific template language</text>
+  <rect x="798" y="228" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="241" font-size="10" fill="#374151">Clerk review &amp; edit before approval</text>
+
+  <!-- Minutes Workflow -->
+  <rect x="798" y="254" width="240" height="22" rx="3" fill="#6B2D9A"/>
+  <text x="918" y="269" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Minutes Workflow</text>
+  <rect x="798" y="280" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="293" font-size="10" fill="#374151">Draft → clerk review → board approval</text>
+  <rect x="798" y="300" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="313" font-size="10" fill="#374151">Approval at next meeting (recorded)</text>
+  <rect x="798" y="320" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="333" font-size="10" fill="#374151">Approved status locks document</text>
+  <rect x="798" y="340" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="353" font-size="10" fill="#374151">Corrections via amendment (not deletion)</text>
+
+  <!-- Document Archive -->
+  <rect x="798" y="366" width="240" height="22" rx="3" fill="#6B2D9A"/>
+  <text x="918" y="381" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Document Archive</text>
+  <rect x="798" y="392" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="405" font-size="10" fill="#374151">Permanent retention (approved minutes)</text>
+  <rect x="798" y="412" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="425" font-size="10" fill="#374151">Attachments stored with parent item</text>
+  <rect x="798" y="432" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="445" font-size="10" fill="#374151">Full-text search across all records</text>
+  <rect x="798" y="452" width="240" height="18" rx="2" fill="#FAF3FF"/>
+  <text x="810" y="465" font-size="10" fill="#374151">Filter by board, date, item type</text>
+  <rect x="798" y="472" width="240" height="18" rx="2" fill="#F3EAF8"/>
+  <text x="810" y="485" font-size="10" fill="#374151">ADA-compliant document publishing</text>
+
+  <!-- ═══════════════════ COLUMN 5: TOWN MEETING / WARRANT ═══════════════════ -->
+  <rect x="1054" y="82" width="240" height="32" rx="4" fill="#7A4A0A"/>
+  <text x="1174" y="103" text-anchor="middle" font-size="13" font-weight="bold" fill="white">5. Annual Town Meeting</text>
+
+  <!-- Warrant Drafting -->
+  <rect x="1054" y="122" width="240" height="22" rx="3" fill="#9E6214"/>
+  <text x="1174" y="137" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Warrant Drafting</text>
+  <rect x="1054" y="148" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="161" font-size="10" fill="#374151">Article numbering &amp; legal text</text>
+  <rect x="1054" y="168" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="181" font-size="10" fill="#374151">Fiscal impact notation per article</text>
+  <rect x="1054" y="188" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="201" font-size="10" fill="#374151">Select Board recommendation</text>
+  <rect x="1054" y="208" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="221" font-size="10" fill="#374151">Supporting attachments per article</text>
+  <rect x="1054" y="228" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="241" font-size="10" fill="#374151">Budget Committee recommendation</text>
+
+  <!-- Pre-Meeting -->
+  <rect x="1054" y="254" width="240" height="22" rx="3" fill="#9E6214"/>
+  <text x="1174" y="269" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Pre-Meeting Publication</text>
+  <rect x="1054" y="280" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="293" font-size="10" fill="#374151">Warrant document generation</text>
+  <rect x="1054" y="300" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="313" font-size="10" fill="#374151">Posting notice tracking</text>
+  <rect x="1054" y="320" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="333" font-size="10" fill="#374151">Public portal publication</text>
+
+  <!-- Meeting Night -->
+  <rect x="1054" y="346" width="240" height="22" rx="3" fill="#9E6214"/>
+  <text x="1174" y="361" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Meeting Night</text>
+  <rect x="1054" y="372" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="385" font-size="10" fill="#374151">Article-by-article progression</text>
+  <rect x="1054" y="392" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="405" font-size="10" fill="#374151">Floor amendment capture</text>
+  <rect x="1054" y="412" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="425" font-size="10" fill="#374151">Vote method: voice/show of hands/secret ballot/counted</text>
+  <rect x="1054" y="432" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="445" font-size="10" fill="#374151">Vote count recording</text>
+  <rect x="1054" y="452" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="465" font-size="10" fill="#374151">Moderator role assignment</text>
+
+  <!-- Post-Meeting -->
+  <rect x="1054" y="478" width="240" height="22" rx="3" fill="#9E6214"/>
+  <text x="1174" y="493" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Post-Meeting Record</text>
+  <rect x="1054" y="504" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="517" font-size="10" fill="#374151">Warrant results document generation</text>
+  <rect x="1054" y="524" width="240" height="18" rx="2" fill="#FFFBF0"/>
+  <text x="1066" y="537" font-size="10" fill="#374151">Legal record publication</text>
+  <rect x="1054" y="544" width="240" height="18" rx="2" fill="#FDF5E6"/>
+  <text x="1066" y="557" font-size="10" fill="#374151">Permanent archive with amendments preserved</text>
+
+  <!-- ═══════════════════ BOTTOM ROW: THREE AUDIENCES ═══════════════════ -->
+  <rect x="30" y="640" width="1264" height="32" rx="4" fill="#374151"/>
+  <text x="662" y="661" text-anchor="middle" font-size="13" font-weight="bold" fill="white">Three Audiences — Access Model</text>
+
+  <!-- Town Clerk / Staff -->
+  <rect x="30" y="680" width="400" height="22" rx="3" fill="#1A2B4A"/>
+  <text x="230" y="695" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Town Clerk / Staff (Full Access)</text>
+  <rect x="30" y="706" width="196" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="128" y="719" text-anchor="middle" font-size="10" fill="#374151">Full agenda build &amp; edit</text>
+  <rect x="234" y="706" width="196" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="332" y="719" text-anchor="middle" font-size="10" fill="#374151">Live meeting manager</text>
+  <rect x="30" y="728" width="196" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="128" y="741" text-anchor="middle" font-size="10" fill="#374151">Minutes draft &amp; approve</text>
+  <rect x="234" y="728" width="196" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="332" y="741" text-anchor="middle" font-size="10" fill="#374151">Member &amp; town management</text>
+  <rect x="30" y="750" width="196" height="18" rx="2" fill="#EBF0F8"/>
+  <text x="128" y="763" text-anchor="middle" font-size="10" fill="#374151">Notice creation &amp; compliance</text>
+  <rect x="234" y="750" width="196" height="18" rx="2" fill="#F3F6FC"/>
+  <text x="332" y="763" text-anchor="middle" font-size="10" fill="#374151">Document archive management</text>
+
+  <!-- Board Members -->
+  <rect x="444" y="680" width="432" height="22" rx="3" fill="#1A5C3A"/>
+  <text x="660" y="695" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Board Members (Participant Access)</text>
+  <rect x="444" y="706" width="210" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="549" y="719" text-anchor="middle" font-size="10" fill="#374151">View agenda &amp; attachments</text>
+  <rect x="662" y="706" width="214" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="769" y="719" text-anchor="middle" font-size="10" fill="#374151">Pre-meeting annotations</text>
+  <rect x="444" y="728" width="210" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="549" y="741" text-anchor="middle" font-size="10" fill="#374151">Vote via member app (optional)</text>
+  <rect x="662" y="728" width="214" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="769" y="741" text-anchor="middle" font-size="10" fill="#374151">View draft minutes</text>
+  <rect x="444" y="750" width="210" height="18" rx="2" fill="#E8F5EE"/>
+  <text x="549" y="763" text-anchor="middle" font-size="10" fill="#374151">Personal attendance &amp; vote history</text>
+  <rect x="662" y="750" width="214" height="18" rx="2" fill="#F0FAF5"/>
+  <text x="769" y="763" text-anchor="middle" font-size="10" fill="#374151">Recording secretary minutes entry</text>
+
+  <!-- General Public -->
+  <rect x="890" y="680" width="404" height="22" rx="3" fill="#6B2D0E"/>
+  <text x="1092" y="695" text-anchor="middle" font-size="11" font-weight="bold" fill="white">General Public (Portal — No Login)</text>
+  <rect x="890" y="706" width="196" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="988" y="719" text-anchor="middle" font-size="10" fill="#374151">Meeting calendar</text>
+  <rect x="1094" y="706" width="200" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="1194" y="719" text-anchor="middle" font-size="10" fill="#374151">Published agendas &amp; packets</text>
+  <rect x="890" y="728" width="196" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="988" y="741" text-anchor="middle" font-size="10" fill="#374151">Approved minutes archive</text>
+  <rect x="1094" y="728" width="200" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="1194" y="741" text-anchor="middle" font-size="10" fill="#374151">Board &amp; member directory</text>
+  <rect x="890" y="750" width="196" height="18" rx="2" fill="#FDF0EA"/>
+  <text x="988" y="763" text-anchor="middle" font-size="10" fill="#374151">Full-text search</text>
+  <rect x="1094" y="750" width="200" height="18" rx="2" fill="#FEF6F2"/>
+  <text x="1194" y="763" text-anchor="middle" font-size="10" fill="#374151">Email / notice subscriptions</text>
+
+  <!-- ═══════════════════ COMPLIANCE FOOTER ═══════════════════ -->
+  <rect x="30" y="790" width="1264" height="22" rx="3" fill="#DC2626"/>
+  <text x="662" y="805" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Compliance Layer — Always On</text>
+  <rect x="30" y="816" width="308" height="18" rx="2" fill="#FEF2F2"/>
+  <text x="184" y="829" text-anchor="middle" font-size="10" fill="#374151">Maine Open Meetings Law (1 MRSA §401–412)</text>
+  <rect x="346" y="816" width="308" height="18" rx="2" fill="#FFF5F5"/>
+  <text x="500" y="829" text-anchor="middle" font-size="10" fill="#374151">Maine FOIA / Records Retention (permanently locked approved minutes)</text>
+  <rect x="662" y="816" width="308" height="18" rx="2" fill="#FEF2F2"/>
+  <text x="816" y="829" text-anchor="middle" font-size="10" fill="#374151">Robert's Rules (loose baseline — motion / seconder / vote)</text>
+  <rect x="978" y="816" width="316" height="18" rx="2" fill="#FFF5F5"/>
+  <text x="1136" y="829" text-anchor="middle" font-size="10" fill="#374151">ADA / WCAG 2.1 AA (public portal &amp; generated documents)</text>
+
+  <!-- ═══════════════════ MODE SWITCH FOOTER ═══════════════════ -->
+  <rect x="30" y="852" width="608" height="22" rx="3" fill="#374151"/>
+  <text x="334" y="867" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Formal Mode</text>
+  <rect x="30" y="878" width="196" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="128" y="891" text-anchor="middle" font-size="10" fill="#374151">Motion + seconder required</text>
+  <rect x="234" y="878" width="196" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="332" y="891" text-anchor="middle" font-size="10" fill="#374151">Speaker recognition enforced</text>
+  <rect x="438" y="878" width="196" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="536" y="891" text-anchor="middle" font-size="10" fill="#374151">All required fields enforced</text>
+  <rect x="30" y="900" width="196" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="128" y="913" text-anchor="middle" font-size="10" fill="#374151">No agenda additions from floor</text>
+  <rect x="234" y="900" width="196" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="332" y="913" text-anchor="middle" font-size="10" fill="#374151">Full Robert's Rules prompts</text>
+  <rect x="438" y="900" width="196" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="536" y="913" text-anchor="middle" font-size="10" fill="#374151">Strict public comment workflow</text>
+
+  <rect x="656" y="852" width="638" height="22" rx="3" fill="#374151"/>
+  <text x="975" y="867" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Informal Mode</text>
+  <rect x="656" y="878" width="204" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="758" y="891" text-anchor="middle" font-size="10" fill="#374151">Seconder optional</text>
+  <rect x="868" y="878" width="204" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="970" y="891" text-anchor="middle" font-size="10" fill="#374151">Open floor participation</text>
+  <rect x="1080" y="878" width="214" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="1187" y="891" text-anchor="middle" font-size="10" fill="#374151">Non-required fields optional</text>
+  <rect x="656" y="900" width="204" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="758" y="913" text-anchor="middle" font-size="10" fill="#374151">Items added from floor</text>
+  <rect x="868" y="900" width="204" height="18" rx="2" fill="#F3F4F6"/>
+  <text x="970" y="913" text-anchor="middle" font-size="10" fill="#374151">Compliance guardrails only</text>
+  <rect x="1080" y="900" width="214" height="18" rx="2" fill="#E5E7EB"/>
+  <text x="1187" y="913" text-anchor="middle" font-size="10" fill="#374151">Record-focused, not procedure-focused</text>
+
+  <!-- Divider between modes -->
+  <line x1="644" y1="848" x2="644" y2="924" stroke="#9CA3AF" stroke-width="2" stroke-dasharray="4,3"/>
+
+  <!-- Footer -->
+  <line x1="30" y1="930" x2="1294" y2="930" stroke="#CBD5E0" stroke-width="1"/>
+  <text x="662" y="950" text-anchor="middle" font-size="10" fill="#9CA3AF">Town Meeting Manager · New England Select Board / Town Meeting Form of Government · Maine-first, New England-expandable</text>
+  <text x="662" y="968" text-anchor="middle" font-size="10" fill="#9CA3AF">Target: Towns 1,000–5,000 · SaaS pricing $600–$1,200/year · Open core model</text>
+
+</svg>
