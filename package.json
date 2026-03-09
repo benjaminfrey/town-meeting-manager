@@ -15,7 +15,10 @@
     "supabase:reset": "cd docker && docker compose down -v && docker compose up -d",
     "supabase:logs": "cd docker && docker compose logs -f",
     "supabase:status": "cd docker && docker compose ps",
-    "supabase:db": "docker exec -it town-meeting-db psql -U postgres"
+    "supabase:db": "docker exec -it town-meeting-db psql -U postgres",
+    "db:migrate": "for file in supabase/migrations/*.sql; do docker exec -i town-meeting-db psql -U postgres -d postgres < \"$file\"; done",
+    "db:seed": "docker exec -i town-meeting-db psql -U postgres -d postgres < supabase/seed.sql",
+    "db:reset": "pnpm supabase:reset && sleep 5 && pnpm db:migrate && pnpm db:seed"
   },
   "engines": {
     "node": ">=20.0.0",
