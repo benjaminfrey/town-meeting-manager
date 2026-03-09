@@ -1,0 +1,20 @@
+{
+  "name": "@town-meeting/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'API dev server not configured yet'",
+    "build": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No linter configured yet'",
+    "test": "echo 'No tests configured yet'"
+  },
+  "dependencies": {
+    "@town-meeting/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@town-meeting/mobile",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Mobile package is Phase 2'"
+  },
+  "dependencies": {
+    "@town-meeting/shared": "workspace:*"
+  }
+}

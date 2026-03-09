@@ -1,0 +1,24 @@
+{
+  "name": "@town-meeting/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'No linter configured yet'",
+    "test": "echo 'No tests configured yet'"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

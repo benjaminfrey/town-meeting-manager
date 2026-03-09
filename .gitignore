@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Turborepo
+.turbo/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Test coverage
+coverage/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Misc
+*.tgz
+.cache/
