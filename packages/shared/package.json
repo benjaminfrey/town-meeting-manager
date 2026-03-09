@@ -9,10 +9,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "import": "./dist/schemas/index.js"
+    },
+    "./constants": {
+      "types": "./dist/constants/index.d.ts",
+      "import": "./dist/constants/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    },
+    "./powersync": {
+      "types": "./dist/powersync/index.d.ts",
+      "import": "./dist/powersync/index.js"
     }
   },
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "tsc -b",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'No linter configured yet'",
@@ -20,5 +40,10 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@powersync/common": "^1.48.0",
+    "uuidv7": "^1.1.0",
+    "zod": "^4.3.6"
   }
 }
