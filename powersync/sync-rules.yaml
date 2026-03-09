@@ -126,8 +126,9 @@ bucket_definitions:
         FROM agenda_template
         WHERE town_id = bucket.town_id
 
-      - SELECT id, agenda_item_id, town_id, file_name, file_storage_path,
-               file_type, file_size, visibility, uploaded_by, created_at
+      - SELECT id, agenda_item_id, town_id, title, file_storage_path,
+               file_type, file_size, exhibit_type, visibility,
+               uploaded_by, sort_order, created_at
         FROM exhibit
         WHERE town_id = bucket.town_id
 
