@@ -3,6 +3,10 @@ node_modules/
 
 # Build output
 dist/
+build/
+
+# React Router generated types
+.react-router/
 
 # Turborepo
 .turbo/
@@ -37,6 +41,9 @@ pnpm-debug.log*
 docker/volumes/db/data/
 docker/volumes/storage/
 docker/.env
+
+# Claude Code
+.claude/
 
 # Misc
 *.tgz
