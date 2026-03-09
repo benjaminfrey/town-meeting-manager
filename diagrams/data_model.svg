@@ -1,289 +1,381 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 980" font-family="Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 1320" font-family="Arial, sans-serif">
 
-  <rect width="1400" height="980" fill="#F8F9FA"/>
+  <rect width="1660" height="1320" fill="#F8F9FA"/>
 
-  <text x="700" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#1A2B4A">Town Meeting Manager — Data Model</text>
-  <text x="700" y="54" text-anchor="middle" font-size="12" fill="#6B7280">Core entities, relationships, and key fields · Supabase / PostgreSQL</text>
-  <line x1="40" y1="64" x2="1360" y2="64" stroke="#CBD5E0" stroke-width="1"/>
+  <text x="830" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#1A2B4A">Town Meeting Manager — Data Model</text>
+  <text x="830" y="54" text-anchor="middle" font-size="12" fill="#6B7280">PERSON entity architecture · Supabase / PostgreSQL + PostGIS · Offline-first via PowerSync</text>
+  <line x1="30" y1="64" x2="1630" y2="64" stroke="#CBD5E0" stroke-width="1"/>
 
   <!-- ════════ TOWN (top center anchor) ════════ -->
-  <rect x="560" y="80" width="280" height="170" rx="6" fill="#1A2B4A" stroke="#0F1E38" stroke-width="2"/>
-  <rect x="560" y="80" width="280" height="28" rx="6" fill="#0F1E38"/>
-  <text x="700" y="99" text-anchor="middle" font-size="12" font-weight="bold" fill="white">TOWN</text>
-  <text x="572" y="124" font-size="10" fill="#93C5FD">id (uuid PK)</text>
-  <text x="572" y="140" font-size="10" fill="#E2E8F0">name · municipality_type</text>
-  <text x="572" y="156" font-size="10" fill="#E2E8F0">state · population_tier</text>
-  <text x="572" y="172" font-size="10" fill="#E2E8F0">subdomain · branding_config (jsonb)</text>
-  <text x="572" y="188" font-size="10" fill="#E2E8F0">governing_board_label · formality_default</text>
-  <text x="572" y="204" font-size="10" fill="#E2E8F0">minutes_style · created_at</text>
-  <text x="572" y="220" font-size="10" fill="#FCA5A5">subscription_tier · subscription_status</text>
-  <text x="572" y="236" font-size="10" fill="#FCA5A5">retention_ack · ack_date</text>
+  <rect x="630" y="80" width="280" height="165" rx="6" fill="#1A2B4A" stroke="#0F1E38" stroke-width="2"/>
+  <rect x="630" y="80" width="280" height="28" rx="6" fill="#0F1E38"/>
+  <text x="770" y="99" text-anchor="middle" font-size="12" font-weight="bold" fill="white">TOWN</text>
+  <text x="642" y="124" font-size="10" fill="#93C5FD">id (uuid PK)</text>
+  <text x="642" y="140" font-size="10" fill="#E2E8F0">name · state · municipality_type</text>
+  <text x="642" y="156" font-size="10" fill="#E2E8F0">population_range · contact_name/role</text>
+  <text x="642" y="172" font-size="10" fill="#E2E8F0">meeting_formality · minutes_style</text>
+  <text x="642" y="188" font-size="10" fill="#E2E8F0">presiding_officer_default · minutes_recorder</text>
+  <text x="642" y="204" font-size="10" fill="#E2E8F0">subdomain · created_at · updated_at</text>
+  <text x="642" y="220" font-size="10" fill="#FCA5A5">retention_ack · ack_date</text>
+
+  <!-- ════════ PERSON (identity anchor) ════════ -->
+  <rect x="40" y="80" width="260" height="120" rx="6" fill="#7C3AED" stroke="#5B21B6" stroke-width="2"/>
+  <rect x="40" y="80" width="260" height="28" rx="6" fill="#5B21B6"/>
+  <text x="170" y="99" text-anchor="middle" font-size="12" font-weight="bold" fill="white">PERSON (identity anchor)</text>
+  <text x="52" y="124" font-size="10" fill="#DDD6FE">id (uuid PK)</text>
+  <text x="52" y="140" font-size="10" fill="#EDE9FE">town_id (FK → TOWN)</text>
+  <text x="52" y="156" font-size="10" fill="#EDE9FE">name · email (unique per town)</text>
+  <text x="52" y="172" font-size="10" fill="#EDE9FE">created_at · archived_at</text>
+
+  <!-- ════════ USER_ACCOUNT ════════ -->
+  <rect x="40" y="230" width="260" height="155" rx="6" fill="#7C3AED" stroke="#5B21B6" stroke-width="2"/>
+  <rect x="40" y="230" width="260" height="28" rx="6" fill="#5B21B6"/>
+  <text x="170" y="249" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USER_ACCOUNT</text>
+  <text x="52" y="274" font-size="10" fill="#DDD6FE">id (uuid PK)</text>
+  <text x="52" y="290" font-size="10" fill="#EDE9FE">person_id (FK → PERSON, unique)</text>
+  <text x="52" y="306" font-size="10" fill="#EDE9FE">town_id (FK → TOWN)</text>
+  <text x="52" y="322" font-size="10" fill="#EDE9FE">role (sys_admin/admin/staff/board_member)</text>
+  <text x="52" y="338" font-size="10" fill="#EDE9FE">gov_title (display label only)</text>
+  <text x="52" y="354" font-size="10" fill="#EDE9FE">permissions (JSONB: global + board overrides)</text>
+  <text x="52" y="370" font-size="10" fill="#EDE9FE">auth_user_id (FK → auth.users) · archived_at</text>
+
+  <!-- ════════ BOARD_MEMBER ════════ -->
+  <rect x="40" y="415" width="260" height="155" rx="6" fill="#7C3AED" stroke="#5B21B6" stroke-width="2"/>
+  <rect x="40" y="415" width="260" height="28" rx="6" fill="#5B21B6"/>
+  <text x="170" y="434" text-anchor="middle" font-size="12" font-weight="bold" fill="white">BOARD_MEMBER</text>
+  <text x="52" y="459" font-size="10" fill="#DDD6FE">id (uuid PK)</text>
+  <text x="52" y="475" font-size="10" fill="#EDE9FE">person_id (FK → PERSON)</text>
+  <text x="52" y="491" font-size="10" fill="#EDE9FE">board_id (FK → BOARD)</text>
+  <text x="52" y="507" font-size="10" fill="#EDE9FE">town_id (FK → TOWN)</text>
+  <text x="52" y="523" font-size="10" fill="#EDE9FE">seat_title · term_start · term_end</text>
+  <text x="52" y="539" font-size="10" fill="#EDE9FE">status (active/archived)</text>
+  <text x="52" y="555" font-size="10" fill="#EDE9FE">is_default_rec_sec (bool)</text>
+
+  <!-- ════════ RESIDENT_ACCOUNT (Phase 2) ════════ -->
+  <rect x="40" y="600" width="260" height="130" rx="6" fill="#7C3AED" stroke="#5B21B6" stroke-width="2" stroke-dasharray="5,3"/>
+  <rect x="40" y="600" width="260" height="28" rx="6" fill="#5B21B6"/>
+  <text x="170" y="619" text-anchor="middle" font-size="12" font-weight="bold" fill="white">RESIDENT_ACCOUNT</text>
+  <text x="52" y="644" font-size="10" fill="#DDD6FE">id (uuid PK)</text>
+  <text x="52" y="660" font-size="10" fill="#EDE9FE">person_id (FK → PERSON, unique)</text>
+  <text x="52" y="676" font-size="10" fill="#EDE9FE">town_id (FK → TOWN)</text>
+  <text x="52" y="692" font-size="10" fill="#EDE9FE">parcel_match · topic_tags (text[])</text>
+  <text x="52" y="708" font-size="10" fill="#EDE9FE">channel_prefs (JSONB) · created_at</text>
+
+  <!-- PERSON → children arrows -->
+  <line x1="170" y1="200" x2="170" y2="230" stroke="#A78BFA" stroke-width="2"/>
+  <text x="176" y="218" font-size="9" fill="#A78BFA">0..1</text>
+  <line x1="170" y1="385" x2="170" y2="415" stroke="#A78BFA" stroke-width="2"/>
+  <text x="176" y="403" font-size="9" fill="#A78BFA">0..many</text>
+  <line x1="170" y1="570" x2="170" y2="600" stroke="#A78BFA" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="176" y="588" font-size="9" fill="#A78BFA">0..1</text>
 
   <!-- ════════ BOARD ════════ -->
-  <rect x="40" y="320" width="260" height="180" rx="6" fill="#1A5C3A" stroke="#0D3D26" stroke-width="2"/>
-  <rect x="40" y="320" width="260" height="28" rx="6" fill="#0D3D26"/>
-  <text x="170" y="339" text-anchor="middle" font-size="12" font-weight="bold" fill="white">BOARD</text>
-  <text x="52" y="364" font-size="10" fill="#86EFAC">id (uuid PK)</text>
-  <text x="52" y="380" font-size="10" fill="#D1FAE5">town_id (FK → TOWN)</text>
-  <text x="52" y="396" font-size="10" fill="#D1FAE5">name · board_type</text>
-  <text x="52" y="412" font-size="10" fill="#D1FAE5">member_count · election_method</text>
-  <text x="52" y="428" font-size="10" fill="#D1FAE5">role_titled (bool) · district_based (bool)</text>
-  <text x="52" y="444" font-size="10" fill="#D1FAE5">formality_default · minutes_style</text>
-  <text x="52" y="460" font-size="10" fill="#D1FAE5">quorum_rule · active (bool)</text>
-  <text x="52" y="476" font-size="10" fill="#D1FAE5">presiding_officer_type</text>
+  <rect x="340" y="280" width="260" height="170" rx="6" fill="#1A5C3A" stroke="#0D3D26" stroke-width="2"/>
+  <rect x="340" y="280" width="260" height="28" rx="6" fill="#0D3D26"/>
+  <text x="470" y="299" text-anchor="middle" font-size="12" font-weight="bold" fill="white">BOARD</text>
+  <text x="352" y="324" font-size="10" fill="#86EFAC">id (uuid PK)</text>
+  <text x="352" y="340" font-size="10" fill="#D1FAE5">town_id (FK → TOWN)</text>
+  <text x="352" y="356" font-size="10" fill="#D1FAE5">name · board_type · is_governing_board</text>
+  <text x="352" y="372" font-size="10" fill="#D1FAE5">member_count · election_method</text>
+  <text x="352" y="388" font-size="10" fill="#D1FAE5">officer_election_method</text>
+  <text x="352" y="404" font-size="10" fill="#D1FAE5">district_based · staggered_terms</text>
+  <text x="352" y="420" font-size="10" fill="#D1FAE5">meeting_formality_override</text>
+  <text x="352" y="436" font-size="10" fill="#D1FAE5">minutes_style_override · archived_at</text>
 
-  <!-- ════════ MEMBER ════════ -->
-  <rect x="40" y="560" width="260" height="185" rx="6" fill="#1A5C3A" stroke="#0D3D26" stroke-width="2"/>
-  <rect x="40" y="560" width="260" height="28" rx="6" fill="#0D3D26"/>
-  <text x="170" y="579" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEMBER</text>
-  <text x="52" y="604" font-size="10" fill="#86EFAC">id (uuid PK)</text>
-  <text x="52" y="620" font-size="10" fill="#D1FAE5">town_id (FK → TOWN)</text>
-  <text x="52" y="636" font-size="10" fill="#D1FAE5">full_name · preferred_name</text>
-  <text x="52" y="652" font-size="10" fill="#D1FAE5">member_type (elected/appointed)</text>
-  <text x="52" y="668" font-size="10" fill="#D1FAE5">role_title (e.g. "1st Selectman")</text>
-  <text x="52" y="684" font-size="10" fill="#D1FAE5">district · term_start · term_end</text>
-  <text x="52" y="700" font-size="10" fill="#D1FAE5">board_id (FK → BOARD)</text>
-  <text x="52" y="716" font-size="10" fill="#D1FAE5">active · email</text>
-  <text x="52" y="732" font-size="10" fill="#D1FAE5">user_id (FK → USER, nullable)</text>
-
-  <!-- ════════ USER / AUTH ════════ -->
-  <rect x="340" y="560" width="250" height="165" rx="6" fill="#374151" stroke="#1F2937" stroke-width="2"/>
-  <rect x="340" y="560" width="250" height="28" rx="6" fill="#1F2937"/>
-  <text x="465" y="579" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USER (auth)</text>
-  <text x="352" y="604" font-size="10" fill="#D1D5DB">id (uuid PK · Supabase Auth)</text>
-  <text x="352" y="620" font-size="10" fill="#D1D5DB">town_id (FK → TOWN)</text>
-  <text x="352" y="636" font-size="10" fill="#D1D5DB">email · full_name</text>
-  <text x="352" y="652" font-size="10" fill="#D1D5DB">role (admin/clerk/staff/board_member/</text>
-  <text x="352" y="666" font-size="10" fill="#D1D5DB">       recording_secretary)</text>
-  <text x="352" y="682" font-size="10" fill="#D1D5DB">member_id (FK → MEMBER, nullable)</text>
-  <text x="352" y="698" font-size="10" fill="#D1D5DB">active · last_login</text>
-  <text x="352" y="714" font-size="10" fill="#D1D5DB">notification_prefs (jsonb)</text>
-
-  <!-- ════════ MEETING ════════ -->
-  <rect x="620" y="320" width="260" height="210" rx="6" fill="#6B2D0E" stroke="#4A1E09" stroke-width="2"/>
-  <rect x="620" y="320" width="260" height="28" rx="6" fill="#4A1E09"/>
-  <text x="750" y="339" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEETING</text>
-  <text x="632" y="364" font-size="10" fill="#FDBA74">id (uuid PK)</text>
-  <text x="632" y="380" font-size="10" fill="#FED7AA">town_id (FK → TOWN)</text>
-  <text x="632" y="396" font-size="10" fill="#FED7AA">board_id (FK → BOARD)</text>
-  <text x="632" y="412" font-size="10" fill="#FED7AA">meeting_type (regular/special/hearing/</text>
-  <text x="632" y="426" font-size="10" fill="#FED7AA">               annual_town_meeting)</text>
-  <text x="632" y="442" font-size="10" fill="#FED7AA">scheduled_at · location</text>
-  <text x="632" y="458" font-size="10" fill="#FED7AA">status (draft/noticed/open/adjourned/</text>
-  <text x="632" y="472" font-size="10" fill="#FED7AA">          minutes_draft/approved)</text>
-  <text x="632" y="488" font-size="10" fill="#FED7AA">formality_mode · presiding_officer_id</text>
-  <text x="632" y="504" font-size="10" fill="#FED7AA">called_to_order_at · adjourned_at</text>
-  <text x="632" y="520" font-size="10" fill="#FED7AA">quorum_present (bool) · member_count</text>
-
-  <!-- ════════ MEETING NOTICE ════════ -->
-  <rect x="620" y="580" width="260" height="155" rx="6" fill="#6B2D0E" stroke="#4A1E09" stroke-width="2"/>
-  <rect x="620" y="580" width="260" height="28" rx="6" fill="#4A1E09"/>
-  <text x="750" y="599" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEETING_NOTICE</text>
-  <text x="632" y="624" font-size="10" fill="#FDBA74">id (uuid PK)</text>
-  <text x="632" y="640" font-size="10" fill="#FED7AA">meeting_id (FK → MEETING)</text>
-  <text x="632" y="656" font-size="10" fill="#FED7AA">notice_text · posted_at</text>
-  <text x="632" y="672" font-size="10" fill="#FED7AA">posting_locations (text[])</text>
-  <text x="632" y="688" font-size="10" fill="#FED7AA">compliant_3day (bool · computed)</text>
-  <text x="632" y="704" font-size="10" fill="#FED7AA">document_url · published_to_portal</text>
-  <text x="632" y="720" font-size="10" fill="#FED7AA">created_by (FK → USER)</text>
-
-  <!-- ════════ AGENDA ITEM ════════ -->
-  <rect x="940" y="320" width="270" height="215" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
-  <rect x="940" y="320" width="270" height="28" rx="6" fill="#31104A"/>
-  <text x="1075" y="339" text-anchor="middle" font-size="12" font-weight="bold" fill="white">AGENDA_ITEM</text>
-  <text x="952" y="364" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
-  <text x="952" y="380" font-size="10" fill="#EDE9FE">meeting_id (FK → MEETING)</text>
-  <text x="952" y="396" font-size="10" fill="#EDE9FE">item_type (discussion/action/public_hearing/</text>
-  <text x="952" y="410" font-size="10" fill="#EDE9FE">              exec_session/warrant_article/</text>
-  <text x="952" y="424" font-size="10" fill="#EDE9FE">              call_to_order/adjournment)</text>
-  <text x="952" y="440" font-size="10" fill="#EDE9FE">sort_order · title · description</text>
-  <text x="952" y="456" font-size="10" fill="#EDE9FE">requested_action · submitted_by</text>
-  <text x="952" y="472" font-size="10" fill="#EDE9FE">status (draft/published/in_progress/</text>
-  <text x="952" y="486" font-size="10" fill="#EDE9FE">           complete/tabled/continued)</text>
-  <text x="952" y="502" font-size="10" fill="#EDE9FE">discussion_notes · started_at · ended_at</text>
-  <text x="952" y="518" font-size="10" fill="#EDE9FE">exec_session_cite · exec_return_at</text>
-  <text x="952" y="534" font-size="10" fill="#EDE9FE">exec_no_vote_confirmed (bool)</text>
-
-  <!-- ════════ VOTE ════════ -->
-  <rect x="940" y="590" width="270" height="165" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
-  <rect x="940" y="590" width="270" height="28" rx="6" fill="#31104A"/>
-  <text x="1075" y="609" text-anchor="middle" font-size="12" font-weight="bold" fill="white">VOTE</text>
-  <text x="952" y="634" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
-  <text x="952" y="650" font-size="10" fill="#EDE9FE">agenda_item_id (FK → AGENDA_ITEM)</text>
-  <text x="952" y="666" font-size="10" fill="#EDE9FE">motion_text · mover_id (FK → MEMBER)</text>
-  <text x="952" y="682" font-size="10" fill="#EDE9FE">seconder_id (FK → MEMBER, nullable)</text>
-  <text x="952" y="698" font-size="10" fill="#EDE9FE">outcome (passed/failed/tabled/withdrawn)</text>
-  <text x="952" y="714" font-size="10" fill="#EDE9FE">vote_method (voice/roll_call/show_of_hands/</text>
-  <text x="952" y="728" font-size="10" fill="#EDE9FE">               secret_ballot/counted)</text>
-  <text x="952" y="744" font-size="10" fill="#EDE9FE">recorded_at</text>
-
-  <!-- ════════ VOTE RECORD (per-member) ════════ -->
-  <rect x="1110" y="800" width="250" height="140" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
-  <rect x="1110" y="800" width="250" height="28" rx="6" fill="#31104A"/>
-  <text x="1235" y="819" text-anchor="middle" font-size="12" font-weight="bold" fill="white">VOTE_RECORD</text>
-  <text x="1122" y="844" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
-  <text x="1122" y="860" font-size="10" fill="#EDE9FE">vote_id (FK → VOTE)</text>
-  <text x="1122" y="876" font-size="10" fill="#EDE9FE">member_id (FK → MEMBER)</text>
-  <text x="1122" y="892" font-size="10" fill="#EDE9FE">vote_cast (yes/no/abstain/absent/</text>
-  <text x="1122" y="906" font-size="10" fill="#EDE9FE">             recused/not_voting)</text>
-  <text x="1122" y="922" font-size="10" fill="#EDE9FE">recorded_at</text>
-
-  <!-- ════════ ATTACHMENT ════════ -->
-  <rect x="1110" y="430" width="250" height="165" rx="6" fill="#374151" stroke="#1F2937" stroke-width="2"/>
-  <rect x="1110" y="430" width="250" height="28" rx="6" fill="#1F2937"/>
-  <text x="1235" y="449" text-anchor="middle" font-size="12" font-weight="bold" fill="white">ATTACHMENT</text>
-  <text x="1122" y="474" font-size="10" fill="#D1D5DB">id (uuid PK)</text>
-  <text x="1122" y="490" font-size="10" fill="#D1D5DB">agenda_item_id (FK → AGENDA_ITEM)</text>
-  <text x="1122" y="506" font-size="10" fill="#D1D5DB">meeting_id (FK → MEETING, for packets)</text>
-  <text x="1122" y="522" font-size="10" fill="#D1D5DB">file_name · file_type · file_size</text>
-  <text x="1122" y="538" font-size="10" fill="#D1D5DB">storage_path (Supabase Storage)</text>
-  <text x="1122" y="554" font-size="10" fill="#D1D5DB">attachment_type (staff_report/exhibit/</text>
-  <text x="1122" y="568" font-size="10" fill="#D1D5DB">   plan/legal_notice/warrant/minutes)</text>
-  <text x="1122" y="584" font-size="10" fill="#D1D5DB">public_visible (bool) · uploaded_by</text>
-
-  <!-- ════════ PUBLIC COMMENT ════════ -->
-  <rect x="940" y="800" width="155" height="145" rx="6" fill="#7A4A0A" stroke="#52300A" stroke-width="2"/>
-  <rect x="940" y="800" width="155" height="28" rx="6" fill="#52300A"/>
-  <text x="1017" y="819" text-anchor="middle" font-size="11" font-weight="bold" fill="white">PUBLIC_COMMENT</text>
-  <text x="952" y="844" font-size="10" fill="#FDE68A">id (uuid PK)</text>
-  <text x="952" y="860" font-size="10" fill="#FEF3C7">agenda_item_id (FK)</text>
-  <text x="952" y="876" font-size="10" fill="#FEF3C7">speaker_name</text>
-  <text x="952" y="892" font-size="10" fill="#FEF3C7">spoke_at · duration_sec</text>
-  <text x="952" y="908" font-size="10" fill="#FEF3C7">summary_notes</text>
-  <text x="952" y="924" font-size="10" fill="#FEF3C7">address (optional)</text>
-
-  <!-- ════════ MINUTES ════════ -->
-  <rect x="620" y="800" width="290" height="155" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
-  <rect x="620" y="800" width="290" height="28" rx="6" fill="#31104A"/>
-  <text x="765" y="819" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MINUTES</text>
-  <text x="632" y="844" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
-  <text x="632" y="860" font-size="10" fill="#EDE9FE">meeting_id (FK → MEETING)</text>
-  <text x="632" y="876" font-size="10" fill="#EDE9FE">status (ai_draft/clerk_review/approved)</text>
-  <text x="632" y="892" font-size="10" fill="#EDE9FE">draft_content (jsonb · structured)</text>
-  <text x="632" y="908" font-size="10" fill="#EDE9FE">approved_at · approved_by (FK → USER)</text>
-  <text x="632" y="924" font-size="10" fill="#EDE9FE">approved_at_meeting_id (FK → MEETING)</text>
-  <text x="632" y="940" font-size="10" fill="#EDE9FE">document_url (locked after approval)</text>
-
-  <!-- ════════ WARRANT ARTICLE (extends AGENDA_ITEM) ════════ -->
-  <rect x="1110" y="80" width="250" height="190" rx="6" fill="#7A4A0A" stroke="#52300A" stroke-width="2"/>
-  <rect x="1110" y="80" width="250" height="28" rx="6" fill="#52300A"/>
-  <text x="1235" y="99" text-anchor="middle" font-size="12" font-weight="bold" fill="white">WARRANT_ARTICLE</text>
-  <text x="1120" y="120" font-size="9" fill="#FDE68A">extends AGENDA_ITEM (item_type = warrant_article)</text>
-  <text x="1122" y="138" font-size="10" fill="#FEF3C7">id (uuid PK = agenda_item_id)</text>
-  <text x="1122" y="154" font-size="10" fill="#FEF3C7">article_number · legal_text</text>
-  <text x="1122" y="170" font-size="10" fill="#FEF3C7">fiscal_impact · fiscal_note</text>
-  <text x="1122" y="186" font-size="10" fill="#FEF3C7">selectboard_recommendation</text>
-  <text x="1122" y="202" font-size="10" fill="#FEF3C7">budget_committee_recommendation</text>
-  <text x="1122" y="218" font-size="10" fill="#FEF3C7">vote_method · yes_count · no_count</text>
-  <text x="1122" y="234" font-size="10" fill="#FEF3C7">outcome · original_text (pre-amendment)</text>
-  <text x="1122" y="250" font-size="10" fill="#FEF3C7">amendment_text · amendment_by</text>
-
-  <!-- ════════ MEETING ATTENDANCE ════════ -->
-  <rect x="330" y="320" width="260" height="130" rx="6" fill="#1A5C3A" stroke="#0D3D26" stroke-width="2"/>
-  <rect x="330" y="320" width="260" height="28" rx="6" fill="#0D3D26"/>
-  <text x="460" y="339" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEETING_ATTENDANCE</text>
-  <text x="342" y="364" font-size="10" fill="#86EFAC">id (uuid PK)</text>
-  <text x="342" y="380" font-size="10" fill="#D1FAE5">meeting_id (FK → MEETING)</text>
-  <text x="342" y="396" font-size="10" fill="#D1FAE5">member_id (FK → MEMBER)</text>
-  <text x="342" y="412" font-size="10" fill="#D1FAE5">status (present/absent/excused/remote)</text>
-  <text x="342" y="428" font-size="10" fill="#D1FAE5">arrived_at · departed_at (nullable)</text>
-  <text x="342" y="444" font-size="10" fill="#D1FAE5">counts_for_quorum (bool)</text>
-
-  <!-- ══════════════ RELATIONSHIPS ══════════════ -->
+  <!-- PERSON → TOWN -->
+  <line x1="300" y1="130" x2="630" y2="130" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
 
   <!-- TOWN → BOARD -->
-  <line x1="560" y1="185" x2="300" y2="370" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="400" y="268" font-size="9" fill="#60A5FA">1 : many</text>
+  <line x1="630" y1="180" x2="600" y2="360" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="595" y="270" font-size="9" fill="#60A5FA">1:many</text>
 
-  <!-- TOWN → MEETING (via board) -->
-  <line x1="700" y1="250" x2="750" y2="320" stroke="#FB923C" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="740" y="290" font-size="9" fill="#FB923C">1:many</text>
+  <!-- BOARD_MEMBER → BOARD -->
+  <line x1="300" y1="490" x2="340" y2="400" stroke="#34D399" stroke-width="1.5"/>
+  <text x="308" y="440" font-size="9" fill="#34D399">many:1</text>
 
-  <!-- BOARD → MEMBER -->
-  <line x1="170" y1="500" x2="170" y2="560" stroke="#60A5FA" stroke-width="1.5"/>
-  <text x="176" y="535" font-size="9" fill="#60A5FA">1:many</text>
+  <!-- ════════ MEETING ════════ -->
+  <rect x="630" y="310" width="270" height="170" rx="6" fill="#6B2D0E" stroke="#4A1E09" stroke-width="2"/>
+  <rect x="630" y="310" width="270" height="28" rx="6" fill="#4A1E09"/>
+  <text x="765" y="329" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEETING</text>
+  <text x="642" y="354" font-size="10" fill="#FDBA74">id (uuid PK)</text>
+  <text x="642" y="370" font-size="10" fill="#FED7AA">board_id (FK → BOARD) · town_id (FK)</text>
+  <text x="642" y="386" font-size="10" fill="#FED7AA">title · scheduled_date · scheduled_time</text>
+  <text x="642" y="402" font-size="10" fill="#FED7AA">location · meeting_type</text>
+  <text x="642" y="418" font-size="10" fill="#FED7AA">status (draft/noticed/open/adjourned/</text>
+  <text x="642" y="432" font-size="10" fill="#FED7AA">          minutes_draft/approved)</text>
+  <text x="642" y="448" font-size="10" fill="#FED7AA">started_at · ended_at</text>
+  <text x="642" y="464" font-size="10" fill="#FED7AA">created_by (FK → USER_ACCOUNT)</text>
 
   <!-- BOARD → MEETING -->
-  <line x1="300" y1="420" x2="620" y2="430" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="450" y="418" font-size="9" fill="#60A5FA">1:many</text>
+  <line x1="600" y1="380" x2="630" y2="380" stroke="#60A5FA" stroke-width="1.5"/>
+  <text x="610" y="374" font-size="9" fill="#60A5FA">1:many</text>
 
-  <!-- MEETING → MEETING_ATTENDANCE -->
-  <line x1="620" y1="400" x2="590" y2="400" stroke="#34D399" stroke-width="1.5"/>
-  <line x1="590" y1="400" x2="590" y2="385" stroke="#34D399" stroke-width="1.5"/>
-  <line x1="590" y1="385" x2="460" y2="385" stroke="#34D399" stroke-width="1.5"/>
-  <text x="510" y="378" font-size="9" fill="#34D399">1:many</text>
+  <!-- ════════ MEETING_ATTENDANCE ════════ -->
+  <rect x="340" y="490" width="260" height="130" rx="6" fill="#6B2D0E" stroke="#4A1E09" stroke-width="2"/>
+  <rect x="340" y="490" width="260" height="28" rx="6" fill="#4A1E09"/>
+  <text x="470" y="509" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MEETING_ATTENDANCE</text>
+  <text x="352" y="534" font-size="10" fill="#FDBA74">id (uuid PK)</text>
+  <text x="352" y="550" font-size="10" fill="#FED7AA">meeting_id (FK) · board_member_id (FK)</text>
+  <text x="352" y="566" font-size="10" fill="#FED7AA">person_id (FK) · town_id (FK)</text>
+  <text x="352" y="582" font-size="10" fill="#FED7AA">status (present/absent/excused/remote)</text>
+  <text x="352" y="598" font-size="10" fill="#FED7AA">is_recording_secretary (bool)</text>
+  <text x="352" y="614" font-size="10" fill="#FED7AA">arrived_at · departed_at</text>
 
-  <!-- MEETING → MEETING_NOTICE -->
-  <line x1="750" y1="530" x2="750" y2="580" stroke="#FB923C" stroke-width="1.5"/>
-  <text x="756" y="560" font-size="9" fill="#FB923C">1:1</text>
+  <!-- MEETING → ATTENDANCE -->
+  <line x1="630" y1="430" x2="600" y2="530" stroke="#FB923C" stroke-width="1.5"/>
+  <text x="604" y="478" font-size="9" fill="#FB923C">1:many</text>
+
+  <!-- ════════ AGENDA_ITEM ════════ -->
+  <rect x="960" y="310" width="270" height="170" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
+  <rect x="960" y="310" width="270" height="28" rx="6" fill="#31104A"/>
+  <text x="1095" y="329" text-anchor="middle" font-size="12" font-weight="bold" fill="white">AGENDA_ITEM</text>
+  <text x="972" y="354" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
+  <text x="972" y="370" font-size="10" fill="#EDE9FE">meeting_id (FK → MEETING)</text>
+  <text x="972" y="386" font-size="10" fill="#EDE9FE">town_id (FK) · section_type</text>
+  <text x="972" y="402" font-size="10" fill="#EDE9FE">sort_order · title · description</text>
+  <text x="972" y="418" font-size="10" fill="#EDE9FE">presenter · estimated_duration</text>
+  <text x="972" y="434" font-size="10" fill="#EDE9FE">status (draft/published/in_progress/</text>
+  <text x="972" y="448" font-size="10" fill="#EDE9FE">           complete/tabled/continued)</text>
+  <text x="972" y="464" font-size="10" fill="#EDE9FE">parent_item_id (FK, self-ref)</text>
 
   <!-- MEETING → AGENDA_ITEM -->
-  <line x1="880" y1="430" x2="940" y2="430" stroke="#FB923C" stroke-width="1.5"/>
-  <text x="895" y="424" font-size="9" fill="#FB923C">1:many</text>
+  <line x1="900" y1="400" x2="960" y2="400" stroke="#FB923C" stroke-width="1.5"/>
+  <text x="920" y="394" font-size="9" fill="#FB923C">1:many</text>
 
-  <!-- MEETING → MINUTES -->
-  <line x1="750" y1="530" x2="765" y2="800" stroke="#C084FC" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="770" y="680" font-size="9" fill="#C084FC">1:1</text>
+  <!-- ════════ MOTION ════════ -->
+  <rect x="960" y="520" width="270" height="140" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
+  <rect x="960" y="520" width="270" height="28" rx="6" fill="#31104A"/>
+  <text x="1095" y="539" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MOTION</text>
+  <text x="972" y="564" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
+  <text x="972" y="580" font-size="10" fill="#EDE9FE">agenda_item_id (FK) · meeting_id (FK)</text>
+  <text x="972" y="596" font-size="10" fill="#EDE9FE">town_id (FK) · motion_text · motion_type</text>
+  <text x="972" y="612" font-size="10" fill="#EDE9FE">moved_by (FK → BOARD_MEMBER)</text>
+  <text x="972" y="628" font-size="10" fill="#EDE9FE">seconded_by (FK, nullable)</text>
+  <text x="972" y="644" font-size="10" fill="#EDE9FE">status (pending/passed/failed/tabled/withdrawn)</text>
 
-  <!-- AGENDA_ITEM → VOTE -->
-  <line x1="1075" y1="535" x2="1075" y2="590" stroke="#C084FC" stroke-width="1.5"/>
-  <text x="1082" y="567" font-size="9" fill="#C084FC">1:many</text>
+  <!-- AGENDA_ITEM → MOTION -->
+  <line x1="1095" y1="480" x2="1095" y2="520" stroke="#C084FC" stroke-width="1.5"/>
+  <text x="1102" y="504" font-size="9" fill="#C084FC">1:many</text>
 
-  <!-- VOTE → VOTE_RECORD -->
-  <line x1="1075" y1="755" x2="1075" y2="780" stroke="#C084FC" stroke-width="1.5"/>
-  <line x1="1075" y1="780" x2="1180" y2="800" stroke="#C084FC" stroke-width="1.5"/>
-  <text x="1100" y="790" font-size="9" fill="#C084FC">1:many</text>
+  <!-- ════════ VOTE_RECORD ════════ -->
+  <rect x="960" y="700" width="270" height="115" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
+  <rect x="960" y="700" width="270" height="28" rx="6" fill="#31104A"/>
+  <text x="1095" y="719" text-anchor="middle" font-size="12" font-weight="bold" fill="white">VOTE_RECORD</text>
+  <text x="972" y="744" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
+  <text x="972" y="760" font-size="10" fill="#EDE9FE">motion_id (FK → MOTION)</text>
+  <text x="972" y="776" font-size="10" fill="#EDE9FE">board_member_id (FK → BOARD_MEMBER)</text>
+  <text x="972" y="792" font-size="10" fill="#EDE9FE">vote (yes/no/abstain/absent/recused)</text>
+  <text x="972" y="808" font-size="10" fill="#EDE9FE">recusal_reason · created_at</text>
 
-  <!-- AGENDA_ITEM → ATTACHMENT -->
-  <line x1="1210" y1="430" x2="1235" y2="430" stroke="#9CA3AF" stroke-width="1.5"/>
-  <text x="1218" y="424" font-size="9" fill="#9CA3AF">1:many</text>
+  <!-- MOTION → VOTE_RECORD -->
+  <line x1="1095" y1="660" x2="1095" y2="700" stroke="#C084FC" stroke-width="1.5"/>
+  <text x="1102" y="684" font-size="9" fill="#C084FC">1:many</text>
 
-  <!-- AGENDA_ITEM → PUBLIC_COMMENT -->
-  <line x1="1075" y1="755" x2="1017" y2="800" stroke="#FBBF24" stroke-width="1.5"/>
-  <text x="1030" y="785" font-size="9" fill="#FBBF24">1:many</text>
+  <!-- ════════ EXHIBIT ════════ -->
+  <rect x="1280" y="310" width="250" height="145" rx="6" fill="#374151" stroke="#1F2937" stroke-width="2"/>
+  <rect x="1280" y="310" width="250" height="28" rx="6" fill="#1F2937"/>
+  <text x="1405" y="329" text-anchor="middle" font-size="12" font-weight="bold" fill="white">EXHIBIT</text>
+  <text x="1292" y="354" font-size="10" fill="#D1D5DB">id (uuid PK)</text>
+  <text x="1292" y="370" font-size="10" fill="#D1D5DB">agenda_item_id (FK → AGENDA_ITEM)</text>
+  <text x="1292" y="386" font-size="10" fill="#D1D5DB">town_id (FK) · title</text>
+  <text x="1292" y="402" font-size="10" fill="#D1D5DB">file_storage_path · file_type · file_size</text>
+  <text x="1292" y="418" font-size="10" fill="#D1D5DB">exhibit_type (staff_report/plan/legal)</text>
+  <text x="1292" y="434" font-size="10" fill="#D1D5DB">visibility (public/board_only/admin_only)</text>
+  <text x="1292" y="450" font-size="10" fill="#D1D5DB">uploaded_by (FK) · sort_order</text>
 
-  <!-- AGENDA_ITEM → WARRANT_ARTICLE -->
-  <line x1="1075" y1="320" x2="1160" y2="270" stroke="#F97316" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <line x1="1160" y1="270" x2="1235" y2="200" stroke="#F97316" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="1120" y="240" font-size="9" fill="#F97316">extends (1:0..1)</text>
+  <!-- AGENDA_ITEM → EXHIBIT -->
+  <line x1="1230" y1="380" x2="1280" y2="380" stroke="#9CA3AF" stroke-width="1.5"/>
+  <text x="1248" y="374" font-size="9" fill="#9CA3AF">1:many</text>
 
-  <!-- MEMBER → USER -->
-  <line x1="300" y1="660" x2="340" y2="660" stroke="#9CA3AF" stroke-width="1.5"/>
-  <text x="310" y="654" font-size="9" fill="#9CA3AF">0..1:1</text>
+  <!-- ════════ MINUTES_DOCUMENT ════════ -->
+  <rect x="630" y="530" width="285" height="145" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
+  <rect x="630" y="530" width="285" height="28" rx="6" fill="#31104A"/>
+  <text x="772" y="549" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MINUTES_DOCUMENT</text>
+  <text x="642" y="574" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
+  <text x="642" y="590" font-size="10" fill="#EDE9FE">meeting_id (FK → MEETING, unique)</text>
+  <text x="642" y="606" font-size="10" fill="#EDE9FE">town_id (FK) · status (draft/review/approved)</text>
+  <text x="642" y="622" font-size="10" fill="#EDE9FE">content_json (JSONB) · html_rendered</text>
+  <text x="642" y="638" font-size="10" fill="#EDE9FE">generated_by (manual/ai/hybrid)</text>
+  <text x="642" y="654" font-size="10" fill="#EDE9FE">approved_at · approved_by_motion_id (FK)</text>
+  <text x="642" y="670" font-size="10" fill="#EDE9FE">pdf_storage_path</text>
 
-  <!-- MEMBER → MEETING_ATTENDANCE -->
-  <line x1="170" y1="560" x2="380" y2="450" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <!-- MEETING → MINUTES_DOCUMENT -->
+  <line x1="765" y1="480" x2="772" y2="530" stroke="#C084FC" stroke-width="1.5"/>
+  <text x="780" y="510" font-size="9" fill="#C084FC">1:1</text>
 
-  <!-- MEMBER → VOTE_RECORD -->
-  <line x1="300" y1="700" x2="500" y2="870" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <line x1="500" y1="870" x2="1110" y2="870" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <!-- ════════ MINUTES_SECTION ════════ -->
+  <rect x="630" y="710" width="285" height="120" rx="6" fill="#4A1A6B" stroke="#31104A" stroke-width="2"/>
+  <rect x="630" y="710" width="285" height="28" rx="6" fill="#31104A"/>
+  <text x="772" y="729" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MINUTES_SECTION</text>
+  <text x="642" y="754" font-size="10" fill="#D8B4FE">id (uuid PK)</text>
+  <text x="642" y="770" font-size="10" fill="#EDE9FE">minutes_document_id (FK)</text>
+  <text x="642" y="786" font-size="10" fill="#EDE9FE">section_type · sort_order · title</text>
+  <text x="642" y="802" font-size="10" fill="#EDE9FE">content_json (JSONB)</text>
+  <text x="642" y="818" font-size="10" fill="#EDE9FE">source_agenda_item_id (FK)</text>
+
+  <!-- MINUTES_DOCUMENT → MINUTES_SECTION -->
+  <line x1="772" y1="675" x2="772" y2="710" stroke="#C084FC" stroke-width="1.5"/>
+  <text x="780" y="696" font-size="9" fill="#C084FC">1:many</text>
+
+  <!-- ════════ AGENDA_TEMPLATE ════════ -->
+  <rect x="1280" y="490" width="250" height="110" rx="6" fill="#1A5C3A" stroke="#0D3D26" stroke-width="2"/>
+  <rect x="1280" y="490" width="250" height="28" rx="6" fill="#0D3D26"/>
+  <text x="1405" y="509" text-anchor="middle" font-size="12" font-weight="bold" fill="white">AGENDA_TEMPLATE</text>
+  <text x="1292" y="534" font-size="10" fill="#86EFAC">id (uuid PK)</text>
+  <text x="1292" y="550" font-size="10" fill="#D1FAE5">board_id (FK → BOARD)</text>
+  <text x="1292" y="566" font-size="10" fill="#D1FAE5">town_id (FK) · name · is_default</text>
+  <text x="1292" y="582" font-size="10" fill="#D1FAE5">sections (JSONB)</text>
+  <text x="1292" y="598" font-size="10" fill="#D1FAE5">created_at · updated_at</text>
+
+  <!-- ════════ PERMISSION_TEMPLATE ════════ -->
+  <rect x="1280" y="630" width="250" height="110" rx="6" fill="#374151" stroke="#1F2937" stroke-width="2"/>
+  <rect x="1280" y="630" width="250" height="28" rx="6" fill="#1F2937"/>
+  <text x="1405" y="649" text-anchor="middle" font-size="12" font-weight="bold" fill="white">PERMISSION_TEMPLATE</text>
+  <text x="1292" y="674" font-size="10" fill="#D1D5DB">id (uuid PK)</text>
+  <text x="1292" y="690" font-size="10" fill="#D1D5DB">town_id (FK) · name · description</text>
+  <text x="1292" y="706" font-size="10" fill="#D1D5DB">permissions (JSONB)</text>
+  <text x="1292" y="722" font-size="10" fill="#D1D5DB">is_system_default (bool)</text>
+  <text x="1292" y="738" font-size="10" fill="#D1D5DB">created_at</text>
+
+  <!-- ════════ NOTIFICATION_EVENT ════════ -->
+  <rect x="340" y="750" width="260" height="110" rx="6" fill="#0E4A6B" stroke="#0A3350" stroke-width="2"/>
+  <rect x="340" y="750" width="260" height="28" rx="6" fill="#0A3350"/>
+  <text x="470" y="769" text-anchor="middle" font-size="12" font-weight="bold" fill="white">NOTIFICATION_EVENT</text>
+  <text x="352" y="794" font-size="10" fill="#7DD3FC">id (uuid PK)</text>
+  <text x="352" y="810" font-size="10" fill="#BAE6FD">town_id (FK) · event_type</text>
+  <text x="352" y="826" font-size="10" fill="#BAE6FD">payload (JSONB) · status</text>
+  <text x="352" y="842" font-size="10" fill="#BAE6FD">created_at · processed_at</text>
+
+  <!-- ════════ NOTIFICATION_DELIVERY ════════ -->
+  <rect x="340" y="890" width="260" height="120" rx="6" fill="#0E4A6B" stroke="#0A3350" stroke-width="2"/>
+  <rect x="340" y="890" width="260" height="28" rx="6" fill="#0A3350"/>
+  <text x="470" y="909" text-anchor="middle" font-size="12" font-weight="bold" fill="white">NOTIFICATION_DELIVERY</text>
+  <text x="352" y="934" font-size="10" fill="#7DD3FC">id (uuid PK)</text>
+  <text x="352" y="950" font-size="10" fill="#BAE6FD">event_id (FK → NOTIFICATION_EVENT)</text>
+  <text x="352" y="966" font-size="10" fill="#BAE6FD">subscriber_id (FK) · channel (email/sms)</text>
+  <text x="352" y="982" font-size="10" fill="#BAE6FD">status · external_id · error_message</text>
+  <text x="352" y="998" font-size="10" fill="#BAE6FD">created_at · delivered_at</text>
+
+  <!-- NOTIFICATION_EVENT → DELIVERY -->
+  <line x1="470" y1="860" x2="470" y2="890" stroke="#38BDF8" stroke-width="1.5"/>
+  <text x="478" y="878" font-size="9" fill="#38BDF8">1:many</text>
+
+  <!-- ════════ AUDIT_LOG ════════ -->
+  <rect x="40" y="760" width="260" height="110" rx="6" fill="#374151" stroke="#1F2937" stroke-width="2"/>
+  <rect x="40" y="760" width="260" height="28" rx="6" fill="#1F2937"/>
+  <text x="170" y="779" text-anchor="middle" font-size="12" font-weight="bold" fill="white">AUDIT_LOG</text>
+  <text x="52" y="804" font-size="10" fill="#D1D5DB">id (uuid PK)</text>
+  <text x="52" y="820" font-size="10" fill="#D1D5DB">town_id (FK) · user_account_id (FK)</text>
+  <text x="52" y="836" font-size="10" fill="#D1D5DB">action · entity_type · entity_id</text>
+  <text x="52" y="852" font-size="10" fill="#D1D5DB">details (JSONB) · created_at</text>
+
+  <!-- ════════ PHASE 2/3 ENTITIES (dashed borders) ════════ -->
+
+  <!-- ════════ WARRANT_ARTICLE ════════ -->
+  <rect x="1280" y="780" width="250" height="125" rx="6" fill="#7A4A0A" stroke="#52300A" stroke-width="2" stroke-dasharray="5,3"/>
+  <rect x="1280" y="780" width="250" height="28" rx="6" fill="#52300A"/>
+  <text x="1405" y="799" text-anchor="middle" font-size="12" font-weight="bold" fill="white">WARRANT_ARTICLE</text>
+  <text x="1288" y="818" font-size="9" fill="#FDE68A">extends AGENDA_ITEM (Phase 2)</text>
+  <text x="1292" y="836" font-size="10" fill="#FEF3C7">article_number · legal_text</text>
+  <text x="1292" y="852" font-size="10" fill="#FEF3C7">fiscal_impact · fiscal_note</text>
+  <text x="1292" y="868" font-size="10" fill="#FEF3C7">selectboard_recommendation</text>
+  <text x="1292" y="884" font-size="10" fill="#FEF3C7">budget_committee_recommendation</text>
+  <text x="1292" y="900" font-size="10" fill="#FEF3C7">outcome · amendment_text</text>
+
+  <!-- ════════ STRAW_POLL (Phase 2) ════════ -->
+  <rect x="1280" y="930" width="250" height="110" rx="6" fill="#7A4A0A" stroke="#52300A" stroke-width="2" stroke-dasharray="5,3"/>
+  <rect x="1280" y="930" width="250" height="28" rx="6" fill="#52300A"/>
+  <text x="1405" y="949" text-anchor="middle" font-size="12" font-weight="bold" fill="white">STRAW_POLL</text>
+  <text x="1288" y="968" font-size="9" fill="#FDE68A">Phase 2</text>
+  <text x="1292" y="986" font-size="10" fill="#FEF3C7">agenda_item_id (FK) · town_id (FK)</text>
+  <text x="1292" y="1002" font-size="10" fill="#FEF3C7">question · options (JSONB)</text>
+  <text x="1292" y="1018" font-size="10" fill="#FEF3C7">status · opens_at · closes_at</text>
+  <text x="1292" y="1034" font-size="10" fill="#FEF3C7">responses (STRAW_POLL_RESPONSE table)</text>
+
+  <!-- ════════ PARCEL (Phase 3) ════════ -->
+  <rect x="40" y="910" width="260" height="130" rx="6" fill="#065F46" stroke="#064E3B" stroke-width="2" stroke-dasharray="5,3"/>
+  <rect x="40" y="910" width="260" height="28" rx="6" fill="#064E3B"/>
+  <text x="170" y="929" text-anchor="middle" font-size="12" font-weight="bold" fill="white">PARCEL</text>
+  <text x="48" y="948" font-size="9" fill="#6EE7B7">Phase 3 — Maine GeoLibrary / PostGIS</text>
+  <text x="52" y="966" font-size="10" fill="#A7F3D0">id · town_id · state_id · map_bk_lot</text>
+  <text x="52" y="982" font-size="10" fill="#A7F3D0">geometry (PostGIS polygon)</text>
+  <text x="52" y="998" font-size="10" fill="#A7F3D0">owner1 · owner2 · prop_loc</text>
+  <text x="52" y="1014" font-size="10" fill="#A7F3D0">land_val · bldg_val · land_use</text>
+  <text x="52" y="1030" font-size="10" fill="#A7F3D0">geocode · imported_at</text>
+
+  <!-- ════════ E911_ADDRESS (Phase 3) ════════ -->
+  <rect x="40" y="1070" width="260" height="100" rx="6" fill="#065F46" stroke="#064E3B" stroke-width="2" stroke-dasharray="5,3"/>
+  <rect x="40" y="1070" width="260" height="28" rx="6" fill="#064E3B"/>
+  <text x="170" y="1089" text-anchor="middle" font-size="12" font-weight="bold" fill="white">E911_ADDRESS</text>
+  <text x="48" y="1108" font-size="9" fill="#6EE7B7">Phase 3 — linked to PARCEL via state_id</text>
+  <text x="52" y="1126" font-size="10" fill="#A7F3D0">id · town_id · state_id · map_bk_lot</text>
+  <text x="52" y="1142" font-size="10" fill="#A7F3D0">address · latitude · longitude</text>
+  <text x="52" y="1158" font-size="10" fill="#A7F3D0">zipcode · building · unit</text>
+
+  <!-- PARCEL → E911_ADDRESS -->
+  <line x1="170" y1="1040" x2="170" y2="1070" stroke="#34D399" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="178" y="1058" font-size="9" fill="#34D399">1:many</text>
+
+  <!-- ════════ SUBSCRIBER_NOTIFICATION_PREFERENCE ════════ -->
+  <rect x="630" y="870" width="285" height="115" rx="6" fill="#0E4A6B" stroke="#0A3350" stroke-width="2"/>
+  <rect x="630" y="870" width="285" height="28" rx="6" fill="#0A3350"/>
+  <text x="772" y="889" text-anchor="middle" font-size="11" font-weight="bold" fill="white">SUBSCRIBER_NOTIFICATION_PREF</text>
+  <text x="642" y="914" font-size="10" fill="#7DD3FC">id (uuid PK)</text>
+  <text x="642" y="930" font-size="10" fill="#BAE6FD">person_id (FK → PERSON)</text>
+  <text x="642" y="946" font-size="10" fill="#BAE6FD">town_id (FK) · channel (email/sms)</text>
+  <text x="642" y="962" font-size="10" fill="#BAE6FD">event_type · enabled (bool)</text>
+  <text x="642" y="978" font-size="10" fill="#BAE6FD">consent_timestamp · consent_method</text>
+
+  <!-- ════════ TOWN_NOTIFICATION_CONFIG ════════ -->
+  <rect x="630" y="1015" width="285" height="95" rx="6" fill="#0E4A6B" stroke="#0A3350" stroke-width="2"/>
+  <rect x="630" y="1015" width="285" height="28" rx="6" fill="#0A3350"/>
+  <text x="772" y="1034" text-anchor="middle" font-size="11" font-weight="bold" fill="white">TOWN_NOTIFICATION_CONFIG</text>
+  <text x="642" y="1059" font-size="10" fill="#7DD3FC">id (uuid PK) · town_id (FK, unique)</text>
+  <text x="642" y="1075" font-size="10" fill="#BAE6FD">postmark_server_token (encrypted)</text>
+  <text x="642" y="1091" font-size="10" fill="#BAE6FD">postmark_sender_email/name</text>
+  <text x="642" y="1107" font-size="10" fill="#BAE6FD">twilio config (Phase 2)</text>
 
   <!-- ══════════════ LEGEND ══════════════ -->
-  <rect x="40" y="810" width="540" height="120" rx="6" fill="white" stroke="#E5E7EB" stroke-width="1.5"/>
-  <text x="56" y="832" font-size="11" font-weight="bold" fill="#374151">Legend</text>
-  <line x1="56" y1="845" x2="106" y2="845" stroke="#60A5FA" stroke-width="1.5"/>
-  <text x="112" y="849" font-size="10" fill="#374151">Foreign key relationship</text>
-  <line x1="56" y1="862" x2="106" y2="862" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
-  <text x="112" y="866" font-size="10" fill="#374151">Derived / indirect relationship</text>
-  <line x1="56" y1="879" x2="106" y2="879" stroke="#F97316" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="112" y="883" font-size="10" fill="#374151">Extends (subtype pattern — shares PK)</text>
+  <rect x="40" y="1190" width="1580" height="100" rx="6" fill="white" stroke="#E5E7EB" stroke-width="1.5"/>
+  <text x="60" y="1212" font-size="11" font-weight="bold" fill="#374151">Legend</text>
 
-  <rect x="310" y="840" width="12" height="12" rx="2" fill="#1A5C3A"/>
-  <text x="328" y="851" font-size="10" fill="#374151">Board / Member domain</text>
-  <rect x="310" y="858" width="12" height="12" rx="2" fill="#6B2D0E"/>
-  <text x="328" y="869" font-size="10" fill="#374151">Meeting / Notice domain</text>
-  <rect x="310" y="876" width="12" height="12" rx="2" fill="#4A1A6B"/>
-  <text x="328" y="887" font-size="10" fill="#374151">Agenda / Vote / Minutes domain</text>
-  <rect x="310" y="894" width="12" height="12" rx="2" fill="#7A4A0A"/>
-  <text x="328" y="905" font-size="10" fill="#374151">Warrant / Town Meeting domain</text>
-  <rect x="430" y="840" width="12" height="12" rx="2" fill="#1A2B4A"/>
-  <text x="448" y="851" font-size="10" fill="#374151">Town (anchor entity)</text>
-  <rect x="430" y="858" width="12" height="12" rx="2" fill="#374151"/>
-  <text x="448" y="869" font-size="10" fill="#374151">Auth / User domain</text>
+  <!-- Relationship types -->
+  <line x1="60" y1="1230" x2="110" y2="1230" stroke="#60A5FA" stroke-width="1.5"/>
+  <text x="116" y="1234" font-size="10" fill="#374151">Foreign key (direct)</text>
+  <line x1="60" y1="1250" x2="110" y2="1250" stroke="#60A5FA" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="116" y="1254" font-size="10" fill="#374151">Indirect / derived relationship</text>
+  <line x1="60" y1="1270" x2="110" y2="1270" stroke="#A78BFA" stroke-width="2"/>
+  <text x="116" y="1274" font-size="10" fill="#374151">PERSON → child entity (identity link)</text>
 
-  <!-- Footer note -->
-  <line x1="40" y1="948" x2="1360" y2="948" stroke="#CBD5E0" stroke-width="1"/>
-  <text x="700" y="964" text-anchor="middle" font-size="10" fill="#9CA3AF">All tables include town_id for Row Level Security (RLS) enforcement · Supabase Auth handles session management</text>
-  <text x="700" y="978" text-anchor="middle" font-size="10" fill="#9CA3AF">Public portal queries use a read-only anon role scoped to published records only</text>
+  <!-- Domain colors -->
+  <rect x="380" y="1222" width="12" height="12" rx="2" fill="#7C3AED"/>
+  <text x="398" y="1233" font-size="10" fill="#374151">PERSON identity domain</text>
+  <rect x="380" y="1242" width="12" height="12" rx="2" fill="#1A5C3A"/>
+  <text x="398" y="1253" font-size="10" fill="#374151">Board / template domain</text>
+  <rect x="380" y="1262" width="12" height="12" rx="2" fill="#6B2D0E"/>
+  <text x="398" y="1273" font-size="10" fill="#374151">Meeting / attendance domain</text>
+
+  <rect x="600" y="1222" width="12" height="12" rx="2" fill="#4A1A6B"/>
+  <text x="618" y="1233" font-size="10" fill="#374151">Agenda / motion / minutes domain</text>
+  <rect x="600" y="1242" width="12" height="12" rx="2" fill="#0E4A6B"/>
+  <text x="618" y="1253" font-size="10" fill="#374151">Notification domain</text>
+  <rect x="600" y="1262" width="12" height="12" rx="2" fill="#374151"/>
+  <text x="618" y="1273" font-size="10" fill="#374151">Utility (exhibit, auth, audit, permissions)</text>
+
+  <rect x="880" y="1222" width="12" height="12" rx="2" fill="#7A4A0A"/>
+  <text x="898" y="1233" font-size="10" fill="#374151">Warrant / civic engagement (Phase 2)</text>
+  <rect x="880" y="1242" width="12" height="12" rx="2" fill="#065F46"/>
+  <text x="898" y="1253" font-size="10" fill="#374151">Parcel / GIS (Phase 3)</text>
+  <rect x="880" y="1262" width="12" height="12" rx="2" fill="#1A2B4A"/>
+  <text x="898" y="1273" font-size="10" fill="#374151">TOWN (anchor entity, all tables have town_id)</text>
+
+  <!-- Phase indicators -->
+  <text x="1180" y="1233" font-size="10" fill="#374151">Solid border = Phase 1 (MVP)</text>
+  <rect x="1160" y="1242" width="12" height="12" rx="2" fill="none" stroke="#52300A" stroke-width="2" stroke-dasharray="5,3"/>
+  <text x="1180" y="1253" font-size="10" fill="#374151">Dashed border = Phase 2/3 (future)</text>
+
+  <!-- Footer -->
+  <line x1="40" y1="1298" x2="1620" y2="1298" stroke="#CBD5E0" stroke-width="1"/>
+  <text x="830" y="1314" text-anchor="middle" font-size="10" fill="#9CA3AF">All tables include town_id for Row Level Security (RLS) · Multi-tenant · PowerSync bidirectional offline sync · Supabase Auth handles sessions</text>
 
 </svg>
