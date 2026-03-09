@@ -1,15 +1,27 @@
+import { useQuery } from "@powersync/react";
 import type { Route } from "./+types/dashboard";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 export async function clientLoader() {
-  // Will be connected to PowerSync in session 02.02
-  return {
-    upcomingMeetings: [],
-    recentActivity: [],
-  };
+  // Data is provided reactively by useQuery hooks in the component.
+  // clientLoader returns minimal static data for initial render.
+  return {};
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
+  // Reactive queries — these auto-update when local data changes
+  const { data: boards } = useQuery("SELECT COUNT(*) as count FROM boards");
+  const { data: meetings } = useQuery(
+    "SELECT COUNT(*) as count FROM meetings WHERE status IN ('scheduled', 'in_progress')"
+  );
+  const { data: pendingMinutes } = useQuery(
+    "SELECT COUNT(*) as count FROM minutes_documents WHERE status = 'draft'"
+  );
+
+  const boardCount = boards?.[0]?.count ?? 0;
+  const meetingCount = meetings?.[0]?.count ?? 0;
+  const pendingMinutesCount = pendingMinutes?.[0]?.count ?? 0;
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -25,9 +37,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           <h3 className="text-sm font-medium text-muted-foreground">
             Upcoming Meetings
           </h3>
-          <p className="mt-2 text-3xl font-bold">0</p>
+          <p className="mt-2 text-3xl font-bold">{meetingCount}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            No meetings scheduled
+            {meetingCount === 0
+              ? "No meetings scheduled"
+              : `${meetingCount} meeting${meetingCount === 1 ? "" : "s"} scheduled`}
           </p>
         </div>
 
@@ -36,9 +50,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           <h3 className="text-sm font-medium text-muted-foreground">
             Active Boards
           </h3>
-          <p className="mt-2 text-3xl font-bold">0</p>
+          <p className="mt-2 text-3xl font-bold">{boardCount}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            No boards configured
+            {boardCount === 0
+              ? "No boards configured"
+              : `${boardCount} board${boardCount === 1 ? "" : "s"} active`}
           </p>
         </div>
 
@@ -47,9 +63,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           <h3 className="text-sm font-medium text-muted-foreground">
             Pending Minutes
           </h3>
-          <p className="mt-2 text-3xl font-bold">0</p>
+          <p className="mt-2 text-3xl font-bold">{pendingMinutesCount}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            All minutes approved
+            {pendingMinutesCount === 0
+              ? "All minutes approved"
+              : `${pendingMinutesCount} draft${pendingMinutesCount === 1 ? "" : "s"} pending`}
           </p>
         </div>
       </div>

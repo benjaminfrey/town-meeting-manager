@@ -11,12 +11,11 @@ import {
   Sun,
   Moon,
   Monitor,
-  Wifi,
-  WifiOff,
 } from "lucide-react";
 import { APP_NAME } from "@town-meeting/shared";
 import { useTheme } from "@/providers/ThemeProvider";
 import { ErrorFallback } from "@/components/ErrorFallback";
+import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -46,16 +45,6 @@ function ThemeToggle() {
       {theme === "system" && <Monitor className="h-4 w-4" />}
       <span className="sr-only">Toggle theme ({theme})</span>
     </button>
-  );
-}
-
-function SyncStatusIndicator() {
-  // Placeholder — will be connected to PowerSync in session 02.02
-  return (
-    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-      <Wifi className="h-4 w-4 text-green-500" />
-      <span className="hidden sm:inline">Synced</span>
-    </div>
   );
 }
 
@@ -159,7 +148,7 @@ export default function RootLayout() {
 
           {/* Header actions */}
           <div className="flex items-center gap-3">
-            <SyncStatusIndicator />
+            <SyncStatusBar />
             <ThemeToggle />
             {/* User menu placeholder */}
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">

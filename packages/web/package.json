@@ -14,11 +14,16 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@powersync/kysely-driver": "^1.3.3",
+    "@powersync/react": "^1.9.0",
+    "@powersync/web": "^1.35.0",
     "@react-router/node": "^7.13.1",
     "@react-router/serve": "^7.13.1",
+    "@supabase/supabase-js": "^2.99.0",
     "@town-meeting/shared": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "isbot": "^5",
     "lucide-react": "^0.511.0",
     "radix-ui": "^1.4.3",
     "react": "^19.1.0",
@@ -28,8 +33,7 @@
     "react-router": "^7.12.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.0",
-    "zod": "^3.25.76",
-    "isbot": "^5"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@react-router/dev": "^7.12.0",
@@ -40,6 +44,8 @@
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
     "vite": "^6.3.0",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0",
     "vite-tsconfig-paths": "^5.1.0"
   }
 }

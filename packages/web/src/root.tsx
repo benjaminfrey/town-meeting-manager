@@ -8,7 +8,11 @@ import {
 } from "react-router";
 import type { Route } from "./+types/root";
 import { ThemeProvider } from "@/providers/ThemeProvider";
+import { PowerSyncProvider } from "@/providers/PowerSyncProvider";
+import { supabase } from "@/lib/supabase";
 import "./app.css";
+
+const powersyncUrl = import.meta.env.VITE_POWERSYNC_URL || "http://localhost:8080";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -46,7 +50,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ThemeProvider>
-      <Outlet />
+      <PowerSyncProvider
+        supabaseClient={supabase}
+        powersyncUrl={powersyncUrl}
+      >
+        <Outlet />
+      </PowerSyncProvider>
     </ThemeProvider>
   );
 }
