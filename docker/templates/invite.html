@@ -1,0 +1,17 @@
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; color: #1a1a1a;">
+  <h2 style="color: #1e3a5f;">You've been invited to Town Meeting Manager</h2>
+  <p>An administrator has invited you to join your town's meeting management system.</p>
+  <p>Click the button below to set up your account:</p>
+  <p style="margin: 24px 0;">
+    <a href="{{ .ConfirmationURL }}"
+       style="background-color: #1e3a5f; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+      Accept Invitation
+    </a>
+  </p>
+  <p style="color: #666; font-size: 14px;">If the button doesn't work, copy and paste this URL into your browser:</p>
+  <p style="color: #666; font-size: 12px; word-break: break-all;">{{ .ConfirmationURL }}</p>
+  <hr style="border: none; border-top: 1px solid #ddd; margin: 24px 0;" />
+  <p style="color: #999; font-size: 12px;">Town Meeting Manager — Civic software for New England town government</p>
+</body>
+</html>

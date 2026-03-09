@@ -12,6 +12,7 @@
 #   54322 — PostgreSQL (direct access)
 #   54323 — Supabase Studio (admin UI)
 #    8080 — PowerSync (offline-first sync API)
+#    9000 — Inbucket (dev email viewer)
 
 name: town-meeting
 
@@ -83,6 +84,17 @@ services:
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-supabase}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-this_password_is_insecure_and_should_be_updated}
 
+  # ─── Inbucket (Dev Email Capture) ──────────────────────────────────
+  # Catches all outgoing emails for local viewing. No real SMTP server needed.
+  # Web UI: http://localhost:9000  |  SMTP: inbucket:2500
+  inbucket:
+    container_name: town-meeting-inbucket
+    image: inbucket/inbucket:latest
+    ports:
+      - "${INBUCKET_PORT:-9000}:9000"   # Web UI for viewing emails
+      - "2500:2500"                     # SMTP
+    restart: unless-stopped
+
   # ─── GoTrue (Auth) ─────────────────────────────────────────────────
   auth:
     container_name: town-meeting-auth
@@ -104,6 +116,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      inbucket:
+        condition: service_started
+    volumes:
+      - ./templates:/templates:ro
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -127,7 +143,7 @@ services:
       GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-true}
 
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-admin@townmeetingmanager.local}
-      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-inbucket}
       GOTRUE_SMTP_PORT: ${SMTP_PORT:-2500}
       GOTRUE_SMTP_USER: ${SMTP_USER:-}
       GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
@@ -140,6 +156,15 @@ services:
 
       GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP:-false}
       GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM:-true}
+
+      # Custom access token hook — injects town_id, role, person_id into JWT
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
+
+      # Email templates
+      GOTRUE_MAILER_TEMPLATES_INVITE: "/templates/invite.html"
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: "/templates/confirmation.html"
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: "/templates/recovery.html"
 
   # ─── PostgREST (REST API) ──────────────────────────────────────────
   rest:
