@@ -26,6 +26,15 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
 
 -- ============================================================
+-- PowerSync logical replication publication
+-- ============================================================
+-- PowerSync uses PostgreSQL logical replication to stream changes.
+-- Creating the publication at init time (FOR ALL TABLES) means
+-- any tables created later (session 01.05+) are automatically included.
+-- Requires wal_level=logical (set in docker-compose db command).
+CREATE PUBLICATION powersync FOR ALL TABLES;
+
+-- ============================================================
 -- Verify extensions are installed
 -- ============================================================
 DO $$

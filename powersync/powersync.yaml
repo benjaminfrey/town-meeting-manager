@@ -1,0 +1,65 @@
+# PowerSync configuration for Town Meeting Manager
+# Docs: https://docs.powersync.com/self-hosting/configuration
+#
+# Environment variables use !env substitution (PS_-prefixed vars only).
+# These are set in docker-compose.yml's powersync service environment.
+
+# ─── Source Database Replication ────────────────────────────────────
+# Connects to Supabase PostgreSQL via logical replication.
+# Requires wal_level=logical (set in db service command).
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable
+      # Default publication name is "powersync" — created in init.sql
+
+# ─── Sync Bucket Storage ───────────────────────────────────────────
+# Uses PostgreSQL for bucket storage (supported since v1.3.8 on Postgres 14+).
+# This avoids the need for a separate MongoDB instance.
+# Alternative: type: mongodb with uri: mongodb://mongo:27017/powersync
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+
+# ─── API Server ────────────────────────────────────────────────────
+port: !env PS_PORT
+
+# ─── Sync Configuration ────────────────────────────────────────────
+# Sync rules define which data syncs to which client.
+# Uses bucket_definitions with town_id scoping for multi-tenant isolation.
+sync_config:
+  path: /config/sync-rules.yaml
+
+# ─── Client JWT Authentication ─────────────────────────────────────
+# Validates JWTs issued by Supabase Auth (GoTrue).
+#
+# Development: Uses HS256 with shared JWT secret via Supabase auth mode.
+# Production:  Switch to RS256 via JWKS endpoint for better security:
+#   client_auth:
+#     jwks_uri: https://your-domain/auth/v1/.well-known/jwks.json
+#     audience: ["https://your-powersync-domain"]
+client_auth:
+  supabase: true
+  supabase_jwt_secret: !env PS_SUPABASE_JWT_SECRET
+
+# ─── Admin API ──────────────────────────────────────────────────────
+# Token for PowerSync admin/diagnostics endpoints.
+# Change this in production.
+api:
+  tokens:
+    - powersync-dev-token
+
+# ─── Telemetry ──────────────────────────────────────────────────────
+telemetry:
+  disable_telemetry_sharing: true
+
+# ─── System ─────────────────────────────────────────────────────────
+migrations:
+  disable_auto_migration: false
+
+system:
+  logging:
+    level: info
+    format: text
