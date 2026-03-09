@@ -69,8 +69,8 @@ town-meeting-manager/
 | AI (Minutes Drafting) | Anthropic Claude API |
 | Source Control | GitHub |
 | Infrastructure | Linux + Docker Compose + Nginx |
-| Email | Resend or Postmark (TBD) |
-| SMS | Twilio or similar (TBD, TCPA-compliant) |
+| Email | Postmark |
+| SMS | Twilio (TCPA-compliant) |
 
 ---
 
