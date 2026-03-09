@@ -10,11 +10,13 @@
 # will report "no token parameters" which is expected.
 #
 # BUCKET DEFINITIONS:
-# 1. town_data      — the user's own town record
-# 2. people_data    — persons, user accounts, boards, and board members
-# 3. meeting_data   — meetings, agenda items, motions, votes, attendance
-# 4. minutes_data   — minutes documents and sections
-# 5. template_data  — agenda templates
+# 1. town_data          — the user's own town record
+# 2. people_data        — persons, user accounts, boards, and board members
+# 3. meeting_data       — meetings, agenda items, motions, votes, attendance
+# 4. minutes_data       — minutes documents and sections
+# 5. template_data      — agenda templates and exhibits
+# 6. notification_data  — notification events, delivery records, subscriber prefs
+# 7. admin_data         — permission templates (system + town) and audit log
 #
 # Every query filters by town_id = bucket.town_id for tenant isolation.
 # ─────────────────────────────────────────────────────────────────────
@@ -113,8 +115,8 @@ bucket_definitions:
         FROM minutes_section
         WHERE town_id = bucket.town_id
 
-  # ─── TEMPLATES ─────────────────────────────────────────────────
-  # Agenda templates for the user's town.
+  # ─── TEMPLATES & EXHIBITS ───────────────────────────────────────
+  # Agenda templates and exhibit attachments for the user's town.
   template_data:
     parameters:
       - SELECT token_parameters.town_id as town_id
@@ -122,4 +124,48 @@ bucket_definitions:
       - SELECT id, board_id, town_id, name, is_default, sections,
                created_at, updated_at
         FROM agenda_template
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, agenda_item_id, town_id, file_name, file_storage_path,
+               file_type, file_size, visibility, uploaded_by, created_at
+        FROM exhibit
+        WHERE town_id = bucket.town_id
+
+  # ─── NOTIFICATIONS ───────────────────────────────────────────
+  # Notification events and delivery records for the user's town.
+  # Subscriber preferences sync so the app can display/edit them offline.
+  notification_data:
+    parameters:
+      - SELECT token_parameters.town_id as town_id
+    data:
+      - SELECT id, town_id, event_type, entity_type, entity_id,
+               payload, status, created_at, processed_at
+        FROM notification_event
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, event_id, town_id, subscriber_id, channel,
+               status, external_id, error_message, sent_at, created_at
+        FROM notification_delivery
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, person_id, town_id, event_type, channel_email,
+               channel_sms, sms_consent, sms_consent_at, created_at
+        FROM subscriber_notification_preference
+        WHERE town_id = bucket.town_id
+
+  # ─── ADMIN DATA ──────────────────────────────────────────────
+  # Permission templates (town-specific only; system defaults are
+  # bundled in the client app) and audit log.
+  admin_data:
+    parameters:
+      - SELECT token_parameters.town_id as town_id
+    data:
+      - SELECT id, town_id, name, description, permissions,
+               is_system_default, created_at
+        FROM permission_template
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, town_id, user_account_id, action, entity_type,
+               entity_id, details, created_at
+        FROM audit_log
         WHERE town_id = bucket.town_id
