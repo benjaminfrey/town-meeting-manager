@@ -1,15 +1,15 @@
 /**
- * Login page — /login route
+ * Forgot Password page — /forgot-password route
  *
- * Uses plain React state + Zod for validation, shadcn/ui for styling.
- * Authenticates via Supabase Auth. On success, redirects to /dashboard
- * or /setup depending on whether the user has a town_id claim in their JWT.
+ * Sends a password reset link via Supabase Auth. Always shows the
+ * generic success message regardless of whether the email exists
+ * (security best practice — don't leak registered emails).
  */
 
 import { type FormEvent, useState } from "react";
-import { Link, useNavigate, Navigate } from "react-router";
+import { Link } from "react-router";
 import { z } from "zod";
-import { Loader2, Landmark } from "lucide-react";
+import { ArrowLeft, Landmark, Loader2, MailCheck } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,55 +26,36 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 // ─── Validation schema ────────────────────────────────────────────────
 
-const loginSchema = z.object({
+const forgotPasswordSchema = z.object({
   email: z.string().min(1, "Email is required").email("Please enter a valid email"),
-  password: z
-    .string()
-    .min(1, "Password is required")
-    .min(8, "Password must be at least 8 characters"),
 });
-
-type FieldErrors = Partial<Record<keyof z.infer<typeof loginSchema>, string>>;
 
 // ─── Component ────────────────────────────────────────────────────────
 
-export default function LoginPage() {
-  const { signIn, isAuthenticated, isLoading: authLoading } = useAuth();
-  const navigate = useNavigate();
+export default function ForgotPasswordPage() {
+  const { resetPassword } = useAuth();
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // If already authenticated, redirect away from login
-  if (!authLoading && isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
-  }
+  const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    setFieldErrors({});
+    setEmailError(null);
 
     // Validate with Zod
-    const result = loginSchema.safeParse({ email, password });
+    const result = forgotPasswordSchema.safeParse({ email });
     if (!result.success) {
-      const errors: FieldErrors = {};
-      for (const issue of result.error.issues) {
-        const field = issue.path[0] as keyof FieldErrors;
-        if (!errors[field]) {
-          errors[field] = issue.message;
-        }
-      }
-      setFieldErrors(errors);
+      setEmailError(result.error.issues[0]?.message ?? "Invalid email");
       return;
     }
 
     setIsSubmitting(true);
 
-    const { error } = await signIn(result.data.email, result.data.password);
+    const { error } = await resetPassword(result.data.email);
 
     if (error) {
       setFormError(error);
@@ -82,23 +63,50 @@ export default function LoginPage() {
       return;
     }
 
-    // Success — determine redirect destination based on JWT claims.
-    // For now, always redirect to /dashboard. The setup redirect will be
-    // handled when useCurrentUser detects no town_id in the JWT.
-    navigate("/dashboard", { replace: true });
+    // Always show success regardless of whether the email exists
+    setSubmitted(true);
   };
+
+  // Success state
+  if (submitted) {
+    return (
+      <Card className="border-0 shadow-lg sm:border">
+        <CardHeader className="space-y-3 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
+            <MailCheck className="h-6 w-6 text-green-600" />
+          </div>
+          <div>
+            <CardTitle className="text-xl">Check your email</CardTitle>
+            <CardDescription className="mt-1">
+              If an account exists with that email, we've sent a password
+              reset link.
+            </CardDescription>
+          </div>
+        </CardHeader>
+
+        <CardFooter className="justify-center">
+          <Link
+            to="/login"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to sign in
+          </Link>
+        </CardFooter>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-0 shadow-lg sm:border">
       <CardHeader className="space-y-3 text-center">
-        {/* Logo placeholder */}
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Landmark className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <CardTitle className="text-xl">Sign in to your account</CardTitle>
+          <CardTitle className="text-xl">Reset your password</CardTitle>
           <CardDescription className="mt-1">
-            Enter your credentials to access the meeting manager
+            Enter your email and we'll send you a reset link
           </CardDescription>
         </div>
       </CardHeader>
@@ -123,44 +131,22 @@ export default function LoginPage() {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={!!fieldErrors.email}
+              aria-invalid={!!emailError}
             />
-            {fieldErrors.email && (
-              <p className="text-sm text-destructive">{fieldErrors.email}</p>
-            )}
-          </div>
-
-          {/* Password field */}
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={!!fieldErrors.password}
-            />
-            {fieldErrors.password && (
-              <p className="text-sm text-destructive">
-                {fieldErrors.password}
-              </p>
+            {emailError && (
+              <p className="text-sm text-destructive">{emailError}</p>
             )}
           </div>
 
           {/* Submit button */}
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isSubmitting}
-          >
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Signing in...
+                Sending...
               </>
             ) : (
-              "Sign in"
+              "Send reset link"
             )}
           </Button>
         </form>
@@ -168,10 +154,11 @@ export default function LoginPage() {
 
       <CardFooter className="justify-center">
         <Link
-          to="/forgot-password"
-          className="text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+          to="/login"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
         >
-          Forgot your password?
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to sign in
         </Link>
       </CardFooter>
     </Card>

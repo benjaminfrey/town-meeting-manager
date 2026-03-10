@@ -3,12 +3,14 @@
  *
  * This provider:
  * 1. Creates a PowerSyncDatabase instance (local SQLite via WASM)
- * 2. Listens for Supabase auth state changes
- * 3. Connects/disconnects PowerSync sync based on authentication
- * 4. Provides the PowerSync database to child components via context
+ * 2. Connects/disconnects sync based on the `authenticated` prop from AuthProvider
+ * 3. Provides the PowerSync database and Supabase client to child components via context
  *
  * The database is always available for local reads/writes, even when
  * not authenticated. Sync only occurs when the user has a valid session.
+ *
+ * Auth lifecycle is managed by AuthProvider. This provider reacts to
+ * authentication state changes and connects/disconnects PowerSync accordingly.
  */
 
 import {
@@ -38,17 +40,27 @@ export function useSupabaseClient(): SupabaseClient {
   return client;
 }
 
+// ─── PowerSync database ref context (for logout disconnect) ──────────
+
+const PowerSyncDbRefContext = createContext<PowerSyncDatabase | null>(null);
+
+export function usePowerSyncDb(): PowerSyncDatabase | null {
+  return useContext(PowerSyncDbRefContext);
+}
+
 // ─── Provider ────────────────────────────────────────────────────────
 
 interface PowerSyncProviderProps {
   supabaseClient: SupabaseClient;
   powersyncUrl: string;
+  authenticated: boolean;
   children: ReactNode;
 }
 
 export function PowerSyncProvider({
   supabaseClient,
   powersyncUrl,
+  authenticated,
   children,
 }: PowerSyncProviderProps) {
   const [initialized, setInitialized] = useState(false);
@@ -71,30 +83,16 @@ export function PowerSyncProvider({
     [supabaseClient, powersyncUrl]
   );
 
-  // Track whether we've already connected to avoid duplicate connections
+  // Track connection state to avoid duplicate connects
   const connectedRef = useRef(false);
 
+  // Initialize the WASM database on mount
   useEffect(() => {
     let mounted = true;
 
     async function initialize() {
       try {
-        // Initialize the local database (creates WASM SQLite)
         await powerSync.init();
-
-        if (!mounted) return;
-
-        // Check if user already has a session
-        const {
-          data: { session },
-        } = await supabaseClient.auth.getSession();
-
-        if (session && !connectedRef.current) {
-          // User is authenticated — start syncing
-          await powerSync.connect(connector);
-          connectedRef.current = true;
-        }
-
         if (mounted) {
           setInitialized(true);
         }
@@ -109,37 +107,35 @@ export function PowerSyncProvider({
 
     initialize();
 
-    // Listen for auth state changes to connect/disconnect sync
-    const {
-      data: { subscription },
-    } = supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session && !connectedRef.current) {
+    return () => {
+      mounted = false;
+    };
+  }, [powerSync]);
+
+  // Connect/disconnect based on authentication state
+  useEffect(() => {
+    if (!initialized) return;
+
+    async function connectSync() {
+      if (authenticated && !connectedRef.current) {
         try {
           await powerSync.connect(connector);
           connectedRef.current = true;
         } catch (error) {
-          console.error("Failed to connect PowerSync after sign-in:", error);
+          console.error("Failed to connect PowerSync:", error);
         }
-      } else if (event === "SIGNED_OUT") {
+      } else if (!authenticated && connectedRef.current) {
         try {
-          await powerSync.disconnect();
-          connectedRef.current = false;
-          // Clear local data on sign-out for security
           await powerSync.disconnectAndClear();
+          connectedRef.current = false;
         } catch (error) {
-          console.error(
-            "Failed to disconnect PowerSync after sign-out:",
-            error
-          );
+          console.error("Failed to disconnect PowerSync:", error);
         }
       }
-    });
+    }
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [powerSync, connector, supabaseClient]);
+    connectSync();
+  }, [authenticated, initialized, powerSync, connector]);
 
   // Show a loading indicator while PowerSync initializes WASM
   if (!initialized) {
@@ -157,9 +153,11 @@ export function PowerSyncProvider({
 
   return (
     <SupabaseContext.Provider value={supabaseClient}>
-      <PowerSyncContext.Provider value={powerSync}>
-        {children}
-      </PowerSyncContext.Provider>
+      <PowerSyncDbRefContext.Provider value={powerSync}>
+        <PowerSyncContext.Provider value={powerSync}>
+          {children}
+        </PowerSyncContext.Provider>
+      </PowerSyncDbRefContext.Provider>
     </SupabaseContext.Provider>
   );
 }

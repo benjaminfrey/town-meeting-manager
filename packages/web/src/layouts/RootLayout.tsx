@@ -11,11 +11,15 @@ import {
   Sun,
   Moon,
   Monitor,
+  LogOut,
 } from "lucide-react";
 import { APP_NAME } from "@town-meeting/shared";
 import { useTheme } from "@/providers/ThemeProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { ErrorFallback } from "@/components/ErrorFallback";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { LogoutDialog } from "@/components/LogoutDialog";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -104,8 +108,15 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
 
 export default function RootLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const currentUser = useCurrentUser();
+
+  // Get initials for the user avatar
+  const initials = currentUser?.email
+    ? currentUser.email.charAt(0).toUpperCase()
+    : "U";
 
   return (
+    <ProtectedRoute>
     <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden md:flex">
@@ -150,10 +161,17 @@ export default function RootLayout() {
           <div className="flex items-center gap-3">
             <SyncStatusBar />
             <ThemeToggle />
-            {/* User menu placeholder */}
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-              U
-            </div>
+            {/* User menu with logout */}
+            <LogoutDialog
+              trigger={
+                <button
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground transition-opacity hover:opacity-80"
+                  title={currentUser?.email ?? "User menu"}
+                >
+                  {initials}
+                </button>
+              }
+            />
           </div>
         </header>
 
@@ -165,5 +183,6 @@ export default function RootLayout() {
         </main>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

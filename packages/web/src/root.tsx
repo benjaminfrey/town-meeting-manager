@@ -8,7 +8,9 @@ import {
 } from "react-router";
 import type { Route } from "./+types/root";
 import { ThemeProvider } from "@/providers/ThemeProvider";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PowerSyncProvider } from "@/providers/PowerSyncProvider";
+import { Toaster } from "@/components/ui/sonner";
 import { supabase } from "@/lib/supabase";
 import "./app.css";
 
@@ -47,15 +49,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Inner component that reads auth state and passes it to PowerSyncProvider.
+ * Must be a child of AuthProvider to access useAuth().
+ */
+function AppWithAuth() {
+  const { isAuthenticated } = useAuth();
+
+  return (
+    <PowerSyncProvider
+      supabaseClient={supabase}
+      powersyncUrl={powersyncUrl}
+      authenticated={isAuthenticated}
+    >
+      <Outlet />
+      <Toaster position="top-right" richColors closeButton />
+    </PowerSyncProvider>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider>
-      <PowerSyncProvider
-        supabaseClient={supabase}
-        powersyncUrl={powersyncUrl}
-      >
-        <Outlet />
-      </PowerSyncProvider>
+      <AuthProvider>
+        <AppWithAuth />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

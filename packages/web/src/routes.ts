@@ -4,6 +4,7 @@ export default [
   // Auth routes — minimal layout (no sidebar)
   layout("layouts/AuthLayout.tsx", [
     route("login", "routes/login.tsx"),
+    route("forgot-password", "routes/forgot-password.tsx"),
     route("setup", "routes/setup.tsx"),
   ]),
 

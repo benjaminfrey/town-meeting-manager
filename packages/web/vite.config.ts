@@ -20,6 +20,13 @@ export default defineConfig({
     include: ["@powersync/web > js-logger"],
   },
 
+  resolve: {
+    // Ensure all packages use the same React instance — prevents duplicate
+    // React errors when packages like @powersync/web are excluded from dep
+    // optimization and resolve their own React copy.
+    dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+  },
+
   server: {
     port: 5173,
     // Required for SharedArrayBuffer (OPFS multi-tab support)
