@@ -17,7 +17,10 @@ export interface Town {
   minutes_style: MinutesStyle;
   presiding_officer_default: string;
   minutes_recorder_default: string;
+  staff_roles_present: string | null; // JSON array stored as text
   subdomain: string | null;
+  seal_url: string | null;
+  retention_policy_acknowledged_at: string | null;
   created_at: string;
   updated_at: string;
 }

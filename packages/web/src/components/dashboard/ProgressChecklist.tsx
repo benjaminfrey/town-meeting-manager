@@ -2,15 +2,16 @@
  * ProgressChecklist — post-wizard setup completion tracker.
  *
  * Shows a card on the dashboard with checklist items for completing
- * town setup. Items are checked off as completed. Required items
- * are marked as such.
+ * town setup. Items are checked off as completed via reactive PowerSync
+ * queries. Required items are tagged. Hides when all items are complete.
  *
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md — Progress Checklist
  */
 
 import { Link } from "react-router";
 import { useQuery } from "@powersync/react";
-import { Check, Circle, ArrowRight } from "lucide-react";
+import { Check, Circle, ArrowRight, PartyPopper } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -18,6 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 // ─── Checklist item component ───────────────────────────────────────
 
@@ -26,7 +28,8 @@ interface ChecklistItemProps {
   description?: string;
   completed: boolean;
   required?: boolean;
-  linkTo: string;
+  linkTo?: string;
+  onClick?: () => void;
 }
 
 function ChecklistItem({
@@ -35,12 +38,10 @@ function ChecklistItem({
   completed,
   required,
   linkTo,
+  onClick,
 }: ChecklistItemProps) {
-  return (
-    <Link
-      to={linkTo}
-      className="group flex items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-muted/50"
-    >
+  const content = (
+    <div className="group flex items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-muted/50">
       {/* Status icon */}
       <div className="mt-0.5 flex-shrink-0">
         {completed ? (
@@ -63,9 +64,9 @@ function ChecklistItem({
             {label}
           </span>
           {required && !completed && (
-            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
               Required
-            </span>
+            </Badge>
           )}
         </div>
         {description && !completed && (
@@ -77,8 +78,22 @@ function ChecklistItem({
       {!completed && (
         <ArrowRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       )}
-    </Link>
+    </div>
   );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="w-full text-left">
+        {content}
+      </button>
+    );
+  }
+
+  if (linkTo) {
+    return <Link to={linkTo}>{content}</Link>;
+  }
+
+  return content;
 }
 
 // ─── Progress bar ───────────────────────────────────────────────────
@@ -106,18 +121,34 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 
 // ─── Main component ─────────────────────────────────────────────────
 
-export function ProgressChecklist() {
-  // Query board members across all boards to check if any have been added
-  const { data: boardMembers } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members"
+interface ProgressChecklistProps {
+  townId: string;
+  sealUrl: string | null;
+  retentionAcknowledgedAt: string | null;
+  onRetentionPolicyClick: () => void;
+}
+
+export function ProgressChecklist({
+  townId,
+  sealUrl,
+  retentionAcknowledgedAt,
+  onRetentionPolicyClick,
+}: ProgressChecklistProps) {
+  // Reactive queries for board member count
+  const { data: memberRows } = useQuery(
+    "SELECT COUNT(*) as count FROM board_members WHERE town_id = ?",
+    [townId]
   );
-  const { data: boards } = useQuery(
-    "SELECT SUM(member_count) as total_seats FROM boards"
+  const { data: seatRows } = useQuery(
+    "SELECT SUM(member_count) as total FROM boards WHERE town_id = ?",
+    [townId]
   );
 
-  const memberCount = boardMembers?.[0]?.count ?? 0;
-  const totalSeats = boards?.[0]?.total_seats ?? 0;
+  const memberCount = memberRows?.[0]?.count ?? 0;
+  const totalSeats = seatRows?.[0]?.total ?? 0;
   const hasBoardMembers = memberCount > 0;
+  const hasSeal = !!sealUrl;
+  const hasRetentionPolicy = !!retentionAcknowledgedAt;
 
   // Define checklist items
   const items: (ChecklistItemProps & { key: string })[] = [
@@ -136,7 +167,6 @@ export function ProgressChecklist() {
       label: "Set meeting notice template",
       description: "Customize how meeting notices are formatted",
       completed: false,
-      required: false,
       linkTo: "/settings",
     },
     {
@@ -144,15 +174,13 @@ export function ProgressChecklist() {
       label: "Configure minutes approval workflow",
       description: "Set up how draft minutes are reviewed and approved",
       completed: false,
-      required: false,
       linkTo: "/settings",
     },
     {
       key: "town-seal",
       label: "Upload town seal",
       description: "Add your town seal for official documents",
-      completed: false,
-      required: false,
+      completed: hasSeal,
       linkTo: "/settings",
     },
     {
@@ -160,32 +188,44 @@ export function ProgressChecklist() {
       label: "Set public portal subdomain",
       description: "Choose your town's public URL",
       completed: false,
-      required: false,
       linkTo: "/settings",
     },
     {
       key: "retention-policy",
       label: "Acknowledge retention policy",
       description: "Required before your first meeting",
-      completed: false,
+      completed: hasRetentionPolicy,
       required: true,
-      linkTo: "/settings",
+      onClick: hasRetentionPolicy ? undefined : onRetentionPolicyClick,
     },
   ];
 
   const completedCount = items.filter((i) => i.completed).length;
+  const allComplete = completedCount === items.length;
 
-  // Don't show checklist if everything is done
-  if (completedCount === items.length) {
-    return null;
+  // Show success message when all items are complete
+  if (allComplete) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-3 py-4">
+          <PartyPopper className="h-5 w-5 text-green-600" />
+          <div>
+            <p className="text-sm font-medium">Setup complete!</p>
+            <p className="text-xs text-muted-foreground">
+              All setup items have been completed. Your town is ready.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Finish Setting Up</CardTitle>
+        <CardTitle className="text-lg">Complete Your Setup</CardTitle>
         <CardDescription>
-          Complete these items to get the most out of your town's workspace
+          Finish these items to get the most out of your town's workspace
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -201,6 +241,7 @@ export function ProgressChecklist() {
                 completed={item.completed}
                 required={item.required}
                 linkTo={item.linkTo}
+                onClick={item.onClick}
               />
             ))}
           </div>

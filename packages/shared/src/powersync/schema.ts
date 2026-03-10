@@ -67,7 +67,10 @@ export const towns = new TableV2({
   minutes_style: column.text,
   presiding_officer_default: column.text,
   minutes_recorder_default: column.text,
+  staff_roles_present: column.text, // JSON array stored as text
   subdomain: column.text,
+  seal_url: column.text,
+  retention_policy_acknowledged_at: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
