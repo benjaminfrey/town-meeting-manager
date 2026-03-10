@@ -14,6 +14,7 @@
  */
 
 import Database, { type Database as DatabaseType } from "better-sqlite3";
+export type { DatabaseType };
 import { AppSchema } from "@town-meeting/shared";
 
 // ─── Schema conversion ─────────────────────────────────────────────
