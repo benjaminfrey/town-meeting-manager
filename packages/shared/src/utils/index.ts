@@ -12,4 +12,11 @@ export {
   hasQuorum,
   quorumAfterRecusal,
   formatQuorumStatus,
+  QUORUM_TYPE_LABELS,
 } from "./quorum.js";
+
+export {
+  getEffectiveBoardSettings,
+  type EffectiveBoardSettings,
+  type SettingSource,
+} from "./board-settings.js";

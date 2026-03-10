@@ -4,7 +4,9 @@ import {
   ElectionMethod,
   MeetingFormality,
   MinutesStyle,
+  MotionDisplayFormat,
   OfficerElectionMethod,
+  QuorumType,
 } from "../constants/enums.js";
 
 export const BoardSchema = z.object({
@@ -26,7 +28,8 @@ export const BoardSchema = z.object({
     BoardType.BROADBAND_COMMITTEE,
     BoardType.OTHER,
   ]),
-  member_count: z.number().int().min(1).max(25),
+  elected_or_appointed: z.enum(["elected", "appointed"]).nullable(),
+  member_count: z.number().int().min(0).max(25),
   election_method: z.enum([
     ElectionMethod.AT_LARGE,
     ElectionMethod.ROLE_TITLED,
@@ -49,6 +52,18 @@ export const BoardSchema = z.object({
     .nullable(),
   minutes_style_override: z
     .enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE])
+    .nullable(),
+  quorum_type: z
+    .enum([
+      QuorumType.SIMPLE_MAJORITY,
+      QuorumType.TWO_THIRDS,
+      QuorumType.THREE_QUARTERS,
+      QuorumType.FIXED_NUMBER,
+    ])
+    .nullable(),
+  quorum_value: z.number().int().min(1).max(25).nullable(),
+  motion_display_format: z
+    .enum([MotionDisplayFormat.BLOCK_FORMAT, MotionDisplayFormat.INLINE_NARRATIVE])
     .nullable(),
   created_at: z.string().datetime(),
   archived_at: z.string().datetime().nullable(),

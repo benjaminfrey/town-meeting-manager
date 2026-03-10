@@ -214,6 +214,25 @@ export const MinutesSectionType = {
 export type MinutesSectionType =
   (typeof MinutesSectionType)[keyof typeof MinutesSectionType];
 
+// ─── Quorum ───────────────────────────────────────────────────────
+
+export const QuorumType = {
+  SIMPLE_MAJORITY: "simple_majority",
+  TWO_THIRDS: "two_thirds",
+  THREE_QUARTERS: "three_quarters",
+  FIXED_NUMBER: "fixed_number",
+} as const;
+export type QuorumType = (typeof QuorumType)[keyof typeof QuorumType];
+
+// ─── Motion Display ───────────────────────────────────────────────
+
+export const MotionDisplayFormat = {
+  BLOCK_FORMAT: "block_format",
+  INLINE_NARRATIVE: "inline_narrative",
+} as const;
+export type MotionDisplayFormat =
+  (typeof MotionDisplayFormat)[keyof typeof MotionDisplayFormat];
+
 // ─── Exhibit ───────────────────────────────────────────────────────
 
 export const ExhibitType = {

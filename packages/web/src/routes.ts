@@ -15,6 +15,7 @@ export default [
     // Index route redirects to /dashboard
     index("routes/home.tsx"),
     route("dashboard", "routes/dashboard.tsx"),
+    route("boards", "routes/boards.tsx"),
     route("boards/:boardId", "routes/boards.$boardId.tsx"),
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
     route("settings", "routes/settings.tsx"),

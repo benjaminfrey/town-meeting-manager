@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Boards", href: "/boards/overview", icon: List },
+  { label: "Boards", href: "/boards", icon: List },
   { label: "Meetings", href: "/meetings/upcoming", icon: CalendarDays },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

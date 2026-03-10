@@ -79,6 +79,7 @@ export const boards = new TableV2({
   town_id: column.text,
   name: column.text,
   board_type: column.text,
+  elected_or_appointed: column.text,
   member_count: column.integer,
   election_method: column.text,
   officer_election_method: column.text,
@@ -87,6 +88,9 @@ export const boards = new TableV2({
   is_governing_board: column.integer, // boolean → 0/1
   meeting_formality_override: column.text,
   minutes_style_override: column.text,
+  quorum_type: column.text,
+  quorum_value: column.integer,
+  motion_display_format: column.text,
   created_at: column.text,
   archived_at: column.text,
 });
