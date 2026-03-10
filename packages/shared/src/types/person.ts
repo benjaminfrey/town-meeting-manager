@@ -41,6 +41,18 @@ export interface BoardMember {
   created_at: string;
 }
 
+/** INVITATION — account invitation linked to a PERSON + USER_ACCOUNT */
+export interface Invitation {
+  id: string;
+  person_id: string;
+  user_account_id: string;
+  town_id: string;
+  token: string;
+  expires_at: string;
+  status: "pending" | "accepted" | "expired";
+  created_at: string;
+}
+
 /** RESIDENT_ACCOUNT — civic engagement account linked to a PERSON (0..1) */
 export interface ResidentAccount {
   id: string;

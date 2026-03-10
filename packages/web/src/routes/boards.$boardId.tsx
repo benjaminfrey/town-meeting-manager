@@ -12,7 +12,6 @@ import {
   ChevronRight,
   Pencil,
   Archive,
-  Users,
   CalendarDays,
   AlertTriangle,
 } from "lucide-react";
@@ -24,6 +23,7 @@ import type { Route } from "./+types/boards.$boardId";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { EditBoardDialog } from "@/components/boards/EditBoardDialog";
 import { ArchiveBoardDialog } from "@/components/boards/ArchiveBoardDialog";
+import { MemberRoster } from "@/components/boards/MemberRoster";
 import {
   FORMALITY_LABELS,
   MINUTES_STYLE_LABELS,
@@ -269,25 +269,14 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
           </CardContent>
         </Card>
 
-        {/* Member Roster (placeholder) */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">Member Roster</CardTitle>
-                <CardDescription>
-                  {activeMemberCount} active member{activeMemberCount !== 1 ? "s" : ""} of {b.member_count} seats
-                </CardDescription>
-              </div>
-              <Users className="h-5 w-5 text-muted-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Member management will be available in session 04.03.
-            </p>
-          </CardContent>
-        </Card>
+        {/* Member Roster */}
+        <MemberRoster
+          boardId={b.id}
+          boardName={b.name}
+          electionMethod={b.election_method}
+          townId={townId ?? ""}
+          isArchived={isArchived}
+        />
 
         {/* Meeting History (placeholder) */}
         <Card>

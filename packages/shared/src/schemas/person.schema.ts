@@ -65,6 +65,17 @@ export const CreateBoardMemberSchema = BoardMemberSchema.omit({
   created_at: true,
 });
 
+export const InvitationSchema = z.object({
+  id: z.string().uuid(),
+  person_id: z.string().uuid(),
+  user_account_id: z.string().uuid(),
+  town_id: z.string().uuid(),
+  token: z.string().uuid(),
+  expires_at: z.string().datetime(),
+  status: z.enum(["pending", "accepted", "expired"]),
+  created_at: z.string().datetime(),
+});
+
 export const ResidentAccountSchema = z.object({
   id: z.string().uuid(),
   person_id: z.string().uuid(),

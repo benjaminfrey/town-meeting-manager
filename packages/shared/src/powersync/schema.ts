@@ -54,6 +54,16 @@ export const resident_accounts = new TableV2({
   archived_at: column.text,
 });
 
+export const invitations = new TableV2({
+  person_id: column.text,
+  user_account_id: column.text,
+  town_id: column.text,
+  token: column.text,
+  expires_at: column.text,
+  status: column.text, // 'pending' | 'accepted' | 'expired'
+  created_at: column.text,
+});
+
 // ─── Town & Board ───────────────────────────────────────────────────
 
 export const towns = new TableV2({
@@ -250,6 +260,7 @@ export const AppSchema = new Schema({
   user_accounts,
   board_members,
   resident_accounts,
+  invitations,
   towns,
   boards,
   meetings,

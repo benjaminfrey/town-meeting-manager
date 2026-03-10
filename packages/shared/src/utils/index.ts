@@ -20,3 +20,9 @@ export {
   type EffectiveBoardSettings,
   type SettingSource,
 } from "./board-settings.js";
+
+export {
+  hasPermission,
+  checkRoleMutualExclusivity,
+  type RoleConflictResult,
+} from "./permissions.js";
