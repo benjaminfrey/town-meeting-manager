@@ -17,6 +17,8 @@ export default [
     route("dashboard", "routes/dashboard.tsx"),
     route("boards", "routes/boards.tsx"),
     route("boards/:boardId", "routes/boards.$boardId.tsx"),
+    route("boards/:boardId/templates", "routes/boards.$boardId.templates.tsx"),
+    route("boards/:boardId/templates/:templateId/edit", "routes/boards.$boardId.templates.$templateId.edit.tsx"),
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
     route("settings", "routes/settings.tsx"),
   ]),

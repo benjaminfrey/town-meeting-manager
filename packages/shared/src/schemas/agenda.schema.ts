@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AgendaItemSectionType,
   AgendaItemStatus,
+  MinutesBehavior,
 } from "../constants/enums.js";
 
 const agendaItemSectionTypes = [
@@ -47,6 +48,14 @@ export const CreateAgendaItemSchema = AgendaItemSchema.omit({
   updated_at: true,
 });
 
+const minutesBehaviors = [
+  MinutesBehavior.SKIP,
+  MinutesBehavior.TIMESTAMP_ONLY,
+  MinutesBehavior.ACTION_ONLY,
+  MinutesBehavior.SUMMARIZE,
+  MinutesBehavior.FULL_RECORD,
+] as const;
+
 export const AgendaTemplateSectionSchema = z.object({
   title: z.string().min(1).max(200),
   sort_order: z.number().int().min(0),
@@ -54,6 +63,8 @@ export const AgendaTemplateSectionSchema = z.object({
   is_fixed: z.boolean(),
   description: z.string().max(500).nullable(),
   default_items: z.array(z.string().max(300)),
+  minutes_behavior: z.enum(minutesBehaviors),
+  show_item_commentary: z.boolean().default(false),
 });
 
 export const AgendaTemplateSchema = z.object({

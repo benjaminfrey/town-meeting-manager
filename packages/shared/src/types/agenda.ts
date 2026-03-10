@@ -1,6 +1,7 @@
 import type {
   AgendaItemSectionType,
   AgendaItemStatus,
+  MinutesBehavior,
 } from "../constants/enums.js";
 
 export interface AgendaItem {
@@ -26,6 +27,8 @@ export interface AgendaTemplateSection {
   is_fixed: boolean;
   description: string | null;
   default_items: string[];
+  minutes_behavior: MinutesBehavior;
+  show_item_commentary: boolean;
 }
 
 export interface AgendaTemplate {

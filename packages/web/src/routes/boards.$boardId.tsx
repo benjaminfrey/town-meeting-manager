@@ -14,6 +14,7 @@ import {
   Archive,
   CalendarDays,
   AlertTriangle,
+  FileText,
 } from "lucide-react";
 import {
   calculateQuorum,
@@ -100,11 +101,16 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     "SELECT * FROM towns WHERE id = ? LIMIT 1",
     [townId ?? ""]
   );
+  const { data: templateCountRows } = useQuery(
+    "SELECT COUNT(*) as count FROM agenda_templates WHERE board_id = ?",
+    [boardId]
+  );
 
   const board = boardRows?.[0] as Record<string, unknown> | undefined;
   const town = townRows?.[0] as Record<string, unknown> | undefined;
   const activeMemberCount = Number((memberCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
   const meetingCount = Number((meetingCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
+  const templateCount = Number((templateCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
 
   // ─── Loading / not found ──────────────────────────────────────────
   if (!board) {
@@ -277,6 +283,26 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
           townId={townId ?? ""}
           isArchived={isArchived}
         />
+
+        {/* Agenda Templates */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg">Agenda Templates</CardTitle>
+                <CardDescription>
+                  {templateCount} template{templateCount !== 1 ? "s" : ""}
+                </CardDescription>
+              </div>
+              <Link to={`/boards/${b.id}/templates`}>
+                <Button variant="outline" size="sm">
+                  <FileText className="mr-2 h-4 w-4" />
+                  Manage Templates
+                </Button>
+              </Link>
+            </div>
+          </CardHeader>
+        </Card>
 
         {/* Meeting History (placeholder) */}
         <Card>

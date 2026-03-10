@@ -100,6 +100,16 @@ export type MeetingType = (typeof MeetingType)[keyof typeof MeetingType];
 
 // ─── Agenda ────────────────────────────────────────────────────────
 
+export const MinutesBehavior = {
+  SKIP: "skip",
+  TIMESTAMP_ONLY: "timestamp_only",
+  ACTION_ONLY: "action_only",
+  SUMMARIZE: "summarize",
+  FULL_RECORD: "full_record",
+} as const;
+export type MinutesBehavior =
+  (typeof MinutesBehavior)[keyof typeof MinutesBehavior];
+
 export const AgendaItemSectionType = {
   CEREMONIAL: "ceremonial",
   PROCEDURAL: "procedural",
