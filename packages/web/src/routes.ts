@@ -5,8 +5,10 @@ export default [
   layout("layouts/AuthLayout.tsx", [
     route("login", "routes/login.tsx"),
     route("forgot-password", "routes/forgot-password.tsx"),
-    route("setup", "routes/setup.tsx"),
   ]),
+
+  // Onboarding wizard — standalone layout (wider than auth, no sidebar)
+  route("setup", "routes/setup.tsx"),
 
   // App routes — full layout with sidebar
   layout("layouts/RootLayout.tsx", [

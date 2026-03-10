@@ -11,6 +11,8 @@ import { Link, useNavigate, Navigate } from "react-router";
 import { z } from "zod";
 import { Loader2, Landmark } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +42,7 @@ type FieldErrors = Partial<Record<keyof z.infer<typeof loginSchema>, string>>;
 
 export default function LoginPage() {
   const { signIn, isAuthenticated, isLoading: authLoading } = useAuth();
+  const currentUser = useCurrentUser();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
@@ -48,9 +51,10 @@ export default function LoginPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // If already authenticated, redirect away from login
+  // If already authenticated, redirect based on whether user has a town
   if (!authLoading && isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    const destination = currentUser?.townId ? "/dashboard" : "/setup";
+    return <Navigate to={destination} replace />;
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -83,9 +87,24 @@ export default function LoginPage() {
     }
 
     // Success — determine redirect destination based on JWT claims.
-    // For now, always redirect to /dashboard. The setup redirect will be
-    // handled when useCurrentUser detects no town_id in the JWT.
-    navigate("/dashboard", { replace: true });
+    // Read the fresh session to check for town_id before the auth
+    // state change propagates through React.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    let hasTown = false;
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]!));
+        hasTown = !!(
+          payload.town_id ??
+          payload.app_metadata?.town_id ??
+          payload.user_metadata?.town_id
+        );
+      } catch {
+        // If JWT decode fails, default to setup
+      }
+    }
+    navigate(hasTown ? "/dashboard" : "/setup", { replace: true });
   };
 
   return (
