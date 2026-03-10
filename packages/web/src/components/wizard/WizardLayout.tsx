@@ -9,7 +9,7 @@
  */
 
 import { type ReactNode } from "react";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { APP_NAME } from "@town-meeting/shared";
 import { Button } from "@/components/ui/button";
 import { useWizard } from "@/providers/WizardProvider";
@@ -119,6 +119,12 @@ interface WizardLayoutProps {
   onBack?: () => void;
   /** Called when the user clicks "Complete Setup" on stage 5 */
   onComplete?: () => void;
+  /** Whether the wizard is currently submitting to the server */
+  isSubmitting?: boolean;
+  /** Error message from a failed submission attempt */
+  submitError?: string | null;
+  /** Called when the user clicks "Retry" after a submission error */
+  onRetry?: () => void;
 }
 
 export function WizardLayout({
@@ -127,6 +133,9 @@ export function WizardLayout({
   onNext,
   onBack,
   onComplete,
+  isSubmitting = false,
+  submitError,
+  onRetry,
 }: WizardLayoutProps) {
   const { state, goBack } = useWizard();
   const { currentStage } = state;
@@ -163,31 +172,58 @@ export function WizardLayout({
 
       {/* Navigation bar */}
       <footer className="border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3 sm:px-6">
-          <div>
-            {!isFirstStage && (
-              <Button variant="outline" onClick={onBack ?? goBack}>
-                Back
-              </Button>
-            )}
-          </div>
+        <div className="mx-auto max-w-2xl px-4 py-3 sm:px-6">
+          {/* Submission error */}
+          {submitError && (
+            <div className="mb-3 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <p className="font-medium">Setup failed</p>
+              <p className="mt-1">{submitError}</p>
+            </div>
+          )}
 
-          <div>
-            {isLastStage ? (
-              <Button
-                onClick={onComplete ?? onNext}
-                disabled={!isStageValid}
-              >
-                Complete Setup
-              </Button>
-            ) : (
-              <Button
-                onClick={onNext}
-                disabled={!isStageValid}
-              >
-                Next
-              </Button>
-            )}
+          <div className="flex items-center justify-between">
+            <div>
+              {!isFirstStage && (
+                <Button
+                  variant="outline"
+                  onClick={onBack ?? goBack}
+                  disabled={isSubmitting}
+                >
+                  Back
+                </Button>
+              )}
+            </div>
+
+            <div>
+              {isLastStage ? (
+                submitError && onRetry ? (
+                  <Button onClick={onRetry}>
+                    Retry
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={onComplete ?? onNext}
+                    disabled={!isStageValid || isSubmitting}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating your town…
+                      </>
+                    ) : (
+                      "Complete Setup"
+                    )}
+                  </Button>
+                )
+              ) : (
+                <Button
+                  onClick={onNext}
+                  disabled={!isStageValid}
+                >
+                  Next
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </footer>

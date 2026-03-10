@@ -13,9 +13,10 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "@/providers/AuthProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useSupabase } from "@/hooks/useSupabase";
 import { WizardProvider, useWizard } from "@/providers/WizardProvider";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
 import { WizardNavBlocker } from "@/components/wizard/WizardNavBlocker";
@@ -24,16 +25,22 @@ import { WizardStage2 } from "@/components/wizard/stages/WizardStage2";
 import { WizardStage3 } from "@/components/wizard/stages/WizardStage3";
 import { WizardStage4 } from "@/components/wizard/stages/WizardStage4";
 import { WizardStage5 } from "@/components/wizard/stages/WizardStage5";
+import { completeWizard } from "@/lib/completeWizard";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 // ─── Stage renderer ──────────────────────────────────────────────────
 
 function WizardContent() {
-  const { state, updateStage, markStageComplete, goNext, goBack } = useWizard();
+  const { state, updateStage, markStageComplete, goNext, goBack, getWizardData } =
+    useWizard();
   const { currentStage } = state;
+  const supabase = useSupabase();
+  const navigate = useNavigate();
 
   // Track form validity from the current stage
   const [isStageValid, setIsStageValid] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Ref to the current stage's validate and getData functions
   const stageHandlersRef = useRef<{
@@ -75,10 +82,43 @@ function WizardContent() {
     goBack();
   }, [currentStage, updateStage, goBack]);
 
+  const submitWizard = useCallback(async () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      // Save Stage 5 data first
+      if (stageHandlersRef.current) {
+        const data = stageHandlersRef.current.validate();
+        if (!data) {
+          setIsSubmitting(false);
+          return;
+        }
+        updateStage(5, data as Record<string, unknown>);
+        markStageComplete(5);
+      }
+
+      // Collect all wizard data and submit
+      const wizardData = getWizardData();
+      await completeWizard(wizardData, supabase);
+
+      // Refresh session so the JWT picks up the new town_id claim
+      await supabase.auth.refreshSession();
+
+      // Navigate to dashboard with welcome flag
+      navigate("/dashboard?welcome=true", { replace: true });
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "An unexpected error occurred."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [getWizardData, supabase, navigate, updateStage, markStageComplete]);
+
   const handleComplete = useCallback(() => {
-    // Stage 5 completion — will submit to backend in a future session
-    handleNext();
-  }, [handleNext]);
+    void submitWizard();
+  }, [submitWizard]);
 
   // Render current stage
   const stageProps = {
@@ -115,6 +155,9 @@ function WizardContent() {
         onNext={handleNext}
         onBack={handleBack}
         onComplete={handleComplete}
+        isSubmitting={isSubmitting}
+        submitError={submitError}
+        onRetry={handleComplete}
       >
         {stageComponent}
       </WizardLayout>
