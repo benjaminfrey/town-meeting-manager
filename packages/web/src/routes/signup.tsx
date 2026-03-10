@@ -1,18 +1,17 @@
 /**
- * Login page — /login route
+ * Signup page — /signup route
  *
- * Uses plain React state + Zod for validation, shadcn/ui for styling.
- * Authenticates via Supabase Auth. On success, redirects to /dashboard
- * or /setup depending on whether the user has a town_id claim in their JWT.
+ * Creates a new Supabase Auth account. In dev mode (auto-confirm enabled),
+ * the user is signed in immediately and redirected to /setup to create
+ * their town. In prod mode, shows a "check your email" confirmation screen.
  */
 
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate, Navigate } from "react-router";
 import { z } from "zod";
-import { Loader2, Landmark } from "lucide-react";
+import { ArrowLeft, Landmark, Loader2, MailCheck } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,30 +27,43 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 // ─── Validation schema ────────────────────────────────────────────────
 
-const loginSchema = z.object({
-  email: z.string().min(1, "Email is required").email("Please enter a valid email"),
-  password: z
-    .string()
-    .min(1, "Password is required")
-    .min(8, "Password must be at least 8 characters"),
-});
+const signupSchema = z
+  .object({
+    email: z
+      .string()
+      .min(1, "Email is required")
+      .email("Please enter a valid email"),
+    password: z
+      .string()
+      .min(1, "Password is required")
+      .min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string().min(1, "Please confirm your password"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
 
-type FieldErrors = Partial<Record<keyof z.infer<typeof loginSchema>, string>>;
+type FieldErrors = Partial<
+  Record<keyof z.infer<typeof signupSchema>, string>
+>;
 
 // ─── Component ────────────────────────────────────────────────────────
 
-export default function LoginPage() {
-  const { signIn, isAuthenticated, isLoading: authLoading } = useAuth();
+export default function SignupPage() {
+  const { signUp, isAuthenticated, isLoading: authLoading } = useAuth();
   const currentUser = useCurrentUser();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
-  // If already authenticated, redirect based on whether user has a town
+  // If already authenticated, redirect
   if (!authLoading && isAuthenticated) {
     const destination = currentUser?.townId ? "/dashboard" : "/setup";
     return <Navigate to={destination} replace />;
@@ -63,7 +75,11 @@ export default function LoginPage() {
     setFieldErrors({});
 
     // Validate with Zod
-    const result = loginSchema.safeParse({ email, password });
+    const result = signupSchema.safeParse({
+      email,
+      password,
+      confirmPassword,
+    });
     if (!result.success) {
       const errors: FieldErrors = {};
       for (const issue of result.error.issues) {
@@ -78,7 +94,10 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
 
-    const { error } = await signIn(result.data.email, result.data.password);
+    const { error, confirmEmail } = await signUp(
+      result.data.email,
+      result.data.password,
+    );
 
     if (error) {
       setFormError(error);
@@ -86,38 +105,59 @@ export default function LoginPage() {
       return;
     }
 
-    // Success — determine redirect destination based on JWT claims.
-    // Read the fresh session to check for town_id before the auth
-    // state change propagates through React.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-    let hasTown = false;
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]!));
-        hasTown = !!(
-          payload.town_id ??
-          payload.app_metadata?.town_id ??
-          payload.user_metadata?.town_id
-        );
-      } catch {
-        // If JWT decode fails, default to setup
-      }
+    if (confirmEmail) {
+      // Prod mode — email confirmation required
+      setShowConfirmation(true);
+    } else {
+      // Dev mode — auto-confirmed, user is now signed in
+      navigate("/setup", { replace: true });
     }
-    navigate(hasTown ? "/dashboard" : "/setup", { replace: true });
   };
+
+  // ─── Email confirmation screen ──────────────────────────────────────
+
+  if (showConfirmation) {
+    return (
+      <Card className="border-0 shadow-lg sm:border">
+        <CardHeader className="space-y-3 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
+            <MailCheck className="h-6 w-6 text-green-600" />
+          </div>
+          <div>
+            <CardTitle className="text-xl">Check your email</CardTitle>
+            <CardDescription className="mt-1">
+              We've sent a confirmation link to your email address. Please
+              click the link to activate your account.
+            </CardDescription>
+          </div>
+        </CardHeader>
+
+        <CardFooter className="justify-center">
+          <Link
+            to="/login"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to sign in
+          </Link>
+        </CardFooter>
+      </Card>
+    );
+  }
+
+  // ─── Signup form ────────────────────────────────────────────────────
 
   return (
     <Card className="border-0 shadow-lg sm:border">
       <CardHeader className="space-y-3 text-center">
-        {/* Logo placeholder */}
+        {/* Logo */}
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Landmark className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <CardTitle className="text-xl">Sign in to your account</CardTitle>
+          <CardTitle className="text-xl">Create your account</CardTitle>
           <CardDescription className="mt-1">
-            Enter your credentials to access the meeting manager
+            Start managing your town's meetings
           </CardDescription>
         </div>
       </CardHeader>
@@ -155,7 +195,7 @@ export default function LoginPage() {
             <Input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               aria-invalid={!!fieldErrors.password}
@@ -167,38 +207,46 @@ export default function LoginPage() {
             )}
           </div>
 
+          {/* Confirm password field */}
+          <div className="space-y-2">
+            <Label htmlFor="confirm-password">Confirm Password</Label>
+            <Input
+              id="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.confirmPassword}
+            />
+            {fieldErrors.confirmPassword && (
+              <p className="text-sm text-destructive">
+                {fieldErrors.confirmPassword}
+              </p>
+            )}
+          </div>
+
           {/* Submit button */}
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isSubmitting}
-          >
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Signing in...
+                Creating account...
               </>
             ) : (
-              "Sign in"
+              "Create account"
             )}
           </Button>
         </form>
       </CardContent>
 
-      <CardFooter className="flex-col gap-2">
-        <Link
-          to="/forgot-password"
-          className="text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
-        >
-          Forgot your password?
-        </Link>
+      <CardFooter className="justify-center">
         <p className="text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          Already have an account?{" "}
           <Link
-            to="/signup"
+            to="/login"
             className="text-primary underline-offset-4 hover:underline"
           >
-            Create one
+            Sign in
           </Link>
         </p>
       </CardFooter>

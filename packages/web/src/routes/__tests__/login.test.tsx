@@ -119,6 +119,7 @@ describe("LoginPage", () => {
   it("redirects to /dashboard when already authenticated with town", () => {
     vi.mocked(useAuth).mockReturnValue({
       signIn: mockSignIn,
+      signUp: vi.fn(),
       signOut: vi.fn(),
       resetPassword: vi.fn(),
       isAuthenticated: true,

@@ -36,6 +36,10 @@ interface AuthContextValue extends AuthState {
     email: string,
     password: string
   ) => Promise<{ error: string | null }>;
+  signUp: (
+    email: string,
+    password: string
+  ) => Promise<{ error: string | null; confirmEmail: boolean }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
 }
@@ -173,6 +177,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
     []
   );
 
+  // ─── Sign up ─────────────────────────────────────────────────────
+
+  const signUp = useCallback(
+    async (
+      email: string,
+      password: string
+    ): Promise<{ error: string | null; confirmEmail: boolean }> => {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+
+      if (error) {
+        if (error.message.includes("User already registered")) {
+          return {
+            error: "An account with this email already exists",
+            confirmEmail: false,
+          };
+        }
+        if (
+          error.message.includes("fetch") ||
+          error.message.includes("network") ||
+          error.message.includes("Failed to fetch")
+        ) {
+          return {
+            error:
+              "Unable to connect. Please check your internet connection.",
+            confirmEmail: false,
+          };
+        }
+        return { error: error.message, confirmEmail: false };
+      }
+
+      // Supabase returns the user but with no identities when email
+      // confirmation is required (user exists but unconfirmed).
+      const needsConfirmation =
+        data.user?.identities?.length === 0 || !data.user?.confirmed_at;
+
+      return { error: null, confirmEmail: needsConfirmation };
+    },
+    []
+  );
+
   // ─── Sign out ────────────────────────────────────────────────────
 
   const signOut = useCallback(async (): Promise<void> => {
@@ -213,6 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const value: AuthContextValue = {
     ...state,
     signIn,
+    signUp,
     signOut,
     resetPassword,
   };
