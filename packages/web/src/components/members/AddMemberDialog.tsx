@@ -17,7 +17,7 @@ import {
   checkRoleMutualExclusivity,
   ALL_PERMISSION_ACTIONS,
 } from "@town-meeting/shared";
-import type { PermissionAction, PermissionsMatrix } from "@town-meeting/shared";
+import type { PermissionAction, PermissionsMatrix, UserRole } from "@town-meeting/shared";
 import {
   Dialog,
   DialogContent,
@@ -224,7 +224,7 @@ export function AddMemberDialog({
   // ─── Step 2: Role selection with conflict check ────────────────────
   const handleRoleChange = (role: "board_member" | "staff") => {
     if (selectedPerson?.role) {
-      const conflict = checkRoleMutualExclusivity(selectedPerson.role, role);
+      const conflict = checkRoleMutualExclusivity(selectedPerson.role as UserRole, role);
       if (conflict.conflict && selectedPerson.user_account_id) {
         setSelectedRole(role);
         setShowConflictDialog(true);
@@ -423,7 +423,7 @@ export function AddMemberDialog({
 
   const conflict =
     selectedPerson?.role && selectedRole
-      ? checkRoleMutualExclusivity(selectedPerson.role, selectedRole)
+      ? checkRoleMutualExclusivity(selectedPerson.role as UserRole, selectedRole as UserRole)
       : { conflict: false };
 
   return (

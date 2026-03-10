@@ -9,7 +9,9 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'No linter configured yet'",
-    "test": "echo 'No tests configured yet'"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@town-meeting/shared": "workspace:*"

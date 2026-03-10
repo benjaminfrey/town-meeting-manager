@@ -9,7 +9,7 @@ import { useState, useMemo, useCallback } from "react";
 import { usePowerSync, useQuery } from "@powersync/react";
 import { Loader2 } from "lucide-react";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
-import type { PermissionsMatrix, PermissionAction } from "@town-meeting/shared";
+import type { PermissionsMatrix, PermissionAction, UserRole } from "@town-meeting/shared";
 import {
   Dialog,
   DialogContent,
@@ -128,7 +128,7 @@ export function MemberTransitionDialog({
     // Check mutual exclusivity for role changes
     if (value === "to_staff" || value === "to_board_member") {
       const check = checkRoleMutualExclusivity(
-        member.role as string | null,
+        (member.role as string | null) as UserRole | null,
         value === "to_staff" ? "staff" : "board_member",
       );
       if (check.conflict && member.user_account_id) {

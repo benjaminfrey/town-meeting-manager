@@ -128,13 +128,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     label: "View & Download",
     codes: ["V1", "V2", "V3", "V4", "V5"],
-    actions: [
-      VIEW_ACTIONS.V1,
-      VIEW_ACTIONS.V2,
-      VIEW_ACTIONS.V3,
-      VIEW_ACTIONS.V4,
-      VIEW_ACTIONS.V5,
-    ] as PermissionAction[],
+    actions: Object.values(VIEW_ACTIONS) as unknown as PermissionAction[],
     locked: "always_on",
   },
 ];
