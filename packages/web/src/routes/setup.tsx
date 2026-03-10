@@ -29,21 +29,24 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // ─── Stage renderer ──────────────────────────────────────────────────
 
 function WizardContent() {
-  const { state, updateStage, markStageComplete, goNext } = useWizard();
+  const { state, updateStage, markStageComplete, goNext, goBack } = useWizard();
   const { currentStage } = state;
 
   // Track form validity from the current stage
   const [isStageValid, setIsStageValid] = useState(false);
 
-  // Ref to the current stage's validate function
-  const stageHandlersRef = useRef<{ validate: () => unknown } | null>(null);
+  // Ref to the current stage's validate and getData functions
+  const stageHandlersRef = useRef<{
+    validate: () => unknown;
+    getData?: () => unknown;
+  } | null>(null);
 
   const handleValidityChange = useCallback((isValid: boolean) => {
     setIsStageValid(isValid);
   }, []);
 
   const handleRegister = useCallback(
-    (handlers: { validate: () => unknown }) => {
+    (handlers: { validate: () => unknown; getData?: () => unknown }) => {
       stageHandlersRef.current = handlers;
     },
     []
@@ -60,6 +63,17 @@ function WizardContent() {
     markStageComplete(currentStage);
     goNext();
   }, [currentStage, updateStage, markStageComplete, goNext]);
+
+  const handleBack = useCallback(() => {
+    // Save current stage data (even if incomplete) before going back
+    if (stageHandlersRef.current?.getData) {
+      const data = stageHandlersRef.current.getData();
+      if (data) {
+        updateStage(currentStage as 1 | 2 | 3 | 4 | 5, data as Record<string, unknown>);
+      }
+    }
+    goBack();
+  }, [currentStage, updateStage, goBack]);
 
   const handleComplete = useCallback(() => {
     // Stage 5 completion — will submit to backend in a future session
@@ -99,6 +113,7 @@ function WizardContent() {
       <WizardLayout
         isStageValid={isStageValid}
         onNext={handleNext}
+        onBack={handleBack}
         onComplete={handleComplete}
       >
         {stageComponent}

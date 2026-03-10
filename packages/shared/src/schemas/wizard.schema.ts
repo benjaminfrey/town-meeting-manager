@@ -78,14 +78,19 @@ export type WizardStage1Data = z.infer<typeof WizardStage1Schema>;
 
 // ─── Stage 2 — Governing Board ──────────────────────────────────────
 
-export const WizardStage2Schema = z.object({
+const WizardStage2Base = z.object({
   boardName: z
     .string()
     .min(2, "Board name must be at least 2 characters")
     .max(100, "Board name must be less than 100 characters"),
   memberCount: z.number().int().min(0).max(15),
   electionMethod: z.enum([ElectionMethod.AT_LARGE, ElectionMethod.ROLE_TITLED]),
-  seatTitles: z.array(z.string().min(2).max(50)),
+  seatTitles: z.array(
+    z
+      .string()
+      .min(2, "Seat title must be at least 2 characters")
+      .max(50, "Seat title must be less than 50 characters")
+  ),
   officerElectionMethod: z.enum([
     OfficerElectionMethod.VOTE_OF_BOARD,
     OfficerElectionMethod.HIGHEST_VOTE_GETTER,
@@ -96,7 +101,23 @@ export const WizardStage2Schema = z.object({
   staggeredTerms: z.boolean(),
 });
 
-export type WizardStage2Data = z.infer<typeof WizardStage2Schema>;
+export const WizardStage2Schema = WizardStage2Base.refine(
+  (data) => {
+    if (data.electionMethod === "role_titled" && data.memberCount > 0) {
+      return (
+        data.seatTitles.length === data.memberCount &&
+        data.seatTitles.every((t) => t.length >= 2)
+      );
+    }
+    return true;
+  },
+  {
+    message: "Each seat must have a title of at least 2 characters",
+    path: ["seatTitles"],
+  }
+);
+
+export type WizardStage2Data = z.infer<typeof WizardStage2Base>;
 
 // ─── Stage 3 — Meeting Roles ────────────────────────────────────────
 

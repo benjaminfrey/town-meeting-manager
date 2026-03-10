@@ -115,6 +115,8 @@ interface WizardLayoutProps {
   isStageValid: boolean;
   /** Called when the user clicks Next — stage should validate and save */
   onNext: () => void;
+  /** Called when the user clicks Back — saves current data then navigates */
+  onBack?: () => void;
   /** Called when the user clicks "Complete Setup" on stage 5 */
   onComplete?: () => void;
 }
@@ -123,6 +125,7 @@ export function WizardLayout({
   children,
   isStageValid,
   onNext,
+  onBack,
   onComplete,
 }: WizardLayoutProps) {
   const { state, goBack } = useWizard();
@@ -163,7 +166,7 @@ export function WizardLayout({
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3 sm:px-6">
           <div>
             {!isFirstStage && (
-              <Button variant="outline" onClick={goBack}>
+              <Button variant="outline" onClick={onBack ?? goBack}>
                 Back
               </Button>
             )}
