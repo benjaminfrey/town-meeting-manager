@@ -12,6 +12,7 @@
 
 import { Navigate } from "react-router";
 import { useAuth } from "@/providers/AuthProvider";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -19,6 +20,7 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading } = useAuth();
+  const currentUser = useCurrentUser();
 
   if (isLoading) {
     return (
@@ -33,6 +35,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Authenticated but no town — redirect to onboarding wizard
+  if (!currentUser?.townId) {
+    return <Navigate to="/setup" replace />;
   }
 
   return <>{children}</>;
