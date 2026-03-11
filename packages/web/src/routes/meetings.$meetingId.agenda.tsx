@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { usePowerSync, useQuery } from "@powersync/react";
 import { toast } from "sonner";
 import {
@@ -31,6 +31,7 @@ import {
   FileText,
   GripVertical,
   Loader2,
+  Play,
   Plus,
   ScrollText,
   Send,
@@ -69,6 +70,7 @@ export default function AgendaBuilderPage({
   loaderData,
 }: Route.ComponentProps) {
   const { meetingId } = loaderData;
+  const navigate = useNavigate();
   const powerSync = usePowerSync();
   const { session } = useAuth();
 
@@ -419,6 +421,12 @@ export default function AgendaBuilderPage({
                 <Eye className="mr-2 h-4 w-4" />
                 Preview
               </Button>
+              {(meetingStatus === "noticed" || meetingStatus === "open") && (
+                <Button variant="default" onClick={() => void navigate(`/meetings/${meetingId}/live`)}>
+                  <Play className="mr-2 h-4 w-4" />
+                  Run Meeting
+                </Button>
+              )}
               {!isPublished && (
                 <Button onClick={() => setPublishOpen(true)}>
                   <Send className="mr-2 h-4 w-4" />

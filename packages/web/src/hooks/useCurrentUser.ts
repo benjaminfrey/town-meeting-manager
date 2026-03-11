@@ -92,8 +92,10 @@ export function useCurrentUser(): CurrentUser | null {
       payload?.user_metadata?.town_id ??
       null;
 
+    const VALID_ROLES = new Set(["sys_admin", "admin", "staff", "board_member"]);
+    const topRole = VALID_ROLES.has(payload?.role ?? "") ? payload!.role : undefined;
     const role =
-      (payload?.role as UserRole) ??
+      (topRole as UserRole) ??
       (payload?.app_metadata?.role as UserRole) ??
       (payload?.user_metadata?.role as UserRole) ??
       "admin"; // Default to admin for first-time setup users

@@ -120,6 +120,9 @@ export const meetings = new TableV2({
   formality_override: column.text,
   started_at: column.text,
   ended_at: column.text,
+  current_agenda_item_id: column.text,
+  presiding_officer_id: column.text,
+  recording_secretary_id: column.text,
   agenda_packet_url: column.text,
   meeting_notice_url: column.text,
   agenda_packet_generated_at: column.text,
@@ -146,6 +149,7 @@ export const agenda_items = new TableV2({
   background: column.text,
   recommendation: column.text,
   suggested_motion: column.text,
+  operator_notes: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
@@ -240,6 +244,26 @@ export const exhibits = new TableV2({
   created_at: column.text,
 });
 
+// ─── Live Meeting ──────────────────────────────────────────────────
+
+export const guest_speakers = new TableV2({
+  meeting_id: column.text,
+  agenda_item_id: column.text,
+  town_id: column.text,
+  name: column.text,
+  address: column.text,
+  topic: column.text,
+  created_at: column.text,
+});
+
+export const agenda_item_transitions = new TableV2({
+  meeting_id: column.text,
+  agenda_item_id: column.text,
+  town_id: column.text,
+  started_at: column.text,
+  ended_at: column.text,
+});
+
 // ─── Notifications ──────────────────────────────────────────────────
 
 export const notification_events = new TableV2({
@@ -286,6 +310,8 @@ export const AppSchema = new Schema({
   minutes_document: new TableV2(minutes_documents.columnMap, { viewName: "minutes_documents" }),
   minutes_section: new TableV2(minutes_sections.columnMap, { viewName: "minutes_sections" }),
   exhibit: new TableV2(exhibits.columnMap, { viewName: "exhibits" }),
+  guest_speaker: new TableV2(guest_speakers.columnMap, { viewName: "guest_speakers" }),
+  agenda_item_transition: new TableV2(agenda_item_transitions.columnMap, { viewName: "agenda_item_transitions" }),
   notification_event: new TableV2(notification_events.columnMap, { viewName: "notification_events" }),
   notification_delivery: new TableV2(notification_deliveries.columnMap, { viewName: "notification_deliveries" }),
 });

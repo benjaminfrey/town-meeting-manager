@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { usePowerSync, useQuery } from "@powersync/react";
-import { ChevronRight, CalendarDays, Plus } from "lucide-react";
+import { ChevronRight, CalendarDays, Play, Plus } from "lucide-react";
 import type { Route } from "./+types/boards.$boardId.meetings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { CreateMeetingDialog } from "@/components/meetings/CreateMeetingDialog";
@@ -239,6 +239,18 @@ export default function MeetingListPage({
                     <td className="px-4 py-3 text-right">
                       {!isCancelled && (
                         <div className="flex items-center justify-end gap-1">
+                          {(status === "noticed" || status === "open") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                void navigate(`/meetings/${id}/live`)
+                              }
+                            >
+                              <Play className="mr-1 h-3.5 w-3.5" />
+                              Run Meeting
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

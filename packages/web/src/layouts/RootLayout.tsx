@@ -11,7 +11,8 @@ import {
   Sun,
   Moon,
   Monitor,
-  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { APP_NAME } from "@town-meeting/shared";
 import { useTheme } from "@/providers/ThemeProvider";
@@ -52,16 +53,31 @@ function ThemeToggle() {
   );
 }
 
-function Sidebar({ onClose }: { onClose?: () => void }) {
+function Sidebar({
+  onClose,
+  collapsed,
+  onToggleCollapse,
+}: {
+  onClose?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}) {
   const location = useLocation();
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-sidebar text-sidebar-foreground">
+    <div
+      className={cn(
+        "flex h-full flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200",
+        collapsed ? "w-14" : "w-52",
+      )}
+    >
       {/* Sidebar header */}
       <div className="flex h-14 items-center justify-between border-b px-4">
-        <Link to="/dashboard" className="text-lg font-semibold">
-          {APP_NAME}
-        </Link>
+        {!collapsed && (
+          <Link to="/dashboard" className="text-lg font-semibold truncate">
+            {APP_NAME}
+          </Link>
+        )}
         {onClose && (
           <button
             onClick={onClose}
@@ -71,10 +87,26 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
             <span className="sr-only">Close sidebar</span>
           </button>
         )}
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className={cn(
+              "hidden md:inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-sidebar-accent",
+              collapsed && "mx-auto",
+            )}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className={cn("flex-1 space-y-1", collapsed ? "px-1.5 py-3" : "p-3")}>
         {navItems.map((item) => {
           const isActive = location.pathname.startsWith(item.href);
           return (
@@ -82,33 +114,58 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
               key={item.href}
               to={item.href}
               onClick={onClose}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "flex items-center rounded-md text-sm font-medium transition-colors",
+                collapsed
+                  ? "justify-center px-0 py-2"
+                  : "gap-3 px-3 py-2",
                 isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               )}
             >
-              <item.icon className="h-4 w-4" />
-              {item.label}
+              <item.icon className="h-4 w-4 flex-shrink-0" />
+              {!collapsed && item.label}
             </Link>
           );
         })}
       </nav>
 
       {/* Sidebar footer */}
-      <div className="border-t p-3">
-        <div className="rounded-md bg-sidebar-accent/50 px-3 py-2 text-xs text-sidebar-foreground/60">
-          Town Meeting Manager
+      {!collapsed && (
+        <div className="border-t p-3">
+          <div className="rounded-md bg-sidebar-accent/50 px-3 py-2 text-xs text-sidebar-foreground/60">
+            Town Meeting Manager
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 export default function RootLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   const currentUser = useCurrentUser();
+
+  const toggleSidebarCollapse = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("sidebar-collapsed", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // Get initials for the user avatar
   const initials = currentUser?.email
@@ -120,7 +177,10 @@ export default function RootLayout() {
     <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden md:flex">
-        <Sidebar />
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapse}
+        />
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -132,7 +192,7 @@ export default function RootLayout() {
             onClick={() => setSidebarOpen(false)}
           />
           {/* Sidebar panel */}
-          <div className="fixed inset-y-0 left-0 z-50 w-64">
+          <div className="fixed inset-y-0 left-0 z-50 w-52">
             <Sidebar onClose={() => setSidebarOpen(false)} />
           </div>
         </div>
