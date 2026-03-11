@@ -12,6 +12,8 @@ import { AuthProvider, useAuth } from "@/providers/AuthProvider";
 import { PowerSyncProvider } from "@/providers/PowerSyncProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { supabase } from "@/lib/supabase";
+import { detectPortalSubdomain } from "@/lib/portal";
+import { PortalApp } from "@/portal/PortalApp";
 import "./app.css";
 
 const powersyncUrl = import.meta.env.VITE_POWERSYNC_URL || "http://localhost:8080";
@@ -69,6 +71,12 @@ function AppWithAuth() {
 }
 
 export default function App() {
+  const subdomain = detectPortalSubdomain(window.location.hostname);
+
+  if (subdomain) {
+    return <PortalApp subdomain={subdomain} />;
+  }
+
   return (
     <ThemeProvider>
       <AuthProvider>

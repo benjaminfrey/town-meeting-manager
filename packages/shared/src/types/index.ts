@@ -7,3 +7,4 @@ export * from "./motion.js";
 export * from "./minutes.js";
 export * from "./notification.js";
 export * from "./permissions.js";
+export * from "./portal.js";

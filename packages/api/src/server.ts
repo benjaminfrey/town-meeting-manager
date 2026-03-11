@@ -12,13 +12,17 @@ import { supabasePlugin } from "./plugins/supabase.js";
 import { authPlugin } from "./plugins/auth.js";
 import { documentRoutes } from "./routes/documents.js";
 import { minutesRoutes } from "./routes/minutes.js";
+import { portalRoutes } from "./routes/portal.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
 
   // ─── Plugins ─────────────────────────────────────────────────────
   await app.register(cors, {
-    origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+    origin: [
+      process.env.CORS_ORIGIN ?? "http://localhost:5173",
+      /\.townmeetingmanager\.com$/,
+    ],
     credentials: true,
   });
 
@@ -34,6 +38,7 @@ export async function buildServer() {
   app.get("/api/health", async () => ({ status: "ok" }));
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
+  await app.register(portalRoutes, { prefix: "/api/portal" });
 
   return app;
 }
