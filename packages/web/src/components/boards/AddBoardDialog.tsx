@@ -246,14 +246,14 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
           <div className="space-y-1.5">
             <Label>Meeting formality</Label>
             <Select
-              value={values.meeting_formality_override}
-              onValueChange={(val) => setValue("meeting_formality_override", val)}
+              value={values.meeting_formality_override || "__default__"}
+              onValueChange={(val) => setValue("meeting_formality_override", val === "__default__" ? "" : val)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select formality" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">
+                <SelectItem value="__default__">
                   Use town default ({FORMALITY_LABELS[townFormality] ?? townFormality})
                 </SelectItem>
                 <SelectItem value="informal">Open (informal)</SelectItem>
@@ -267,14 +267,14 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
           <div className="space-y-1.5">
             <Label>Minutes style</Label>
             <Select
-              value={values.minutes_style_override}
-              onValueChange={(val) => setValue("minutes_style_override", val)}
+              value={values.minutes_style_override || "__default__"}
+              onValueChange={(val) => setValue("minutes_style_override", val === "__default__" ? "" : val)}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select minutes style" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">
+                <SelectItem value="__default__">
                   Use town default ({MINUTES_STYLE_LABELS[townMinutesStyle] ?? townMinutesStyle})
                 </SelectItem>
                 <SelectItem value="action">Action minutes</SelectItem>

@@ -20,7 +20,9 @@ export default [
     route("boards/:boardId", "routes/boards.$boardId.tsx"),
     route("boards/:boardId/templates", "routes/boards.$boardId.templates.tsx"),
     route("boards/:boardId/templates/:templateId/edit", "routes/boards.$boardId.templates.$templateId.edit.tsx"),
+    route("boards/:boardId/meetings", "routes/boards.$boardId.meetings.tsx"),
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
+    route("meetings/:meetingId/agenda", "routes/meetings.$meetingId.agenda.tsx"),
     route("settings", "routes/settings.tsx"),
   ]),
 ] satisfies RouteConfig;

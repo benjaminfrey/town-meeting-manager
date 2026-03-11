@@ -10,7 +10,12 @@ export function parseSections(
 ): AgendaTemplateSection[] {
   if (!jsonText) return [];
   try {
-    const raw = JSON.parse(jsonText) as unknown[];
+    let raw = JSON.parse(jsonText) as unknown;
+    // Handle double-encoding: JSONB string stored via PostgREST
+    // may produce a string instead of an array on first parse
+    if (typeof raw === "string") {
+      raw = JSON.parse(raw) as unknown;
+    }
     if (!Array.isArray(raw)) return [];
     const results: AgendaTemplateSection[] = [];
     for (const item of raw) {

@@ -16,6 +16,7 @@ export interface Exhibit {
   exhibit_type: ExhibitType;
   visibility: ExhibitVisibility;
   uploaded_by: string;
+  file_name: string | null;
   sort_order: number;
   created_at: string;
 }

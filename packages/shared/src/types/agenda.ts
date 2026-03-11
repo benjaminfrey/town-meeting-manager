@@ -16,6 +16,10 @@ export interface AgendaItem {
   estimated_duration: number | null;
   parent_item_id: string | null;
   status: AgendaItemStatus;
+  staff_resource: string | null;
+  background: string | null;
+  recommendation: string | null;
+  suggested_motion: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -26,3 +26,9 @@ export {
   checkRoleMutualExclusivity,
   type RoleConflictResult,
 } from "./permissions.js";
+
+export {
+  validateMeetingCreation,
+  type MeetingCreationValidation,
+  type MeetingValidationError,
+} from "./meeting-validation.js";

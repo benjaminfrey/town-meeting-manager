@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AgendaStatus,
   MeetingFormality,
   MeetingStatus,
   MeetingType,
@@ -28,6 +29,7 @@ export const MeetingSchema = z.object({
     MeetingStatus.APPROVED,
     MeetingStatus.CANCELLED,
   ]),
+  agenda_status: z.enum([AgendaStatus.DRAFT, AgendaStatus.PUBLISHED]),
   formality_override: z
     .enum([
       MeetingFormality.INFORMAL,
@@ -45,6 +47,7 @@ export const MeetingSchema = z.object({
 export const CreateMeetingSchema = MeetingSchema.omit({
   id: true,
   status: true,
+  agenda_status: true,
   started_at: true,
   ended_at: true,
   created_at: true,

@@ -116,6 +116,7 @@ export const meetings = new TableV2({
   scheduled_time: column.text,
   location: column.text,
   status: column.text,
+  agenda_status: column.text,
   formality_override: column.text,
   started_at: column.text,
   ended_at: column.text,
@@ -137,6 +138,10 @@ export const agenda_items = new TableV2({
   estimated_duration: column.integer,
   parent_item_id: column.text,
   status: column.text,
+  staff_resource: column.text,
+  background: column.text,
+  recommendation: column.text,
+  suggested_motion: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
@@ -223,6 +228,7 @@ export const exhibits = new TableV2({
   file_storage_path: column.text,
   file_type: column.text,
   file_size: column.integer,
+  file_name: column.text,
   exhibit_type: column.text,
   visibility: column.text,
   uploaded_by: column.text,
@@ -254,24 +260,28 @@ export const notification_deliveries = new TableV2({
 });
 
 // ─── Combined Schema ────────────────────────────────────────────────
+//
+// Schema keys use SINGULAR Postgres table names (matching sync-rules.yaml
+// FROM clauses). viewName on each table preserves the PLURAL names used
+// in all existing SQL queries throughout the web app.
 
 export const AppSchema = new Schema({
-  persons,
-  user_accounts,
-  board_members,
-  resident_accounts,
-  invitations,
-  towns,
-  boards,
-  meetings,
-  agenda_items,
-  agenda_templates,
-  motions,
-  vote_records,
-  meeting_attendance,
-  minutes_documents,
-  minutes_sections,
-  exhibits,
-  notification_events,
-  notification_deliveries,
+  person: new TableV2(persons.columnMap, { viewName: "persons" }),
+  user_account: new TableV2(user_accounts.columnMap, { viewName: "user_accounts" }),
+  board_member: new TableV2(board_members.columnMap, { viewName: "board_members" }),
+  resident_account: new TableV2(resident_accounts.columnMap, { viewName: "resident_accounts" }),
+  invitation: new TableV2(invitations.columnMap, { viewName: "invitations" }),
+  town: new TableV2(towns.columnMap, { viewName: "towns" }),
+  board: new TableV2(boards.columnMap, { viewName: "boards" }),
+  meeting: new TableV2(meetings.columnMap, { viewName: "meetings" }),
+  agenda_item: new TableV2(agenda_items.columnMap, { viewName: "agenda_items" }),
+  agenda_template: new TableV2(agenda_templates.columnMap, { viewName: "agenda_templates" }),
+  motion: new TableV2(motions.columnMap, { viewName: "motions" }),
+  vote_record: new TableV2(vote_records.columnMap, { viewName: "vote_records" }),
+  meeting_attendance: new TableV2(meeting_attendance.columnMap),
+  minutes_document: new TableV2(minutes_documents.columnMap, { viewName: "minutes_documents" }),
+  minutes_section: new TableV2(minutes_sections.columnMap, { viewName: "minutes_sections" }),
+  exhibit: new TableV2(exhibits.columnMap, { viewName: "exhibits" }),
+  notification_event: new TableV2(notification_events.columnMap, { viewName: "notification_events" }),
+  notification_delivery: new TableV2(notification_deliveries.columnMap, { viewName: "notification_deliveries" }),
 });

@@ -304,30 +304,24 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
           </CardHeader>
         </Card>
 
-        {/* Meeting History (placeholder) */}
+        {/* Meetings */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-lg">Meeting History</CardTitle>
+                <CardTitle className="text-lg">Meetings</CardTitle>
                 <CardDescription>
                   {meetingCount} meeting{meetingCount !== 1 ? "s" : ""}
                 </CardDescription>
               </div>
-              <CalendarDays className="h-5 w-5 text-muted-foreground" />
+              <Link to={`/boards/${b.id}/meetings`}>
+                <Button variant="outline" size="sm">
+                  <CalendarDays className="mr-2 h-4 w-4" />
+                  Manage Meetings
+                </Button>
+              </Link>
             </div>
           </CardHeader>
-          <CardContent>
-            {meetingCount === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No meetings yet. Meetings will be available in Block 06.
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Meeting list will be displayed here.
-              </p>
-            )}
-          </CardContent>
         </Card>
       </div>
     </div>

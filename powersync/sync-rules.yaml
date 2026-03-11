@@ -27,11 +27,13 @@ bucket_definitions:
   # The user's own town record. Every authenticated user gets this.
   town_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, name, state, municipality_type, population_range,
                contact_name, contact_role, meeting_formality, minutes_style,
-               presiding_officer_default, minutes_recorder_default, subdomain,
+               presiding_officer_default, minutes_recorder_default,
+               staff_roles_present, subdomain, seal_url,
+               retention_policy_acknowledged_at,
                created_at, updated_at
         FROM town
         WHERE id = bucket.town_id
@@ -41,7 +43,7 @@ bucket_definitions:
   # Staff and admin see all; board members need fellow members for meeting context.
   people_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, town_id, name, email, created_at, archived_at
         FROM person
@@ -55,7 +57,9 @@ bucket_definitions:
       - SELECT id, town_id, name, board_type, member_count,
                election_method, officer_election_method, district_based,
                staggered_terms, is_governing_board, meeting_formality_override,
-               minutes_style_override, created_at, archived_at
+               minutes_style_override, elected_or_appointed, seat_titles,
+               quorum_type, quorum_value, motion_display_format,
+               created_at, archived_at
         FROM board
         WHERE town_id = bucket.town_id
 
@@ -68,17 +72,19 @@ bucket_definitions:
   # All meetings, agenda items, motions, votes, and attendance for the user's town.
   meeting_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
-      - SELECT id, board_id, town_id, title, scheduled_date, scheduled_time,
-               location, status, started_at, ended_at, created_by,
+      - SELECT id, board_id, town_id, title, meeting_type, scheduled_date,
+               scheduled_time, location, status, agenda_status,
+               formality_override, started_at, ended_at, created_by,
                created_at, updated_at
         FROM meeting
         WHERE town_id = bucket.town_id
 
       - SELECT id, meeting_id, town_id, section_type, sort_order, title,
                description, presenter, estimated_duration, parent_item_id,
-               status, created_at, updated_at
+               status, staff_resource, background, recommendation,
+               suggested_motion, created_at, updated_at
         FROM agenda_item
         WHERE town_id = bucket.town_id
 
@@ -101,7 +107,7 @@ bucket_definitions:
   # Minutes documents and their sections for the user's town.
   minutes_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, meeting_id, town_id, status, content_json,
                html_rendered, pdf_storage_path, generated_by,
@@ -119,7 +125,7 @@ bucket_definitions:
   # Agenda templates and exhibit attachments for the user's town.
   template_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, board_id, town_id, name, is_default, sections,
                created_at, updated_at
@@ -127,7 +133,7 @@ bucket_definitions:
         WHERE town_id = bucket.town_id
 
       - SELECT id, agenda_item_id, town_id, title, file_storage_path,
-               file_type, file_size, exhibit_type, visibility,
+               file_type, file_size, file_name, exhibit_type, visibility,
                uploaded_by, sort_order, created_at
         FROM exhibit
         WHERE town_id = bucket.town_id
@@ -137,7 +143,7 @@ bucket_definitions:
   # Subscriber preferences sync so the app can display/edit them offline.
   notification_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, town_id, event_type, entity_type, entity_id,
                payload, status, created_at, processed_at
@@ -159,7 +165,7 @@ bucket_definitions:
   # bundled in the client app) and audit log.
   admin_data:
     parameters:
-      - SELECT token_parameters.town_id as town_id
+      - SELECT request.jwt() ->> 'town_id' as town_id
     data:
       - SELECT id, town_id, name, description, permissions,
                is_system_default, created_at

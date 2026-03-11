@@ -30,6 +30,10 @@ export const AgendaItemSchema = z.object({
   presenter: z.string().max(100).nullable(),
   estimated_duration: z.number().int().min(1).max(480).nullable(),
   parent_item_id: z.string().uuid().nullable(),
+  staff_resource: z.string().max(200).nullable(),
+  background: z.string().max(5000).nullable(),
+  recommendation: z.string().max(2000).nullable(),
+  suggested_motion: z.string().max(1000).nullable(),
   status: z.enum([
     AgendaItemStatus.PENDING,
     AgendaItemStatus.ACTIVE,

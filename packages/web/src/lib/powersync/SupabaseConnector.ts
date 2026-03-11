@@ -14,6 +14,31 @@ import type {
 } from "@powersync/web";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/**
+ * Maps PowerSync table names (plural, used in local SQLite) to
+ * Postgres table names (singular, used by PostgREST).
+ */
+const POWERSYNC_TO_POSTGRES: Record<string, string> = {
+  towns: "town",
+  persons: "person",
+  user_accounts: "user_account",
+  boards: "board",
+  board_members: "board_member",
+  resident_accounts: "resident_account",
+  invitations: "invitation",
+  meetings: "meeting",
+  agenda_items: "agenda_item",
+  agenda_templates: "agenda_template",
+  motions: "motion",
+  vote_records: "vote_record",
+  meeting_attendance: "meeting_attendance",
+  minutes_documents: "minutes_document",
+  minutes_sections: "minutes_section",
+  exhibits: "exhibit",
+  notification_events: "notification_event",
+  notification_deliveries: "notification_delivery",
+};
+
 export class SupabaseConnector implements PowerSyncBackendConnector {
   private supabase: SupabaseClient;
   private powersyncUrl: string;
@@ -72,7 +97,8 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     try {
       for (const op of transaction.crud) {
         lastOp = op;
-        const table = this.supabase.from(op.table);
+        const tableName = POWERSYNC_TO_POSTGRES[op.table] ?? op.table;
+        const table = this.supabase.from(tableName);
 
         switch (op.op) {
           case "PUT": {
@@ -105,11 +131,9 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
       // All operations succeeded — mark the transaction as complete
       await transaction.complete();
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Unknown error";
       console.error(
         `Failed to upload CRUD operation on ${lastOp?.table}:`,
-        message
+        error,
       );
       throw error;
     }

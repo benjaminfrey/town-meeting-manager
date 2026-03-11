@@ -11,6 +11,9 @@
 --   "sub": "<auth-user-uuid>",
 --   "aud": "authenticated",
 --   "role": "authenticated",
+--   "town_id": "<town-uuid>",              -- Top-level for PowerSync token_parameters
+--   "role": "admin|staff|board_member",     -- Top-level for PowerSync
+--   "person_id": "<person-uuid>",           -- Top-level for PowerSync
 --   "app_metadata": {
 --     "town_id": "<town-uuid>",              -- Multi-tenant isolation key
 --     "role": "admin|staff|board_member",     -- App role for permission checking
@@ -67,7 +70,17 @@ BEGIN
   LIMIT 1;
 
   IF user_account_record IS NOT NULL THEN
-    -- Inject custom claims into app_metadata
+    -- Inject custom claims at top level (for PowerSync token_parameters)
+    -- IMPORTANT: Do NOT override 'role' at the top level — PostgREST uses it
+    -- to SET ROLE and expects 'authenticated'. Use 'app_role' instead.
+    claims := claims
+      || jsonb_build_object(
+           'town_id', user_account_record.town_id::TEXT,
+           'app_role', user_account_record.role::TEXT,
+           'person_id', user_account_record.person_id::TEXT
+         );
+
+    -- Also inject into app_metadata (for Supabase client / RLS helpers)
     claims := jsonb_set(
       claims,
       '{app_metadata}',

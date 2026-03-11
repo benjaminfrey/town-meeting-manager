@@ -1,4 +1,5 @@
 import type {
+  AgendaStatus,
   MeetingFormality,
   MeetingStatus,
   MeetingType,
@@ -14,6 +15,7 @@ export interface Meeting {
   scheduled_time: string;
   location: string;
   status: MeetingStatus;
+  agenda_status: AgendaStatus;
   formality_override: MeetingFormality | null;
   started_at: string | null;
   ended_at: string | null;

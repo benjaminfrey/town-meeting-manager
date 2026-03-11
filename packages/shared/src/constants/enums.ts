@@ -243,6 +243,14 @@ export const MotionDisplayFormat = {
 export type MotionDisplayFormat =
   (typeof MotionDisplayFormat)[keyof typeof MotionDisplayFormat];
 
+// ─── Agenda Status ────────────────────────────────────────────────
+
+export const AgendaStatus = {
+  DRAFT: "draft",
+  PUBLISHED: "published",
+} as const;
+export type AgendaStatus = (typeof AgendaStatus)[keyof typeof AgendaStatus];
+
 // ─── Exhibit ───────────────────────────────────────────────────────
 
 export const ExhibitType = {
