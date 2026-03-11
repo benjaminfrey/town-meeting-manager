@@ -15,29 +15,38 @@ import type {
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Maps PowerSync table names (plural, used in local SQLite) to
- * Postgres table names (singular, used by PostgREST).
+ * Maps PowerSync CRUD table names to PostgREST table names.
+ *
+ * Our AppSchema uses SINGULAR keys (matching Postgres table names) with
+ * viewName aliases for plural SQL queries. CRUD ops arrive with the
+ * singular schema key, so most names pass through unchanged. Only
+ * `meeting_attendance` has no viewName alias and needs no mapping.
+ *
+ * We keep this map as an explicit allow-list so unknown tables are
+ * logged rather than silently forwarded to PostgREST.
  */
-const POWERSYNC_TO_POSTGRES: Record<string, string> = {
-  towns: "town",
-  persons: "person",
-  user_accounts: "user_account",
-  boards: "board",
-  board_members: "board_member",
-  resident_accounts: "resident_account",
-  invitations: "invitation",
-  meetings: "meeting",
-  agenda_items: "agenda_item",
-  agenda_templates: "agenda_template",
-  motions: "motion",
-  vote_records: "vote_record",
-  meeting_attendance: "meeting_attendance",
-  minutes_documents: "minutes_document",
-  minutes_sections: "minutes_section",
-  exhibits: "exhibit",
-  notification_events: "notification_event",
-  notification_deliveries: "notification_delivery",
-};
+const KNOWN_TABLES = new Set([
+  "town",
+  "person",
+  "user_account",
+  "board",
+  "board_member",
+  "resident_account",
+  "invitation",
+  "meeting",
+  "agenda_item",
+  "agenda_template",
+  "motion",
+  "vote_record",
+  "meeting_attendance",
+  "minutes_document",
+  "minutes_section",
+  "exhibit",
+  "guest_speaker",
+  "agenda_item_transition",
+  "notification_event",
+  "notification_delivery",
+]);
 
 export class SupabaseConnector implements PowerSyncBackendConnector {
   private supabase: SupabaseClient;
@@ -97,7 +106,15 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     try {
       for (const op of transaction.crud) {
         lastOp = op;
-        const tableName = POWERSYNC_TO_POSTGRES[op.table] ?? op.table;
+        const tableName = op.table;
+
+        if (!KNOWN_TABLES.has(tableName)) {
+          console.warn(
+            `[SupabaseConnector] Skipping unknown table "${tableName}" in CRUD queue`,
+          );
+          continue;
+        }
+
         const table = this.supabase.from(tableName);
 
         switch (op.op) {

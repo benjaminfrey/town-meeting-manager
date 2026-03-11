@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { Navigate, useNavigate } from "react-router";
+import { Navigate } from "react-router";
 import { useAuth } from "@/providers/AuthProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useSupabase } from "@/hooks/useSupabase";
@@ -35,7 +35,6 @@ function WizardContent() {
     useWizard();
   const { currentStage } = state;
   const supabase = useSupabase();
-  const navigate = useNavigate();
 
   // Track form validity from the current stage
   const [isStageValid, setIsStageValid] = useState(false);
@@ -105,8 +104,10 @@ function WizardContent() {
       // Refresh session so the JWT picks up the new town_id claim
       await supabase.auth.refreshSession();
 
-      // Navigate to dashboard with welcome flag
-      navigate("/dashboard?welcome=true", { replace: true });
+      // Full page reload to reinitialize PowerSync with the new JWT
+      // (which now contains town_id for sync rules). A client-side
+      // navigate would leave PowerSync connected with the old token.
+      window.location.href = "/dashboard?welcome=true";
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "An unexpected error occurred."
@@ -114,7 +115,7 @@ function WizardContent() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [getWizardData, supabase, navigate, updateStage, markStageComplete]);
+  }, [getWizardData, supabase, updateStage, markStageComplete]);
 
   const handleComplete = useCallback(() => {
     void submitWizard();

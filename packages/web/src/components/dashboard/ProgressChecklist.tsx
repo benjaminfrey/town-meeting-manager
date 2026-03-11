@@ -160,7 +160,7 @@ export function ProgressChecklist({
       description: "Add members to your boards so they can hold meetings",
       completed: hasBoardMembers,
       required: true,
-      linkTo: "/boards/overview",
+      linkTo: "/boards",
     },
     {
       key: "meeting-notice",

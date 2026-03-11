@@ -11,10 +11,11 @@
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md — Dashboard
  */
 
-import { useCallback, useState } from "react";
-import { useSearchParams } from "react-router";
-import { useQuery } from "@powersync/react";
-import { PartyPopper } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams, Navigate } from "react-router";
+import { useQuery, useStatus } from "@powersync/react";
+import { PartyPopper, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { Route } from "./+types/dashboard";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { ProgressChecklist } from "@/components/dashboard/ProgressChecklist";
@@ -95,11 +96,42 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     setSearchParams({}, { replace: true });
   }, [setSearchParams]);
 
-  // ─── Loading state ──────────────────────────────────────────────
-  if (!townId || !town) {
+  // ─── Sync-aware loading state ───────────────────────────────────
+  const syncStatus = useStatus();
+
+  // No townId at all → user hasn't completed onboarding
+  if (!townId) {
+    return <Navigate to="/setup" replace />;
+  }
+
+  // townId exists but town data hasn't synced to local DB yet
+  if (!town) {
+    const hasSynced = syncStatus.hasSynced;
     return (
-      <div className="flex items-center justify-center p-12">
-        <p className="text-sm text-muted-foreground">Loading town data...</p>
+      <div className="flex flex-col items-center justify-center gap-4 p-12">
+        {!hasSynced ? (
+          <>
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground">
+              Syncing your town data...
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Town data not found. This can happen if the initial sync
+              hasn&apos;t completed yet.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.location.reload()}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Reload
+            </Button>
+          </>
+        )}
       </div>
     );
   }
