@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{boardName}} — Agenda Packet</title>
+  <style>{{{css}}}</style>
+</head>
+<body>
+
+  {{!-- ─── Cover Page ──────────────────────────────────────────────── --}}
+  <header class="cover-page">
+    {{#ifPresent sealUrl}}
+      <img src="{{sealUrl}}" alt="Town Seal" class="town-seal">
+    {{/ifPresent}}
+    <h1>{{townName}}</h1>
+    <h2>{{boardName}}</h2>
+    <div class="meeting-type">{{meetingType}} Meeting</div>
+    <div class="meeting-info">
+      <div><strong>{{formatDate scheduledDate}}</strong></div>
+      {{#ifPresent scheduledTime}}
+        <div>{{scheduledTime}}</div>
+      {{/ifPresent}}
+      {{#ifPresent location}}
+        <div>{{location}}</div>
+      {{/ifPresent}}
+    </div>
+  </header>
+
+  {{!-- ─── Table of Contents ───────────────────────────────────────── --}}
+  <nav class="toc" aria-label="Table of contents">
+    <h2>Agenda</h2>
+    <ol>
+      {{#each sections}}
+        <li>
+          <strong>{{sectionNumber @index}}. {{this.title}}</strong>
+          {{#if this.items.length}}
+            <ol>
+              {{#each this.items}}
+                <li>{{itemLabel @../index @index}}. {{this.title}}</li>
+              {{/each}}
+            </ol>
+          {{/if}}
+        </li>
+      {{/each}}
+    </ol>
+  </nav>
+
+  {{!-- ─── Agenda Sections ─────────────────────────────────────────── --}}
+  <main>
+    {{#each sections}}
+      <section class="agenda-section">
+        <h2>{{sectionNumber @index}}. {{this.title}}</h2>
+
+        {{#unless this.items.length}}
+          <p class="no-items">None</p>
+        {{/unless}}
+
+        {{#each this.items}}
+          <article class="agenda-item">
+            <h3>
+              <span class="item-label">{{itemLabel @../index @index}}.</span>
+              {{this.title}}
+              {{#ifPresent this.presenter}}
+                <span class="item-meta">({{this.presenter}})</span>
+              {{/ifPresent}}
+              {{#if this.estimatedDuration}}
+                <span class="item-meta">[{{this.estimatedDuration}} min]</span>
+              {{/if}}
+            </h3>
+
+            {{#ifPresent this.description}}
+              <p class="item-description">{{this.description}}</p>
+            {{/ifPresent}}
+
+            {{!-- Item Commentary block --}}
+            {{#ifPresent this.staffResource}}
+              <div class="item-commentary">
+                <div>
+                  <span class="commentary-label">Staff Resource:</span>
+                  <span class="commentary-text">{{this.staffResource}}</span>
+                </div>
+              </div>
+            {{/ifPresent}}
+
+            {{#ifPresent this.background}}
+              <div class="item-commentary">
+                <div class="commentary-label">Background</div>
+                <div class="commentary-text">{{this.background}}</div>
+              </div>
+            {{/ifPresent}}
+
+            {{#ifPresent this.recommendation}}
+              <div class="item-commentary">
+                <div class="commentary-label">Recommendation</div>
+                <div class="commentary-text">{{this.recommendation}}</div>
+              </div>
+            {{/ifPresent}}
+
+            {{#ifPresent this.suggestedMotion}}
+              <div class="item-commentary">
+                <div class="commentary-label">Suggested Motion</div>
+                <div class="commentary-text suggested-motion">{{this.suggestedMotion}}</div>
+              </div>
+            {{/ifPresent}}
+
+            {{!-- Exhibits --}}
+            {{#if this.exhibits.length}}
+              <div class="exhibits-list">
+                <strong>Exhibits:</strong>
+                <ol>
+                  {{#each this.exhibits}}
+                    <li>
+                      {{this.title}}
+                      {{#ifPresent this.exhibitType}}
+                        <span class="exhibit-type">({{this.exhibitType}})</span>
+                      {{/ifPresent}}
+                    </li>
+                  {{/each}}
+                </ol>
+              </div>
+            {{/if}}
+
+            {{!-- Sub-items --}}
+            {{#if this.subItems.length}}
+              <ul class="sub-items">
+                {{#each this.subItems}}
+                  <li>
+                    <span class="sub-item-label">{{romanNumeral @index}}.</span>
+                    {{this.title}}
+                  </li>
+                {{/each}}
+              </ul>
+            {{/if}}
+          </article>
+        {{/each}}
+      </section>
+    {{/each}}
+  </main>
+
+  {{!-- ─── Exhibits Appendix ───────────────────────────────────────── --}}
+  {{#if hasExhibits}}
+    <aside class="exhibits-appendix">
+      <h2>Appendix: Exhibits</h2>
+      {{#each sections}}
+        {{#each this.items}}
+          {{#if this.exhibits.length}}
+            <h3>{{itemLabel @../index @index}}. {{this.title}}</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Title</th>
+                  <th>File</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{#each this.exhibits}}
+                  <tr>
+                    <td>{{sectionNumber @index}}</td>
+                    <td>{{this.title}}</td>
+                    <td>{{this.fileName}}</td>
+                    <td>{{this.exhibitType}}</td>
+                  </tr>
+                {{/each}}
+              </tbody>
+            </table>
+          {{/if}}
+        {{/each}}
+      {{/each}}
+    </aside>
+  {{/if}}
+
+</body>
+</html>

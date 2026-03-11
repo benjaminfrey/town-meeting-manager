@@ -76,8 +76,10 @@ bucket_definitions:
     data:
       - SELECT id, board_id, town_id, title, meeting_type, scheduled_date,
                scheduled_time, location, status, agenda_status,
-               formality_override, started_at, ended_at, created_by,
-               created_at, updated_at
+               formality_override, started_at, ended_at,
+               agenda_packet_url, meeting_notice_url,
+               agenda_packet_generated_at, meeting_notice_generated_at,
+               created_by, created_at, updated_at
         FROM meeting
         WHERE town_id = bucket.town_id
 

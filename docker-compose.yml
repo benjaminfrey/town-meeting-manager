@@ -1,0 +1,19 @@
+# Docker Compose for the API server (document generation).
+# Supabase infrastructure lives in docker/docker-compose.yml.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:54321}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped

@@ -1,0 +1,278 @@
+/* Agenda Packet PDF Styles — Print-optimized */
+
+@page {
+  size: letter;
+  margin: 1in;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 11pt;
+  line-height: 1.5;
+}
+
+body {
+  font-family: Georgia, "Times New Roman", Times, serif;
+  color: #1a1a1a;
+  background: white;
+}
+
+/* ─── Cover Page ─────────────────────────────────────────────── */
+
+.cover-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 8in;
+  text-align: center;
+  page-break-after: always;
+}
+
+.cover-page .town-seal {
+  width: 1.5in;
+  height: auto;
+  margin-bottom: 0.5in;
+}
+
+.cover-page h1 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 20pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15in;
+}
+
+.cover-page h2 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 16pt;
+  font-weight: 600;
+  margin-bottom: 0.4in;
+}
+
+.cover-page .meeting-info {
+  font-size: 12pt;
+  line-height: 1.8;
+}
+
+.cover-page .meeting-type {
+  font-size: 13pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.3in;
+}
+
+/* ─── Table of Contents ──────────────────────────────────────── */
+
+.toc {
+  page-break-after: always;
+}
+
+.toc h2 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 14pt;
+  font-weight: 700;
+  border-bottom: 2px solid #1a1a1a;
+  padding-bottom: 0.08in;
+  margin-bottom: 0.25in;
+}
+
+.toc ol {
+  list-style: none;
+  padding: 0;
+}
+
+.toc li {
+  padding: 0.06in 0;
+  font-size: 11pt;
+}
+
+.toc li strong {
+  font-weight: 600;
+}
+
+/* ─── Section Headings ───────────────────────────────────────── */
+
+.agenda-section {
+  page-break-before: always;
+}
+
+.agenda-section:first-of-type {
+  page-break-before: auto;
+}
+
+.agenda-section h2 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 13pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1.5px solid #1a1a1a;
+  padding-bottom: 0.06in;
+  margin-bottom: 0.2in;
+  break-after: avoid;
+}
+
+/* ─── Agenda Items ───────────────────────────────────────────── */
+
+.agenda-item {
+  margin-bottom: 0.25in;
+  break-inside: avoid;
+}
+
+.agenda-item h3 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 11pt;
+  font-weight: 600;
+  margin-bottom: 0.06in;
+}
+
+.item-label {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 10pt;
+  color: #555;
+  margin-right: 0.1in;
+}
+
+.item-meta {
+  font-size: 9pt;
+  color: #666;
+  margin-left: 0.1in;
+}
+
+.item-description {
+  margin-top: 0.06in;
+  margin-left: 0.35in;
+  font-size: 10.5pt;
+  color: #333;
+}
+
+/* ─── Item Commentary ────────────────────────────────────────── */
+
+.item-commentary {
+  margin: 0.1in 0 0.15in 0.35in;
+  padding: 0.1in 0.15in;
+  border-left: 2px solid #ccc;
+  font-size: 10.5pt;
+}
+
+.item-commentary .commentary-label {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 9pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #555;
+  margin-bottom: 0.03in;
+}
+
+.item-commentary .commentary-text {
+  margin-bottom: 0.1in;
+}
+
+.suggested-motion {
+  font-style: italic;
+}
+
+/* ─── Sub-Items ──────────────────────────────────────────────── */
+
+.sub-items {
+  margin: 0.08in 0 0 0.5in;
+  list-style: none;
+  padding: 0;
+}
+
+.sub-items li {
+  margin-bottom: 0.04in;
+  font-size: 10.5pt;
+}
+
+.sub-item-label {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 9pt;
+  color: #666;
+  margin-right: 0.08in;
+}
+
+/* ─── Exhibits ───────────────────────────────────────────────── */
+
+.exhibits-list {
+  margin: 0.06in 0 0 0.35in;
+  font-size: 10pt;
+}
+
+.exhibits-list ol {
+  padding-left: 0.2in;
+}
+
+.exhibits-list li {
+  margin-bottom: 0.03in;
+}
+
+.exhibit-type {
+  font-size: 9pt;
+  color: #888;
+  font-style: italic;
+}
+
+/* ─── Exhibits Appendix ──────────────────────────────────────── */
+
+.exhibits-appendix {
+  page-break-before: always;
+}
+
+.exhibits-appendix h2 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 14pt;
+  font-weight: 700;
+  border-bottom: 2px solid #1a1a1a;
+  padding-bottom: 0.08in;
+  margin-bottom: 0.25in;
+}
+
+.exhibits-appendix h3 {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 11pt;
+  font-weight: 600;
+  margin-top: 0.15in;
+  margin-bottom: 0.06in;
+}
+
+.exhibits-appendix table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.15in;
+  font-size: 10pt;
+}
+
+.exhibits-appendix th,
+.exhibits-appendix td {
+  text-align: left;
+  padding: 0.04in 0.1in;
+  border-bottom: 1px solid #ddd;
+}
+
+.exhibits-appendix th {
+  font-family: system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  font-size: 9pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #555;
+  border-bottom: 1.5px solid #999;
+}
+
+/* ─── Empty Section ──────────────────────────────────────────── */
+
+.no-items {
+  font-style: italic;
+  color: #888;
+  margin-left: 0.35in;
+  font-size: 10pt;
+}

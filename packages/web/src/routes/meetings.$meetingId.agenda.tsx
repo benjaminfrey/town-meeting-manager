@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { usePowerSync, useQuery } from "@powersync/react";
+import { toast } from "sonner";
 import {
   DndContext,
   closestCenter,
@@ -27,11 +28,15 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ChevronRight,
   Eye,
+  FileText,
   GripVertical,
+  Loader2,
   Plus,
+  ScrollText,
   Send,
 } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.agenda";
+import { useAuth } from "@/providers/AuthProvider";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { AgendaSection } from "@/components/meetings/AgendaSection";
 import { AgendaStatusBar } from "@/components/meetings/AgendaStatusBar";
@@ -65,11 +70,14 @@ export default function AgendaBuilderPage({
 }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const powerSync = usePowerSync();
+  const { session } = useAuth();
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [addingSectionType, setAddingSectionType] = useState<string | null>(null);
   const [addingSectionTitle, setAddingSectionTitle] = useState("");
+  const [generatingPacket, setGeneratingPacket] = useState(false);
+  const [generatingNotice, setGeneratingNotice] = useState(false);
 
   // ─── Queries (no JOINs — separate queries, merge in JS) ─────────────
   const { data: meetingRows } = useQuery(
@@ -144,8 +152,72 @@ export default function AgendaBuilderPage({
   const scheduledTime = String(meeting?.scheduled_time ?? "");
   const location = String(meeting?.location ?? "");
 
+  const agendaPacketUrl = (meeting?.agenda_packet_url as string) || null;
+  const agendaPacketGeneratedAt = (meeting?.agenda_packet_generated_at as string) || null;
+  const meetingNoticeUrl = (meeting?.meeting_notice_url as string) || null;
+  const meetingNoticeGeneratedAt = (meeting?.meeting_notice_generated_at as string) || null;
+
   const isCancelled = meetingStatus === "cancelled";
   const isPublished = agendaStatus === "published";
+
+  // ─── Document Generation ──────────────────────────────────────────
+  const handleGeneratePacket = useCallback(async () => {
+    if (!session?.access_token) return;
+    setGeneratingPacket(true);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/agenda-packet`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(body.message ?? `Error ${res.status}`);
+      }
+      const data = await res.json();
+      toast.success("Agenda packet generated", {
+        action: {
+          label: "Download",
+          onClick: () => window.open(data.url, "_blank"),
+        },
+      });
+    } catch (err) {
+      toast.error(`Failed to generate agenda packet: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setGeneratingPacket(false);
+    }
+  }, [meetingId, session?.access_token]);
+
+  const handleGenerateNotice = useCallback(async () => {
+    if (!session?.access_token) return;
+    setGeneratingNotice(true);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/meeting-notice`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: res.statusText }));
+        throw new Error(body.message ?? `Error ${res.status}`);
+      }
+      const data = await res.json();
+      toast.success("Meeting notice generated", {
+        action: {
+          label: "Download",
+          onClick: () => window.open(data.url, "_blank"),
+        },
+      });
+    } catch (err) {
+      toast.error(`Failed to generate meeting notice: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setGeneratingNotice(false);
+    }
+  }, [meetingId, session?.access_token]);
 
   // ─── DnD for section reordering ─────────────────────────────────────
   const sensors = useSensors(
@@ -315,16 +387,60 @@ export default function AgendaBuilderPage({
           </div>
         </div>
         {!isCancelled && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setPreviewOpen(true)}>
-              <Eye className="mr-2 h-4 w-4" />
-              Preview
-            </Button>
-            {!isPublished && (
-              <Button onClick={() => setPublishOpen(true)}>
-                <Send className="mr-2 h-4 w-4" />
-                Publish Agenda
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleGenerateNotice()}
+                disabled={generatingNotice}
+              >
+                {generatingNotice ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ScrollText className="mr-2 h-4 w-4" />
+                )}
+                {meetingNoticeUrl ? "Regenerate Notice" : "Generate Notice"}
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleGeneratePacket()}
+                disabled={generatingPacket || totalItems === 0}
+              >
+                {generatingPacket ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="mr-2 h-4 w-4" />
+                )}
+                {agendaPacketUrl ? "Regenerate Packet" : "Generate Packet"}
+              </Button>
+              <Button variant="outline" onClick={() => setPreviewOpen(true)}>
+                <Eye className="mr-2 h-4 w-4" />
+                Preview
+              </Button>
+              {!isPublished && (
+                <Button onClick={() => setPublishOpen(true)}>
+                  <Send className="mr-2 h-4 w-4" />
+                  Publish Agenda
+                </Button>
+              )}
+            </div>
+            {(agendaPacketGeneratedAt || meetingNoticeGeneratedAt) && (
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                {agendaPacketGeneratedAt && (
+                  <span>
+                    Packet generated{" "}
+                    {new Date(agendaPacketGeneratedAt).toLocaleString()}
+                  </span>
+                )}
+                {meetingNoticeGeneratedAt && (
+                  <span>
+                    Notice generated{" "}
+                    {new Date(meetingNoticeGeneratedAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )}
