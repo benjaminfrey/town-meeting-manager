@@ -11,6 +11,7 @@ import sensible from "@fastify/sensible";
 import { supabasePlugin } from "./plugins/supabase.js";
 import { authPlugin } from "./plugins/auth.js";
 import { documentRoutes } from "./routes/documents.js";
+import { minutesRoutes } from "./routes/minutes.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -32,6 +33,7 @@ export async function buildServer() {
   // ─── Routes ──────────────────────────────────────────────────────
   app.get("/api/health", async () => ({ status: "ok" }));
   await app.register(documentRoutes, { prefix: "/api" });
+  await app.register(minutesRoutes, { prefix: "/api" });
 
   return app;
 }

@@ -59,6 +59,7 @@ bucket_definitions:
                staggered_terms, is_governing_board, meeting_formality_override,
                minutes_style_override, elected_or_appointed, seat_titles,
                quorum_type, quorum_value, motion_display_format,
+               certification_format, member_reference_style,
                created_at, archived_at
         FROM board
         WHERE town_id = bucket.town_id
@@ -136,9 +137,11 @@ bucket_definitions:
     parameters:
       - SELECT request.jwt() ->> 'town_id' as town_id
     data:
-      - SELECT id, meeting_id, town_id, status, content_json,
-               html_rendered, pdf_storage_path, generated_by,
-               approved_at, approved_by_motion_id, created_at, updated_at
+      - SELECT id, meeting_id, board_id, town_id, status, content_json,
+               html_rendered, pdf_storage_path, minutes_style, generated_by,
+               approved_at, approved_by_motion_id,
+               submitted_for_review_at, published_at, created_by,
+               created_at, updated_at
         FROM minutes_document
         WHERE town_id = bucket.town_id
 

@@ -101,6 +101,8 @@ export const boards = new TableV2({
   quorum_type: column.text,
   quorum_value: column.integer,
   motion_display_format: column.text,
+  certification_format: column.text,
+  member_reference_style: column.text,
   created_at: column.text,
   archived_at: column.text,
 });
@@ -206,14 +208,19 @@ export const meeting_attendance = new TableV2({
 
 export const minutes_documents = new TableV2({
   meeting_id: column.text,
+  board_id: column.text,
   town_id: column.text,
   status: column.text,
   content_json: column.text, // JSON stored as text
   html_rendered: column.text,
   pdf_storage_path: column.text,
+  minutes_style: column.text,
   generated_by: column.text,
   approved_at: column.text,
   approved_by_motion_id: column.text,
+  submitted_for_review_at: column.text,
+  published_at: column.text,
+  created_by: column.text,
   created_at: column.text,
   updated_at: column.text,
 });

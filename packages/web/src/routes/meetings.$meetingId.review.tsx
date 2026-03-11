@@ -12,7 +12,7 @@
  * - Export button for structured meeting data JSON
  */
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "@powersync/react";
 import {
@@ -29,12 +29,32 @@ import {
   ArrowRightCircle,
   Circle,
   ShieldOff,
+  FileText,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.review";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FutureItemsQueue } from "@/components/meeting/FutureItemsQueue";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { hasPermission } from "@town-meeting/shared";
 import {
   buildStructuredMeetingRecord,
   downloadMeetingRecord,
@@ -49,9 +69,25 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 
 // ─── Component ────────────────────────────────────────────────────
 
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+
+const MINUTES_STYLE_LABELS: Record<string, string> = {
+  action: "Action Minutes",
+  summary: "Summary Minutes",
+  narrative: "Narrative Minutes",
+};
+
 export default function PostMeetingReviewPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
+  const currentUser = useCurrentUser();
+
+  // Minutes generation state
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
+  const [styleOverride, setStyleOverride] = useState<string>("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   // ─── Reactive queries ───────────────────────────────────────────
   const { data: meetingRows } = useQuery(
@@ -128,6 +164,22 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     "SELECT * FROM future_item_queues WHERE source_meeting_id = ?",
     [meetingId],
   );
+
+  // Minutes document query
+  const { data: minutesDocRows } = useQuery(
+    "SELECT * FROM minutes_documents WHERE meeting_id = ? LIMIT 1",
+    [meetingId],
+  );
+  const minutesDoc = minutesDocRows?.[0] as Record<string, unknown> | undefined;
+  const hasMinutes = !!minutesDoc;
+
+  // Check user permission for R2 (generate_ai_minutes)
+  const canGenerateMinutes = useMemo(() => {
+    if (!currentUser) return false;
+    const role = currentUser.role;
+    if (role === "admin" || role === "sys_admin") return true;
+    return hasPermission(currentUser.permissions ?? {}, "generate_ai_minutes");
+  }, [currentUser]);
 
   // ─── Data merging ─────────────────────────────────────────────
 
@@ -273,6 +325,78 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         status: (fi.status as string) ?? "pending",
       })),
     [futureItemRows],
+  );
+
+  // Effective minutes style for the board
+  const effectiveMinutesStyle = useMemo(() => {
+    const boardOverride = (board?.minutes_style_override as string) ?? null;
+    const townDefault = (town?.minutes_style as string) ?? "summary";
+    return boardOverride ?? townDefault;
+  }, [board, town]);
+
+  // ─── Minutes generation handlers ────────────────────────────────
+
+  const handleGenerateMinutes = useCallback(
+    async (isRegenerate: boolean) => {
+      setGenerating(true);
+      setGenerateError(null);
+
+      const endpoint = isRegenerate
+        ? `${API_BASE}/api/meetings/${meetingId}/minutes/regenerate`
+        : `${API_BASE}/api/meetings/${meetingId}/minutes/generate`;
+
+      try {
+        const token = (await import("@supabase/supabase-js")).createClient(
+          import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
+          import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
+        );
+        // Get the session token from Supabase auth
+        const { data: sessionData } = await token.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+
+        if (!accessToken) {
+          setGenerateError("Not authenticated. Please sign in again.");
+          setGenerating(false);
+          return;
+        }
+
+        const body: Record<string, string> = {};
+        if (styleOverride && styleOverride !== effectiveMinutesStyle) {
+          body.minutes_style_override = styleOverride;
+        }
+
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          throw new Error(
+            (errData.message as string) ?? `Generation failed (${res.status})`,
+          );
+        }
+
+        // Success — close dialogs
+        setGenerateDialogOpen(false);
+        setRegenerateDialogOpen(false);
+        setStyleOverride("");
+
+        // Navigate to minutes review page (future session builds this)
+        // For now, the page will reactively show "View Minutes Draft" via the query
+      } catch (err) {
+        setGenerateError(
+          err instanceof Error ? err.message : "An error occurred during generation.",
+        );
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [meetingId, styleOverride, effectiveMinutesStyle],
   );
 
   // ─── Export handler ────────────────────────────────────────────
@@ -805,15 +929,175 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
           Return to Meeting List
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" disabled title="Coming in a future session">
-            Generate Minutes
-          </Button>
-          <Button onClick={handleExport}>
+          {canGenerateMinutes && !hasMinutes && (
+            <Button onClick={() => setGenerateDialogOpen(true)}>
+              <FileText className="mr-1 h-4 w-4" />
+              Generate Minutes Draft
+            </Button>
+          )}
+          {hasMinutes && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => void navigate(`/meetings/${meetingId}/minutes`)}
+              >
+                <FileText className="mr-1 h-4 w-4" />
+                View Minutes Draft
+              </Button>
+              {canGenerateMinutes &&
+                minutesDoc?.status !== "approved" &&
+                minutesDoc?.status !== "published" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRegenerateDialogOpen(true)}
+                  >
+                    <RefreshCw className="mr-1 h-4 w-4" />
+                    Regenerate
+                  </Button>
+                )}
+            </>
+          )}
+          <Button variant="outline" onClick={handleExport}>
             <Download className="mr-1 h-4 w-4" />
             Export Meeting Data
           </Button>
         </div>
       </div>
+
+      {/* Generate Minutes Dialog */}
+      <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generate Minutes Draft</DialogTitle>
+            <DialogDescription>
+              Generate minutes draft for {boardName} meeting on{" "}
+              {meetingDate
+                ? new Date(meetingDate + "T00:00:00").toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : ""}
+              .
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">
+                Minutes Style
+              </label>
+              <Select
+                value={styleOverride || effectiveMinutesStyle}
+                onValueChange={setStyleOverride}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="action">
+                    Action Minutes — Decisions and motions only
+                  </SelectItem>
+                  <SelectItem value="summary">
+                    Summary Minutes — Brief discussion summaries + decisions
+                  </SelectItem>
+                  <SelectItem value="narrative">
+                    Narrative Minutes — Detailed discussion record
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Board default:{" "}
+                {MINUTES_STYLE_LABELS[effectiveMinutesStyle] ?? effectiveMinutesStyle}
+              </p>
+            </div>
+          </div>
+
+          {generateError && (
+            <p className="text-sm text-destructive">{generateError}</p>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setGenerateDialogOpen(false);
+                setStyleOverride("");
+                setGenerateError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleGenerateMinutes(false)}
+              disabled={generating}
+            >
+              {generating && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              {generating ? "Generating..." : "Generate Draft"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Regenerate Minutes Dialog */}
+      <Dialog open={regenerateDialogOpen} onOpenChange={setRegenerateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Regenerate Minutes Draft</DialogTitle>
+            <DialogDescription>
+              This will overwrite the existing minutes draft. The current draft
+              will be replaced with a freshly generated version.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">
+                Minutes Style
+              </label>
+              <Select
+                value={styleOverride || effectiveMinutesStyle}
+                onValueChange={setStyleOverride}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="action">Action Minutes</SelectItem>
+                  <SelectItem value="summary">Summary Minutes</SelectItem>
+                  <SelectItem value="narrative">Narrative Minutes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {generateError && (
+            <p className="text-sm text-destructive">{generateError}</p>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRegenerateDialogOpen(false);
+                setStyleOverride("");
+                setGenerateError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleGenerateMinutes(true)}
+              disabled={generating}
+            >
+              {generating && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              {generating ? "Regenerating..." : "Overwrite & Regenerate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{boardName}} — {{#if isDraft}}DRAFT {{/if}}Meeting Minutes</title>
+  <style>{{{css}}}</style>
+</head>
+<body>
+
+  <article class="minutes-document">
+
+    {{!-- ─── Document Header ───────────────────────────────────────── --}}
+    <header class="document-header">
+      {{#if sealUrl}}
+        <img src="{{sealUrl}}" alt="Official seal of {{townName}}" class="town-seal">
+      {{/if}}
+      <h1>{{townName}}<br>{{boardName}}</h1>
+      <h2>{{#if isDraft}}DRAFT {{/if}}Meeting Minutes</h2>
+      <div class="meeting-info">
+        <p>
+          <strong>{{formattedMeetingType}}</strong>
+        </p>
+        <p>
+          <time datetime="{{meetingHeader.meeting_date}}">{{formatDate meetingHeader.meeting_date}}</time>
+        </p>
+        {{#if meetingHeader.location}}
+          <p>{{meetingHeader.location}}</p>
+        {{/if}}
+        <p>
+          Called to Order:
+          <time datetime="{{meetingHeader.called_to_order_at}}">{{meetingHeader.called_to_order_at}}</time>
+          {{#if meetingHeader.adjourned_at}}
+            — Adjourned:
+            <time datetime="{{meetingHeader.adjourned_at}}">{{meetingHeader.adjourned_at}}</time>
+          {{/if}}
+        </p>
+      </div>
+    </header>
+
+    {{!-- ─── Attendance ────────────────────────────────────────────── --}}
+    <section class="attendance">
+      <h3>Attendance</h3>
+
+      {{#if attendance.members_present.length}}
+        <table class="attendance-table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Title / Seat</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each attendance.members_present}}
+              <tr>
+                <td>
+                  {{this.name}}
+                  {{#if this.is_presiding_officer}}
+                    <span class="role-badge">Presiding Officer</span>
+                  {{/if}}
+                  {{#if this.is_recording_secretary}}
+                    <span class="role-badge">Recording Secretary</span>
+                  {{/if}}
+                </td>
+                <td>{{this.seat_title}}</td>
+                <td>
+                  {{this.status}}
+                  {{#if this.arrived_at}}
+                    (arrived <time datetime="{{this.arrived_at}}">{{this.arrived_at}}</time>)
+                  {{/if}}
+                </td>
+              </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      {{/if}}
+
+      {{#if attendance.members_absent.length}}
+        <p class="members-absent">
+          <strong>Absent:</strong>
+          {{#each attendance.members_absent}}
+            {{this.name}}{{#if this.seat_title}} ({{this.seat_title}}){{/if}}{{#unless @last}}, {{/unless}}
+          {{/each}}
+        </p>
+      {{/if}}
+
+      <p class="quorum-statement">
+        {{#if attendance.quorum.met}}
+          A quorum was present ({{attendance.quorum.present_count}} of {{attendance.quorum.total_members}} members; {{attendance.quorum.required_count}} required).
+        {{else}}
+          A quorum was <strong>NOT</strong> present ({{attendance.quorum.present_count}} of {{attendance.quorum.total_members}} members; {{attendance.quorum.required_count}} required).
+        {{/if}}
+      </p>
+
+      {{#if attendance.staff_present.length}}
+        <p class="staff-present">
+          <strong>Staff Present:</strong>
+          {{#each attendance.staff_present}}
+            {{this.name}}{{#if this.title}}, {{this.title}}{{/if}}{{#unless @last}}; {{/unless}}
+          {{/each}}
+        </p>
+      {{/if}}
+    </section>
+
+    {{!-- ─── Agenda Sections ───────────────────────────────────────── --}}
+    {{#each sections}}
+      {{#unless omit}}
+        <section class="agenda-section">
+          <h3>{{this.title}}</h3>
+          {{{this.formatted_text}}}
+        </section>
+      {{/unless}}
+    {{/each}}
+
+    {{!-- ─── Adjournment ───────────────────────────────────────────── --}}
+    {{#if adjournmentText}}
+      <p class="adjournment">{{adjournmentText}}</p>
+    {{/if}}
+
+    {{!-- ─── Certification / Signatures ────────────────────────────── --}}
+    <footer class="certification">
+      {{#if certification}}
+        {{!-- Prepared-by block --}}
+        {{#if certification.recording_secretary}}
+          {{#unless (eq certification.format "all_member_certification")}}
+            <div class="prepared-by">
+              <p class="respectfully">Respectfully submitted,</p>
+              <div class="signature-line">
+                <div class="signature-rule" aria-hidden="true"></div>
+                <p>{{certification.recording_secretary.name}}<br>{{certification.recording_secretary.title}}</p>
+              </div>
+            </div>
+          {{/unless}}
+        {{/if}}
+
+        {{!-- All-member certification block --}}
+        {{#unless (eq certification.format "prepared_by")}}
+          <div class="member-certification">
+            <p>We, the undersigned members of the {{boardName}}, certify that these minutes accurately reflect the proceedings of the meeting held on <time datetime="{{meetingHeader.meeting_date}}">{{formattedDate}}</time>.</p>
+            <div class="signature-lines">
+              {{#each certification.board_members}}
+                <div class="signature-line">
+                  <div class="signature-rule" aria-hidden="true"></div>
+                  <p>{{this.name}}{{#if this.seat_title}}, {{this.seat_title}}{{/if}}</p>
+                </div>
+              {{/each}}
+            </div>
+          </div>
+        {{/unless}}
+      {{/if}}
+    </footer>
+
+    {{!-- ─── Draft Watermark ───────────────────────────────────────── --}}
+    {{#if isDraft}}
+      <div class="draft-watermark" aria-hidden="true">DRAFT</div>
+    {{/if}}
+
+  </article>
+
+</body>
+</html>

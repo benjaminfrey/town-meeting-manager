@@ -243,6 +243,26 @@ export const MotionDisplayFormat = {
 export type MotionDisplayFormat =
   (typeof MotionDisplayFormat)[keyof typeof MotionDisplayFormat];
 
+// ─── Certification Format ────────────────────────────────────────
+
+export const CertificationFormat = {
+  PREPARED_BY: "prepared_by",
+  ALL_MEMBER_CERTIFICATION: "all_member_certification",
+  BOTH: "both",
+} as const;
+export type CertificationFormat =
+  (typeof CertificationFormat)[keyof typeof CertificationFormat];
+
+// ─── Member Reference Style ─────────────────────────────────────
+
+export const MemberReferenceStyle = {
+  LAST_NAME_ONLY: "last_name_only",
+  TITLE_AND_LAST_NAME: "title_and_last_name",
+  FULL_NAME_FIRST_THEN_LAST: "full_name_first_then_last",
+} as const;
+export type MemberReferenceStyle =
+  (typeof MemberReferenceStyle)[keyof typeof MemberReferenceStyle];
+
 // ─── Agenda Status ────────────────────────────────────────────────
 
 export const AgendaStatus = {
