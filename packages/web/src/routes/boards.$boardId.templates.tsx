@@ -64,7 +64,7 @@ export default function AgendaTemplateListPage({
     "SELECT id, name, board_type FROM boards WHERE id = ? LIMIT 1",
     [boardId],
   );
-  const { data: templateRows } = useQuery(
+  const { data: templateRows, isLoading: templatesLoading } = useQuery(
     "SELECT * FROM agenda_templates WHERE board_id = ? ORDER BY is_default DESC, name ASC",
     [boardId],
   );
@@ -75,10 +75,14 @@ export default function AgendaTemplateListPage({
   const templates = (templateRows ?? []) as Record<string, unknown>[];
 
   // ─── Auto-create default template ──────────────────────────────────
+  // IMPORTANT: Must wait for isLoading to be false before checking length.
+  // useQuery initially returns { data: [], isLoading: true } — without this
+  // guard the effect would fire on every mount and create duplicates.
   const autoCreatedRef = useRef(false);
 
   useEffect(() => {
     if (
+      !templatesLoading &&
       templateRows &&
       templateRows.length === 0 &&
       !autoCreatedRef.current &&
@@ -88,7 +92,7 @@ export default function AgendaTemplateListPage({
       autoCreatedRef.current = true;
       void createDefaultTemplate(powerSync, boardId, townId, boardType);
     }
-  }, [templateRows, townId, board, powerSync, boardId, boardType]);
+  }, [templatesLoading, templateRows, townId, board, powerSync, boardId, boardType]);
 
   // ─── Handlers ───────────────────────────────────────────────────────
   const handleClone = useCallback(

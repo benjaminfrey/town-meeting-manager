@@ -8,21 +8,19 @@
 
 import type {
   AbstractPowerSyncDatabase,
-  CrudEntry,
   PowerSyncBackendConnector,
   PowerSyncCredentials,
 } from "@powersync/web";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Maps PowerSync CRUD table names to PostgREST table names.
+ * Known PowerSync/Postgres table names.
  *
  * Our AppSchema uses SINGULAR keys (matching Postgres table names) with
  * viewName aliases for plural SQL queries. CRUD ops arrive with the
- * singular schema key, so most names pass through unchanged. Only
- * `meeting_attendance` has no viewName alias and needs no mapping.
+ * singular schema key, so names pass through unchanged.
  *
- * We keep this map as an explicit allow-list so unknown tables are
+ * We keep this as an explicit allow-list so unknown tables are
  * logged rather than silently forwarded to PostgREST.
  */
 const KNOWN_TABLES = new Set([
@@ -90,36 +88,39 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
   /**
    * Upload local changes to Supabase.
    *
-   * PowerSync accumulates local writes in a queue (CRUDs).
-   * This method processes each entry and applies it to the
-   * corresponding Supabase table via REST API.
+   * PowerSync accumulates local writes in a CRUD queue. This method
+   * processes each entry one at a time using `getCrudBatch()` so that
+   * a single failing operation does NOT block the entire queue.
+   *
+   * For each batch (we use size=1), we attempt the upload. On success
+   * the batch is marked complete and removed from the queue. On failure
+   * the error is logged and we still mark the batch complete to prevent
+   * it from blocking subsequent operations indefinitely.
    */
   async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
-    const transaction = await database.getNextCrudTransaction();
+    // Process one CRUD entry at a time
+    const batch = await database.getCrudBatch(1);
 
-    if (!transaction) {
+    if (!batch) {
       return;
     }
 
-    let lastOp: CrudEntry | null = null;
+    for (const op of batch.crud) {
+      const tableName = op.table;
 
-    try {
-      for (const op of transaction.crud) {
-        lastOp = op;
-        const tableName = op.table;
+      if (!KNOWN_TABLES.has(tableName)) {
+        console.warn(
+          `[SupabaseConnector] Skipping unknown table "${tableName}" (op: ${op.op}, id: ${op.id})`,
+        );
+        continue;
+      }
 
-        if (!KNOWN_TABLES.has(tableName)) {
-          console.warn(
-            `[SupabaseConnector] Skipping unknown table "${tableName}" in CRUD queue`,
-          );
-          continue;
-        }
-
+      try {
         const table = this.supabase.from(tableName);
 
         switch (op.op) {
           case "PUT": {
-            // Upsert: insert or update (PowerSync uses PUT for both create and update)
+            // Upsert: insert or update (PowerSync uses PUT for both)
             const { error } = await table.upsert({
               id: op.id,
               ...op.opData,
@@ -141,18 +142,28 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
             break;
           }
           default:
-            throw new Error(`Unknown CRUD operation: ${op.op}`);
+            console.warn(
+              `[SupabaseConnector] Unknown CRUD op "${op.op}" on ${tableName}`,
+            );
         }
+      } catch (error: unknown) {
+        // Log but do NOT re-throw. Marking the batch complete below
+        // prevents this operation from blocking the queue forever.
+        // The server's sync-rules will push the authoritative state
+        // back down, so the local record will self-correct.
+        const msg =
+          error instanceof Error
+            ? error.message
+            : JSON.stringify(error);
+        console.error(
+          `[SupabaseConnector] Failed ${op.op} on ${tableName} (id: ${op.id}): ${msg}`,
+        );
       }
-
-      // All operations succeeded — mark the transaction as complete
-      await transaction.complete();
-    } catch (error: unknown) {
-      console.error(
-        `Failed to upload CRUD operation on ${lastOp?.table}:`,
-        error,
-      );
-      throw error;
     }
+
+    // Always mark the batch as complete so the queue advances.
+    // Failed operations are logged above; the server's state will
+    // be synced back down to correct any local-only records.
+    await batch.complete();
   }
 }
