@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Building2, Users } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchBoards } from "@/lib/portal-api";
 import type { PortalBoardSummary } from "@town-meeting/shared";
 
@@ -20,7 +21,15 @@ function Spinner() {
 }
 
 export default function BoardDirectory() {
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
+
+  usePortalMeta({
+    title: `Boards & Committees - ${townName}`,
+    description: `Directory of boards, committees, and members for ${townName}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  });
+
   const [boards, setBoards] = useState<PortalBoardSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

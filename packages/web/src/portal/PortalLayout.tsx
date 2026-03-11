@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Building, Menu, X } from "lucide-react";
+import { Building, Menu, Search, X } from "lucide-react";
 import { usePortal } from "./PortalProvider";
 
 function getMunicipalityLabel(type: string): string {
@@ -25,9 +25,18 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
   const { townName, sealUrl, municipalityType, contactName, contactRole } =
     usePortal();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
 
   const municipalityLabel = getMunicipalityLabel(municipalityType);
   const fullName = `${municipalityLabel} of ${townName}`;
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      window.location.href = `/search?q=${encodeURIComponent(searchQuery.trim())}`;
+    }
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
@@ -53,13 +62,69 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               <Building className="h-6 w-6 text-slate-300" />
             </div>
           )}
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-bold leading-tight sm:text-xl">
               {fullName}
             </h1>
             <p className="text-sm text-slate-300">Municipal Government</p>
           </div>
+
+          {/* Desktop search */}
+          <form
+            role="search"
+            aria-label="Search portal"
+            onSubmit={handleSearch}
+            className="hidden sm:flex sm:items-center"
+          >
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search agendas and minutes..."
+                className="w-full max-w-xs rounded-md border border-slate-600 bg-slate-700 py-1.5 pl-9 pr-3 text-sm text-white placeholder-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+          </form>
+
+          {/* Mobile search toggle */}
+          <button
+            type="button"
+            onClick={() => setShowMobileSearch(!showMobileSearch)}
+            className="inline-flex items-center justify-center rounded-md p-2 text-slate-300 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400 sm:hidden"
+            aria-label={showMobileSearch ? "Close search" : "Open search"}
+          >
+            {showMobileSearch ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Search className="h-5 w-5" />
+            )}
+          </button>
         </div>
+
+        {/* Mobile search bar (expanded) */}
+        {showMobileSearch && (
+          <div className="border-t border-slate-700 px-4 py-3 sm:hidden">
+            <form
+              role="search"
+              aria-label="Search portal"
+              onSubmit={handleSearch}
+            >
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search agendas and minutes..."
+                  autoFocus
+                  className="w-full rounded-md border border-slate-600 bg-slate-700 py-2 pl-10 pr-3 text-sm text-white placeholder-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </div>
+            </form>
+          </div>
+        )}
       </header>
 
       {/* Navigation */}

@@ -7,6 +7,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchMeetings, fetchBoards } from "@/lib/portal-api";
 import type {
   PortalMeetingSummary,
@@ -113,7 +114,14 @@ function MeetingRow({
 }
 
 export default function MeetingsList() {
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
+
+  usePortalMeta({
+    title: `Meetings - ${townName}`,
+    description: `Upcoming and past meetings for ${townName} boards and committees.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  });
 
   const [meetings, setMeetings] = useState<PortalMeetingSummary[]>([]);
   const [boards, setBoards] = useState<PortalBoardSummary[]>([]);

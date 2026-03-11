@@ -96,3 +96,19 @@ export interface PortalCalendarEvent {
   location: string;
   meeting_type: string;
 }
+
+export interface PortalSearchResult {
+  type: "agenda" | "minutes";
+  meeting_id: string;
+  meeting_date: string;
+  board_name: string;
+  title: string;
+  snippet: string;
+}
+
+export interface PortalSearchResponse {
+  results: PortalSearchResult[];
+  total: number;
+  page: number;
+  pages: number;
+}

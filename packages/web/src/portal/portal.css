@@ -151,6 +151,14 @@
   color: #475569;
 }
 
+/* ── Search snippet highlighting ───────────────────────────*/
+.search-snippet mark {
+  background-color: #fef08a; /* yellow-200 */
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
 /* ── Print stylesheet ───────────────────────────────────────*/
 @media print {
   /* Hide portal chrome */

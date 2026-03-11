@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { PortalAgenda, PortalAgendaItem } from "@town-meeting/shared";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchAgenda, getAgendaPdfUrl, PortalApiError } from "@/lib/portal-api";
 
 function toRoman(num: number): string {
@@ -156,10 +157,17 @@ function AgendaItemDetails({
 
 export default function AgendaView() {
   const { meetingId } = useParams<{ meetingId: string }>();
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
   const [agenda, setAgenda] = useState<PortalAgenda | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<"not_found" | "error" | null>(null);
+
+  usePortalMeta(agenda ? {
+    title: `${agenda.meeting.board_name} Agenda - ${formatDate(agenda.meeting.scheduled_date)} - ${townName}`,
+    description: `Published agenda for ${agenda.meeting.board_name} meeting on ${formatDate(agenda.meeting.scheduled_date)}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  } : null);
 
   useEffect(() => {
     if (!meetingId) return;

@@ -13,6 +13,7 @@ const MinutesView = lazy(() => import("./pages/MinutesView"));
 const BoardDirectory = lazy(() => import("./pages/BoardDirectory"));
 const BoardDetail = lazy(() => import("./pages/BoardDetail"));
 const MeetingCalendar = lazy(() => import("./pages/MeetingCalendar"));
+const SearchResults = lazy(() => import("./pages/SearchResults"));
 const Portal404 = lazy(() => import("./pages/Portal404"));
 
 export function PortalApp({ subdomain }: { subdomain: string }) {
@@ -35,6 +36,7 @@ export function PortalApp({ subdomain }: { subdomain: string }) {
             <Route path="boards" element={<BoardDirectory />} />
             <Route path="boards/:boardId" element={<BoardDetail />} />
             <Route path="calendar" element={<MeetingCalendar />} />
+            <Route path="search" element={<SearchResults />} />
             <Route path="*" element={<Portal404 />} />
           </Routes>
         </Suspense>

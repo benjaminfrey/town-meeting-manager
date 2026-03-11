@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { PortalMinutes } from "@town-meeting/shared";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import {
   fetchMinutes,
   getMinutesPdfUrl,
@@ -24,10 +25,17 @@ function formatDate(date: string): string {
 
 export default function MinutesView() {
   const { meetingId } = useParams<{ meetingId: string }>();
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
   const [minutes, setMinutes] = useState<PortalMinutes | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<"not_found" | "error" | null>(null);
+
+  usePortalMeta(minutes ? {
+    title: `${minutes.board_name} Minutes - ${formatDate(minutes.meeting_date)} - ${townName}`,
+    description: `Approved minutes for ${minutes.board_name} meeting on ${formatDate(minutes.meeting_date)}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  } : null);
 
   useEffect(() => {
     if (!meetingId) return;

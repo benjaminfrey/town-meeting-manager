@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { Building2, Users, ChevronRight, Calendar } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchBoardDetail } from "@/lib/portal-api";
 import type { PortalBoardDetail } from "@town-meeting/shared";
 
@@ -29,11 +30,18 @@ function Spinner() {
 }
 
 export default function BoardDetail() {
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
   const { boardId } = useParams<{ boardId: string }>();
   const [board, setBoard] = useState<PortalBoardDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  usePortalMeta(board ? {
+    title: `${board.name} - ${townName}`,
+    description: `Members and meeting information for ${board.name}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  } : null);
 
   useEffect(() => {
     if (!boardId) return;

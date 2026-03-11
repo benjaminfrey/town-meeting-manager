@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchBoards, fetchCalendarEvents } from "@/lib/portal-api";
 import type {
   PortalBoardSummary,
@@ -71,7 +72,14 @@ function Spinner() {
 }
 
 export default function MeetingCalendar() {
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
+
+  usePortalMeta({
+    title: `Meeting Calendar - ${townName}`,
+    description: `Calendar of scheduled meetings for ${townName} boards and committees.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  });
 
   const [currentMonth, setCurrentMonth] = useState<Date>(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),

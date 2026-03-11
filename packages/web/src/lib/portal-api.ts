@@ -7,6 +7,7 @@ import type {
   PortalBoardSummary,
   PortalBoardDetail,
   PortalCalendarEvent,
+  PortalSearchResponse,
 } from "@town-meeting/shared";
 
 const BASE = "/api/portal";
@@ -100,4 +101,18 @@ export function getAgendaPdfUrl(
   meetingId: string,
 ): string {
   return `${BASE}/${townId}/meetings/${meetingId}/agenda/pdf`;
+}
+
+export async function searchPortal(
+  townId: string,
+  params: { q: string; type?: string; board?: string; from?: string; to?: string; page?: number },
+): Promise<PortalSearchResponse> {
+  const qs = new URLSearchParams();
+  qs.set("q", params.q);
+  if (params.type && params.type !== "all") qs.set("type", params.type);
+  if (params.board) qs.set("board", params.board);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.page && params.page > 1) qs.set("page", String(params.page));
+  return fetchJson(`${BASE}/${townId}/search?${qs.toString()}`);
 }

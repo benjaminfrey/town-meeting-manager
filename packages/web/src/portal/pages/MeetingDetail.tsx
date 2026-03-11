@@ -9,6 +9,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import {
   fetchMeetingDetail,
   getAgendaPdfUrl,
@@ -62,11 +63,18 @@ function Spinner() {
 
 export default function MeetingDetail() {
   const { meetingId } = useParams<{ meetingId: string }>();
-  const { townId } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
 
   const [meeting, setMeeting] = useState<PortalMeetingDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  usePortalMeta(meeting ? {
+    title: `${meeting.board_name} Meeting - ${formatDate(meeting.scheduled_date)} - ${townName}`,
+    description: `${meeting.meeting_type} meeting of ${meeting.board_name} on ${formatDate(meeting.scheduled_date)}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  } : null);
 
   useEffect(() => {
     if (!meetingId) return;

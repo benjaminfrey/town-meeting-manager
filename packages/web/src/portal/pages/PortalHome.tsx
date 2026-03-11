@@ -8,6 +8,7 @@ import {
   Building2,
 } from "lucide-react";
 import { usePortal } from "../PortalProvider";
+import { usePortalMeta } from "@/lib/portal/seo";
 import {
   fetchMeetings,
   fetchBoards,
@@ -34,7 +35,14 @@ function Spinner() {
 }
 
 export default function PortalHome() {
-  const { townId, townName } = usePortal();
+  const { townId, townName, sealUrl } = usePortal();
+
+  usePortalMeta({
+    title: `${townName} - Meeting Records`,
+    description: `Official meeting agendas, minutes, and board information for ${townName}.`,
+    siteName: townName ?? undefined,
+    ogImage: sealUrl,
+  });
 
   const [upcomingMeetings, setUpcomingMeetings] = useState<PortalMeetingSummary[]>([]);
   const [recentMinutes, setRecentMinutes] = useState<PortalMeetingSummary[]>([]);
