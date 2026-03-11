@@ -29,7 +29,9 @@ function schemaToSQL(): string[] {
       const sqlType = col.type ?? "TEXT";
       return `${col.name} ${sqlType}`;
     });
-    return `CREATE TABLE IF NOT EXISTS ${table.name} (id TEXT PRIMARY KEY, ${columnDefs.join(", ")})`;
+    // Use viewName (e.g. "towns") rather than schema key (e.g. "town")
+    const tableName = (table as any).viewName ?? table.name;
+    return `CREATE TABLE IF NOT EXISTS ${tableName} (id TEXT PRIMARY KEY, ${columnDefs.join(", ")})`;
   });
 }
 
