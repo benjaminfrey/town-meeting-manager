@@ -128,6 +128,7 @@ export const meetings = new TableV2({
   agenda_packet_generated_at: column.text,
   meeting_notice_generated_at: column.text,
   created_by: column.text,
+  adjournment: column.text, // JSONB stored as TEXT
   created_at: column.text,
   updated_at: column.text,
 });
@@ -266,6 +267,34 @@ export const agenda_item_transitions = new TableV2({
   ended_at: column.text,
 });
 
+// ─── Executive Session & Future Items ────────────────────────────────
+
+export const executive_sessions = new TableV2({
+  meeting_id: column.text,
+  agenda_item_id: column.text,
+  town_id: column.text,
+  statutory_basis: column.text,
+  entered_at: column.text,
+  exited_at: column.text,
+  entry_motion_id: column.text,
+  post_session_action_motion_ids: column.text, // JSON array as TEXT
+  created_at: column.text,
+});
+
+export const future_item_queues = new TableV2({
+  board_id: column.text,
+  town_id: column.text,
+  source_meeting_id: column.text,
+  source_agenda_item_id: column.text,
+  title: column.text,
+  description: column.text,
+  source: column.text,
+  status: column.text,
+  dismissed_reason: column.text,
+  placed_agenda_item_id: column.text,
+  created_at: column.text,
+});
+
 // ─── Notifications ──────────────────────────────────────────────────
 
 export const notification_events = new TableV2({
@@ -314,6 +343,8 @@ export const AppSchema = new Schema({
   exhibit: new TableV2(exhibits.columnMap, { viewName: "exhibits" }),
   guest_speaker: new TableV2(guest_speakers.columnMap, { viewName: "guest_speakers" }),
   agenda_item_transition: new TableV2(agenda_item_transitions.columnMap, { viewName: "agenda_item_transitions" }),
+  executive_session: new TableV2(executive_sessions.columnMap, { viewName: "executive_sessions" }),
+  future_item_queue: new TableV2(future_item_queues.columnMap, { viewName: "future_item_queues" }),
   notification_event: new TableV2(notification_events.columnMap, { viewName: "notification_events" }),
   notification_delivery: new TableV2(notification_deliveries.columnMap, { viewName: "notification_deliveries" }),
 });

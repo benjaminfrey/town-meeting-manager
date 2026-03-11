@@ -24,6 +24,7 @@ export default [
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
     route("meetings/:meetingId/agenda", "routes/meetings.$meetingId.agenda.tsx"),
     route("meetings/:meetingId/live", "routes/meetings.$meetingId.live.tsx"),
+    route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
     route("settings", "routes/settings.tsx"),
   ]),
 ] satisfies RouteConfig;

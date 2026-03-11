@@ -16,6 +16,7 @@ import {
   PauseCircle,
   ArrowRightCircle,
   Gavel,
+  Lock,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -48,6 +49,8 @@ interface AgendaNavigationPanelProps {
   readOnly?: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** ID of the item currently in executive session (shows Lock icon) */
+  execSessionItemId?: string | null;
 }
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
@@ -65,6 +68,7 @@ export function AgendaNavigationPanel({
   readOnly,
   collapsed,
   onToggleCollapse,
+  execSessionItemId,
 }: AgendaNavigationPanelProps) {
   const currentRef = useRef<HTMLButtonElement>(null);
 
@@ -154,6 +158,9 @@ export function AgendaNavigationPanel({
                     <span className="min-w-0 flex-1 truncate">
                       {letter}. {item.title}
                     </span>
+                    {execSessionItemId === item.id && (
+                      <Lock className="h-3 w-3 flex-shrink-0 text-red-500" />
+                    )}
                     {item.hasMotions && (
                       <Gavel className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                     )}

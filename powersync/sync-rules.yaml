@@ -80,6 +80,7 @@ bucket_definitions:
                current_agenda_item_id, presiding_officer_id, recording_secretary_id,
                agenda_packet_url, meeting_notice_url,
                agenda_packet_generated_at, meeting_notice_generated_at,
+               adjournment,
                created_by, created_at, updated_at
         FROM meeting
         WHERE town_id = bucket.town_id
@@ -115,6 +116,18 @@ bucket_definitions:
       - SELECT id, meeting_id, agenda_item_id, town_id,
                started_at, ended_at
         FROM agenda_item_transition
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, meeting_id, agenda_item_id, town_id, statutory_basis,
+               entered_at, exited_at, entry_motion_id,
+               post_session_action_motion_ids, created_at
+        FROM executive_session
+        WHERE town_id = bucket.town_id
+
+      - SELECT id, board_id, town_id, source_meeting_id, source_agenda_item_id,
+               title, description, source, status, dismissed_reason,
+               placed_agenda_item_id, created_at
+        FROM future_item_queue
         WHERE town_id = bucket.town_id
 
   # ─── MINUTES ───────────────────────────────────────────────────

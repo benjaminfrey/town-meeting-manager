@@ -20,6 +20,7 @@ import {
   FileText,
   Gavel,
   AlertTriangle,
+  Lock,
 } from "lucide-react";
 import { quorumAfterRecusal } from "@town-meeting/shared";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,10 @@ interface AgendaItemDetailPanelProps {
   externalRecusalMember?: MemberInfo | null;
   /** Called after the external recusal trigger is consumed */
   onExternalRecusalConsumed?: () => void;
+  /** Whether the board is currently in executive session */
+  isInExecSession?: boolean;
+  /** Opens the ExecutiveSessionDialog (citation picker) */
+  onEnterExecSession?: () => void;
 }
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -156,6 +161,8 @@ export function AgendaItemDetailPanel({
   readOnly,
   externalRecusalMember,
   onExternalRecusalConsumed,
+  isInExecSession,
+  onEnterExecSession,
 }: AgendaItemDetailPanelProps) {
   const powerSync = usePowerSync();
   const [notesValue, setNotesValue] = useState(item?.operatorNotes ?? "");
@@ -268,6 +275,23 @@ export function AgendaItemDetailPanel({
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
         <p>Select an agenda item to view details</p>
+      </div>
+    );
+  }
+
+  // Executive session: simplified locked view
+  if (isInExecSession) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center text-center">
+        <Lock className="mb-4 h-12 w-12 text-red-400" />
+        <h2 className="text-lg font-semibold text-red-700 dark:text-red-300">
+          Executive Session In Progress
+        </h2>
+        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+          Public recording is paused during executive session. No agenda item
+          content or motions are displayed. Use the banner above to return to
+          public session.
+        </p>
       </div>
     );
   }
@@ -483,6 +507,16 @@ export function AgendaItemDetailPanel({
         </div>
         {!readOnly && (
           <div className="flex gap-2">
+            {onEnterExecSession && item.sectionType === "executive_session" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-400"
+                onClick={onEnterExecSession}
+              >
+                <Lock className="mr-1 h-4 w-4" /> Enter Executive Session
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

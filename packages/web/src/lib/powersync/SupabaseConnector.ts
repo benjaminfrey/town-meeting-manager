@@ -42,6 +42,8 @@ const KNOWN_TABLES = new Set([
   "exhibit",
   "guest_speaker",
   "agenda_item_transition",
+  "executive_session",
+  "future_item_queue",
   "notification_event",
   "notification_delivery",
 ]);

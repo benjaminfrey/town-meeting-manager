@@ -9,10 +9,16 @@
  * - draft/cancelled → redirect to boards
  * - noticed → MeetingStartFlow overlay
  * - open → three-panel live interface
- * - adjourned+ → read-only review mode
+ * - adjourned+ → redirect to review page
+ *
+ * Executive session & adjournment:
+ * - Reactive detection of exec session entry/adjourn motions via useQuery
+ * - Executive session banner with timer during closed session
+ * - Dual adjournment: formal motion or without objection
+ * - Meeting end flow: close transitions, defer unreached items, navigate to review
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQuery, usePowerSync } from "@powersync/react";
 import { ErrorBoundary } from "react-error-boundary";
@@ -28,6 +34,11 @@ import { MeetingStartFlow } from "@/components/meeting/MeetingStartFlow";
 import { AgendaNavigationPanel } from "@/components/meeting/AgendaNavigationPanel";
 import { AgendaItemDetailPanel } from "@/components/meeting/AgendaItemDetailPanel";
 import { AttendancePanel } from "@/components/meeting/AttendancePanel";
+import { ExecutiveSessionDialog } from "@/components/meeting/ExecutiveSessionDialog";
+import { ExecSessionBanner } from "@/components/meeting/ExecSessionBanner";
+import { ExitExecutiveSessionDialog } from "@/components/meeting/ExitExecutiveSessionDialog";
+import { AdjournmentControls } from "@/components/meeting/AdjournmentControls";
+import { MotionCaptureDialog, type MotionDialogMode } from "@/components/meeting/MotionCaptureDialog";
 import { hasPermission } from "@town-meeting/shared";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +62,24 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     name: string;
     seatTitle: string | null;
   } | null>(null);
+
+  // ─── Executive session state ────────────────────────────────────
+  const [execSessionDialogOpen, setExecSessionDialogOpen] = useState(false);
+  const [exitExecDialogOpen, setExitExecDialogOpen] = useState(false);
+  const [pendingExecCitation, setPendingExecCitation] = useState<{
+    citation: string;
+    citationLetter: string;
+    motionText: string;
+  } | null>(null);
+  const [execMotionDialogOpen, setExecMotionDialogOpen] = useState(false);
+  const [isPostExecSession, setIsPostExecSession] = useState(false);
+  const [postExecSessionId, setPostExecSessionId] = useState<string | null>(null);
+
+  // ─── Adjournment state ──────────────────────────────────────────
+  const [adjournMotionDialogOpen, setAdjournMotionDialogOpen] = useState(false);
+
+  // Track which motions we've already processed to avoid re-processing
+  const processedMotionIds = useRef<Set<string>>(new Set());
 
   // ─── Permission check ─────────────────────────────────────────
   const canRunMeeting = currentUser
@@ -120,6 +149,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   const { data: transitionRows } = useQuery(
     "SELECT * FROM agenda_item_transitions WHERE meeting_id = ? ORDER BY started_at ASC",
+    [meetingId],
+  );
+
+  const { data: execSessionRows } = useQuery(
+    "SELECT * FROM executive_sessions WHERE meeting_id = ?",
     [meetingId],
   );
 
@@ -347,6 +381,122 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     [members, attendanceRows],
   );
 
+  // ─── Executive session detection ────────────────────────────────
+
+  // Active exec session: has entered_at but no exited_at
+  const activeExecSession = useMemo(() => {
+    if (!execSessionRows) return null;
+    return (execSessionRows as Array<Record<string, unknown>>).find(
+      (es) => es.entered_at && !es.exited_at,
+    ) ?? null;
+  }, [execSessionRows]);
+
+  const isInExecSession = !!activeExecSession;
+
+  // Pending exec session: has entry_motion_id but no entered_at (motion filed, not yet voted)
+  const pendingExecSession = useMemo(() => {
+    if (!execSessionRows) return null;
+    return (execSessionRows as Array<Record<string, unknown>>).find(
+      (es) => es.entry_motion_id && !es.entered_at && !es.exited_at,
+    ) ?? null;
+  }, [execSessionRows]);
+
+  // Reactive: when entry motion for exec session passes → set entered_at
+  // When entry motion fails → delete the pending exec session record
+  useEffect(() => {
+    if (!pendingExecSession || !motionRows) return;
+    const entryMotionId = pendingExecSession.entry_motion_id as string;
+    const entryMotion = (motionRows as Array<Record<string, unknown>>).find(
+      (m) => m.id === entryMotionId,
+    );
+    if (!entryMotion) return;
+
+    const motionStatus = entryMotion.status as string;
+    const esId = pendingExecSession.id as string;
+
+    // Already processed this motion
+    if (processedMotionIds.current.has(entryMotionId)) return;
+
+    if (motionStatus === "passed") {
+      processedMotionIds.current.add(entryMotionId);
+      const now = new Date().toISOString();
+      void powerSync.execute(
+        "UPDATE executive_sessions SET entered_at = ? WHERE id = ?",
+        [now, esId],
+      );
+    } else if (motionStatus === "failed") {
+      processedMotionIds.current.add(entryMotionId);
+      void powerSync.execute(
+        "DELETE FROM executive_sessions WHERE id = ?",
+        [esId],
+      );
+    }
+  }, [pendingExecSession, motionRows, powerSync]);
+
+  // Reactive: when adjourn motion passes → trigger meeting end
+  useEffect(() => {
+    if (!motionRows || status !== "open") return;
+    const adjournMotion = (motionRows as Array<Record<string, unknown>>).find(
+      (m) => m.motion_type === "adjourn" && m.status === "passed",
+    );
+    if (!adjournMotion) return;
+    const motionId = adjournMotion.id as string;
+    if (processedMotionIds.current.has(`adjourn_${motionId}`)) return;
+    processedMotionIds.current.add(`adjourn_${motionId}`);
+    void handleMeetingEnd("motion", motionId);
+  }, [motionRows, status]);
+
+  // Track post-session action motions: any motion created after returning
+  // from exec session gets linked to the exec session record
+  useEffect(() => {
+    if (!isPostExecSession || !postExecSessionId || !motionRows) return;
+    const execSession = (execSessionRows as Array<Record<string, unknown>>)?.find(
+      (es) => es.id === postExecSessionId,
+    );
+    if (!execSession) return;
+
+    const existingIds: string[] = (() => {
+      try {
+        const raw = execSession.post_session_action_motion_ids as string;
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    // Find motions created after exec session exited_at
+    const exitedAt = execSession.exited_at as string;
+    if (!exitedAt) return;
+
+    const postMotions = (motionRows as Array<Record<string, unknown>>).filter(
+      (m) =>
+        (m.created_at as string) > exitedAt &&
+        !existingIds.includes(m.id as string),
+    );
+
+    if (postMotions.length > 0) {
+      const newIds = [...existingIds, ...postMotions.map((m) => m.id as string)];
+      void powerSync.execute(
+        "UPDATE executive_sessions SET post_session_action_motion_ids = ? WHERE id = ?",
+        [JSON.stringify(newIds), postExecSessionId],
+      );
+    }
+  }, [isPostExecSession, postExecSessionId, motionRows, execSessionRows, powerSync]);
+
+  // Find the item that belongs to the executive session section (for lock icon)
+  const execSessionItemId = useMemo(() => {
+    if (!activeExecSession) return null;
+    return (activeExecSession.agenda_item_id as string) ?? null;
+  }, [activeExecSession]);
+
+  // Presiding officer name for adjournment controls
+  const presidingOfficerName = useMemo(() => {
+    const presidingId = (meeting?.presiding_officer_id as string) ?? null;
+    if (!presidingId) return "Chair";
+    // presiding_officer_id references a board_member
+    return memberNameMap.get(presidingId) ?? "Chair";
+  }, [meeting?.presiding_officer_id, memberNameMap]);
+
   // ─── Navigation ───────────────────────────────────────────────
 
   const navigateToItem = useCallback(
@@ -396,6 +546,195 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     }
   }, [currentFlatIdx, flatItems, navigateToItem]);
 
+  // ─── Executive session handlers ─────────────────────────────────
+
+  const handleExecSessionProceed = useCallback(
+    (citation: string, citationLetter: string, motionText: string) => {
+      setPendingExecCitation({ citation, citationLetter, motionText });
+      setExecMotionDialogOpen(true);
+    },
+    [],
+  );
+
+  // Called after exec session entry motion is filed — create the pending
+  // exec session record linked to the motion
+  const handleExecMotionFiled = useCallback(async () => {
+    if (!pendingExecCitation || !currentItemId) return;
+
+    // Find the most recently created motion on the current item with type "main"
+    // that contains "Executive Session" — this is the entry motion just filed
+    const itemMotions = motionsByItem.get(currentItemId) ?? [];
+    const entryMotion = [...itemMotions].reverse().find(
+      (m: Record<string, unknown>) =>
+        (m.motion_text as string)?.includes("Executive Session"),
+    );
+
+    if (!entryMotion) return;
+
+    const esId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await powerSync.execute(
+      `INSERT INTO executive_sessions
+       (id, meeting_id, agenda_item_id, town_id, statutory_basis, entered_at, exited_at, entry_motion_id, post_session_action_motion_ids, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, '[]', ?)`,
+      [esId, meetingId, currentItemId, townId, pendingExecCitation.citation, entryMotion.id as string, now],
+    );
+
+    setPendingExecCitation(null);
+  }, [pendingExecCitation, currentItemId, motionsByItem, meetingId, townId, powerSync]);
+
+  // When the exec motion dialog closes, file the exec session record
+  const handleExecMotionDialogClose = useCallback(
+    (open: boolean) => {
+      setExecMotionDialogOpen(open);
+      if (!open && pendingExecCitation) {
+        // Motion was filed (dialog closed after submit) — create exec session record
+        void handleExecMotionFiled();
+      }
+    },
+    [pendingExecCitation, handleExecMotionFiled],
+  );
+
+  const handleReturnToPublic = useCallback(() => {
+    setExitExecDialogOpen(true);
+  }, []);
+
+  const handleExitExecWithActions = useCallback(() => {
+    if (activeExecSession) {
+      setIsPostExecSession(true);
+      setPostExecSessionId(activeExecSession.id as string);
+    }
+  }, [activeExecSession]);
+
+  const handleExitExecNoActions = useCallback(() => {
+    setIsPostExecSession(false);
+    setPostExecSessionId(null);
+  }, []);
+
+  const handleDonePostExecActions = useCallback(() => {
+    setIsPostExecSession(false);
+    setPostExecSessionId(null);
+  }, []);
+
+  // ─── Meeting end flow ───────────────────────────────────────────
+
+  const handleMeetingEnd = useCallback(
+    async (method: "motion" | "without_objection", adjournMotionId?: string) => {
+      const now = new Date().toISOString();
+
+      // 1. End current transition
+      if (currentTransition) {
+        await powerSync.execute(
+          "UPDATE agenda_item_transitions SET ended_at = ? WHERE id = ?",
+          [now, currentTransition.id as string],
+        );
+      }
+
+      // 2. Mark pending/active items as "deferred" and create future_item_queue entries
+      const unreachedItems = allItems.filter((item: Record<string, unknown>) => {
+        const itemStatus = item.status as string;
+        return (
+          item.parent_item_id && // Skip section headers
+          (itemStatus === "pending" || itemStatus === "active") &&
+          item.id !== currentItemId // Don't defer the item we were on if it was active
+        );
+      });
+
+      for (const item of unreachedItems) {
+        // Mark as deferred
+        await powerSync.execute(
+          "UPDATE agenda_items SET status = 'deferred', updated_at = ? WHERE id = ?",
+          [now, item.id as string],
+        );
+
+        // Create future_item_queue entry
+        const fiqId = crypto.randomUUID();
+        await powerSync.execute(
+          `INSERT INTO future_item_queues
+           (id, board_id, town_id, source_meeting_id, source_agenda_item_id, title, description, source, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'deferred', 'pending', ?)`,
+          [
+            fiqId,
+            boardId,
+            townId,
+            meetingId,
+            item.id as string,
+            item.title as string,
+            (item.description as string) ?? null,
+            now,
+          ],
+        );
+      }
+
+      // 3. Also add tabled items (items with a passed "table" motion) to future queue
+      const tabledItems = allItems.filter((item: Record<string, unknown>) => {
+        if (!item.parent_item_id) return false;
+        const itemMotions = motionsByItem.get(item.id as string) ?? [];
+        return itemMotions.some(
+          (m: Record<string, unknown>) =>
+            m.motion_type === "table" && m.status === "passed",
+        );
+      });
+
+      for (const item of tabledItems) {
+        // Check if already in future queue from this meeting
+        const fiqId = crypto.randomUUID();
+        await powerSync.execute(
+          `INSERT INTO future_item_queues
+           (id, board_id, town_id, source_meeting_id, source_agenda_item_id, title, description, source, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'tabled', 'pending', ?)`,
+          [
+            fiqId,
+            boardId,
+            townId,
+            meetingId,
+            item.id as string,
+            item.title as string,
+            (item.description as string) ?? null,
+            now,
+          ],
+        );
+      }
+
+      // 4. Build adjournment JSONB
+      const adjournment = {
+        method,
+        adjourned_by: currentUser?.personId ?? null,
+        adjourned_by_name: presidingOfficerName,
+        motion_id: adjournMotionId ?? null,
+        timestamp: now,
+      };
+
+      // 5. Update meeting: status=adjourned, ended_at, adjournment, clear current item
+      await powerSync.execute(
+        `UPDATE meetings
+         SET status = 'adjourned',
+             ended_at = ?,
+             adjournment = ?,
+             current_agenda_item_id = NULL,
+             updated_at = ?
+         WHERE id = ?`,
+        [now, JSON.stringify(adjournment), now, meetingId],
+      );
+
+      // 6. Navigate to review page
+      void navigate(`/meetings/${meetingId}/review`);
+    },
+    [
+      currentTransition, allItems, currentItemId, motionsByItem,
+      boardId, townId, meetingId, currentUser, presidingOfficerName,
+      powerSync, navigate,
+    ],
+  );
+
+  const handleAdjournMotion = useCallback(() => {
+    setAdjournMotionDialogOpen(true);
+  }, []);
+
+  const handleAdjournWithoutObjection = useCallback(() => {
+    void handleMeetingEnd("without_objection");
+  }, [handleMeetingEnd]);
+
   // ─── Keyboard shortcuts ───────────────────────────────────────
 
   useEffect(() => {
@@ -431,6 +770,12 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     return null;
   }
 
+  // Adjourned meetings go to review page
+  if (status === "adjourned" || status === "minutes_draft" || status === "approved") {
+    void navigate(`/meetings/${meetingId}/review`, { replace: true });
+    return null;
+  }
+
   if (!canRunMeeting) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -445,7 +790,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  const readOnly = status === "adjourned" || status === "minutes_draft" || status === "approved";
+  const readOnly = false; // If we reach here, status is "open"
   const meetingStartedAt = (meeting.started_at as string) ?? null;
 
   // ─── Noticed → Show start flow ─────────────────────────────
@@ -473,7 +818,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  // ─── Open / Adjourned → Three-panel layout ───────────────────
+  // ─── Open → Three-panel layout ────────────────────────────────
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -481,9 +826,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">{meeting.title as string}</h1>
-          <Badge variant={status === "open" ? "default" : "secondary"}>
-            {status === "open" ? "In Progress" : status}
-          </Badge>
+          <Badge variant="default">In Progress</Badge>
           {board && (
             <span className="text-sm text-muted-foreground">{board.name as string}</span>
           )}
@@ -495,17 +838,52 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
               <MeetingTimer startedAt={meetingStartedAt} />
             </div>
           )}
-          {quorum && !quorum.hasQuorum && status === "open" && (
+          {quorum && !quorum.hasQuorum && (
             <Badge variant="destructive" className="text-xs">
               <AlertTriangle className="mr-1 h-3 w-3" />
               No Quorum
             </Badge>
           )}
-          {!readOnly && (
-            <AdjournButton meetingId={meetingId} currentItemId={currentItemId} currentTransitionId={(currentTransition?.id as string) ?? null} />
+          {isPostExecSession && (
+            <Badge variant="outline" className="border-amber-300 text-amber-700 text-xs">
+              Post-Session Actions
+            </Badge>
+          )}
+          {!isInExecSession && (
+            <AdjournmentControls
+              presidingOfficerName={presidingOfficerName}
+              onAdjournMotion={handleAdjournMotion}
+              onAdjournWithoutObjection={handleAdjournWithoutObjection}
+            />
           )}
         </div>
       </div>
+
+      {/* Executive session banner */}
+      {isInExecSession && activeExecSession && (
+        <ExecSessionBanner
+          citation={(activeExecSession.statutory_basis as string) ?? ""}
+          enteredAt={(activeExecSession.entered_at as string) ?? ""}
+          onReturnToPublic={handleReturnToPublic}
+        />
+      )}
+
+      {/* Post-exec session action bar */}
+      {isPostExecSession && !isInExecSession && (
+        <div className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-6 py-2 dark:border-amber-900 dark:bg-amber-950/30">
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            Recording post-executive-session actions. File any motions resulting from executive session discussion.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-300 text-amber-700"
+            onClick={handleDonePostExecActions}
+          >
+            Done with Post-Session Actions
+          </Button>
+        </div>
+      )}
 
       {/* Three-panel layout */}
       <div className="flex flex-1 overflow-hidden">
@@ -517,6 +895,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             readOnly={readOnly}
             collapsed={agendaCollapsed}
             onToggleCollapse={() => setAgendaCollapsed((c) => !c)}
+            execSessionItemId={isInExecSession ? execSessionItemId : undefined}
           />
         </ErrorBoundary>
 
@@ -554,6 +933,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             readOnly={readOnly}
             externalRecusalMember={recusalMemberFromAttendance}
             onExternalRecusalConsumed={() => setRecusalMemberFromAttendance(null)}
+            isInExecSession={isInExecSession}
+            onEnterExecSession={() => setExecSessionDialogOpen(true)}
           />
         </ErrorBoundary>
 
@@ -585,58 +966,61 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           />
         </ErrorBoundary>
       </div>
+
+      {/* ─── Dialogs ─────────────────────────────────────────────── */}
+
+      {/* Executive session citation dialog */}
+      <ExecutiveSessionDialog
+        open={execSessionDialogOpen}
+        onOpenChange={setExecSessionDialogOpen}
+        onProceed={handleExecSessionProceed}
+      />
+
+      {/* Executive session entry motion dialog (reuses MotionCaptureDialog) */}
+      {pendingExecCitation && currentItemId && (
+        <MotionCaptureDialog
+          open={execMotionDialogOpen}
+          onOpenChange={handleExecMotionDialogClose}
+          mode={{
+            type: "custom",
+            motionType: "main",
+            prefillText: pendingExecCitation.motionText,
+          }}
+          meetingId={meetingId}
+          townId={townId}
+          agendaItemId={currentItemId}
+          presentMembers={presentMembers}
+        />
+      )}
+
+      {/* Exit executive session dialog */}
+      {activeExecSession && (
+        <ExitExecutiveSessionDialog
+          open={exitExecDialogOpen}
+          onOpenChange={setExitExecDialogOpen}
+          execSessionId={activeExecSession.id as string}
+          onReturnWithActions={handleExitExecWithActions}
+          onReturnNoActions={handleExitExecNoActions}
+        />
+      )}
+
+      {/* Adjournment motion dialog (reuses MotionCaptureDialog) */}
+      {currentItemId && (
+        <MotionCaptureDialog
+          open={adjournMotionDialogOpen}
+          onOpenChange={setAdjournMotionDialogOpen}
+          mode={{
+            type: "custom",
+            motionType: "adjourn",
+            prefillText: "to adjourn the meeting",
+          }}
+          meetingId={meetingId}
+          townId={townId}
+          agendaItemId={currentItemId}
+          presentMembers={presentMembers}
+        />
+      )}
     </div>
-  );
-}
-
-// ─── Adjourn Button ─────────────────────────────────────────────
-
-function AdjournButton({
-  meetingId,
-  currentItemId,
-  currentTransitionId,
-}: {
-  meetingId: string;
-  currentItemId: string | null;
-  currentTransitionId: string | null;
-}) {
-  const powerSync = usePowerSync();
-  const [confirming, setConfirming] = useState(false);
-
-  const handleAdjourn = async () => {
-    const now = new Date().toISOString();
-
-    if (currentTransitionId) {
-      await powerSync.execute(
-        "UPDATE agenda_item_transitions SET ended_at = ? WHERE id = ?",
-        [now, currentTransitionId],
-      );
-    }
-
-    await powerSync.execute(
-      "UPDATE meetings SET status = 'adjourned', ended_at = ?, current_agenda_item_id = NULL, updated_at = ? WHERE id = ?",
-      [now, now, meetingId],
-    );
-  };
-
-  if (confirming) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Adjourn meeting?</span>
-        <Button size="sm" variant="destructive" onClick={() => void handleAdjourn()}>
-          Confirm
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-          Cancel
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
-      Adjourn Meeting
-    </Button>
   );
 }
 
