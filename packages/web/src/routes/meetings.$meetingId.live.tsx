@@ -446,6 +446,82 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     void handleMeetingEnd("motion", motionId);
   }, [motionRows, status]);
 
+  // Reactive: when a minutes-approval motion passes → auto-approve minutes
+  useEffect(() => {
+    if (!motionRows || !itemRows) return;
+    const items = itemRows as Array<Record<string, unknown>>;
+    const motions = motionRows as Array<Record<string, unknown>>;
+
+    // Find agenda items linked to a minutes document
+    const approvalItems = items.filter(
+      (item) => item.source_minutes_document_id,
+    );
+    if (approvalItems.length === 0) return;
+
+    for (const item of approvalItems) {
+      const itemMotions = motions.filter(
+        (m) => m.agenda_item_id === item.id && m.status === "passed",
+      );
+
+      for (const motion of itemMotions) {
+        const key = `minutes_approve_${motion.id}`;
+        if (processedMotionIds.current.has(key)) continue;
+        processedMotionIds.current.add(key);
+
+        const docId = item.source_minutes_document_id as string;
+        const now = new Date().toISOString();
+        const motionText = String(motion.motion_text ?? "").toLowerCase();
+        const asAmended = motionText.includes("as amended") ||
+          motionText.includes("with corrections") ? 1 : 0;
+
+        // Update minutes_document status to approved
+        void powerSync.execute(
+          "UPDATE minutes_documents SET status = ?, approved_at = ?, approved_by_motion_id = ?, approved_as_amended = ?, updated_at = ? WHERE id = ?",
+          ["approved", now, motion.id, asAmended, now, docId],
+        );
+
+        // Fire notification event
+        void powerSync.execute(
+          "INSERT INTO notification_events (id, town_id, event_type, payload, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [
+            crypto.randomUUID(),
+            townId,
+            "minutes_approved",
+            JSON.stringify({ minutes_document_id: docId, meeting_id: meetingId, approved_by_motion_id: motion.id }),
+            "pending",
+            now,
+          ],
+        );
+
+        // Fire API call to regenerate PDF without DRAFT watermark (fire-and-forget)
+        void (async () => {
+          try {
+            const { createClient } = await import("@supabase/supabase-js");
+            const supabase = createClient(
+              import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
+              import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
+            );
+            const { data: sessionData } = await supabase.auth.getSession();
+            const accessToken = sessionData?.session?.access_token;
+            if (accessToken) {
+              const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+              await fetch(`${apiBase}/api/meetings/${meetingId}/minutes/render`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify({ is_draft: false }),
+              });
+            }
+          } catch {
+            // Fire-and-forget — PDF regeneration failure is non-critical
+          }
+        })();
+      }
+    }
+  }, [motionRows, itemRows, powerSync, townId, meetingId]);
+
   // Track post-session action motions: any motion created after returning
   // from exec session gets linked to the exec session record
   useEffect(() => {

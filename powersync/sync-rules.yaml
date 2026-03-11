@@ -89,7 +89,8 @@ bucket_definitions:
       - SELECT id, meeting_id, town_id, section_type, sort_order, title,
                description, presenter, estimated_duration, parent_item_id,
                status, staff_resource, background, recommendation,
-               suggested_motion, operator_notes, created_at, updated_at
+               suggested_motion, operator_notes, source_minutes_document_id,
+               created_at, updated_at
         FROM agenda_item
         WHERE town_id = bucket.town_id
 
@@ -141,6 +142,7 @@ bucket_definitions:
                html_rendered, pdf_storage_path, minutes_style, generated_by,
                approved_at, approved_by_motion_id,
                submitted_for_review_at, published_at, created_by,
+               original_content_json, amendments_history, approved_as_amended,
                created_at, updated_at
         FROM minutes_document
         WHERE town_id = bucket.town_id

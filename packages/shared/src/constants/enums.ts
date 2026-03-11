@@ -305,6 +305,7 @@ export const NotificationEventType = {
   MEETING_SCHEDULED: "meeting_scheduled",
   AGENDA_PUBLISHED: "agenda_published",
   MEETING_CANCELLED: "meeting_cancelled",
+  MINUTES_SUBMITTED_REVIEW: "minutes_submitted_review",
   MINUTES_APPROVED: "minutes_approved",
   MINUTES_PUBLISHED: "minutes_published",
   STRAW_POLL_CREATED: "straw_poll_created",

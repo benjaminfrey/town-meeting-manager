@@ -6,6 +6,9 @@
  *
  * POST /api/meetings/:meetingId/minutes/regenerate
  *   — Overwrite an existing minutes draft
+ *
+ * POST /api/meetings/:meetingId/minutes/render
+ *   — Re-render HTML + PDF from existing content_json (no JSON regeneration)
  */
 
 import type { FastifyInstance } from "fastify";
@@ -14,7 +17,7 @@ import { assembleMinutesJson } from "../services/minutes-assembler.js";
 import { formatMinutes } from "../services/minutes-formatters.js";
 import { renderMinutes } from "../services/templates.js";
 import { generateMinutesPdf } from "../services/minutes-pdf.js";
-import type { MinutesRenderOptions } from "@town-meeting/shared";
+import type { MinutesRenderOptions, MinutesContentJson } from "@town-meeting/shared";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -24,6 +27,10 @@ interface MeetingParams {
 
 interface GenerateBody {
   minutes_style_override?: string;
+}
+
+interface RenderBody {
+  is_draft?: boolean;
 }
 
 // DB row types
@@ -57,6 +64,8 @@ interface MinutesDocRow {
   id: string;
   meeting_id: string;
   status: string;
+  content_json: unknown;
+  minutes_style: string | null;
 }
 
 // ─── Route Registration ─────────────────────────────────────────
@@ -204,6 +213,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             town_id: meeting.town_id,
             status: "draft",
             content_json: contentJson,
+            original_content_json: contentJson,
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
@@ -376,6 +386,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           .update({
             status: "draft",
             content_json: contentJson,
+            original_content_json: contentJson,
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
@@ -407,6 +418,169 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         request.log.error(err, "Minutes regeneration failed");
         return reply.internalServerError(
           `Minutes regeneration failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        );
+      }
+    },
+  );
+
+  // ─── Render Minutes (re-render HTML + PDF from existing content_json) ──
+  fastify.post<{ Params: MeetingParams; Body: RenderBody }>(
+    "/meetings/:meetingId/minutes/render",
+    {
+      preHandler: [
+        fastify.verifyAuth,
+        requirePermission("edit_draft_minutes"),
+      ],
+    },
+    async (request, reply) => {
+      const { meetingId } = request.params;
+      const user = request.user!;
+      const isDraft = request.body?.is_draft ?? true;
+
+      // 1. Fetch meeting
+      const { data: meeting, error: meetingErr } = await fastify.supabase
+        .from("meeting")
+        .select("id, board_id, town_id, title, meeting_type, scheduled_date, status")
+        .eq("id", meetingId)
+        .single<MeetingRow>();
+
+      if (meetingErr || !meeting) {
+        return reply.notFound("Meeting not found");
+      }
+
+      if (meeting.town_id !== user.townId) {
+        return reply.forbidden("Meeting belongs to a different town");
+      }
+
+      // 2. Fetch existing minutes document
+      const { data: existingMinutes } = await fastify.supabase
+        .from("minutes_document")
+        .select("id, meeting_id, status, content_json, minutes_style")
+        .eq("meeting_id", meetingId)
+        .single<MinutesDocRow>();
+
+      if (!existingMinutes) {
+        return reply.notFound("No existing minutes found. Use /generate first.");
+      }
+
+      if (!existingMinutes.content_json) {
+        return reply.badRequest("Minutes document has no content_json to render.");
+      }
+
+      // 3. Fetch board and town for render options
+      const [boardResult, townResult] = await Promise.all([
+        fastify.supabase
+          .from("board")
+          .select("id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override")
+          .eq("id", meeting.board_id)
+          .single<BoardRow>(),
+        fastify.supabase
+          .from("town")
+          .select("id, name, minutes_style, seal_url")
+          .eq("id", meeting.town_id)
+          .single<TownRow>(),
+      ]);
+
+      const board = boardResult.data;
+      const town = townResult.data;
+      if (!board || !town) {
+        return reply.notFound("Board or town not found");
+      }
+
+      const minutesStyle =
+        existingMinutes.minutes_style ??
+        board.minutes_style_override ??
+        town.minutes_style ??
+        "summary";
+
+      const renderOptions: MinutesRenderOptions = {
+        minutes_style: minutesStyle as MinutesRenderOptions["minutes_style"],
+        motion_display_format: (board.motion_display_format ?? "inline_narrative") as MinutesRenderOptions["motion_display_format"],
+        member_reference_style: (board.member_reference_style ?? "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
+        certification_format: (board.certification_format ?? "prepared_by") as MinutesRenderOptions["certification_format"],
+        is_draft: isDraft,
+        town_seal_url: town.seal_url,
+      };
+
+      try {
+        // 4. Format content from existing JSON
+        const contentJson = existingMinutes.content_json as MinutesContentJson;
+        const formattedContent = formatMinutes(contentJson, renderOptions);
+
+        // 5. Render HTML
+        const meetingTypeLabels: Record<string, string> = {
+          regular: "Regular Meeting",
+          special: "Special Meeting",
+          public_hearing: "Public Hearing",
+          emergency: "Emergency Meeting",
+        };
+        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00")
+          .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+        const html = renderMinutes({
+          isDraft,
+          sealUrl: town.seal_url,
+          townName: town.name,
+          boardName: board.name,
+          meetingHeader: formattedContent.meeting_header as unknown as Record<string, unknown>,
+          attendance: formattedContent.attendance as unknown as Record<string, unknown>,
+          sections: formattedContent.sections as unknown as Array<Record<string, unknown>>,
+          adjournmentText: formattedContent.adjournment_text,
+          certification: formattedContent.certification as unknown as Record<string, unknown>,
+          formattedDate,
+          formattedMeetingType: meetingTypeLabels[meeting.meeting_type] ?? meeting.meeting_type,
+        });
+
+        // 6. Generate PDF
+        const pdfStoragePath = await generateMinutesPdf(
+          fastify.supabase,
+          html,
+          meetingId,
+          meeting.town_id,
+          meeting.board_id,
+          {
+            townName: town.name,
+            boardName: board.name,
+            meetingDate: meeting.scheduled_date,
+            isDraft,
+          },
+        );
+
+        // 7. Update minutes_document with new HTML + PDF
+        const now = new Date().toISOString();
+        const { data: updated, error: updateErr } = await fastify.supabase
+          .from("minutes_document")
+          .update({
+            html_rendered: html,
+            pdf_storage_path: pdfStoragePath,
+            updated_at: now,
+          })
+          .eq("id", existingMinutes.id)
+          .select("id, status, minutes_style, pdf_storage_path, created_at")
+          .single();
+
+        if (updateErr) {
+          request.log.error(updateErr, "Failed to update minutes_document");
+          return reply.internalServerError("Failed to update minutes document");
+        }
+
+        const { data: { publicUrl } } = fastify.supabase.storage
+          .from("documents")
+          .getPublicUrl(pdfStoragePath);
+
+        return {
+          id: updated.id,
+          status: updated.status,
+          minutes_style: updated.minutes_style,
+          pdf_url: publicUrl,
+          rendered: true,
+          is_draft: isDraft,
+          created_at: updated.created_at,
+        };
+      } catch (err) {
+        request.log.error(err, "Minutes render failed");
+        return reply.internalServerError(
+          `Minutes render failed: ${err instanceof Error ? err.message : "Unknown error"}`,
         );
       }
     },

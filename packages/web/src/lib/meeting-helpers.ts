@@ -95,6 +95,10 @@ export async function instantiateAgendaFromTemplate(
 /**
  * Find meetings needing minutes approval and insert them as child items
  * under the minutes_approval section.
+ *
+ * Queries minutes_documents in "review" status for this board and links
+ * each approval agenda item to the minutes document via
+ * source_minutes_document_id. Also pre-populates the suggested_motion.
  */
 async function autoPopulateMinutesApproval(
   powerSync: PowerSyncLike,
@@ -104,13 +108,60 @@ async function autoPopulateMinutesApproval(
   sectionId: string,
   now: string,
 ): Promise<void> {
-  const rows = await powerSync.getAll(
+  // Query minutes documents in review status for this board
+  const minutesDocs = await powerSync.getAll(
+    `SELECT id, meeting_id, approved_as_amended, amendments_history FROM minutes_documents WHERE board_id = ? AND status = 'review'`,
+    [boardId],
+  );
+
+  // Also find meetings with adjourned/minutes_draft status that might not have minutes yet
+  const meetingRows = await powerSync.getAll(
     `SELECT id, title, scheduled_date FROM meetings WHERE board_id = ? AND status IN ('adjourned', 'minutes_draft') AND id != ? ORDER BY scheduled_date ASC`,
     [boardId, meetingId],
   );
 
-  for (let j = 0; j < rows.length; j++) {
-    const row = rows[j]!;
+  // Get the board name for the suggested motion
+  const boardRows = await powerSync.getAll(
+    `SELECT name FROM boards WHERE id = ?`,
+    [boardId],
+  );
+  const boardName = boardRows[0] ? String(boardRows[0].name ?? "") : "";
+
+  // Build a lookup: meeting_id → minutes_document for reviewed minutes
+  const minutesByMeeting = new Map<string, Record<string, unknown>>();
+  for (const doc of minutesDocs) {
+    minutesByMeeting.set(String(doc.meeting_id), doc);
+  }
+
+  // Get meeting info for reviewed minutes that might not be in meetingRows
+  const reviewedMeetingIds = minutesDocs
+    .map((d) => String(d.meeting_id))
+    .filter((mid) => mid !== meetingId);
+  const existingMeetingIds = new Set(meetingRows.map((r) => String(r.id)));
+
+  // Fetch any reviewed meeting dates not already in meetingRows
+  for (const mid of reviewedMeetingIds) {
+    if (!existingMeetingIds.has(mid)) {
+      const rows = await powerSync.getAll(
+        `SELECT id, title, scheduled_date FROM meetings WHERE id = ?`,
+        [mid],
+      );
+      if (rows[0]) meetingRows.push(rows[0]);
+    }
+  }
+
+  // Sort by date
+  meetingRows.sort((a, b) => {
+    const da = String(a.scheduled_date ?? "");
+    const db = String(b.scheduled_date ?? "");
+    return da.localeCompare(db);
+  });
+
+  let sortOrder = 0;
+  for (const row of meetingRows) {
+    const mid = String(row.id);
+    if (mid === meetingId) continue;
+
     const date = String(row.scheduled_date ?? "");
     const formattedDate = date
       ? new Date(date + "T00:00:00").toLocaleDateString("en-US", {
@@ -120,24 +171,47 @@ async function autoPopulateMinutesApproval(
         })
       : "Unknown Date";
 
+    const minutesDoc = minutesByMeeting.get(mid);
+    const docId = minutesDoc ? String(minutesDoc.id) : null;
+
+    // Determine if amendments were applied
+    const hasAmendments = minutesDoc
+      ? (() => {
+          try {
+            const history = JSON.parse(String(minutesDoc.amendments_history || "[]"));
+            return Array.isArray(history) && history.length > 0;
+          } catch {
+            return false;
+          }
+        })()
+      : false;
+
+    const suffix = hasAmendments ? "as amended" : "as presented";
+    const suggestedMotion = boardName
+      ? `to approve the minutes of the ${boardName} meeting of ${formattedDate} ${suffix}`
+      : `to approve the minutes of the meeting of ${formattedDate} ${suffix}`;
+
     const childId = crypto.randomUUID();
     await powerSync.execute(
-      `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, suggested_motion, source_minutes_document_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         childId,
         meetingId,
         townId,
         "minutes_approval",
-        j,
+        sortOrder,
         `Approval of Minutes — ${formattedDate}`,
         null,
         null,
         null,
         sectionId,
         "pending",
+        suggestedMotion,
+        docId,
         now,
         now,
       ],
     );
+    sortOrder++;
   }
 }

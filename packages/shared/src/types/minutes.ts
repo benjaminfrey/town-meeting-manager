@@ -26,8 +26,19 @@ export interface MinutesDocument {
   submitted_for_review_at: string | null;
   published_at: string | null;
   created_by: string | null;
+  original_content_json: Record<string, unknown> | null;
+  amendments_history: AmendmentHistoryEntry[];
+  approved_as_amended: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AmendmentHistoryEntry {
+  round: number;
+  returned_at: string;
+  reason: string;
+  returned_by: string;
+  resubmitted_at: string | null;
 }
 
 export interface MinutesSection {

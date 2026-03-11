@@ -45,6 +45,7 @@ export const NotificationEventSchema = z.object({
     NotificationEventType.MEETING_SCHEDULED,
     NotificationEventType.AGENDA_PUBLISHED,
     NotificationEventType.MEETING_CANCELLED,
+    NotificationEventType.MINUTES_SUBMITTED_REVIEW,
     NotificationEventType.MINUTES_APPROVED,
     NotificationEventType.MINUTES_PUBLISHED,
     NotificationEventType.STRAW_POLL_CREATED,

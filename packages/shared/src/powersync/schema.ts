@@ -153,6 +153,7 @@ export const agenda_items = new TableV2({
   recommendation: column.text,
   suggested_motion: column.text,
   operator_notes: column.text,
+  source_minutes_document_id: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
@@ -221,6 +222,9 @@ export const minutes_documents = new TableV2({
   submitted_for_review_at: column.text,
   published_at: column.text,
   created_by: column.text,
+  original_content_json: column.text,
+  amendments_history: column.text,
+  approved_as_amended: column.integer, // boolean → 0/1
   created_at: column.text,
   updated_at: column.text,
 });
