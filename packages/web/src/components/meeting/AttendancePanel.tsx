@@ -8,7 +8,7 @@
  */
 
 import { usePowerSync } from "@powersync/react";
-import { Check, X, Clock, LogOut, Crown, BookOpen } from "lucide-react";
+import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MeetingTimer } from "./MeetingTimer";
@@ -45,6 +45,8 @@ interface AttendancePanelProps {
   currentItemStartedAt: string | null;
   currentItemEstimatedDuration: number | null;
   readOnly?: boolean;
+  /** Called when the "Recuse" button is clicked for a present member */
+  onRecuse?: (member: MemberInfo) => void;
 }
 
 const STATUS_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
@@ -73,6 +75,7 @@ export function AttendancePanel({
   currentItemStartedAt,
   currentItemEstimatedDuration,
   readOnly,
+  onRecuse,
 }: AttendancePanelProps) {
   const powerSync = usePowerSync();
 
@@ -140,35 +143,50 @@ export function AttendancePanel({
             const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.absent;
             const isPresiding = member.boardMemberId === presidingOfficerId;
             const isSecretary = member.personId === recordingSecretaryId;
+            const isPresent = status === "present" || status === "remote" || status === "late_arrival";
 
             return (
-              <button
-                key={member.boardMemberId}
-                onClick={() => void cycleStatus(member)}
-                disabled={readOnly}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors",
-                  readOnly ? "cursor-default" : "hover:bg-muted",
-                )}
-              >
-                <span className={cn("flex-shrink-0", config?.color)}>
-                  {config?.icon}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="truncate font-medium">{member.name}</span>
-                    {isPresiding && (
-                      <Crown className="h-3 w-3 flex-shrink-0 text-amber-500" title="Presiding Officer" />
-                    )}
-                    {isSecretary && (
-                      <BookOpen className="h-3 w-3 flex-shrink-0 text-blue-500" title="Recording Secretary" />
+              <div key={member.boardMemberId} className="flex items-center gap-0.5">
+                <button
+                  onClick={() => void cycleStatus(member)}
+                  disabled={readOnly}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+                    readOnly ? "cursor-default" : "hover:bg-muted",
+                  )}
+                >
+                  <span className={cn("flex-shrink-0", config?.color)}>
+                    {config?.icon}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <span className="truncate font-medium">{member.name}</span>
+                      {isPresiding && (
+                        <Crown className="h-3 w-3 flex-shrink-0 text-amber-500" title="Presiding Officer" />
+                      )}
+                      {isSecretary && (
+                        <BookOpen className="h-3 w-3 flex-shrink-0 text-blue-500" title="Recording Secretary" />
+                      )}
+                    </div>
+                    {member.seatTitle && (
+                      <span className="text-xs text-muted-foreground">{member.seatTitle}</span>
                     )}
                   </div>
-                  {member.seatTitle && (
-                    <span className="text-xs text-muted-foreground">{member.seatTitle}</span>
-                  )}
-                </div>
-              </button>
+                </button>
+                {/* Recuse button — only for present members when not read-only */}
+                {isPresent && !readOnly && onRecuse && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRecuse(member);
+                    }}
+                    className="flex-shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title={`Record recusal for ${member.name}`}
+                  >
+                    <ShieldOff className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>

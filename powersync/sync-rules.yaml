@@ -92,7 +92,8 @@ bucket_definitions:
         WHERE town_id = bucket.town_id
 
       - SELECT id, agenda_item_id, meeting_id, town_id, motion_text,
-               motion_type, moved_by, seconded_by, status, created_at
+               motion_type, moved_by, seconded_by, status,
+               parent_motion_id, vote_summary, created_at
         FROM motion
         WHERE town_id = bucket.town_id
 

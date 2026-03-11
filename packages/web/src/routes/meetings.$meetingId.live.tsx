@@ -45,6 +45,12 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const powerSync = usePowerSync();
   const currentUser = useCurrentUser();
   const [agendaCollapsed, setAgendaCollapsed] = useState(false);
+  const [recusalMemberFromAttendance, setRecusalMemberFromAttendance] = useState<{
+    boardMemberId: string;
+    personId: string;
+    name: string;
+    seatTitle: string | null;
+  } | null>(null);
 
   // ─── Permission check ─────────────────────────────────────────
   const canRunMeeting = currentUser
@@ -94,6 +100,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   const { data: motionRows } = useQuery(
     "SELECT * FROM motions WHERE meeting_id = ?",
+    [meetingId],
+  );
+
+  const { data: voteRecordRows } = useQuery(
+    "SELECT * FROM vote_records WHERE meeting_id = ?",
     [meetingId],
   );
 
@@ -152,6 +163,16 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     });
     return map;
   }, [motionRows]);
+
+  const votesByMotion = useMemo(() => {
+    const map = new Map<string, Array<Record<string, unknown>>>();
+    (voteRecordRows ?? []).forEach((v: Record<string, unknown>) => {
+      const mId = v.motion_id as string;
+      if (!map.has(mId)) map.set(mId, []);
+      map.get(mId)!.push(v);
+    });
+    return map;
+  }, [voteRecordRows]);
 
   const exhibitsByItem = useMemo(() => {
     const map = new Map<string, Array<Record<string, unknown>>>();
@@ -261,6 +282,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       movedBy: (m.moved_by as string) ?? null,
       secondedBy: (m.seconded_by as string) ?? null,
       status: (m.status as string) ?? "pending",
+      parentMotionId: (m.parent_motion_id as string) ?? null,
+      voteSummary: (m.vote_summary as string) ?? null,
     }));
 
     const itemExhibits = (exhibitsByItem.get(currentItemId) ?? []).map((e: Record<string, unknown>) => ({
@@ -502,13 +525,35 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             item={currentItemDetail}
             meetingId={meetingId}
             townId={townId}
+            allMembers={members}
             presentMembers={presentMembers}
             memberNameMap={memberNameMap}
+            attendanceRecords={(attendanceRows ?? []) as Array<{
+              id: string;
+              board_member_id: string | null;
+              person_id: string;
+              status: string;
+            }>}
+            votesByMotion={votesByMotion as unknown as Map<string, Array<{
+              id: string;
+              motion_id: string;
+              board_member_id: string;
+              vote: string;
+              recusal_reason: string | null;
+            }>>}
+            motionDisplayFormat={(board?.motion_display_format as string) ?? null}
+            boardQuorumConfig={{
+              quorumType: (board?.quorum_type as string) ?? null,
+              quorumValue: (board?.quorum_value as number) ?? null,
+              memberCount: (board?.member_count as number) ?? 0,
+            }}
             onNavigatePrev={navigatePrev}
             onNavigateNext={navigateNext}
             hasPrev={currentFlatIdx > 0}
             hasNext={currentFlatIdx < flatItems.length - 1}
             readOnly={readOnly}
+            externalRecusalMember={recusalMemberFromAttendance}
+            onExternalRecusalConsumed={() => setRecusalMemberFromAttendance(null)}
           />
         </ErrorBoundary>
 
@@ -536,6 +581,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             currentItemStartedAt={(currentTransition?.started_at as string) ?? null}
             currentItemEstimatedDuration={currentItemDetail?.estimatedDuration ?? null}
             readOnly={readOnly}
+            onRecuse={(member) => setRecusalMemberFromAttendance(member)}
           />
         </ErrorBoundary>
       </div>

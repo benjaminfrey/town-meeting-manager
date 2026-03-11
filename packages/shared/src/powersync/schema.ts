@@ -175,6 +175,8 @@ export const motions = new TableV2({
   moved_by: column.text,
   seconded_by: column.text,
   status: column.text,
+  parent_motion_id: column.text,
+  vote_summary: column.text, // JSONB stored as TEXT in PowerSync
   created_at: column.text,
 });
 
