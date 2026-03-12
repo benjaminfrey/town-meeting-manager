@@ -14,6 +14,7 @@ import { documentRoutes } from "./routes/documents.js";
 import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
 import { notificationRoutes } from "./routes/notifications.js";
+import { invitationRoutes } from "./routes/invitations.js";
 import { NotificationService } from "./services/notification-service.js";
 
 export async function buildServer() {
@@ -42,6 +43,7 @@ export async function buildServer() {
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });
   await app.register(notificationRoutes, { prefix: "/api" });
+  await app.register(invitationRoutes, { prefix: "/api" });
 
   // ─── Retry processor — runs every 60 seconds ─────────────────────
   const retryInterval = setInterval(() => {

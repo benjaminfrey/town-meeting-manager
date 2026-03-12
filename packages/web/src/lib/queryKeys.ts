@@ -119,4 +119,16 @@ export const queryKeys = {
   pushSubscriptions: {
     byUser: (userId: string) => ['pushSubscriptions', 'byUser', userId] as const,
   },
+
+  // Invitations
+  invitations: {
+    byPerson: (personId: string) => ['invitations', 'byPerson', personId] as const,
+    byBoard: (boardId: string) => ['invitations', 'byBoard', boardId] as const,
+    byTown: (townId: string) => ['invitations', 'byTown', townId] as const,
+  },
+
+  // Notification preferences
+  notificationPreferences: {
+    mine: ['notificationPreferences', 'mine'] as const,
+  },
 } as const;

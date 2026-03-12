@@ -13,6 +13,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { requirePermission } from "../plugins/auth.js";
+import { triggerMinutesReview, triggerMinutesApproved } from "../services/notification-triggers.js";
 import { assembleMinutesJson } from "../services/minutes-assembler.js";
 import { formatMinutes } from "../services/minutes-formatters.js";
 import { renderMinutes } from "../services/templates.js";
@@ -583,6 +584,108 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           `Minutes render failed: ${err instanceof Error ? err.message : "Unknown error"}`,
         );
       }
+    },
+  );
+
+  // ─── Submit for Review ──────────────────────────────────────────
+  fastify.post<{ Params: MeetingParams }>(
+    "/meetings/:meetingId/minutes/submit",
+    {
+      preHandler: [
+        fastify.verifyAuth,
+        requirePermission("submit_minutes_review"),
+      ],
+    },
+    async (request, reply) => {
+      const { meetingId } = request.params;
+      const user = request.user!;
+      const now = new Date().toISOString();
+
+      const { data: meeting } = await fastify.supabase
+        .from("meeting")
+        .select("id, town_id")
+        .eq("id", meetingId)
+        .single<{ id: string; town_id: string }>();
+
+      if (!meeting || meeting.town_id !== user.townId) {
+        return reply.notFound("Meeting not found");
+      }
+
+      const { data: minutesDoc } = await fastify.supabase
+        .from("minutes_document")
+        .select("id, status")
+        .eq("meeting_id", meetingId)
+        .single<{ id: string; status: string }>();
+
+      if (!minutesDoc) return reply.notFound("No minutes document found");
+      if (minutesDoc.status !== "draft") {
+        return reply.badRequest(`Cannot submit minutes with status "${minutesDoc.status}"`);
+      }
+
+      await fastify.supabase
+        .from("minutes_document")
+        .update({ status: "review", submitted_for_review_at: now, updated_at: now })
+        .eq("id", minutesDoc.id);
+
+      // Fire notification async — do not block response
+      setImmediate(() => {
+        triggerMinutesReview(fastify.supabase, meetingId, minutesDoc.id).catch((err: unknown) => {
+          fastify.log.error({ err }, "triggerMinutesReview failed");
+        });
+      });
+
+      return reply.send({ ok: true, status: "review" });
+    },
+  );
+
+  // ─── Approve Minutes ────────────────────────────────────────────
+  fastify.post<{ Params: MeetingParams }>(
+    "/meetings/:meetingId/minutes/approve",
+    {
+      preHandler: [
+        fastify.verifyAuth,
+        requirePermission("approve_minutes"),
+      ],
+    },
+    async (request, reply) => {
+      const { meetingId } = request.params;
+      const user = request.user!;
+      const now = new Date().toISOString();
+
+      const { data: meeting } = await fastify.supabase
+        .from("meeting")
+        .select("id, town_id")
+        .eq("id", meetingId)
+        .single<{ id: string; town_id: string }>();
+
+      if (!meeting || meeting.town_id !== user.townId) {
+        return reply.notFound("Meeting not found");
+      }
+
+      const { data: minutesDoc } = await fastify.supabase
+        .from("minutes_document")
+        .select("id, status")
+        .eq("meeting_id", meetingId)
+        .single<{ id: string; status: string }>();
+
+      if (!minutesDoc) return reply.notFound("No minutes document found");
+      if (minutesDoc.status !== "review") {
+        return reply.badRequest(`Cannot approve minutes with status "${minutesDoc.status}"`);
+      }
+
+      await fastify.supabase
+        .from("minutes_document")
+        .update({ status: "approved", approved_at: now, updated_at: now })
+        .eq("id", minutesDoc.id);
+
+      // Fire notification async
+      setImmediate(() => {
+        triggerMinutesApproved(fastify.supabase, meetingId, minutesDoc.id).catch((err: unknown) => {
+          fastify.log.error({ err }, "triggerMinutesApproved failed");
+        });
+      });
+
+      return reply.send({ ok: true, status: "approved" });
     },
   );
 }

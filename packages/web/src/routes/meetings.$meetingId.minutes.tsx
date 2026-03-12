@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  CheckCircle2,
   ChevronRight,
   Clock,
   Download,
@@ -355,31 +356,13 @@ export default function MinutesReviewPage({
           .throwOnError();
       }
 
-      // Create notification event
-      const notifId = crypto.randomUUID();
-      await supabase
-        .from("notification_event")
-        .insert({
-          id: notifId,
-          town_id: townId,
-          event_type: "minutes_submitted_review",
-          payload: {
-            meeting_id: meetingId,
-            board_id: boardId,
-            minutes_document_id: docId,
-          },
-          status: "pending",
-          created_at: now,
-        })
-        .throwOnError();
-
-      // Fire render API call (best effort)
+      // Call submit API: sets status="review" + fires minutes_review notification
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (token) {
           await fetch(
-            `${API_BASE}/api/meetings/${meetingId}/minutes/render`,
+            `${API_BASE}/api/meetings/${meetingId}/minutes/submit`,
             {
               method: "POST",
               headers: {
@@ -390,13 +373,44 @@ export default function MinutesReviewPage({
           );
         }
       } catch {
-        // Non-critical
+        // Non-critical — Supabase update already succeeded
       }
     },
     onSuccess: () => {
       invalidateMinutes();
       setSubmitDialogOpen(false);
       toast.success("Minutes submitted for board review");
+    },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch(
+        `${API_BASE}/api/meetings/${meetingId}/minutes/approve`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errData.message ?? `Approval failed (${res.status})`);
+      }
+    },
+    onSuccess: () => {
+      invalidateMinutes();
+      toast.success("Minutes approved");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to approve minutes");
     },
   });
 
@@ -413,22 +427,31 @@ export default function MinutesReviewPage({
         .eq("id", docId)
         .throwOnError();
 
-      const notifId = crypto.randomUUID();
-      await supabase
-        .from("notification_event")
-        .insert({
-          id: notifId,
-          town_id: townId,
-          event_type: "minutes_published",
-          payload: {
-            meeting_id: meetingId,
-            board_id: boardId,
-            minutes_document_id: docId,
-          },
-          status: "pending",
-          created_at: now,
-        })
-        .throwOnError();
+      // Fire minutes_published notification via API (best effort)
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) {
+          await fetch(`${API_BASE}/api/notifications/events`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              event_type: "minutes_published",
+              town_id: townId,
+              payload: {
+                meeting_id: meetingId,
+                board_id: boardId,
+                minutes_document_id: docId,
+              },
+            }),
+          });
+        }
+      } catch {
+        // Non-critical
+      }
     },
     onSuccess: () => {
       invalidateMinutes();
@@ -495,6 +518,10 @@ export default function MinutesReviewPage({
   const handleSubmitForReview = useCallback(() => {
     submitForReviewMutation.mutate();
   }, [submitForReviewMutation]);
+
+  const handleApprove = useCallback(() => {
+    approveMutation.mutate();
+  }, [approveMutation]);
 
   const handlePublish = useCallback(() => {
     publishMutation.mutate();
@@ -702,6 +729,16 @@ export default function MinutesReviewPage({
               className={`mr-1.5 h-4 w-4 ${regenerating ? "animate-spin" : ""}`}
             />
             Regenerate
+          </Button>
+        )}
+        {status === "review" && isAdmin && (
+          <Button
+            size="sm"
+            onClick={() => handleApprove()}
+            disabled={approveMutation.isPending}
+          >
+            <CheckCircle2 className="mr-1.5 h-4 w-4" />
+            Approve Minutes
           </Button>
         )}
         {status === "review" && isAdmin && (

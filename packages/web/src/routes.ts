@@ -27,6 +27,10 @@ export default [
     route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
     route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
     route("settings", "routes/settings.tsx"),
+    route("settings/notifications", "routes/settings.notifications.tsx"),
     route("admin/notifications", "routes/admin.notifications.tsx"),
   ]),
+
+  // Standalone routes — no layout
+  route("invite/accept", "routes/invite.accept.tsx"),
 ] satisfies RouteConfig;
