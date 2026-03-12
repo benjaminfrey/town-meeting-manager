@@ -303,12 +303,36 @@ export type NotificationChannel =
 
 export const NotificationEventType = {
   MEETING_SCHEDULED: "meeting_scheduled",
-  AGENDA_PUBLISHED: "agenda_published",
   MEETING_CANCELLED: "meeting_cancelled",
-  MINUTES_SUBMITTED_REVIEW: "minutes_submitted_review",
+  AGENDA_PUBLISHED: "agenda_published",
+  MINUTES_REVIEW: "minutes_review",
   MINUTES_APPROVED: "minutes_approved",
   MINUTES_PUBLISHED: "minutes_published",
+  ADMIN_ALERT: "admin_alert",
+  USER_INVITED: "user_invited",
+  PASSWORD_RESET: "password_reset",
+  // Phase 2
   STRAW_POLL_CREATED: "straw_poll_created",
 } as const;
 export type NotificationEventType =
   (typeof NotificationEventType)[keyof typeof NotificationEventType];
+
+export const NotificationDeliveryStatus = {
+  PENDING: "pending",
+  SENT: "sent",
+  DELIVERED: "delivered",
+  BOUNCED: "bounced",
+  FAILED: "failed",
+  COMPLAINED: "complained",
+} as const;
+export type NotificationDeliveryStatus =
+  (typeof NotificationDeliveryStatus)[keyof typeof NotificationDeliveryStatus];
+
+export const NotificationEventStatus = {
+  PENDING: "pending",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type NotificationEventStatus =
+  (typeof NotificationEventStatus)[keyof typeof NotificationEventStatus];

@@ -2,6 +2,8 @@ import type {
   ExhibitType,
   ExhibitVisibility,
   NotificationChannel,
+  NotificationDeliveryStatus,
+  NotificationEventStatus,
   NotificationEventType,
 } from "../constants/enums.js";
 
@@ -26,7 +28,7 @@ export interface NotificationEvent {
   town_id: string;
   event_type: NotificationEventType;
   payload: Record<string, unknown>;
-  status: string;
+  status: NotificationEventStatus;
   created_at: string;
   processed_at: string | null;
 }
@@ -34,12 +36,35 @@ export interface NotificationEvent {
 export interface NotificationDelivery {
   id: string;
   event_id: string;
-  town_id: string;
   subscriber_id: string;
   channel: NotificationChannel;
-  status: string;
-  external_id: string | null;
-  error_message: string | null;
-  created_at: string;
+  status: NotificationDeliveryStatus;
+  postmark_message_id: string | null;
+  sent_at: string | null;
   delivered_at: string | null;
+  opened_at: string | null;
+  error_message: string | null;
+  retry_count: number;
+  next_retry_at: string | null;
+  created_at: string;
+}
+
+export interface TownNotificationConfig {
+  id: string;
+  town_id: string;
+  postmark_server_token: string | null;
+  postmark_sender_email: string;
+  postmark_sender_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubscriberNotificationPreference {
+  id: string;
+  subscriber_id: string;
+  event_type: NotificationEventType;
+  channel: NotificationChannel;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }

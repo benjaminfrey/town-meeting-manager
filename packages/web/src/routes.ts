@@ -27,5 +27,6 @@ export default [
     route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
     route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
     route("settings", "routes/settings.tsx"),
+    route("admin/notifications", "routes/admin.notifications.tsx"),
   ]),
 ] satisfies RouteConfig;

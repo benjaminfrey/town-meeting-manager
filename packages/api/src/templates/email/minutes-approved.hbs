@@ -1,0 +1,49 @@
+{{! Subject: Minutes approved — {{boardName}}, {{meetingDate}} }}
+<h2 style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:22px;color:#1a3a6b;font-weight:normal;">
+  Minutes Approved
+</h2>
+
+<p style="margin:0 0 24px;font-size:13px;color:#6b7280;">{{townName}}</p>
+
+<p style="margin:0 0 16px;">
+  Hi {{recipientName}},
+</p>
+
+<p style="margin:0 0 24px;">
+  The minutes from the <strong>{{boardName}}</strong> meeting on
+  <strong>{{meetingDate}}</strong> have been approved and are now part of the official record.
+</p>
+
+<!-- Action buttons -->
+<table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+  <tr>
+    {{#if minutesUrl}}
+    <td style="padding-right:12px;">
+      <table cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="background-color:#1a3a6b;border-radius:4px;padding:12px 24px;">
+            <a href="{{minutesUrl}}"
+               style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;text-decoration:none;display:block;">
+              View Minutes
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+    {{/if}}
+    {{#if portalUrl}}
+    <td>
+      <table cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="background-color:#ffffff;border:1px solid #1a3a6b;border-radius:4px;padding:11px 24px;">
+            <a href="{{portalUrl}}"
+               style="color:#1a3a6b;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;text-decoration:none;display:block;">
+              Public Portal
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+    {{/if}}
+  </tr>
+</table>

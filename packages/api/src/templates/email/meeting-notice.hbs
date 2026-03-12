@@ -1,0 +1,68 @@
+{{! Subject: {{boardName}} meeting {{action}} — {{meetingDate}} }}
+<h2 style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:22px;color:#1a3a6b;font-weight:normal;">
+  {{boardName}} Meeting
+  {{#if (eq action "cancelled")}}
+  <span style="color:#b91c1c;">Cancelled</span>
+  {{else}}
+  <span style="color:#166534;">Scheduled</span>
+  {{/if}}
+</h2>
+
+<p style="margin:0 0 24px;font-size:13px;color:#6b7280;">{{townName}}</p>
+
+{{#if (eq action "cancelled")}}
+<p style="background-color:#fef2f2;border-left:4px solid #b91c1c;padding:12px 16px;margin:0 0 20px;color:#7f1d1d;font-size:14px;">
+  This meeting has been <strong>cancelled</strong>. Please contact {{townName}} for more information.
+</p>
+{{/if}}
+
+<!-- Meeting details -->
+<table cellpadding="0" cellspacing="0" style="width:100%;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;margin:0 0 24px;">
+  <tr>
+    <td style="padding:20px 24px;">
+      <table cellpadding="0" cellspacing="0" style="width:100%;">
+        <tr>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;width:110px;vertical-align:top;">Board</td>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:600;">{{boardName}}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;vertical-align:top;">Date</td>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">{{meetingDate}}</td>
+        </tr>
+        {{#if meetingTime}}
+        <tr>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;vertical-align:top;">Time</td>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">{{meetingTime}}</td>
+        </tr>
+        {{/if}}
+        {{#if location}}
+        <tr>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;vertical-align:top;">Location</td>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">{{location}}</td>
+        </tr>
+        {{/if}}
+        {{#if meetingType}}
+        <tr>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;vertical-align:top;">Type</td>
+          <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">{{meetingType}}</td>
+        </tr>
+        {{/if}}
+      </table>
+    </td>
+  </tr>
+</table>
+
+{{#unless (eq action "cancelled")}}
+{{#if meetingUrl}}
+<table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+  <tr>
+    <td style="background-color:#1a3a6b;border-radius:4px;padding:12px 28px;">
+      <a href="{{meetingUrl}}"
+         style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;display:block;">
+        View Meeting Details
+      </a>
+    </td>
+  </tr>
+</table>
+{{/if}}
+{{/unless}}

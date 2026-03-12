@@ -43,6 +43,7 @@ export {
   CreateExhibitSchema,
   NotificationEventSchema,
   NotificationDeliverySchema,
+  TownNotificationConfigSchema,
 } from "./notification.schema.js";
 
 export {

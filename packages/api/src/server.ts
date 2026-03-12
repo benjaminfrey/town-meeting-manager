@@ -13,6 +13,8 @@ import { authPlugin } from "./plugins/auth.js";
 import { documentRoutes } from "./routes/documents.js";
 import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
+import { notificationRoutes } from "./routes/notifications.js";
+import { NotificationService } from "./services/notification-service.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -39,6 +41,17 @@ export async function buildServer() {
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });
+  await app.register(notificationRoutes, { prefix: "/api" });
+
+  // ─── Retry processor — runs every 60 seconds ─────────────────────
+  const retryInterval = setInterval(() => {
+    const service = new NotificationService(app.supabase);
+    service.processRetries().catch((err) => {
+      app.log.error({ err }, "Notification retry processor error");
+    });
+  }, 60_000);
+
+  app.addHook("onClose", async () => clearInterval(retryInterval));
 
   return app;
 }
