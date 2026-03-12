@@ -6,7 +6,10 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
 import type { PermissionsMatrix, PermissionAction, UserRole } from "@town-meeting/shared";
@@ -65,6 +68,7 @@ export function MemberTransitionDialog({
   onOpenChange,
 }: MemberTransitionDialogProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const [transition, setTransition] = useState<TransitionType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
@@ -82,13 +86,24 @@ export function MemberTransitionDialog({
   });
 
   // Active boards for "move to different board"
-  const { data: boardRows } = useQuery(
-    "SELECT id, name, election_method FROM boards WHERE town_id = ? AND archived_at IS NULL AND id != ? ORDER BY name",
-    [townId, boardId],
-  );
+  const { data: boardRows = [] } = useQuery({
+    queryKey: [...queryKeys.boards.byTown(townId), 'otherBoards', boardId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board')
+        .select('id, name, election_method')
+        .eq('town_id', townId)
+        .is('archived_at', null)
+        .neq('id', boardId)
+        .order('name');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
   const otherBoards = useMemo(
     () =>
-      ((boardRows ?? []) as Record<string, unknown>[]).map((b) => ({
+      boardRows.map((b) => ({
         id: String(b.id),
         name: String(b.name),
         election_method: String(b.election_method ?? "at_large"),
@@ -97,13 +112,20 @@ export function MemberTransitionDialog({
   );
 
   // Check for other active board memberships
-  const { data: otherMembershipRows } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members WHERE person_id = ? AND board_id != ? AND status = 'active'",
-    [member.person_id, boardId],
-  );
-  const otherActiveMemberships = Number(
-    (otherMembershipRows?.[0] as Record<string, unknown>)?.count ?? 0,
-  );
+  const { data: otherActiveMemberships = 0 } = useQuery({
+    queryKey: [...queryKeys.members.byPerson(member.person_id), 'otherActive', boardId],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('board_member')
+        .select('*', { count: 'exact', head: true })
+        .eq('person_id', member.person_id)
+        .neq('board_id', boardId)
+        .eq('status', 'active');
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!member.person_id,
+  });
 
   // Mutual exclusivity check
   const conflict = useMemo(() => {

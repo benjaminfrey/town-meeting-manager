@@ -8,7 +8,10 @@
 
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { validateMeetingCreation } from "@town-meeting/shared";
@@ -68,6 +71,7 @@ export function CreateMeetingDialog({
   onOpenChange,
 }: CreateMeetingDialogProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
   const [isSaving, setIsSaving] = useState(false);
@@ -90,30 +94,54 @@ export function CreateMeetingDialog({
     useWizardForm(CreateMeetingFormSchema, initial);
 
   // ─── Queries for validation & templates ─────────────────────────────
-  const { data: memberCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members WHERE board_id = ? AND status = 'active'",
-    [boardId],
-  );
-  const { data: townRows } = useQuery(
-    "SELECT retention_policy_acknowledged_at FROM towns WHERE id = ? LIMIT 1",
-    [townId],
-  );
-  const { data: templateRows } = useQuery(
-    "SELECT id, name, is_default, sections FROM agenda_templates WHERE board_id = ? ORDER BY is_default DESC, name ASC",
-    [boardId],
-  );
+  const { data: activeMemberCount = 0 } = useQuery({
+    queryKey: [...queryKeys.members.byBoard(boardId), 'activeCount'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('board_member')
+        .select('*', { count: 'exact', head: true })
+        .eq('board_id', boardId)
+        .eq('status', 'active');
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!boardId,
+  });
 
-  const activeMemberCount = Number(
-    (memberCountRows?.[0] as Record<string, unknown>)?.count ?? 0,
-  );
-  const retentionAck =
-    (townRows?.[0] as Record<string, unknown>)
-      ?.retention_policy_acknowledged_at as string | null ?? null;
-  const templates = (templateRows ?? []) as Record<string, unknown>[];
+  const { data: townData } = useQuery({
+    queryKey: queryKeys.towns.detail(townId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('town')
+        .select('retention_policy_acknowledged_at')
+        .eq('id', townId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
+
+  const { data: templates = [] } = useQuery({
+    queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agenda_template')
+        .select('id, name, is_default, sections')
+        .eq('board_id', boardId)
+        .order('is_default', { ascending: false })
+        .order('name');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!boardId,
+  });
+
+  const retentionAck = townData?.retention_policy_acknowledged_at ?? null;
 
   // Auto-select default template
   if (values.template_id === "" && templates.length > 0) {
-    const defaultTpl = templates.find((t) => t.is_default === 1) ?? templates[0];
+    const defaultTpl = templates.find((t) => t.is_default) ?? templates[0];
     if (defaultTpl) {
       setValue("template_id", String(defaultTpl.id));
     }
@@ -316,7 +344,7 @@ export function CreateMeetingDialog({
                   {templates.map((t) => {
                     const id = String(t.id);
                     const name = String(t.name ?? "");
-                    const isDefault = t.is_default === 1;
+                    const isDefault = t.is_default;
                     return (
                       <SelectItem key={id} value={id}>
                         {name}

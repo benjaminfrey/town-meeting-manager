@@ -9,7 +9,9 @@
  */
 
 import { Link } from "react-router";
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Check, Circle, ArrowRight, PartyPopper } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -134,18 +136,34 @@ export function ProgressChecklist({
   retentionAcknowledgedAt,
   onRetentionPolicyClick,
 }: ProgressChecklistProps) {
-  // Reactive queries for board member count
-  const { data: memberRows } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members WHERE town_id = ?",
-    [townId]
-  );
-  const { data: seatRows } = useQuery(
-    "SELECT SUM(member_count) as total FROM boards WHERE town_id = ?",
-    [townId]
-  );
+  const supabase = useSupabase();
 
-  const memberCount = memberRows?.[0]?.count ?? 0;
-  const totalSeats = seatRows?.[0]?.total ?? 0;
+  const { data: memberCount = 0 } = useQuery({
+    queryKey: [...queryKeys.members.all, 'count', townId],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('board_member')
+        .select('*', { count: 'exact', head: true })
+        .eq('town_id', townId);
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!townId,
+  });
+
+  const { data: totalSeats = 0 } = useQuery({
+    queryKey: [...queryKeys.boards.byTown(townId), 'totalSeats'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board')
+        .select('member_count')
+        .eq('town_id', townId);
+      if (error) throw error;
+      return (data ?? []).reduce((sum, b) => sum + (b.member_count ?? 0), 0);
+    },
+    enabled: !!townId,
+  });
+
   const hasBoardMembers = memberCount > 0;
   const hasSeal = !!sealUrl;
   const hasRetentionPolicy = !!retentionAcknowledgedAt;

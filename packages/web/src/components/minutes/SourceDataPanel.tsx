@@ -1,4 +1,6 @@
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Clock } from "lucide-react";
 import type {
@@ -29,30 +31,73 @@ export function SourceDataPanel({
   selectedSectionIndex,
   contentJson,
 }: SourceDataPanelProps) {
-  const { data: agendaItems } = useQuery(
-    "SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order ASC",
-    [meetingId],
-  );
+  const supabase = useSupabase();
 
-  const { data: motions } = useQuery(
-    "SELECT * FROM motions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: agendaItems = [] } = useQuery({
+    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agenda_item')
+        .select('*')
+        .eq('meeting_id', meetingId)
+        .order('sort_order');
+      if (error) throw error;
+      return data as Record<string, unknown>[];
+    },
+    enabled: !!meetingId,
+  });
 
-  const { data: voteRecords } = useQuery(
-    "SELECT * FROM vote_records WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: motions = [] } = useQuery({
+    queryKey: queryKeys.motions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('motion')
+        .select('*')
+        .eq('meeting_id', meetingId);
+      if (error) throw error;
+      return data as Record<string, unknown>[];
+    },
+    enabled: !!meetingId,
+  });
 
-  const { data: transitions } = useQuery(
-    "SELECT * FROM agenda_item_transitions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: voteRecords = [] } = useQuery({
+    queryKey: queryKeys.voteRecords.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('vote_record')
+        .select('*')
+        .eq('meeting_id', meetingId);
+      if (error) throw error;
+      return data as Record<string, unknown>[];
+    },
+    enabled: !!meetingId,
+  });
 
-  const { data: guestSpeakers } = useQuery(
-    "SELECT * FROM guest_speakers WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: transitions = [] } = useQuery({
+    queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agenda_item_transition')
+        .select('*')
+        .eq('meeting_id', meetingId);
+      if (error) throw error;
+      return data as Record<string, unknown>[];
+    },
+    enabled: !!meetingId,
+  });
+
+  const { data: guestSpeakers = [] } = useQuery({
+    queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('guest_speaker')
+        .select('*')
+        .eq('meeting_id', meetingId);
+      if (error) throw error;
+      return data as Record<string, unknown>[];
+    },
+    enabled: !!meetingId,
+  });
 
   const section: MinutesContentSection | undefined =
     contentJson.sections[selectedSectionIndex];

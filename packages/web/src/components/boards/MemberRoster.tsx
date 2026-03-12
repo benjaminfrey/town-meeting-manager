@@ -7,7 +7,10 @@
  */
 
 import { useMemo, useState } from "react";
-import { useQuery, usePowerSync } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   Plus,
   Star,
@@ -53,9 +56,9 @@ interface MemberRow {
   gov_title: string | null;
   user_account_id: string | null;
   user_account_archived: string | null;
-  // From invitations
-  invitation_status: string | null;
-  invitation_token: string | null;
+  // Invitation fields (no longer used — handled via Supabase auth)
+  invitation_status: null;
+  invitation_token: null;
 }
 
 interface MemberRosterProps {
@@ -88,6 +91,7 @@ export function MemberRoster({
   isArchived,
 }: MemberRosterProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const [showArchived, setShowArchived] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [archiveMember, setArchiveMember] = useState<MemberRow | null>(null);
@@ -97,58 +101,44 @@ export function MemberRoster({
   const [editGovTitle, setEditGovTitle] = useState<MemberRow | null>(null);
 
   // ─── Reactive queries ───────────────────────────────────────────────
-  const { data: bmRows } = useQuery(
-    "SELECT * FROM board_members WHERE board_id = ?",
-    [boardId],
-  );
-  const { data: personRows } = useQuery(
-    "SELECT * FROM persons WHERE town_id = ?",
-    [townId],
-  );
-  const { data: uaRows } = useQuery(
-    "SELECT * FROM user_accounts WHERE town_id = ?",
-    [townId],
-  );
-  const { data: invRows } = useQuery(
-    "SELECT * FROM invitations WHERE town_id = ?",
-    [townId],
-  );
+  const { data: bmRows = [] } = useQuery({
+    queryKey: queryKeys.members.byBoard(boardId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board_member')
+        .select('*, person(*)')
+        .eq('board_id', boardId);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!boardId,
+  });
+
+  const { data: uaRows = [] } = useQuery({
+    queryKey: queryKeys.userAccounts.byTown(townId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('user_account')
+        .select('*')
+        .eq('town_id', townId);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
 
   // ─── Merge data ─────────────────────────────────────────────────────
   const members: MemberRow[] = useMemo(() => {
-    const personMap = new Map<string, Record<string, unknown>>();
-    for (const p of personRows ?? []) {
-      const pr = p as Record<string, unknown>;
-      personMap.set(String(pr.id), pr);
-    }
-
     const uaMap = new Map<string, Record<string, unknown>>();
-    for (const ua of uaRows ?? []) {
+    for (const ua of uaRows) {
       const uar = ua as Record<string, unknown>;
       uaMap.set(String(uar.person_id), uar);
     }
 
-    const invMap = new Map<string, Record<string, unknown>>();
-    for (const inv of invRows ?? []) {
-      const ir = inv as Record<string, unknown>;
-      const personId = String(ir.person_id);
-      // Keep the most recent invitation per person
-      if (
-        !invMap.has(personId) ||
-        String(ir.created_at) >
-          String(
-            (invMap.get(personId) as Record<string, unknown>)?.created_at ?? "",
-          )
-      ) {
-        invMap.set(personId, ir);
-      }
-    }
-
-    return ((bmRows ?? []) as Record<string, unknown>[]).map((bm) => {
+    return bmRows.map((bm) => {
       const personId = String(bm.person_id);
-      const person = personMap.get(personId);
+      const person = bm.person as Record<string, unknown> | null;
       const ua = uaMap.get(personId);
-      const inv = invMap.get(personId);
 
       return {
         id: String(bm.id),
@@ -158,18 +148,18 @@ export function MemberRoster({
         term_start: (bm.term_start as string) || null,
         term_end: (bm.term_end as string) || null,
         status: String(bm.status ?? "active"),
-        is_default_rec_sec: bm.is_default_rec_sec === 1,
+        is_default_rec_sec: !!bm.is_default_rec_sec,
         name: String(person?.name ?? "Unknown"),
         email: String(person?.email ?? ""),
         role: (ua?.role as string) || null,
         gov_title: (ua?.gov_title as string) || null,
         user_account_id: ua ? String(ua.id) : null,
         user_account_archived: (ua?.archived_at as string) || null,
-        invitation_status: (inv?.status as string) || null,
-        invitation_token: (inv?.token as string) || null,
+        invitation_status: null,
+        invitation_token: null,
       };
     });
-  }, [bmRows, personRows, uaRows, invRows]);
+  }, [bmRows, uaRows]);
 
   // ─── Filter ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {

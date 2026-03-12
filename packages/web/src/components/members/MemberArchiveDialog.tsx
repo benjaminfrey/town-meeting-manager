@@ -7,7 +7,10 @@
  */
 
 import { useState } from "react";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -44,17 +47,25 @@ export function MemberArchiveDialog({
   onOpenChange,
 }: MemberArchiveDialogProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveAccount, setArchiveAccount] = useState(false);
 
   // Check for other active board memberships
-  const { data: otherBoardRows } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members WHERE person_id = ? AND board_id != ? AND status = 'active'",
-    [member.person_id, boardId],
-  );
-  const otherActiveMemberships = Number(
-    (otherBoardRows?.[0] as Record<string, unknown>)?.count ?? 0,
-  );
+  const { data: otherActiveMemberships = 0 } = useQuery({
+    queryKey: [...queryKeys.members.byPerson(member.person_id), 'otherActive', boardId],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('board_member')
+        .select('*', { count: 'exact', head: true })
+        .eq('person_id', member.person_id)
+        .neq('board_id', boardId)
+        .eq('status', 'active');
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!member.person_id,
+  });
   const hasOtherMemberships = otherActiveMemberships > 0;
 
   const handleArchive = async () => {

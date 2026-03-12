@@ -9,7 +9,10 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -81,6 +84,7 @@ export function AddMemberDialog({
   onOpenChange,
 }: AddMemberDialogProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -108,32 +112,69 @@ export function AddMemberDialog({
   // ─── Search ─────────────────────────────────────────────────────────
   const searchTerm = searchQuery.trim().length >= 2 ? `%${searchQuery.trim()}%` : "";
 
-  const { data: personRows } = useQuery(
-    searchTerm
-      ? "SELECT * FROM persons WHERE town_id = ? AND (name LIKE ? OR email LIKE ?) AND archived_at IS NULL"
-      : "SELECT * FROM persons WHERE 1=0",
-    searchTerm ? [townId, searchTerm, searchTerm] : [],
-  );
-  const { data: uaRows } = useQuery(
-    "SELECT * FROM user_accounts WHERE town_id = ? AND archived_at IS NULL",
-    [townId],
-  );
-  const { data: bmRows } = useQuery(
-    "SELECT person_id, COUNT(*) as count FROM board_members WHERE town_id = ? AND status = 'active' GROUP BY person_id",
-    [townId],
-  );
+  const { data: personRows = [] } = useQuery({
+    queryKey: [...queryKeys.persons.byTown(townId), 'search', searchTerm],
+    queryFn: async () => {
+      const term = searchQuery.trim();
+      const { data, error } = await supabase
+        .from('person')
+        .select('*')
+        .eq('town_id', townId)
+        .is('archived_at', null)
+        .or(`name.ilike.%${term}%,email.ilike.%${term}%`);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!searchTerm,
+  });
+
+  const { data: uaRows = [] } = useQuery({
+    queryKey: queryKeys.userAccounts.byTown(townId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('user_account')
+        .select('*')
+        .eq('town_id', townId)
+        .is('archived_at', null);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
+
+  const { data: bmRows = [] } = useQuery({
+    queryKey: [...queryKeys.members.all, 'activeCounts', townId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board_member')
+        .select('person_id')
+        .eq('town_id', townId)
+        .eq('status', 'active');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
+
   // Check existing membership on this board
-  const { data: existingMemberRows } = useQuery(
-    "SELECT person_id FROM board_members WHERE board_id = ? AND status = 'active'",
-    [boardId],
-  );
+  const { data: existingMemberRows = [] } = useQuery({
+    queryKey: [...queryKeys.members.byBoard(boardId), 'personIds'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board_member')
+        .select('person_id')
+        .eq('board_id', boardId)
+        .eq('status', 'active');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!boardId,
+  });
 
   const existingMemberPersonIds = useMemo(
     () =>
       new Set(
-        ((existingMemberRows ?? []) as Record<string, unknown>[]).map((r) =>
-          String(r.person_id),
-        ),
+        existingMemberRows.map((r) => String(r.person_id)),
       ),
     [existingMemberRows],
   );
@@ -144,7 +185,7 @@ export function AddMemberDialog({
       string,
       { id: string; role: string; archived_at: string | null }
     >();
-    for (const ua of (uaRows ?? []) as Record<string, unknown>[]) {
+    for (const ua of uaRows) {
       map.set(String(ua.person_id), {
         id: String(ua.id),
         role: String(ua.role ?? ""),
@@ -157,15 +198,16 @@ export function AddMemberDialog({
   // Build board member count lookup
   const bmCountMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const bm of (bmRows ?? []) as Record<string, unknown>[]) {
-      map.set(String(bm.person_id), Number(bm.count));
+    for (const bm of bmRows) {
+      const personId = String(bm.person_id);
+      map.set(personId, (map.get(personId) ?? 0) + 1);
     }
     return map;
   }, [bmRows]);
 
   // Search results
   const searchResults: SelectedPerson[] = useMemo(() => {
-    return ((personRows ?? []) as Record<string, unknown>[])
+    return personRows
       .filter((p) => !existingMemberPersonIds.has(String(p.id)))
       .map((p) => {
         const personId = String(p.id);
@@ -182,16 +224,22 @@ export function AddMemberDialog({
   }, [personRows, uaMap, bmCountMap, existingMemberPersonIds]);
 
   // Check email uniqueness
-  const { data: emailCheckRows } = useQuery(
-    personForm.values.email.includes("@")
-      ? "SELECT id FROM persons WHERE town_id = ? AND email = ? LIMIT 1"
-      : "SELECT id FROM persons WHERE 1=0",
-    personForm.values.email.includes("@")
-      ? [townId, personForm.values.email.toLowerCase().trim()]
-      : [],
-  );
-  const emailExists =
-    ((emailCheckRows ?? []) as Record<string, unknown>[]).length > 0;
+  const emailToCheck = personForm.values.email.toLowerCase().trim();
+  const { data: emailCheckRows = [] } = useQuery({
+    queryKey: [...queryKeys.persons.byTown(townId), 'emailCheck', emailToCheck],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('person')
+        .select('id')
+        .eq('town_id', townId)
+        .eq('email', emailToCheck)
+        .limit(1);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!emailToCheck && emailToCheck.includes('@'),
+  });
+  const emailExists = emailCheckRows.length > 0;
 
   // ─── Step 1: Select person ─────────────────────────────────────────
   const handleSelectPerson = (person: SelectedPerson) => {

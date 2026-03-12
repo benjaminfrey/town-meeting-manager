@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 interface DeleteTemplateDialogProps {
-  template: { id: string; name: string; is_default: number | boolean };
+  template: { id: string; name: string; is_default: boolean | number | null };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -26,7 +26,7 @@ export function DeleteTemplateDialog({
   const powerSync = usePowerSync();
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const isDefault = template.is_default === 1 || template.is_default === true;
+  const isDefault = !!template.is_default;
 
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);

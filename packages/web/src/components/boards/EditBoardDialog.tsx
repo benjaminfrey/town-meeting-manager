@@ -6,7 +6,10 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { usePowerSync } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -60,15 +63,24 @@ interface EditBoardDialogProps {
 
 export function EditBoardDialog({ townId, town, board, open, onOpenChange }: EditBoardDialogProps) {
   const powerSync = usePowerSync();
+  const supabase = useSupabase();
   const [isSaving, setIsSaving] = useState(false);
   const boardId = String(board.id);
 
   // Check if board has meetings (disables name editing)
-  const { data: meetingCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM meetings WHERE board_id = ?",
-    [boardId]
-  );
-  const hasMeetings = Number((meetingCountRows?.[0] as Record<string, unknown>)?.count ?? 0) > 0;
+  const { data: meetingCount = 0 } = useQuery({
+    queryKey: [...queryKeys.meetings.byBoard(boardId), 'count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('meeting')
+        .select('*', { count: 'exact', head: true })
+        .eq('board_id', boardId);
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!boardId,
+  });
+  const hasMeetings = meetingCount > 0;
 
   const initial: EditBoardData = useMemo(
     () => ({

@@ -4,7 +4,9 @@
  */
 
 import { useMemo } from "react";
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Check, X, Minus } from "lucide-react";
 import { PERMISSIONS } from "@town-meeting/shared";
 import type { PermissionsMatrix, PermissionAction } from "@town-meeting/shared";
@@ -51,10 +53,22 @@ export function PermissionOverrideView({
   permissions,
   townId,
 }: PermissionOverrideViewProps) {
-  const { data: boardRows } = useQuery(
-    "SELECT id, name FROM boards WHERE town_id = ? AND archived_at IS NULL ORDER BY name",
-    [townId],
-  );
+  const supabase = useSupabase();
+
+  const { data: boardRows = [] } = useQuery({
+    queryKey: queryKeys.boards.byTown(townId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('board')
+        .select('id, name')
+        .eq('town_id', townId)
+        .is('archived_at', null)
+        .order('name');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!townId,
+  });
 
   const boards = useMemo(
     () =>

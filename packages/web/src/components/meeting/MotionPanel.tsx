@@ -361,10 +361,12 @@ function MotionCard({
   const movedByName = motion.movedBy ? memberNameMap.get(motion.movedBy) ?? "Unknown" : null;
   const secondedByName = motion.secondedBy ? memberNameMap.get(motion.secondedBy) ?? "Unknown" : null;
 
-  // Parse vote summary if available
+  // Vote summary — Supabase returns JSONB as a native object; no JSON.parse needed.
+  // Defensive: if it's still a string (legacy), parse it.
   const voteSummary = motion.voteSummary ? (() => {
     try {
-      return JSON.parse(motion.voteSummary) as { yeas: number; nays: number; abstentions: number; recusals: number; absent: number; result: string; passed: boolean };
+      const raw = motion.voteSummary;
+      return (typeof raw === "string" ? JSON.parse(raw) : raw) as { yeas: number; nays: number; abstentions: number; recusals: number; absent: number; result: string; passed: boolean };
     } catch { return null; }
   })() : null;
 

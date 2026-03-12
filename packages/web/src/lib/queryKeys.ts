@@ -109,6 +109,12 @@ export const queryKeys = {
     byMeeting: (meetingId: string) => ['minutesDocuments', 'byMeeting', meetingId] as const,
   },
 
+  // User accounts
+  userAccounts: {
+    byTown: (townId: string) => ['userAccounts', 'byTown', townId] as const,
+    byPerson: (personId: string) => ['userAccounts', 'byPerson', personId] as const,
+  },
+
   // Push subscriptions
   pushSubscriptions: {
     byUser: (userId: string) => ['pushSubscriptions', 'byUser', userId] as const,
