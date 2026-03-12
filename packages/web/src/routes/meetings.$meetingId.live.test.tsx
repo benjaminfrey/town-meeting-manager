@@ -3,50 +3,82 @@
  *
  * Mocks all child panels/dialogs to isolate page-level routing,
  * status transitions, and data wiring.
+ *
+ * NOTE(M.09): PowerSync mocks replaced with TanStack Query + Supabase mocks.
+ * Full test rewrite with proper query mocking is in M.10.
  */
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { mockQueryResult } from "@/test/mocks/powersync-mock";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
-import { fireEvent } from "@testing-library/react";
 
 // ─── Module-level mocks ──────────────────────────────────────────
 
-const { mockDb, mockUseQuery } = vi.hoisted(() => {
+const { mockUseQuery } = vi.hoisted(() => {
   return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
     mockUseQuery: vi.fn(),
   };
 });
 
 const mockNavigate = vi.fn();
 
-vi.mock("@powersync/react", () => ({
-  useQuery: (...args: unknown[]) => mockUseQuery(...args),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+// Mock TanStack Query hooks
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
+  return {
+    ...actual,
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
+    useMutation: vi.fn(() => ({
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      mutate: vi.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    })),
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: vi.fn(),
+      ensureQueryData: vi.fn(),
+    })),
+  };
+});
+
+// Mock Supabase hook (no real DB calls in tests)
+vi.mock("@/hooks/useSupabase", () => ({
+  useSupabase: vi.fn(() => ({
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      insert: vi.fn().mockResolvedValue({ data: null, error: null }),
+      update: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+    })),
+    auth: { getSession: vi.fn().mockResolvedValue({ data: { session: null } }) },
+    channel: vi.fn(() => ({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis(),
+    })),
+    removeChannel: vi.fn(),
+  })),
+}));
+
+// Mock Realtime subscription (no-op in tests)
+vi.mock("@/hooks/useRealtimeSubscription", () => ({
+  useRealtimeSubscription: vi.fn(() => ({ status: "connected" })),
+}));
+
+// Mock ConnectionStatusBar (silent in tests)
+vi.mock("@/components/ConnectionStatusBar", () => ({
+  ConnectionStatusBar: () => null,
 }));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
-  return { ...actual, useNavigate: () => mockNavigate, useParams: () => ({ meetingId: "meeting-1" }) };
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+    useParams: () => ({ meetingId: "meeting-1" }),
+  };
 });
 
 vi.mock("./+types/meetings.$meetingId.live", () => ({}));
@@ -107,25 +139,36 @@ vi.mock("@/components/meeting/MeetingStartFlow", () => ({
   MeetingStartFlow: (props: any) => (
     <div data-testid="meeting-start-flow">
       <span data-testid="start-flow-meeting-id">{props.meetingId}</span>
-      <button data-testid="start-meeting" onClick={() => props.onComplete?.()}>Start</button>
+      <button data-testid="start-meeting" onClick={() => props.onComplete?.()}>
+        Start
+      </button>
     </div>
   ),
 }));
 
 vi.mock("@/components/meeting/ExecutiveSessionDialog", () => ({
-  ExecutiveSessionDialog: (props: any) => props.open ? <div data-testid="exec-session-dialog" /> : null,
+  ExecutiveSessionDialog: (props: any) =>
+    props.open ? <div data-testid="exec-session-dialog" /> : null,
   EXECUTIVE_SESSION_CITATIONS: [],
 }));
 
 vi.mock("@/components/meeting/ExitExecutiveSessionDialog", () => ({
-  ExitExecutiveSessionDialog: (props: any) => props.open ? <div data-testid="exit-exec-dialog" /> : null,
+  ExitExecutiveSessionDialog: (props: any) =>
+    props.open ? <div data-testid="exit-exec-dialog" /> : null,
 }));
 
 vi.mock("@/components/meeting/AdjournmentControls", () => ({
   AdjournmentControls: (props: any) => (
     <div data-testid="adjournment-controls">
-      <button data-testid="adjourn-motion" onClick={props.onAdjournMotion}>Motion</button>
-      <button data-testid="adjourn-wo" onClick={props.onAdjournWithoutObjection}>WO</button>
+      <button data-testid="adjourn-motion" onClick={props.onAdjournMotion}>
+        Motion
+      </button>
+      <button
+        data-testid="adjourn-wo"
+        onClick={props.onAdjournWithoutObjection}
+      >
+        WO
+      </button>
     </div>
   ),
 }));
@@ -139,11 +182,14 @@ vi.mock("@/components/meeting/ExecSessionBanner", () => ({
 }));
 
 vi.mock("@/components/meeting/MotionCaptureDialog", () => ({
-  MotionCaptureDialog: (props: any) => props.open ? <div data-testid="motion-dialog" /> : null,
+  MotionCaptureDialog: (props: any) =>
+    props.open ? <div data-testid="motion-dialog" /> : null,
 }));
 
 vi.mock("@/components/meeting/MeetingTimer", () => ({
-  MeetingTimer: (props: any) => <span data-testid="meeting-timer">{props.startedAt}</span>,
+  MeetingTimer: (props: any) => (
+    <span data-testid="meeting-timer">{props.startedAt}</span>
+  ),
 }));
 
 vi.mock("@/components/RouteErrorBoundary", () => ({
@@ -162,13 +208,6 @@ const mockBoard = {
   motion_display_format: "inline_narrative",
 };
 
-const mockTown = {
-  id: "town-1",
-  name: "Testville",
-  meeting_formality: "formal",
-  minutes_style: "action",
-};
-
 const mockMeeting = {
   id: "meeting-1",
   board_id: "board-1",
@@ -185,48 +224,131 @@ const mockMeeting = {
   presiding_officer_id: "bm-1",
   recording_secretary_id: "bm-2",
   adjournment: null,
+  board: mockBoard,
 };
 
 const mockMembers = [
-  { id: "bm-1", person_id: "p-1", board_id: "board-1", seat_title: "Chair", status: "active", is_default_rec_sec: 0 },
-  { id: "bm-2", person_id: "p-2", board_id: "board-1", seat_title: null, status: "active", is_default_rec_sec: 1 },
-  { id: "bm-3", person_id: "p-3", board_id: "board-1", seat_title: null, status: "active", is_default_rec_sec: 0 },
-];
-
-const mockPersons = [
-  { id: "p-1", first_name: "Alice", last_name: "Smith", name: "Alice Smith", town_id: "town-1" },
-  { id: "p-2", first_name: "Bob", last_name: "Jones", name: "Bob Jones", town_id: "town-1" },
-  { id: "p-3", first_name: "Carol", last_name: "White", name: "Carol White", town_id: "town-1" },
+  {
+    id: "bm-1",
+    person_id: "p-1",
+    board_id: "board-1",
+    seat_title: "Chair",
+    status: "active",
+    is_default_rec_sec: false,
+    person: { id: "p-1", name: "Alice Smith" },
+  },
+  {
+    id: "bm-2",
+    person_id: "p-2",
+    board_id: "board-1",
+    seat_title: null,
+    status: "active",
+    is_default_rec_sec: true,
+    person: { id: "p-2", name: "Bob Jones" },
+  },
+  {
+    id: "bm-3",
+    person_id: "p-3",
+    board_id: "board-1",
+    seat_title: null,
+    status: "active",
+    is_default_rec_sec: false,
+    person: { id: "p-3", name: "Carol White" },
+  },
 ];
 
 const mockAttendance = [
-  { id: "att-1", meeting_id: "meeting-1", board_member_id: "bm-1", person_id: "p-1", status: "present", is_recording_secretary: 0, arrived_at: null, departed_at: null },
-  { id: "att-2", meeting_id: "meeting-1", board_member_id: "bm-2", person_id: "p-2", status: "present", is_recording_secretary: 1, arrived_at: null, departed_at: null },
-  { id: "att-3", meeting_id: "meeting-1", board_member_id: "bm-3", person_id: "p-3", status: "absent", is_recording_secretary: 0, arrived_at: null, departed_at: null },
+  {
+    id: "att-1",
+    meeting_id: "meeting-1",
+    board_member_id: "bm-1",
+    status: "present",
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
+  },
+  {
+    id: "att-2",
+    meeting_id: "meeting-1",
+    board_member_id: "bm-2",
+    status: "present",
+    is_recording_secretary: true,
+    arrived_at: null,
+    departed_at: null,
+  },
+  {
+    id: "att-3",
+    meeting_id: "meeting-1",
+    board_member_id: "bm-3",
+    status: "absent",
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
+  },
 ];
 
 const mockAgendaItems = [
-  { id: "section-1", meeting_id: "meeting-1", title: "Call to Order", section_type: "procedural", sort_order: 0, parent_item_id: null, status: "completed", description: null, presenter: null, staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null, estimated_duration: null },
-  { id: "item-1", meeting_id: "meeting-1", title: "Site Plan Review", section_type: null, sort_order: 0, parent_item_id: "section-1", status: "in_progress", description: "Review the site plan", presenter: null, staff_resource: null, background: null, recommendation: null, suggested_motion: "to approve the site plan", operator_notes: null, estimated_duration: 15 },
+  {
+    id: "section-1",
+    meeting_id: "meeting-1",
+    title: "Call to Order",
+    section_type: "procedural",
+    sort_order: 0,
+    parent_item_id: null,
+    status: "completed",
+    exhibit: [],
+  },
+  {
+    id: "item-1",
+    meeting_id: "meeting-1",
+    title: "Site Plan Review",
+    section_type: null,
+    sort_order: 0,
+    parent_item_id: "section-1",
+    status: "in_progress",
+    description: "Review the site plan",
+    suggested_motion: "to approve the site plan",
+    estimated_duration: 15,
+    exhibit: [],
+  },
 ];
 
 // ─── Query router ────────────────────────────────────────────────
 
-function setupLiveMeetingQueries(overrides: Record<string, any[]> = {}) {
-  mockUseQuery.mockImplementation((sql: string) => {
-    if (sql.includes("FROM meetings")) return mockQueryResult(overrides.meetings ?? [mockMeeting]);
-    if (sql.includes("FROM boards")) return mockQueryResult(overrides.boards ?? [mockBoard]);
-    if (sql.includes("FROM towns")) return mockQueryResult(overrides.towns ?? [mockTown]);
-    if (sql.includes("FROM board_members")) return mockQueryResult(overrides.members ?? mockMembers);
-    if (sql.includes("FROM persons")) return mockQueryResult(overrides.persons ?? mockPersons);
-    if (sql.includes("FROM meeting_attendance")) return mockQueryResult(overrides.attendance ?? mockAttendance);
-    if (sql.includes("FROM agenda_items")) return mockQueryResult(overrides.agendaItems ?? mockAgendaItems);
-    if (sql.includes("FROM motions")) return mockQueryResult(overrides.motions ?? []);
-    if (sql.includes("FROM vote_records")) return mockQueryResult(overrides.voteRecords ?? []);
-    if (sql.includes("FROM executive_sessions")) return mockQueryResult(overrides.execSessions ?? []);
-    if (sql.includes("FROM agenda_item_transitions")) return mockQueryResult(overrides.transitions ?? []);
-    if (sql.includes("FROM guest_speakers")) return mockQueryResult(overrides.speakers ?? []);
-    if (sql.includes("FROM exhibits")) return mockQueryResult(overrides.exhibits ?? []);
+function setupLiveMeetingQueries(overrides: Record<string, any> = {}) {
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+
+    if (key === "meetings") {
+      // meetings.detail — returns meeting with embedded board
+      const meetingOverride = overrides.meeting ?? overrides.meetings?.[0];
+      const data = meetingOverride ?? { ...mockMeeting, board: overrides.board ?? mockBoard };
+      return { data, isLoading: false, error: undefined };
+    }
+    if (key === "members") {
+      return mockQueryResult(overrides.members ?? mockMembers);
+    }
+    if (key === "attendance") {
+      return mockQueryResult(overrides.attendance ?? mockAttendance);
+    }
+    if (key === "agendaItems") {
+      return mockQueryResult(overrides.agendaItems ?? mockAgendaItems);
+    }
+    if (key === "motions") {
+      return mockQueryResult(overrides.motions ?? []);
+    }
+    if (key === "voteRecords") {
+      return mockQueryResult(overrides.voteRecords ?? []);
+    }
+    if (key === "executiveSessions") {
+      return mockQueryResult(overrides.execSessions ?? []);
+    }
+    if (key === "agendaItemTransitions") {
+      return mockQueryResult(overrides.transitions ?? []);
+    }
+    if (key === "guestSpeakers") {
+      return mockQueryResult(overrides.speakers ?? []);
+    }
     return mockQueryResult([]);
   });
 }
@@ -241,8 +363,6 @@ describe("LiveMeetingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockReset();
-    mockDb.execute.mockReset();
-    mockDb.execute.mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 });
   });
 
   it("renders meeting start flow when meeting not started", () => {
@@ -252,13 +372,12 @@ describe("LiveMeetingPage", () => {
       started_at: null,
       current_agenda_item_id: null,
     };
-    setupLiveMeetingQueries({ meetings: [noticedMeeting] });
+    setupLiveMeetingQueries({ meeting: noticedMeeting });
 
     renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
 
     expect(screen.getByTestId("meeting-start-flow")).toBeInTheDocument();
     expect(screen.getByTestId("start-flow-meeting-id")).toHaveTextContent("meeting-1");
-    // Three-panel layout should not be visible
     expect(screen.queryByTestId("agenda-nav-panel")).not.toBeInTheDocument();
   });
 
@@ -270,7 +389,6 @@ describe("LiveMeetingPage", () => {
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
     expect(screen.getByTestId("attendance-panel")).toBeInTheDocument();
-    // Start flow should not be visible
     expect(screen.queryByTestId("meeting-start-flow")).not.toBeInTheDocument();
   });
 
@@ -318,11 +436,13 @@ describe("LiveMeetingPage", () => {
       status: "adjourned",
       ended_at: "2026-03-10T20:00:00Z",
     };
-    setupLiveMeetingQueries({ meetings: [adjournedMeeting] });
+    setupLiveMeetingQueries({ meeting: adjournedMeeting });
 
     renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
 
-    expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", { replace: true });
+    expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", {
+      replace: true,
+    });
   });
 
   it("shows executive session banner when in exec session", () => {
@@ -335,7 +455,7 @@ describe("LiveMeetingPage", () => {
       entered_at: "2026-03-10T19:00:00Z",
       exited_at: null,
       entry_motion_id: "motion-es-1",
-      post_session_action_motion_ids: "[]",
+      post_session_action_motion_ids: [],
       created_at: "2026-03-10T18:55:00Z",
     };
     setupLiveMeetingQueries({ execSessions: [activeExecSession] });
@@ -343,8 +463,9 @@ describe("LiveMeetingPage", () => {
     renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
 
     expect(screen.getByTestId("exec-banner")).toBeInTheDocument();
-    expect(screen.getByTestId("exec-citation")).toHaveTextContent("1 M.R.S.A. 405(6)(A)");
-    // Adjournment controls should be hidden during exec session
+    expect(screen.getByTestId("exec-citation")).toHaveTextContent(
+      "1 M.R.S.A. 405(6)(A)",
+    );
     expect(screen.queryByTestId("adjournment-controls")).not.toBeInTheDocument();
   });
 
@@ -364,17 +485,15 @@ describe("LiveMeetingPage", () => {
       current_agenda_item_id: null,
     };
     setupLiveMeetingQueries({
-      meetings: [meetingNoCurrentItem],
+      meeting: meetingNoCurrentItem,
       agendaItems: [],
     });
 
     renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
 
-    // Should still render the three-panel layout without errors
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
     expect(screen.getByTestId("attendance-panel")).toBeInTheDocument();
-    // Detail panel should show "none" since no current item
     expect(screen.getByTestId("detail-title")).toHaveTextContent("none");
   });
 });

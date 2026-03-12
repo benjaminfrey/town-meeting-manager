@@ -18,12 +18,9 @@
  * - Meeting end flow: close transitions, defer unreached items, navigate to review
  */
 
-// TODO(M.09): This file still uses PowerSync-style useQuery(sql, params) calls.
-// The @powersync/react import resolves to the shim in hooks/usePowerSync.ts
-// via vite.config.ts alias until the full migration in session M.09.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { useQuery, usePowerSync } from "@powersync/react";
+import { useNavigate } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErrorBoundary } from "react-error-boundary";
 import { Clock, AlertTriangle } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.live";
@@ -32,6 +29,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useQuorumCheck } from "@/hooks/useQuorumCheck";
+import { useSupabase } from "@/hooks/useSupabase";
+import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
+import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase as supabaseSingleton } from "@/lib/supabase";
+import { queryClient as sharedQueryClient } from "@/lib/queryClient";
 import { MeetingTimer } from "@/components/meeting/MeetingTimer";
 import { MeetingStartFlow } from "@/components/meeting/MeetingStartFlow";
 import { AgendaNavigationPanel } from "@/components/meeting/AgendaNavigationPanel";
@@ -48,7 +51,80 @@ import { cn } from "@/lib/utils";
 // ─── Route Loader ─────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { meetingId: params.meetingId };
+  const meetingId = params.meetingId!;
+
+  // Prefetch meeting + board in one query
+  const meetingData = await sharedQueryClient.ensureQueryData({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabaseSingleton
+        .from("meeting")
+        .select("*, board(*)")
+        .eq("id", meetingId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const boardId = (meetingData as Record<string, unknown>)?.board_id as string ?? "";
+
+  // Prefetch secondary data in parallel
+  await Promise.all([
+    sharedQueryClient.ensureQueryData({
+      queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+      queryFn: async () => {
+        const { data, error } = await supabaseSingleton
+          .from("agenda_item")
+          .select("*, exhibit(*)")
+          .eq("meeting_id", meetingId)
+          .order("sort_order");
+        if (error) throw error;
+        return data ?? [];
+      },
+    }),
+    sharedQueryClient.ensureQueryData({
+      queryKey: queryKeys.attendance.byMeeting(meetingId),
+      queryFn: async () => {
+        const { data, error } = await supabaseSingleton
+          .from("meeting_attendance")
+          .select("*")
+          .eq("meeting_id", meetingId);
+        if (error) throw error;
+        return data ?? [];
+      },
+    }),
+    sharedQueryClient.ensureQueryData({
+      queryKey: queryKeys.motions.byMeeting(meetingId),
+      queryFn: async () => {
+        const { data, error } = await supabaseSingleton
+          .from("motion")
+          .select("*")
+          .eq("meeting_id", meetingId)
+          .order("created_at");
+        if (error) throw error;
+        return data ?? [];
+      },
+    }),
+    ...(boardId
+      ? [
+          sharedQueryClient.ensureQueryData({
+            queryKey: queryKeys.members.byBoard(boardId),
+            queryFn: async () => {
+              const { data, error } = await supabaseSingleton
+                .from("board_member")
+                .select("*, person(*)")
+                .eq("board_id", boardId)
+                .eq("status", "active");
+              if (error) throw error;
+              return data ?? [];
+            },
+          }),
+        ]
+      : []),
+  ]);
+
+  return { meetingId };
 }
 
 // ─── Component ────────────────────────────────────────────────────
@@ -56,7 +132,8 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const currentUser = useCurrentUser();
   const [agendaCollapsed, setAgendaCollapsed] = useState(false);
   const [recusalMemberFromAttendance, setRecusalMemberFromAttendance] = useState<{
@@ -94,95 +171,237 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       )
     : false;
 
-  // ─── Reactive queries (no JOINs) ─────────────────────────────
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE id = ? LIMIT 1",
-    [meetingId],
-  );
-  const meeting = meetingRows?.[0] as Record<string, unknown> | undefined;
+  // ─── Reactive queries ─────────────────────────────────────────
+
+  // Meeting + Board (joined)
+  const { data: meetingData } = useQuery({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("meeting")
+        .select("*, board(*)")
+        .eq("id", meetingId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 10_000,
+  });
+
+  const meeting = meetingData as Record<string, unknown> | undefined;
+  const board = (meetingData as Record<string, unknown> | undefined)?.board as Record<string, unknown> | undefined;
   const boardId = (meeting?.board_id as string) ?? "";
   const townId = (meeting?.town_id as string) ?? "";
   const status = (meeting?.status as string) ?? "";
 
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
+  // Board members + persons (joined)
+  const { data: memberRows = [] } = useQuery({
+    queryKey: queryKeys.members.byBoard(boardId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("board_member")
+        .select("*, person(*)")
+        .eq("board_id", boardId)
+        .eq("status", "active");
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!boardId,
+  });
 
-  const { data: memberRows } = useQuery(
-    "SELECT * FROM board_members WHERE board_id = ? AND status = 'active'",
-    [boardId],
-  );
+  // Attendance
+  const { data: attendanceRows = [] } = useQuery({
+    queryKey: queryKeys.attendance.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("meeting_attendance")
+        .select("*")
+        .eq("meeting_id", meetingId);
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: personRows } = useQuery(
-    "SELECT * FROM persons WHERE town_id = ?",
-    [townId],
-  );
+  // Agenda items + exhibits (joined)
+  const { data: itemRows = [] } = useQuery({
+    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("agenda_item")
+        .select("*, exhibit(*)")
+        .eq("meeting_id", meetingId)
+        .order("sort_order");
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: attendanceRows } = useQuery(
-    "SELECT * FROM meeting_attendance WHERE meeting_id = ?",
-    [meetingId],
-  );
+  // Motions
+  const { data: motionRows = [] } = useQuery({
+    queryKey: queryKeys.motions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("motion")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("created_at");
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: itemRows } = useQuery(
-    "SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order ASC",
-    [meetingId],
-  );
+  // Vote records
+  const { data: voteRecordRows = [] } = useQuery({
+    queryKey: queryKeys.voteRecords.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vote_record")
+        .select("*")
+        .eq("meeting_id", meetingId);
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: motionRows } = useQuery(
-    "SELECT * FROM motions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  // Guest speakers
+  const { data: speakerRows = [] } = useQuery({
+    queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("guest_speaker")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("created_at");
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: voteRecordRows } = useQuery(
-    "SELECT * FROM vote_records WHERE meeting_id = ?",
-    [meetingId],
-  );
+  // Agenda item transitions
+  const { data: transitionRows = [] } = useQuery({
+    queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("agenda_item_transition")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("started_at");
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
-  const { data: exhibitRows } = useQuery(
-    "SELECT * FROM exhibits WHERE town_id = ?",
-    [townId],
-  );
-
-  const { data: speakerRows } = useQuery(
-    "SELECT * FROM guest_speakers WHERE meeting_id = ? ORDER BY created_at ASC",
-    [meetingId],
-  );
-
-  const { data: transitionRows } = useQuery(
-    "SELECT * FROM agenda_item_transitions WHERE meeting_id = ? ORDER BY started_at ASC",
-    [meetingId],
-  );
-
-  const { data: execSessionRows } = useQuery(
-    "SELECT * FROM executive_sessions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  // Executive sessions
+  const { data: execSessionRows = [] } = useQuery({
+    queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("executive_session")
+        .select("*")
+        .eq("meeting_id", meetingId);
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5_000,
+  });
 
   const { quorum } = useQuorumCheck(meetingId, boardId);
 
-  // ─── Data merging ─────────────────────────────────────────────
+  // ─── Realtime subscriptions ────────────────────────────────────
 
-  const personMap = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    (personRows ?? []).forEach((p: Record<string, unknown>) => map.set(p.id as string, p));
-    return map;
-  }, [personRows]);
+  useRealtimeSubscription(
+    `live-${meetingId}-meeting`,
+    "meeting",
+    `id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-attendance`,
+    "meeting_attendance",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-agenda`,
+    "agenda_item",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-motions`,
+    "motion",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-votes`,
+    "vote_record",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-speakers`,
+    "guest_speaker",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-transitions`,
+    "agenda_item_transition",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId) });
+    },
+  );
+
+  useRealtimeSubscription(
+    `live-${meetingId}-exec`,
+    "executive_session",
+    `meeting_id=eq.${meetingId}`,
+    () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.executiveSessions.byMeeting(meetingId) });
+    },
+  );
+
+  // ─── Data merging ─────────────────────────────────────────────
 
   const members = useMemo(
     () =>
-      (memberRows ?? []).map((m: Record<string, unknown>) => {
-        const person = personMap.get(m.person_id as string);
+      (memberRows as Array<Record<string, unknown>>).map((m) => {
+        const person = m.person as Record<string, unknown> | null;
         return {
-          boardMemberId: m.id as string,
-          personId: m.person_id as string,
+          boardMemberId: String(m.id),
+          personId: String(m.person_id),
           name: (person?.name as string) ?? "Unknown",
           seatTitle: (m.seat_title as string) ?? null,
-          isDefaultRecSec: (m.is_default_rec_sec as number) === 1,
+          isDefaultRecSec: !!m.is_default_rec_sec,
         };
       }),
-    [memberRows, personMap],
+    [memberRows],
   );
 
   const memberNameMap = useMemo(() => {
@@ -193,7 +412,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   const motionsByItem = useMemo(() => {
     const map = new Map<string, Array<Record<string, unknown>>>();
-    (motionRows ?? []).forEach((m: Record<string, unknown>) => {
+    (motionRows as Array<Record<string, unknown>>).forEach((m) => {
       const itemId = m.agenda_item_id as string;
       if (!map.has(itemId)) map.set(itemId, []);
       map.get(itemId)!.push(m);
@@ -203,7 +422,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   const votesByMotion = useMemo(() => {
     const map = new Map<string, Array<Record<string, unknown>>>();
-    (voteRecordRows ?? []).forEach((v: Record<string, unknown>) => {
+    (voteRecordRows as Array<Record<string, unknown>>).forEach((v) => {
       const mId = v.motion_id as string;
       if (!map.has(mId)) map.set(mId, []);
       map.get(mId)!.push(v);
@@ -211,19 +430,22 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     return map;
   }, [voteRecordRows]);
 
+  // Exhibits are embedded in itemRows via select('*, exhibit(*)')
   const exhibitsByItem = useMemo(() => {
     const map = new Map<string, Array<Record<string, unknown>>>();
-    (exhibitRows ?? []).forEach((e: Record<string, unknown>) => {
-      const itemId = e.agenda_item_id as string;
-      if (!map.has(itemId)) map.set(itemId, []);
-      map.get(itemId)!.push(e);
+    (itemRows as Array<Record<string, unknown>>).forEach((item) => {
+      const exhibits = item.exhibit;
+      const arr = Array.isArray(exhibits) ? exhibits : exhibits ? [exhibits] : [];
+      if (arr.length > 0) {
+        map.set(String(item.id), arr as Array<Record<string, unknown>>);
+      }
     });
     return map;
-  }, [exhibitRows]);
+  }, [itemRows]);
 
   const speakersByItem = useMemo(() => {
     const map = new Map<string, Array<Record<string, unknown>>>();
-    (speakerRows ?? []).forEach((s: Record<string, unknown>) => {
+    (speakerRows as Array<Record<string, unknown>>).forEach((s) => {
       const itemId = s.agenda_item_id as string;
       if (!map.has(itemId)) map.set(itemId, []);
       map.get(itemId)!.push(s);
@@ -232,19 +454,20 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   }, [speakerRows]);
 
   // Build sections → items tree
-  const allItems = useMemo(() => itemRows ?? [], [itemRows]);
+  const allItems = useMemo(
+    () => itemRows as Array<Record<string, unknown>>,
+    [itemRows],
+  );
 
   const sections = useMemo(() => {
-    const parents = allItems.filter(
-      (item: Record<string, unknown>) => !item.parent_item_id,
-    );
-    return parents.map((section: Record<string, unknown>, sIdx: number) => {
+    const parents = allItems.filter((item) => !item.parent_item_id);
+    return parents.map((section, sIdx) => {
       const children = allItems
-        .filter((item: Record<string, unknown>) => item.parent_item_id === section.id)
-        .map((item: Record<string, unknown>) => {
+        .filter((item) => item.parent_item_id === section.id)
+        .map((item, _iIdx) => {
           const subItems = allItems
-            .filter((sub: Record<string, unknown>) => sub.parent_item_id === item.id)
-            .map((sub: Record<string, unknown>) => ({
+            .filter((sub) => sub.parent_item_id === item.id)
+            .map((sub) => ({
               id: sub.id as string,
               title: sub.title as string,
               sortOrder: sub.sort_order as number,
@@ -274,7 +497,13 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // Flat ordered item list for navigation
   const flatItems = useMemo(() => {
-    const items: Array<{ id: string; sectionTitle: string; sectionType: string; sectionIdx: number; itemIdx: number }> = [];
+    const items: Array<{
+      id: string;
+      sectionTitle: string;
+      sectionType: string;
+      sectionIdx: number;
+      itemIdx: number;
+    }> = [];
     sections.forEach((section, sIdx) => {
       section.items.forEach((item, iIdx) => {
         items.push({
@@ -296,23 +525,23 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   // Current item's transition for per-item timer
   const currentTransition = useMemo(() => {
     if (!currentItemId) return null;
-    const transitions = (transitionRows ?? []).filter(
-      (t: Record<string, unknown>) => t.agenda_item_id === currentItemId && !t.ended_at,
+    const transitions = (transitionRows as Array<Record<string, unknown>>).filter(
+      (t) => t.agenda_item_id === currentItemId && !t.ended_at,
     );
-    return transitions[transitions.length - 1] as Record<string, unknown> | undefined ?? null;
+    return transitions[transitions.length - 1] ?? null;
   }, [transitionRows, currentItemId]);
 
   // Build current item detail
   const currentItemDetail = useMemo(() => {
     if (!currentItemId) return null;
-    const raw = allItems.find((i: Record<string, unknown>) => i.id === currentItemId);
+    const raw = allItems.find((i) => i.id === currentItemId);
     if (!raw) return null;
 
     const flatInfo = flatItems.find((i) => i.id === currentItemId);
     const letter = flatInfo ? String.fromCharCode(65 + flatInfo.itemIdx) : "";
     const sectionRef = flatInfo ? `${flatInfo.sectionIdx + 1}${letter}` : "";
 
-    const itemMotions = (motionsByItem.get(currentItemId) ?? []).map((m: Record<string, unknown>) => ({
+    const itemMotions = (motionsByItem.get(currentItemId) ?? []).map((m) => ({
       id: m.id as string,
       motionText: (m.motion_text as string) ?? "",
       motionType: (m.motion_type as string) ?? "main",
@@ -320,16 +549,16 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       secondedBy: (m.seconded_by as string) ?? null,
       status: (m.status as string) ?? "pending",
       parentMotionId: (m.parent_motion_id as string) ?? null,
-      voteSummary: (m.vote_summary as string) ?? null,
+      voteSummary: m.vote_summary ?? null,
     }));
 
-    const itemExhibits = (exhibitsByItem.get(currentItemId) ?? []).map((e: Record<string, unknown>) => ({
+    const itemExhibits = (exhibitsByItem.get(currentItemId) ?? []).map((e) => ({
       id: e.id as string,
       title: (e.title as string) ?? "",
       fileName: (e.file_name as string) ?? "",
     }));
 
-    const itemSpeakers = (speakersByItem.get(currentItemId) ?? []).map((s: Record<string, unknown>) => ({
+    const itemSpeakers = (speakersByItem.get(currentItemId) ?? []).map((s) => ({
       id: s.id as string,
       name: (s.name as string) ?? "",
       address: (s.address as string) ?? null,
@@ -338,8 +567,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     }));
 
     const subItems = allItems
-      .filter((sub: Record<string, unknown>) => sub.parent_item_id === currentItemId)
-      .map((sub: Record<string, unknown>) => ({
+      .filter((sub) => sub.parent_item_id === currentItemId)
+      .map((sub) => ({
         id: sub.id as string,
         title: sub.title as string,
         sortOrder: sub.sort_order as number,
@@ -347,13 +576,16 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
     // Find the section this item belongs to
     const parentId = raw.parent_item_id as string;
-    const section = allItems.find((i: Record<string, unknown>) => i.id === parentId);
+    const section = allItems.find((i) => i.id === parentId);
 
     return {
       id: currentItemId,
       title: (raw.title as string) ?? "",
       sectionTitle: (section?.title as string) ?? "",
-      sectionType: (section?.section_type as string) ?? (raw.section_type as string) ?? "other",
+      sectionType:
+        (section?.section_type as string) ??
+        (raw.section_type as string) ??
+        "other",
       sectionRef,
       description: (raw.description as string) ?? null,
       presenter: (raw.presenter as string) ?? null,
@@ -369,16 +601,25 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       speakers: itemSpeakers,
       motions: itemMotions,
     };
-  }, [currentItemId, allItems, flatItems, motionsByItem, exhibitsByItem, speakersByItem]);
+  }, [
+    currentItemId,
+    allItems,
+    flatItems,
+    motionsByItem,
+    exhibitsByItem,
+    speakersByItem,
+  ]);
 
   // Present members for motion forms
   const presentMembers = useMemo(
     () =>
       members.filter((m) =>
-        (attendanceRows ?? []).some(
-          (a: Record<string, unknown>) =>
+        (attendanceRows as Array<Record<string, unknown>>).some(
+          (a) =>
             a.board_member_id === m.boardMemberId &&
-            (a.status === "present" || a.status === "remote" || a.status === "late_arrival"),
+            (a.status === "present" ||
+              a.status === "remote" ||
+              a.status === "late_arrival"),
         ),
       ),
     [members, attendanceRows],
@@ -386,28 +627,24 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Executive session detection ────────────────────────────────
 
-  // Active exec session: has entered_at but no exited_at
   const activeExecSession = useMemo(() => {
-    if (!execSessionRows) return null;
-    return (execSessionRows as Array<Record<string, unknown>>).find(
-      (es) => es.entered_at && !es.exited_at,
-    ) ?? null;
+    const rows = execSessionRows as Array<Record<string, unknown>>;
+    return rows.find((es) => es.entered_at && !es.exited_at) ?? null;
   }, [execSessionRows]);
 
   const isInExecSession = !!activeExecSession;
 
-  // Pending exec session: has entry_motion_id but no entered_at (motion filed, not yet voted)
   const pendingExecSession = useMemo(() => {
-    if (!execSessionRows) return null;
-    return (execSessionRows as Array<Record<string, unknown>>).find(
-      (es) => es.entry_motion_id && !es.entered_at && !es.exited_at,
-    ) ?? null;
+    const rows = execSessionRows as Array<Record<string, unknown>>;
+    return (
+      rows.find((es) => es.entry_motion_id && !es.entered_at && !es.exited_at) ?? null
+    );
   }, [execSessionRows]);
 
   // Reactive: when entry motion for exec session passes → set entered_at
   // When entry motion fails → delete the pending exec session record
   useEffect(() => {
-    if (!pendingExecSession || !motionRows) return;
+    if (!pendingExecSession || !motionRows.length) return;
     const entryMotionId = pendingExecSession.entry_motion_id as string;
     const entryMotion = (motionRows as Array<Record<string, unknown>>).find(
       (m) => m.id === entryMotionId,
@@ -417,28 +654,34 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     const motionStatus = entryMotion.status as string;
     const esId = pendingExecSession.id as string;
 
-    // Already processed this motion
     if (processedMotionIds.current.has(entryMotionId)) return;
 
     if (motionStatus === "passed") {
       processedMotionIds.current.add(entryMotionId);
       const now = new Date().toISOString();
-      void powerSync.execute(
-        "UPDATE executive_sessions SET entered_at = ? WHERE id = ?",
-        [now, esId],
-      );
+      void (async () => {
+        await supabase
+          .from("executive_session")
+          .update({ entered_at: now })
+          .eq("id", esId);
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+        });
+      })();
     } else if (motionStatus === "failed") {
       processedMotionIds.current.add(entryMotionId);
-      void powerSync.execute(
-        "DELETE FROM executive_sessions WHERE id = ?",
-        [esId],
-      );
+      void (async () => {
+        await supabase.from("executive_session").delete().eq("id", esId);
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+        });
+      })();
     }
-  }, [pendingExecSession, motionRows, powerSync]);
+  }, [pendingExecSession, motionRows, supabase, queryClient, meetingId]);
 
   // Reactive: when adjourn motion passes → trigger meeting end
   useEffect(() => {
-    if (!motionRows || status !== "open") return;
+    if (!motionRows.length || status !== "open") return;
     const adjournMotion = (motionRows as Array<Record<string, unknown>>).find(
       (m) => m.motion_type === "adjourn" && m.status === "passed",
     );
@@ -447,18 +690,16 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     if (processedMotionIds.current.has(`adjourn_${motionId}`)) return;
     processedMotionIds.current.add(`adjourn_${motionId}`);
     void handleMeetingEnd("motion", motionId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [motionRows, status]);
 
   // Reactive: when a minutes-approval motion passes → auto-approve minutes
   useEffect(() => {
-    if (!motionRows || !itemRows) return;
+    if (!motionRows.length || !itemRows.length) return;
     const items = itemRows as Array<Record<string, unknown>>;
     const motions = motionRows as Array<Record<string, unknown>>;
 
-    // Find agenda items linked to a minutes document
-    const approvalItems = items.filter(
-      (item) => item.source_minutes_document_id,
-    );
+    const approvalItems = items.filter((item) => item.source_minutes_document_id);
     if (approvalItems.length === 0) return;
 
     for (const item of approvalItems) {
@@ -467,55 +708,66 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       );
 
       for (const motion of itemMotions) {
-        const key = `minutes_approve_${motion.id}`;
+        const key = `minutes_approve_${motion.id as string}`;
         if (processedMotionIds.current.has(key)) continue;
         processedMotionIds.current.add(key);
 
         const docId = item.source_minutes_document_id as string;
         const now = new Date().toISOString();
         const motionText = String(motion.motion_text ?? "").toLowerCase();
-        const asAmended = motionText.includes("as amended") ||
-          motionText.includes("with corrections") ? 1 : 0;
+        const asAmended =
+          motionText.includes("as amended") ||
+          motionText.includes("with corrections");
 
-        // Update minutes_document status to approved
-        void powerSync.execute(
-          "UPDATE minutes_documents SET status = ?, approved_at = ?, approved_by_motion_id = ?, approved_as_amended = ?, updated_at = ? WHERE id = ?",
-          ["approved", now, motion.id, asAmended, now, docId],
-        );
-
-        // Fire notification event
-        void powerSync.execute(
-          "INSERT INTO notification_events (id, town_id, event_type, payload, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [
-            crypto.randomUUID(),
-            townId,
-            "minutes_approved",
-            JSON.stringify({ minutes_document_id: docId, meeting_id: meetingId, approved_by_motion_id: motion.id }),
-            "pending",
-            now,
-          ],
-        );
-
-        // Fire API call to regenerate PDF without DRAFT watermark (fire-and-forget)
         void (async () => {
+          // Update minutes_document status to approved
+          await supabase
+            .from("minutes_document")
+            .update({
+              status: "approved",
+              approved_at: now,
+              approved_by_motion_id: motion.id as string,
+              approved_as_amended: asAmended,
+              updated_at: now,
+            })
+            .eq("id", docId);
+
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
+          });
+
+          // Fire notification event (fire-and-forget)
+          await supabase.from("notification_event").insert({
+            id: crypto.randomUUID(),
+            town_id: townId,
+            event_type: "minutes_approved",
+            payload: {
+              minutes_document_id: docId,
+              meeting_id: meetingId,
+              approved_by_motion_id: motion.id as string,
+            },
+            status: "pending",
+            created_at: now,
+          });
+
+          // Fire API call to regenerate PDF without DRAFT watermark (fire-and-forget)
           try {
-            const { createClient } = await import("@supabase/supabase-js");
-            const supabase = createClient(
-              import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
-              import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
-            );
             const { data: sessionData } = await supabase.auth.getSession();
             const accessToken = sessionData?.session?.access_token;
             if (accessToken) {
-              const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-              await fetch(`${apiBase}/api/meetings/${meetingId}/minutes/render`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${accessToken}`,
+              const apiBase =
+                import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+              await fetch(
+                `${apiBase}/api/meetings/${meetingId}/minutes/render`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${accessToken}`,
+                  },
+                  body: JSON.stringify({ is_draft: false }),
                 },
-                body: JSON.stringify({ is_draft: false }),
-              });
+              );
             }
           } catch {
             // Fire-and-forget — PDF regeneration failure is non-critical
@@ -523,27 +775,24 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         })();
       }
     }
-  }, [motionRows, itemRows, powerSync, townId, meetingId]);
+  }, [motionRows, itemRows, supabase, queryClient, townId, meetingId]);
 
   // Track post-session action motions: any motion created after returning
   // from exec session gets linked to the exec session record
   useEffect(() => {
-    if (!isPostExecSession || !postExecSessionId || !motionRows) return;
-    const execSession = (execSessionRows as Array<Record<string, unknown>>)?.find(
+    if (!isPostExecSession || !postExecSessionId || !motionRows.length) return;
+    const execSession = (execSessionRows as Array<Record<string, unknown>>).find(
       (es) => es.id === postExecSessionId,
     );
     if (!execSession) return;
 
-    const existingIds: string[] = (() => {
-      try {
-        const raw = execSession.post_session_action_motion_ids as string;
-        return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
-      }
-    })();
+    // post_session_action_motion_ids is JSONB (native array) in Supabase
+    const existingIds: string[] = Array.isArray(
+      execSession.post_session_action_motion_ids,
+    )
+      ? (execSession.post_session_action_motion_ids as string[])
+      : [];
 
-    // Find motions created after exec session exited_at
     const exitedAt = execSession.exited_at as string;
     if (!exitedAt) return;
 
@@ -555,12 +804,25 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
     if (postMotions.length > 0) {
       const newIds = [...existingIds, ...postMotions.map((m) => m.id as string)];
-      void powerSync.execute(
-        "UPDATE executive_sessions SET post_session_action_motion_ids = ? WHERE id = ?",
-        [JSON.stringify(newIds), postExecSessionId],
-      );
+      void (async () => {
+        await supabase
+          .from("executive_session")
+          .update({ post_session_action_motion_ids: newIds })
+          .eq("id", postExecSessionId);
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+        });
+      })();
     }
-  }, [isPostExecSession, postExecSessionId, motionRows, execSessionRows, powerSync]);
+  }, [
+    isPostExecSession,
+    postExecSessionId,
+    motionRows,
+    execSessionRows,
+    supabase,
+    queryClient,
+    meetingId,
+  ]);
 
   // Find the item that belongs to the executive session section (for lock icon)
   const execSessionItemId = useMemo(() => {
@@ -572,7 +834,6 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const presidingOfficerName = useMemo(() => {
     const presidingId = (meeting?.presiding_officer_id as string) ?? null;
     if (!presidingId) return "Chair";
-    // presiding_officer_id references a board_member
     return memberNameMap.get(presidingId) ?? "Chair";
   }, [meeting?.presiding_officer_id, memberNameMap]);
 
@@ -584,33 +845,47 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
       // End current transition
       if (currentItemId && currentTransition) {
-        await powerSync.execute(
-          "UPDATE agenda_item_transitions SET ended_at = ? WHERE id = ?",
-          [now, currentTransition.id as string],
-        );
+        await supabase
+          .from("agenda_item_transition")
+          .update({ ended_at: now })
+          .eq("id", (currentTransition as Record<string, unknown>).id as string);
       }
 
       // Set current item to active
-      await powerSync.execute(
-        "UPDATE agenda_items SET status = 'active', updated_at = ? WHERE id = ?",
-        [now, itemId],
-      );
+      await supabase
+        .from("agenda_item")
+        .update({ status: "active", updated_at: now })
+        .eq("id", itemId);
 
       // Update meeting's current item
-      await powerSync.execute(
-        "UPDATE meetings SET current_agenda_item_id = ?, updated_at = ? WHERE id = ?",
-        [itemId, now, meetingId],
-      );
+      await supabase
+        .from("meeting")
+        .update({ current_agenda_item_id: itemId, updated_at: now })
+        .eq("id", meetingId);
 
       // Create new transition
       const transId = crypto.randomUUID();
-      await powerSync.execute(
-        `INSERT INTO agenda_item_transitions (id, meeting_id, agenda_item_id, town_id, started_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, NULL)`,
-        [transId, meetingId, itemId, townId, now],
-      );
+      await supabase.from("agenda_item_transition").insert({
+        id: transId,
+        meeting_id: meetingId,
+        agenda_item_id: itemId,
+        town_id: townId,
+        started_at: now,
+        ended_at: null,
+      });
+
+      // Invalidate affected queries
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.meetings.detail(meetingId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+      });
     },
-    [currentItemId, currentTransition, meetingId, townId, powerSync],
+    [currentItemId, currentTransition, meetingId, townId, supabase, queryClient],
   );
 
   const navigateNext = useCallback(() => {
@@ -640,8 +915,6 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const handleExecMotionFiled = useCallback(async () => {
     if (!pendingExecCitation || !currentItemId) return;
 
-    // Find the most recently created motion on the current item with type "main"
-    // that contains "Executive Session" — this is the entry motion just filed
     const itemMotions = motionsByItem.get(currentItemId) ?? [];
     const entryMotion = [...itemMotions].reverse().find(
       (m: Record<string, unknown>) =>
@@ -652,22 +925,38 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
     const esId = crypto.randomUUID();
     const now = new Date().toISOString();
-    await powerSync.execute(
-      `INSERT INTO executive_sessions
-       (id, meeting_id, agenda_item_id, town_id, statutory_basis, entered_at, exited_at, entry_motion_id, post_session_action_motion_ids, created_at)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, '[]', ?)`,
-      [esId, meetingId, currentItemId, townId, pendingExecCitation.citation, entryMotion.id as string, now],
-    );
+    await supabase.from("executive_session").insert({
+      id: esId,
+      meeting_id: meetingId,
+      agenda_item_id: currentItemId,
+      town_id: townId,
+      statutory_basis: pendingExecCitation.citation,
+      entered_at: null,
+      exited_at: null,
+      entry_motion_id: entryMotion.id as string,
+      post_session_action_motion_ids: [],
+      created_at: now,
+    });
+
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+    });
 
     setPendingExecCitation(null);
-  }, [pendingExecCitation, currentItemId, motionsByItem, meetingId, townId, powerSync]);
+  }, [
+    pendingExecCitation,
+    currentItemId,
+    motionsByItem,
+    meetingId,
+    townId,
+    supabase,
+    queryClient,
+  ]);
 
-  // When the exec motion dialog closes, file the exec session record
   const handleExecMotionDialogClose = useCallback(
     (open: boolean) => {
       setExecMotionDialogOpen(open);
       if (!open && pendingExecCitation) {
-        // Motion was filed (dialog closed after submit) — create exec session record
         void handleExecMotionFiled();
       }
     },
@@ -703,50 +992,44 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
       // 1. End current transition
       if (currentTransition) {
-        await powerSync.execute(
-          "UPDATE agenda_item_transitions SET ended_at = ? WHERE id = ?",
-          [now, currentTransition.id as string],
-        );
+        await supabase
+          .from("agenda_item_transition")
+          .update({ ended_at: now })
+          .eq("id", (currentTransition as Record<string, unknown>).id as string);
       }
 
       // 2. Mark pending/active items as "deferred" and create future_item_queue entries
-      const unreachedItems = allItems.filter((item: Record<string, unknown>) => {
+      const unreachedItems = allItems.filter((item) => {
         const itemStatus = item.status as string;
         return (
-          item.parent_item_id && // Skip section headers
+          item.parent_item_id &&
           (itemStatus === "pending" || itemStatus === "active") &&
-          item.id !== currentItemId // Don't defer the item we were on if it was active
+          item.id !== currentItemId
         );
       });
 
       for (const item of unreachedItems) {
-        // Mark as deferred
-        await powerSync.execute(
-          "UPDATE agenda_items SET status = 'deferred', updated_at = ? WHERE id = ?",
-          [now, item.id as string],
-        );
+        await supabase
+          .from("agenda_item")
+          .update({ status: "deferred", updated_at: now })
+          .eq("id", item.id as string);
 
-        // Create future_item_queue entry
-        const fiqId = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO future_item_queues
-           (id, board_id, town_id, source_meeting_id, source_agenda_item_id, title, description, source, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'deferred', 'pending', ?)`,
-          [
-            fiqId,
-            boardId,
-            townId,
-            meetingId,
-            item.id as string,
-            item.title as string,
-            (item.description as string) ?? null,
-            now,
-          ],
-        );
+        await supabase.from("future_item_queue").insert({
+          id: crypto.randomUUID(),
+          board_id: boardId,
+          town_id: townId,
+          source_meeting_id: meetingId,
+          source_agenda_item_id: item.id as string,
+          title: item.title as string,
+          description: (item.description as string) ?? null,
+          source: "deferred",
+          status: "pending",
+          created_at: now,
+        });
       }
 
-      // 3. Also add tabled items (items with a passed "table" motion) to future queue
-      const tabledItems = allItems.filter((item: Record<string, unknown>) => {
+      // 3. Also add tabled items to future queue
+      const tabledItems = allItems.filter((item) => {
         if (!item.parent_item_id) return false;
         const itemMotions = motionsByItem.get(item.id as string) ?? [];
         return itemMotions.some(
@@ -756,26 +1039,21 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       });
 
       for (const item of tabledItems) {
-        // Check if already in future queue from this meeting
-        const fiqId = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO future_item_queues
-           (id, board_id, town_id, source_meeting_id, source_agenda_item_id, title, description, source, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'tabled', 'pending', ?)`,
-          [
-            fiqId,
-            boardId,
-            townId,
-            meetingId,
-            item.id as string,
-            item.title as string,
-            (item.description as string) ?? null,
-            now,
-          ],
-        );
+        await supabase.from("future_item_queue").insert({
+          id: crypto.randomUUID(),
+          board_id: boardId,
+          town_id: townId,
+          source_meeting_id: meetingId,
+          source_agenda_item_id: item.id as string,
+          title: item.title as string,
+          description: (item.description as string) ?? null,
+          source: "tabled",
+          status: "pending",
+          created_at: now,
+        });
       }
 
-      // 4. Build adjournment JSONB
+      // 4. Build adjournment JSONB (Supabase handles native objects)
       const adjournment = {
         method,
         adjourned_by: currentUser?.personId ?? null,
@@ -785,24 +1063,41 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       };
 
       // 5. Update meeting: status=adjourned, ended_at, adjournment, clear current item
-      await powerSync.execute(
-        `UPDATE meetings
-         SET status = 'adjourned',
-             ended_at = ?,
-             adjournment = ?,
-             current_agenda_item_id = NULL,
-             updated_at = ?
-         WHERE id = ?`,
-        [now, JSON.stringify(adjournment), now, meetingId],
-      );
+      await supabase
+        .from("meeting")
+        .update({
+          status: "adjourned",
+          ended_at: now,
+          adjournment,
+          current_agenda_item_id: null,
+          updated_at: now,
+        })
+        .eq("id", meetingId);
+
+      // Invalidate affected queries
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.meetings.detail(meetingId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+      });
 
       // 6. Navigate to review page
       void navigate(`/meetings/${meetingId}/review`);
     },
     [
-      currentTransition, allItems, currentItemId, motionsByItem,
-      boardId, townId, meetingId, currentUser, presidingOfficerName,
-      powerSync, navigate,
+      currentTransition,
+      allItems,
+      currentItemId,
+      motionsByItem,
+      boardId,
+      townId,
+      meetingId,
+      currentUser,
+      presidingOfficerName,
+      supabase,
+      queryClient,
+      navigate,
     ],
   );
 
@@ -849,8 +1144,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     return null;
   }
 
-  // Adjourned meetings go to review page
-  if (status === "adjourned" || status === "minutes_draft" || status === "approved") {
+  if (
+    status === "adjourned" ||
+    status === "minutes_draft" ||
+    status === "approved"
+  ) {
     void navigate(`/meetings/${meetingId}/review`, { replace: true });
     return null;
   }
@@ -862,14 +1160,15 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
           <h2 className="text-lg font-semibold">Permission Required</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            You need the "Start/Run Meeting" permission to access the live meeting interface.
+            You need the "Start/Run Meeting" permission to access the live
+            meeting interface.
           </p>
         </div>
       </div>
     );
   }
 
-  const readOnly = false; // If we reach here, status is "open"
+  const readOnly = false;
   const meetingStartedAt = (meeting.started_at as string) ?? null;
 
   // ─── Noticed → Show start flow ─────────────────────────────
@@ -881,13 +1180,15 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         townId={townId}
         boardId={boardId}
         members={members}
-        attendance={(attendanceRows ?? []) as Array<{
-          id: string;
-          board_member_id: string | null;
-          person_id: string;
-          status: string;
-          is_recording_secretary: number;
-        }>}
+        attendance={
+          (attendanceRows as Array<{
+            id: string;
+            board_member_id: string | null;
+            person_id: string;
+            status: string;
+            is_recording_secretary: boolean;
+          }>) ?? []
+        }
         quorumRequired={quorum?.required ?? 0}
         quorumPresent={quorum?.present ?? 0}
         quorumTotal={quorum?.total ?? 0}
@@ -901,13 +1202,18 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+      {/* Connection status banner (prominent in live meeting context) */}
+      <ConnectionStatusBar prominent={true} />
+
       {/* Header bar */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">{meeting.title as string}</h1>
           <Badge variant="default">In Progress</Badge>
           {board && (
-            <span className="text-sm text-muted-foreground">{board.name as string}</span>
+            <span className="text-sm text-muted-foreground">
+              {board.name as string}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-4">
@@ -924,7 +1230,10 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             </Badge>
           )}
           {isPostExecSession && (
-            <Badge variant="outline" className="border-amber-300 text-amber-700 text-xs">
+            <Badge
+              variant="outline"
+              className="border-amber-300 text-amber-700 text-xs"
+            >
               Post-Session Actions
             </Badge>
           )}
@@ -951,7 +1260,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       {isPostExecSession && !isInExecSession && (
         <div className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-6 py-2 dark:border-amber-900 dark:bg-amber-950/30">
           <p className="text-sm text-amber-700 dark:text-amber-400">
-            Recording post-executive-session actions. File any motions resulting from executive session discussion.
+            Recording post-executive-session actions. File any motions resulting
+            from executive session discussion.
           </p>
           <Button
             size="sm"
@@ -986,20 +1296,29 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             allMembers={members}
             presentMembers={presentMembers}
             memberNameMap={memberNameMap}
-            attendanceRecords={(attendanceRows ?? []) as Array<{
-              id: string;
-              board_member_id: string | null;
-              person_id: string;
-              status: string;
-            }>}
-            votesByMotion={votesByMotion as unknown as Map<string, Array<{
-              id: string;
-              motion_id: string;
-              board_member_id: string;
-              vote: string;
-              recusal_reason: string | null;
-            }>>}
-            motionDisplayFormat={(board?.motion_display_format as string) ?? null}
+            attendanceRecords={
+              (attendanceRows as Array<{
+                id: string;
+                board_member_id: string | null;
+                person_id: string;
+                status: string;
+              }>) ?? []
+            }
+            votesByMotion={
+              votesByMotion as unknown as Map<
+                string,
+                Array<{
+                  id: string;
+                  motion_id: string;
+                  board_member_id: string;
+                  vote: string;
+                  recusal_reason: string | null;
+                }>
+              >
+            }
+            motionDisplayFormat={
+              (board?.motion_display_format as string) ?? null
+            }
             boardQuorumConfig={{
               quorumType: (board?.quorum_type as string) ?? null,
               quorumValue: (board?.quorum_value as number) ?? null,
@@ -1022,24 +1341,35 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             meetingId={meetingId}
             townId={townId}
             members={members}
-            attendance={(attendanceRows ?? []) as Array<{
-              id: string;
-              board_member_id: string | null;
-              person_id: string;
-              status: string;
-              arrived_at: string | null;
-              departed_at: string | null;
-              is_recording_secretary: number;
-            }>}
-            presidingOfficerId={(meeting.presiding_officer_id as string) ?? null}
-            recordingSecretaryId={(meeting.recording_secretary_id as string) ?? null}
+            attendance={
+              (attendanceRows as Array<{
+                id: string;
+                board_member_id: string | null;
+                person_id: string;
+                status: string;
+                arrived_at: string | null;
+                departed_at: string | null;
+                is_recording_secretary: boolean;
+              }>) ?? []
+            }
+            presidingOfficerId={
+              (meeting.presiding_officer_id as string) ?? null
+            }
+            recordingSecretaryId={
+              (meeting.recording_secretary_id as string) ?? null
+            }
             quorumRequired={quorum?.required ?? 0}
             quorumPresent={quorum?.present ?? 0}
             quorumTotal={quorum?.total ?? 0}
             hasQuorum={quorum?.hasQuorum ?? false}
             meetingStartedAt={meetingStartedAt}
-            currentItemStartedAt={(currentTransition?.started_at as string) ?? null}
-            currentItemEstimatedDuration={currentItemDetail?.estimatedDuration ?? null}
+            currentItemStartedAt={
+              (currentTransition as Record<string, unknown> | null)
+                ?.started_at as string ?? null
+            }
+            currentItemEstimatedDuration={
+              currentItemDetail?.estimatedDuration ?? null
+            }
             readOnly={readOnly}
             onRecuse={(member) => setRecusalMemberFromAttendance(member)}
           />
