@@ -14,7 +14,7 @@
 
 import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
   Calendar,
@@ -60,11 +60,30 @@ import {
   downloadMeetingRecord,
   type StructuredMeetingRecordInput,
 } from "@/lib/meeting/buildStructuredMeetingRecord";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Route Loader ─────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { meetingId: params.meetingId };
+  const meetingId = params.meetingId;
+
+  // Prefetch meeting data
+  await queryClient.ensureQueryData({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
+
+  return { meetingId };
 }
 
 // ─── Component ────────────────────────────────────────────────────
@@ -90,86 +109,200 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   // ─── Reactive queries ───────────────────────────────────────────
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE id = ? LIMIT 1",
-    [meetingId],
-  );
-  const meeting = meetingRows?.[0] as Record<string, unknown> | undefined;
+  const { data: meeting } = useQuery({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
   const boardId = (meeting?.board_id as string) ?? "";
   const townId = (meeting?.town_id as string) ?? "";
 
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("id", boardId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!boardId,
+  });
 
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId],
-  );
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
+  const { data: town } = useQuery({
+    queryKey: queryKeys.towns.detail(townId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!townId,
+  });
 
-  const { data: memberRows } = useQuery(
-    "SELECT * FROM board_members WHERE board_id = ?",
-    [boardId],
-  );
+  const { data: memberRows } = useQuery({
+    queryKey: queryKeys.members.byBoard(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board_member")
+        .select("*")
+        .eq("board_id", boardId)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!boardId,
+  });
 
-  const { data: personRows } = useQuery(
-    "SELECT * FROM persons WHERE town_id = ?",
-    [townId],
-  );
+  const { data: personRows } = useQuery({
+    queryKey: queryKeys.persons.byTown(townId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("person")
+        .select("*")
+        .eq("town_id", townId)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
 
-  const { data: attendanceRows } = useQuery(
-    "SELECT * FROM meeting_attendance WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: attendanceRows } = useQuery({
+    queryKey: queryKeys.attendance.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting_attendance")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: itemRows } = useQuery(
-    "SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order ASC",
-    [meetingId],
-  );
+  const { data: itemRows } = useQuery({
+    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_item")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("sort_order", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: motionRows } = useQuery(
-    "SELECT * FROM motions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: motionRows } = useQuery({
+    queryKey: queryKeys.motions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("motion")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: voteRecordRows } = useQuery(
-    "SELECT * FROM vote_records WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: voteRecordRows } = useQuery({
+    queryKey: queryKeys.voteRecords.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("vote_record")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: execSessionRows } = useQuery(
-    "SELECT * FROM executive_sessions WHERE meeting_id = ?",
-    [meetingId],
-  );
+  const { data: execSessionRows } = useQuery({
+    queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("executive_session")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: transitionRows } = useQuery(
-    "SELECT * FROM agenda_item_transitions WHERE meeting_id = ? ORDER BY started_at ASC",
-    [meetingId],
-  );
+  const { data: transitionRows } = useQuery({
+    queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_item_transition")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("started_at", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: speakerRows } = useQuery(
-    "SELECT * FROM guest_speakers WHERE meeting_id = ? ORDER BY created_at ASC",
-    [meetingId],
-  );
+  const { data: speakerRows } = useQuery({
+    queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("guest_speaker")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("created_at", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
-  const { data: exhibitRows } = useQuery(
-    "SELECT * FROM exhibits WHERE town_id = ?",
-    [townId],
-  );
+  const { data: exhibitRows } = useQuery({
+    queryKey: [...queryKeys.exhibits.byMeeting(meetingId), townId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("exhibit")
+        .select("*")
+        .eq("town_id", townId)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
 
-  const { data: futureItemRows } = useQuery(
-    "SELECT * FROM future_item_queues WHERE source_meeting_id = ?",
-    [meetingId],
-  );
+  const { data: futureItemRows } = useQuery({
+    queryKey: queryKeys.futureItemQueues.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("future_item_queue")
+        .select("*")
+        .eq("source_meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
   // Minutes document query
-  const { data: minutesDocRows } = useQuery(
-    "SELECT * FROM minutes_documents WHERE meeting_id = ? LIMIT 1",
-    [meetingId],
-  );
+  const { data: minutesDocRows } = useQuery({
+    queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("minutes_document")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
   const minutesDoc = minutesDocRows?.[0] as Record<string, unknown> | undefined;
   const hasMinutes = !!minutesDoc;
 
@@ -275,9 +408,11 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     return id ? memberNameMap.get(id) ?? null : null;
   }, [meeting, memberNameMap]);
 
-  // Adjournment data
+  // Adjournment data — Supabase returns native JSONB objects
   const adjournment = useMemo(() => {
     if (!meeting?.adjournment) return null;
+    // Supabase returns JSONB as native objects; handle string fallback for safety
+    if (typeof meeting.adjournment === "object") return meeting.adjournment as Record<string, unknown>;
     try {
       return JSON.parse(meeting.adjournment as string) as Record<string, unknown>;
     } catch {
@@ -346,12 +481,8 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         : `${API_BASE}/api/meetings/${meetingId}/minutes/generate`;
 
       try {
-        const token = (await import("@supabase/supabase-js")).createClient(
-          import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
-          import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
-        );
         // Get the session token from Supabase auth
-        const { data: sessionData } = await token.auth.getSession();
+        const { data: sessionData } = await supabase.auth.getSession();
         const accessToken = sessionData?.session?.access_token;
 
         if (!accessToken) {
@@ -381,13 +512,11 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
           );
         }
 
-        // Success — close dialogs
+        // Success — close dialogs and invalidate minutes query
         setGenerateDialogOpen(false);
         setRegenerateDialogOpen(false);
         setStyleOverride("");
-
-        // Navigate to minutes review page (future session builds this)
-        // For now, the page will reactively show "View Minutes Draft" via the query
+        await queryClient.invalidateQueries({ queryKey: queryKeys.minutesDocuments.byMeeting(meetingId) });
       } catch (err) {
         setGenerateError(
           err instanceof Error ? err.message : "An error occurred during generation.",
@@ -404,6 +533,19 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   const handleExport = useCallback(() => {
     if (!meeting || !board || !town) return;
 
+    // Helper: Supabase returns native booleans; normalize is_recording_secretary
+    const normalizeBool = (val: unknown): number => {
+      if (typeof val === "boolean") return val ? 1 : 0;
+      return (val as number) ?? 0;
+    };
+
+    // Helper: Supabase returns native JSONB; ensure string for export
+    const normalizeJsonString = (val: unknown): string | null => {
+      if (val == null) return null;
+      if (typeof val === "string") return val;
+      return JSON.stringify(val);
+    };
+
     const input: StructuredMeetingRecordInput = {
       meeting: {
         id: meeting.id as string,
@@ -414,7 +556,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         meeting_type: (meeting.meeting_type as string) ?? "regular",
         started_at: (meeting.started_at as string) ?? null,
         ended_at: (meeting.ended_at as string) ?? null,
-        adjournment: (meeting.adjournment as string) ?? null,
+        adjournment: normalizeJsonString(meeting.adjournment),
       },
       board: {
         id: board.id as string,
@@ -436,7 +578,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         status: (a.status as string) ?? "absent",
         arrived_at: (a.arrived_at as string) ?? null,
         departed_at: (a.departed_at as string) ?? null,
-        is_recording_secretary: (a.is_recording_secretary as number) ?? 0,
+        is_recording_secretary: normalizeBool(a.is_recording_secretary),
       })),
       agendaItems: allItems.map((i: Record<string, unknown>) => ({
         id: i.id as string,
@@ -464,7 +606,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         seconded_by: (m.seconded_by as string) ?? null,
         status: (m.status as string) ?? "pending",
         parent_motion_id: (m.parent_motion_id as string) ?? null,
-        vote_summary: (m.vote_summary as string) ?? null,
+        vote_summary: normalizeJsonString(m.vote_summary),
       })),
       voteRecords: (voteRecords as Array<Record<string, unknown>>).map((v) => ({
         id: v.id as string,
@@ -480,7 +622,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         entered_at: (es.entered_at as string) ?? null,
         exited_at: (es.exited_at as string) ?? null,
         entry_motion_id: (es.entry_motion_id as string) ?? null,
-        post_session_action_motion_ids: (es.post_session_action_motion_ids as string) ?? null,
+        post_session_action_motion_ids: normalizeJsonString(es.post_session_action_motion_ids),
       })),
       transitions: (transitions as Array<Record<string, unknown>>).map((t) => ({
         agenda_item_id: (t.agenda_item_id as string) ?? "",
@@ -613,7 +755,8 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                   (a: Record<string, unknown>) => a.board_member_id === m.boardMemberId,
                 ) as Record<string, unknown> | undefined;
                 const status = (att?.status as string) ?? "absent";
-                const isRecSec = (att?.is_recording_secretary as number) === 1;
+                // Supabase returns native booleans
+                const isRecSec = att?.is_recording_secretary === true || (att?.is_recording_secretary as number) === 1;
                 const isPresiding = (meeting?.presiding_officer_id as string) === m.boardMemberId;
 
                 return (
@@ -730,12 +873,17 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                         {itemMotions.map((m: Record<string, unknown>) => {
                           const mId = m.id as string;
                           const votes = votesByMotion.get(mId) ?? [];
+                          // Supabase returns JSONB natively; handle string fallback
                           let summary: Record<string, unknown> | null = null;
-                          try {
-                            summary = m.vote_summary
-                              ? (JSON.parse(m.vote_summary as string) as Record<string, unknown>)
-                              : null;
-                          } catch { /* ignore */ }
+                          if (m.vote_summary) {
+                            if (typeof m.vote_summary === "object") {
+                              summary = m.vote_summary as Record<string, unknown>;
+                            } else {
+                              try {
+                                summary = JSON.parse(m.vote_summary as string) as Record<string, unknown>;
+                              } catch { /* ignore */ }
+                            }
+                          }
 
                           return (
                             <div
@@ -749,14 +897,14 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                                     {m.motion_text as string}
                                   </p>
                                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                                    {m.moved_by && (
+                                    {!!m.moved_by && (
                                       <span>
                                         Moved:{" "}
                                         {memberNameMap.get(m.moved_by as string) ??
                                           (m.moved_by as string)}
                                       </span>
                                     )}
-                                    {m.seconded_by && (
+                                    {!!m.seconded_by && (
                                       <span>
                                         Seconded:{" "}
                                         {memberNameMap.get(
@@ -764,7 +912,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                                         ) ?? (m.seconded_by as string)}
                                       </span>
                                     )}
-                                    {m.motion_type &&
+                                    {!!m.motion_type &&
                                       m.motion_type !== "main" && (
                                         <Badge variant="outline" className="text-xs">
                                           {(m.motion_type as string).replace(/_/g, " ")}
@@ -851,19 +999,19 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                     </span>
                   </div>
                   <div className="mt-1 flex gap-4 text-xs text-muted-foreground">
-                    {es.entered_at && (
+                    {!!es.entered_at && (
                       <span>
                         Entered:{" "}
                         {new Date(es.entered_at as string).toLocaleTimeString()}
                       </span>
                     )}
-                    {es.exited_at && (
+                    {!!es.exited_at && (
                       <span>
                         Returned:{" "}
                         {new Date(es.exited_at as string).toLocaleTimeString()}
                       </span>
                     )}
-                    {es.entered_at && es.exited_at && (
+                    {!!es.entered_at && !!es.exited_at && (
                       <span>
                         Duration:{" "}
                         {computeDuration(

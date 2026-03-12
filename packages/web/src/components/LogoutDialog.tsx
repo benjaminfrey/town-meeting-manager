@@ -1,15 +1,12 @@
 /**
- * Logout confirmation dialog with unsynced changes warning.
- *
- * If there are pending local changes in the PowerSync upload queue,
- * the dialog warns the user that signing out will discard them.
+ * Logout confirmation dialog.
  */
 
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery } from "@powersync/react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
+import { resetQueryCache } from "@/lib/queryClient";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,15 +28,10 @@ export function LogoutDialog({ trigger }: LogoutDialogProps) {
   const navigate = useNavigate();
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  // Check for pending uploads in the PowerSync CRUD queue
-  const { data: crudCount } = useQuery(
-    "SELECT count(*) as count FROM ps_crud"
-  );
-  const pendingUploads = crudCount?.[0]?.count ?? 0;
-
   const handleSignOut = async () => {
     setIsSigningOut(true);
     try {
+      resetQueryCache();
       await signOut();
       navigate("/login", { replace: true });
     } catch (error) {
@@ -55,18 +47,7 @@ export function LogoutDialog({ trigger }: LogoutDialogProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>Sign out?</AlertDialogTitle>
           <AlertDialogDescription>
-            {pendingUploads > 0 ? (
-              <>
-                You have{" "}
-                <span className="font-medium text-foreground">
-                  {pendingUploads} unsynced{" "}
-                  {pendingUploads === 1 ? "change" : "changes"}
-                </span>
-                . Signing out will discard them. Are you sure?
-              </>
-            ) : (
-              "Are you sure you want to sign out? Any unsynced changes will be lost."
-            )}
+            Are you sure you want to sign out?
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

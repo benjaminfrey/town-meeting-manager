@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { useQuery, usePowerSync } from "@powersync/react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Check,
@@ -58,6 +58,8 @@ import { hasPermission } from "@town-meeting/shared";
 import type { MinutesContentJson } from "@town-meeting/shared/types";
 import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
+import { supabase } from "@/lib/supabase";
+import { queryKeys } from "@/lib/queryKeys";
 
 // ─── Route Loader ─────────────────────────────────────────────────
 
@@ -114,7 +116,7 @@ export default function MinutesReviewPage({
   loaderData,
 }: Route.ComponentProps) {
   const { meetingId } = loaderData;
-  const powerSync = usePowerSync();
+  const queryClient = useQueryClient();
   const user = useCurrentUser();
 
   // ─── State ──────────────────────────────────────────────────────
@@ -128,33 +130,62 @@ export default function MinutesReviewPage({
   const [showChanges, setShowChanges] = useState(false);
 
   // ─── Queries ────────────────────────────────────────────────────
-  const { data: minutesDocRows } = useQuery(
-    "SELECT * FROM minutes_documents WHERE meeting_id = ? LIMIT 1",
-    [meetingId],
-  );
-  const minutesDoc = minutesDocRows?.[0] as
-    | Record<string, unknown>
-    | undefined;
+  const { data: minutesDoc } = useQuery({
+    queryKey: queryKeys.minutes.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("minutes_document")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .limit(1)
+        .throwOnError();
+      return (data ?? [])[0] ?? null;
+    },
+  });
 
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE id = ? LIMIT 1",
-    [meetingId],
-  );
-  const meeting = meetingRows?.[0] as Record<string, unknown> | undefined;
+  const { data: meeting } = useQuery({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .limit(1)
+        .throwOnError();
+      return (data ?? [])[0] ?? null;
+    },
+  });
+
   const boardId = (meeting?.board_id as string) ?? "";
   const townId = (meeting?.town_id as string) ?? "";
 
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("id", boardId)
+        .limit(1)
+        .throwOnError();
+      return (data ?? [])[0] ?? null;
+    },
+    enabled: !!boardId,
+  });
 
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId],
-  );
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
+  const { data: town } = useQuery({
+    queryKey: queryKeys.towns.detail(townId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId)
+        .limit(1)
+        .throwOnError();
+      return (data ?? [])[0] ?? null;
+    },
+    enabled: !!townId,
+  });
 
   // ─── Derived values ────────────────────────────────────────────
   const docId = (minutesDoc?.id as string) ?? "";
@@ -177,8 +208,11 @@ export default function MinutesReviewPage({
 
   const amendmentsHistory = useMemo((): AmendmentEntry[] => {
     if (!minutesDoc?.amendments_history) return [];
+    // Supabase returns JSONB as parsed objects directly
+    const raw = minutesDoc.amendments_history;
+    if (Array.isArray(raw)) return raw as AmendmentEntry[];
     try {
-      return JSON.parse(minutesDoc.amendments_history as string);
+      return JSON.parse(raw as string);
     } catch {
       return [];
     }
@@ -186,8 +220,11 @@ export default function MinutesReviewPage({
 
   const contentJson = useMemo((): MinutesContentJson | null => {
     if (!minutesDoc?.content_json) return null;
+    // Supabase returns JSONB as parsed objects directly
+    const raw = minutesDoc.content_json;
+    if (typeof raw === "object" && raw !== null) return raw as MinutesContentJson;
     try {
-      return JSON.parse(minutesDoc.content_json as string) as MinutesContentJson;
+      return JSON.parse(raw as string) as MinutesContentJson;
     } catch {
       return null;
     }
@@ -195,8 +232,11 @@ export default function MinutesReviewPage({
 
   const originalContentJson = useMemo((): MinutesContentJson | null => {
     if (!minutesDoc?.original_content_json) return null;
+    // Supabase returns JSONB as parsed objects directly
+    const raw = minutesDoc.original_content_json;
+    if (typeof raw === "object" && raw !== null) return raw as MinutesContentJson;
     try {
-      return JSON.parse(minutesDoc.original_content_json as string) as MinutesContentJson;
+      return JSON.parse(raw as string) as MinutesContentJson;
     } catch {
       return null;
     }
@@ -228,23 +268,22 @@ export default function MinutesReviewPage({
     return hasPermission(user.permissions, "view_draft_minutes");
   }, [user, status, isAdmin]);
 
-  // ─── Handlers ──────────────────────────────────────────────────
+  // ─── Mutations ────────────────────────────────────────────────
 
-  const handleEditorSave = useCallback(
-    async (updatedContentJson: MinutesContentJson) => {
+  const invalidateMinutes = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.minutes.byMeeting(meetingId) });
+
+  const saveDraftMutation = useMutation({
+    mutationFn: async (updatedContentJson: MinutesContentJson) => {
       const now = new Date().toISOString();
-      await powerSync.execute(
-        "UPDATE minutes_documents SET content_json = ?, updated_at = ? WHERE id = ?",
-        [JSON.stringify(updatedContentJson), now, docId],
-      );
+      await supabase
+        .from("minutes_document")
+        .update({ content_json: updatedContentJson, updated_at: now })
+        .eq("id", docId)
+        .throwOnError();
 
       // Fire API call to re-render HTML/PDF
       try {
-        const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(
-          import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
-          import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
-        );
         const { data: sessionData } = await supabase.auth.getSession();
         const accessToken = sessionData?.session?.access_token;
         if (accessToken) {
@@ -261,141 +300,220 @@ export default function MinutesReviewPage({
         // Non-critical — local changes are saved, server render may fail
       }
     },
-    [powerSync, docId, meetingId],
+    onSuccess: () => {
+      invalidateMinutes();
+    },
+  });
+
+  const handleEditorSave = useCallback(
+    async (updatedContentJson: MinutesContentJson) => {
+      await saveDraftMutation.mutateAsync(updatedContentJson);
+    },
+    [saveDraftMutation],
   );
 
-  const handleSubmitForReview = useCallback(async () => {
-    const now = new Date().toISOString();
+  const submitForReviewMutation = useMutation({
+    mutationFn: async () => {
+      const now = new Date().toISOString();
 
-    // If there are pending amendments, mark the latest as resubmitted
-    if (amendmentsHistory.length > 0) {
-      const updated = [...amendmentsHistory];
-      const latest = updated[updated.length - 1];
-      if (latest && !latest.resubmitted_at) {
-        updated[updated.length - 1] = { ...latest, resubmitted_at: now };
-        await powerSync.execute(
-          "UPDATE minutes_documents SET status = ?, submitted_for_review_at = ?, amendments_history = ?, updated_at = ? WHERE id = ?",
-          ["review", now, JSON.stringify(updated), now, docId],
-        );
+      // If there are pending amendments, mark the latest as resubmitted
+      if (amendmentsHistory.length > 0) {
+        const updated = [...amendmentsHistory];
+        const latest = updated[updated.length - 1];
+        if (latest && !latest.resubmitted_at) {
+          updated[updated.length - 1] = { ...latest, resubmitted_at: now };
+          await supabase
+            .from("minutes_document")
+            .update({
+              status: "review",
+              submitted_for_review_at: now,
+              amendments_history: updated,
+              updated_at: now,
+            })
+            .eq("id", docId)
+            .throwOnError();
+        } else {
+          await supabase
+            .from("minutes_document")
+            .update({
+              status: "review",
+              submitted_for_review_at: now,
+              updated_at: now,
+            })
+            .eq("id", docId)
+            .throwOnError();
+        }
       } else {
-        await powerSync.execute(
-          "UPDATE minutes_documents SET status = ?, submitted_for_review_at = ?, updated_at = ? WHERE id = ?",
-          ["review", now, now, docId],
-        );
+        await supabase
+          .from("minutes_document")
+          .update({
+            status: "review",
+            submitted_for_review_at: now,
+            updated_at: now,
+          })
+          .eq("id", docId)
+          .throwOnError();
       }
-    } else {
-      await powerSync.execute(
-        "UPDATE minutes_documents SET status = ?, submitted_for_review_at = ?, updated_at = ? WHERE id = ?",
-        ["review", now, now, docId],
-      );
-    }
 
-    const notifId = crypto.randomUUID();
-    await powerSync.execute(
-      "INSERT INTO notification_events (id, town_id, event_type, payload, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        notifId,
-        townId,
-        "minutes_submitted_review",
-        JSON.stringify({
-          meeting_id: meetingId,
-          board_id: boardId,
-          minutes_document_id: docId,
-        }),
-        "pending",
-        now,
-      ],
-    );
-
-    // Fire render API call (best effort)
-    try {
-      const token = await getAccessToken();
-      if (token) {
-        await fetch(
-          `${API_BASE}/api/meetings/${meetingId}/minutes/render`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
+      // Create notification event
+      const notifId = crypto.randomUUID();
+      await supabase
+        .from("notification_event")
+        .insert({
+          id: notifId,
+          town_id: townId,
+          event_type: "minutes_submitted_review",
+          payload: {
+            meeting_id: meetingId,
+            board_id: boardId,
+            minutes_document_id: docId,
           },
-        );
+          status: "pending",
+          created_at: now,
+        })
+        .throwOnError();
+
+      // Fire render API call (best effort)
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) {
+          await fetch(
+            `${API_BASE}/api/meetings/${meetingId}/minutes/render`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+            },
+          );
+        }
+      } catch {
+        // Non-critical
       }
-    } catch {
-      // Non-critical
-    }
+    },
+    onSuccess: () => {
+      invalidateMinutes();
+      setSubmitDialogOpen(false);
+      toast.success("Minutes submitted for board review");
+    },
+  });
 
-    setSubmitDialogOpen(false);
-    toast.success("Minutes submitted for board review");
-  }, [powerSync, docId, townId, meetingId, boardId, amendmentsHistory]);
+  const publishMutation = useMutation({
+    mutationFn: async () => {
+      const now = new Date().toISOString();
+      await supabase
+        .from("minutes_document")
+        .update({
+          status: "published",
+          published_at: now,
+          updated_at: now,
+        })
+        .eq("id", docId)
+        .throwOnError();
 
-  const handlePublish = useCallback(async () => {
-    const now = new Date().toISOString();
-    await powerSync.execute(
-      "UPDATE minutes_documents SET status = ?, published_at = ?, updated_at = ? WHERE id = ?",
-      ["published", now, now, docId],
-    );
+      const notifId = crypto.randomUUID();
+      await supabase
+        .from("notification_event")
+        .insert({
+          id: notifId,
+          town_id: townId,
+          event_type: "minutes_published",
+          payload: {
+            meeting_id: meetingId,
+            board_id: boardId,
+            minutes_document_id: docId,
+          },
+          status: "pending",
+          created_at: now,
+        })
+        .throwOnError();
+    },
+    onSuccess: () => {
+      invalidateMinutes();
+      setPublishDialogOpen(false);
+      toast.success("Minutes published to public portal");
+    },
+  });
 
-    const notifId = crypto.randomUUID();
-    await powerSync.execute(
-      "INSERT INTO notification_events (id, town_id, event_type, payload, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        notifId,
-        townId,
-        "minutes_published",
-        JSON.stringify({
-          meeting_id: meetingId,
-          board_id: boardId,
-          minutes_document_id: docId,
-        }),
-        "pending",
-        now,
-      ],
-    );
+  const returnForAmendmentsMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      const now = new Date().toISOString();
 
-    setPublishDialogOpen(false);
-    toast.success("Minutes published to public portal");
-  }, [powerSync, docId, townId, meetingId, boardId]);
+      const updatedHistory: AmendmentEntry[] = [
+        ...amendmentsHistory,
+        {
+          round: amendmentsHistory.length + 1,
+          returned_at: now,
+          reason: reason.trim(),
+          returned_by: user?.id ?? "",
+          resubmitted_at: null,
+        },
+      ];
 
-  const handleReturnForAmendments = useCallback(async () => {
+      await supabase
+        .from("minutes_document")
+        .update({
+          status: "draft",
+          amendments_history: updatedHistory,
+          submitted_for_review_at: null,
+          updated_at: now,
+        })
+        .eq("id", docId)
+        .throwOnError();
+    },
+    onSuccess: () => {
+      invalidateMinutes();
+      setReturnDialogOpen(false);
+      setReturnReason("");
+      toast.success("Minutes returned for amendments");
+    },
+  });
+
+  const unpublishMutation = useMutation({
+    mutationFn: async () => {
+      const now = new Date().toISOString();
+      await supabase
+        .from("minutes_document")
+        .update({
+          status: "approved",
+          published_at: null,
+          updated_at: now,
+        })
+        .eq("id", docId)
+        .throwOnError();
+    },
+    onSuccess: () => {
+      invalidateMinutes();
+      toast.success("Minutes unpublished");
+    },
+  });
+
+  // ─── Handlers ──────────────────────────────────────────────────
+
+  const handleSubmitForReview = useCallback(() => {
+    submitForReviewMutation.mutate();
+  }, [submitForReviewMutation]);
+
+  const handlePublish = useCallback(() => {
+    publishMutation.mutate();
+  }, [publishMutation]);
+
+  const handleReturnForAmendments = useCallback(() => {
     if (!returnReason.trim()) return;
-    const now = new Date().toISOString();
+    returnForAmendmentsMutation.mutate(returnReason);
+  }, [returnForAmendmentsMutation, returnReason]);
 
-    const updatedHistory: AmendmentEntry[] = [
-      ...amendmentsHistory,
-      {
-        round: amendmentsHistory.length + 1,
-        returned_at: now,
-        reason: returnReason.trim(),
-        returned_by: user?.id ?? "",
-        resubmitted_at: null,
-      },
-    ];
-
-    await powerSync.execute(
-      "UPDATE minutes_documents SET status = ?, amendments_history = ?, submitted_for_review_at = NULL, updated_at = ? WHERE id = ?",
-      ["draft", JSON.stringify(updatedHistory), now, docId],
-    );
-
-    setReturnDialogOpen(false);
-    setReturnReason("");
-    toast.success("Minutes returned for amendments");
-  }, [powerSync, docId, returnReason, amendmentsHistory, user?.id]);
-
-  const handleUnpublish = useCallback(async () => {
-    const now = new Date().toISOString();
-    await powerSync.execute(
-      "UPDATE minutes_documents SET status = ?, published_at = NULL, updated_at = ? WHERE id = ?",
-      ["approved", now, docId],
-    );
-    toast.success("Minutes unpublished");
-  }, [powerSync, docId]);
+  const handleUnpublish = useCallback(() => {
+    unpublishMutation.mutate();
+  }, [unpublishMutation]);
 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
     try {
-      const token = await getAccessToken();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
       if (!token) {
         toast.error("Not authenticated. Please sign in again.");
         return;
@@ -424,6 +542,7 @@ export default function MinutesReviewPage({
       }
 
       toast.success("Minutes regeneration started");
+      invalidateMinutes();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to regenerate minutes",
@@ -605,7 +724,7 @@ export default function MinutesReviewPage({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void handleUnpublish()}
+            onClick={() => handleUnpublish()}
           >
             Unpublish
           </Button>
@@ -738,7 +857,7 @@ export default function MinutesReviewPage({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void handleSubmitForReview()}
+              onClick={() => handleSubmitForReview()}
             >
               Submit for Review
             </AlertDialogAction>
@@ -758,7 +877,7 @@ export default function MinutesReviewPage({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handlePublish()}>
+            <AlertDialogAction onClick={() => handlePublish()}>
               Publish
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -802,7 +921,7 @@ export default function MinutesReviewPage({
             </Button>
             <Button
               disabled={!returnReason.trim()}
-              onClick={() => void handleReturnForAmendments()}
+              onClick={() => handleReturnForAmendments()}
             >
               Return for Amendments
             </Button>
@@ -922,22 +1041,6 @@ function StatusTimeline({
       })}
     </div>
   );
-}
-
-// ─── Auth helper ─────────────────────────────────────────────────
-
-async function getAccessToken(): Promise<string | null> {
-  try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const client = createClient(
-      import.meta.env.VITE_SUPABASE_URL ?? "http://localhost:54321",
-      import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
-    );
-    const { data } = await client.auth.getSession();
-    return data?.session?.access_token ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export { RouteErrorBoundary as ErrorBoundary };

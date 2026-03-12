@@ -94,6 +94,21 @@ export const queryKeys = {
     byItem: (agendaItemId: string) => ['guestSpeakers', 'byItem', agendaItemId] as const,
   },
 
+  // Agenda item transitions
+  agendaItemTransitions: {
+    byMeeting: (meetingId: string) => ['agendaItemTransitions', 'byMeeting', meetingId] as const,
+  },
+
+  // Future item queues
+  futureItemQueues: {
+    byMeeting: (meetingId: string) => ['futureItemQueues', 'byMeeting', meetingId] as const,
+  },
+
+  // Minutes documents
+  minutesDocuments: {
+    byMeeting: (meetingId: string) => ['minutesDocuments', 'byMeeting', meetingId] as const,
+  },
+
   // Push subscriptions
   pushSubscriptions: {
     byUser: (userId: string) => ['pushSubscriptions', 'byUser', userId] as const,

@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { Link } from "react-router";
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   Pencil,
@@ -43,6 +43,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Helper ──────────────────────────────────────────────────────────
 
@@ -73,7 +76,23 @@ function InfoRow({
 // ─── Route ───────────────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { boardId: params.boardId };
+  const boardId = params.boardId;
+
+  // Prefetch board detail
+  await queryClient.ensureQueryData({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("id", boardId)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+
+  return { boardId };
 }
 
 export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
@@ -85,32 +104,75 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
   const [archiveOpen, setArchiveOpen] = useState(false);
 
   // ─── Reactive queries ─────────────────────────────────────────────
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE id = ? LIMIT 1",
-    [boardId]
-  );
-  const { data: memberCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM board_members WHERE board_id = ? AND status = 'active'",
-    [boardId]
-  );
-  const { data: meetingCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM meetings WHERE board_id = ?",
-    [boardId]
-  );
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId ?? ""]
-  );
-  const { data: templateCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM agenda_templates WHERE board_id = ?",
-    [boardId]
-  );
+  const { data: boardRows } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("id", boardId)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+
+  const { data: activeMemberCount } = useQuery({
+    queryKey: [...queryKeys.members.byBoard(boardId), "active-count"],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("board_member")
+        .select("*", { count: "exact", head: true })
+        .eq("board_id", boardId)
+        .eq("status", "active")
+        .throwOnError();
+      return count ?? 0;
+    },
+  });
+
+  const { data: meetingCount } = useQuery({
+    queryKey: [...queryKeys.meetings.byBoard(boardId), "count"],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("meeting")
+        .select("*", { count: "exact", head: true })
+        .eq("board_id", boardId)
+        .throwOnError();
+      return count ?? 0;
+    },
+  });
+
+  const { data: townRows } = useQuery({
+    queryKey: queryKeys.towns.detail(townId ?? ""),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId!)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
+
+  const { data: templateCount } = useQuery({
+    queryKey: [...queryKeys.agendaTemplates.byBoard(boardId), "count"],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("agenda_template")
+        .select("*", { count: "exact", head: true })
+        .eq("board_id", boardId)
+        .throwOnError();
+      return count ?? 0;
+    },
+  });
 
   const board = boardRows?.[0] as Record<string, unknown> | undefined;
   const town = townRows?.[0] as Record<string, unknown> | undefined;
-  const activeMemberCount = Number((memberCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
-  const meetingCount = Number((meetingCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
-  const templateCount = Number((templateCountRows?.[0] as Record<string, unknown>)?.count ?? 0);
+  const memberCount = activeMemberCount ?? 0;
+  const mtgCount = meetingCount ?? 0;
+  const tmplCount = templateCount ?? 0;
 
   // ─── Loading / not found ──────────────────────────────────────────
   if (!board) {
@@ -121,7 +183,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  // Cast board fields
+  // Cast board fields — Supabase returns native booleans
   const b = {
     id: String(board.id),
     name: String(board.name ?? ""),
@@ -129,7 +191,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     member_count: Number(board.member_count ?? 0),
     election_method: String(board.election_method ?? "at_large"),
     officer_election_method: String(board.officer_election_method ?? "vote_of_board"),
-    is_governing_board: board.is_governing_board === 1,
+    is_governing_board: board.is_governing_board === true,
     meeting_formality_override: (board.meeting_formality_override as string) || null,
     minutes_style_override: (board.minutes_style_override as string) || null,
     quorum_type: (board.quorum_type as string) || "simple_majority",
@@ -246,7 +308,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
           </CardHeader>
           <CardContent className="space-y-3">
             <InfoRow label="Type" value={b.elected_or_appointed === "appointed" ? "Appointed" : "Elected"} />
-            <InfoRow label="Members" value={`${activeMemberCount} active / ${b.member_count} seats`} />
+            <InfoRow label="Members" value={`${memberCount} active / ${b.member_count} seats`} />
             <InfoRow
               label="Quorum"
               value={`${quorumRequired} of ${b.member_count}`}
@@ -291,7 +353,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               <div>
                 <CardTitle className="text-lg">Agenda Templates</CardTitle>
                 <CardDescription>
-                  {templateCount} template{templateCount !== 1 ? "s" : ""}
+                  {tmplCount} template{tmplCount !== 1 ? "s" : ""}
                 </CardDescription>
               </div>
               <Link to={`/boards/${b.id}/templates`}>
@@ -311,7 +373,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               <div>
                 <CardTitle className="text-lg">Meetings</CardTitle>
                 <CardDescription>
-                  {meetingCount} meeting{meetingCount !== 1 ? "s" : ""}
+                  {mtgCount} meeting{mtgCount !== 1 ? "s" : ""}
                 </CardDescription>
               </div>
               <Link to={`/boards/${b.id}/meetings`}>

@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Pencil, Archive } from "lucide-react";
 import type { Route } from "./+types/boards";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -19,6 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 export async function clientLoader() {
   return {};
@@ -34,30 +37,59 @@ export default function BoardListPage(_props: Route.ComponentProps) {
   const [archiveBoard, setArchiveBoard] = useState<Record<string, unknown> | null>(null);
 
   // ─── Reactive queries ─────────────────────────────────────────────
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE town_id = ? ORDER BY is_governing_board DESC, name ASC",
-    [townId ?? ""]
-  );
-  const { data: memberCountRows } = useQuery(
-    "SELECT board_id, COUNT(*) as count FROM board_members WHERE town_id = ? AND status = 'active' GROUP BY board_id",
-    [townId ?? ""]
-  );
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId ?? ""]
-  );
+  const { data: boardRows } = useQuery({
+    queryKey: queryKeys.boards.byTown(townId ?? ""),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("town_id", townId!)
+        .order("is_governing_board", { ascending: false })
+        .order("name", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
+
+  const { data: memberCountRows } = useQuery({
+    queryKey: [...queryKeys.members.all, "counts-by-board", townId ?? ""],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board_member")
+        .select("board_id")
+        .eq("town_id", townId!)
+        .eq("status", "active")
+        .throwOnError();
+      // Group by board_id in JS since Supabase doesn't support GROUP BY directly
+      const counts: Record<string, number> = {};
+      for (const row of data ?? []) {
+        const bid = (row as Record<string, unknown>).board_id as string;
+        counts[bid] = (counts[bid] ?? 0) + 1;
+      }
+      return counts;
+    },
+    enabled: !!townId,
+  });
+
+  const { data: townRows } = useQuery({
+    queryKey: queryKeys.towns.detail(townId ?? ""),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId!)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
 
   const town = townRows?.[0] as Record<string, unknown> | undefined;
 
-  // Build member count lookup
-  const memberCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const row of memberCountRows ?? []) {
-      const r = row as Record<string, unknown>;
-      map[String(r.board_id)] = Number(r.count);
-    }
-    return map;
-  }, [memberCountRows]);
+  // Build member count lookup — already grouped in queryFn
+  const memberCounts = memberCountRows ?? {};
 
   // Filter boards
   const boards = useMemo(() => {
@@ -162,7 +194,7 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                 const name = String(board.name ?? "");
                 const electedOrAppointed = String(board.elected_or_appointed ?? "elected");
                 const isArchived = !!board.archived_at;
-                const isGoverning = board.is_governing_board === 1;
+                const isGoverning = board.is_governing_board === true;
                 const activeMemberCount = memberCounts[id] ?? 0;
                 const seatCount = Number(board.member_count ?? 0);
 

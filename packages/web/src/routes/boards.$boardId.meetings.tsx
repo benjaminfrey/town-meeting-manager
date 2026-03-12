@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, CalendarDays, Play, Plus } from "lucide-react";
 import type { Route } from "./+types/boards.$boardId.meetings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -22,11 +22,45 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { boardId: params.boardId };
+  const boardId = params.boardId;
+
+  // Prefetch board and meetings
+  await Promise.all([
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.boards.detail(boardId),
+      queryFn: async () => {
+        const { data } = await supabase
+          .from("board")
+          .select("id, name, board_type")
+          .eq("id", boardId)
+          .limit(1)
+          .throwOnError();
+        return data ?? [];
+      },
+    }),
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.meetings.byBoard(boardId),
+      queryFn: async () => {
+        const { data } = await supabase
+          .from("meeting")
+          .select("*")
+          .eq("board_id", boardId)
+          .order("scheduled_date", { ascending: false })
+          .order("scheduled_time", { ascending: false })
+          .throwOnError();
+        return data ?? [];
+      },
+    }),
+  ]);
+
+  return { boardId };
 }
 
 export default function MeetingListPage({
@@ -44,14 +78,32 @@ export default function MeetingListPage({
   } | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────
-  const { data: boardRows } = useQuery(
-    "SELECT id, name, board_type FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE board_id = ? ORDER BY scheduled_date DESC, scheduled_time DESC",
-    [boardId],
-  );
+  const { data: boardRows } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("id, name, board_type")
+        .eq("id", boardId)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+
+  const { data: meetingRows } = useQuery({
+    queryKey: queryKeys.meetings.byBoard(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("board_id", boardId)
+        .order("scheduled_date", { ascending: false })
+        .order("scheduled_time", { ascending: false })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
 
   const board = boardRows?.[0] as Record<string, unknown> | undefined;
   const boardName = String(board?.name ?? "");

@@ -5,9 +5,9 @@
  * and delete actions. Auto-creates a default template when none exist.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Copy,
@@ -31,6 +31,8 @@ import { parseSections } from "@/lib/agenda-template-helpers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -43,7 +45,7 @@ export default function AgendaTemplateListPage({
 }: Route.ComponentProps) {
   const { boardId } = loaderData;
   const navigate = useNavigate();
-  const powerSync = usePowerSync();
+  const queryClient = useQueryClient();
   const currentUser = useCurrentUser();
   const townId = currentUser?.townId ?? "";
 
@@ -52,27 +54,43 @@ export default function AgendaTemplateListPage({
   const [deleteTemplate, setDeleteTemplate] = useState<{
     id: string;
     name: string;
-    is_default: number;
+    is_default: boolean;
   } | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<{
     name: string;
-    sections: string;
+    sections: unknown;
   } | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────
-  const { data: boardRows } = useQuery(
-    "SELECT id, name, board_type FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const { data: templateRows, isLoading: templatesLoading } = useQuery(
-    "SELECT * FROM agenda_templates WHERE board_id = ? ORDER BY is_default DESC, name ASC",
-    [boardId],
-  );
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("id, name, board_type")
+        .eq("id", boardId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
 
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
+  const { data: templates = [], isLoading: templatesLoading } = useQuery({
+    queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_template")
+        .select("*")
+        .eq("board_id", boardId)
+        .order("is_default", { ascending: false })
+        .order("name", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+
   const boardName = String(board?.name ?? "");
   const boardType = String(board?.board_type ?? "other");
-  const templates = (templateRows ?? []) as Record<string, unknown>[];
 
   // ─── Auto-create default template ──────────────────────────────────
   // IMPORTANT: Must wait for isLoading to be false before checking length.
@@ -83,51 +101,65 @@ export default function AgendaTemplateListPage({
   useEffect(() => {
     if (
       !templatesLoading &&
-      templateRows &&
-      templateRows.length === 0 &&
+      templates.length === 0 &&
       !autoCreatedRef.current &&
       townId &&
       board
     ) {
       autoCreatedRef.current = true;
-      void createDefaultTemplate(powerSync, boardId, townId, boardType);
+      void createDefaultTemplate(boardId, townId, boardType).then(() => {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+        });
+      });
     }
-  }, [templatesLoading, templateRows, townId, board, powerSync, boardId, boardType]);
+  }, [templatesLoading, templates, townId, board, boardId, boardType, queryClient]);
 
   // ─── Handlers ───────────────────────────────────────────────────────
   const handleClone = useCallback(
     async (template: Record<string, unknown>) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
-      await powerSync.execute(
-        `INSERT INTO agenda_templates (id, board_id, town_id, name, is_default, sections, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
+      await supabase
+        .from("agenda_template")
+        .insert({
           id,
-          template.board_id,
-          template.town_id,
-          `Copy of ${String(template.name)}`,
-          0,
-          template.sections,
-          now,
-          now,
-        ],
-      );
+          board_id: template.board_id as string,
+          town_id: template.town_id as string,
+          name: `Copy of ${String(template.name)}`,
+          is_default: false,
+          sections: template.sections,
+          created_at: now,
+          updated_at: now,
+        })
+        .throwOnError();
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+      });
     },
-    [powerSync],
+    [queryClient, boardId],
   );
 
   const handleSetDefault = useCallback(
     async (templateId: string) => {
-      await powerSync.execute(
-        `UPDATE agenda_templates SET is_default = 0 WHERE board_id = ? AND is_default = 1`,
-        [boardId],
-      );
-      await powerSync.execute(
-        `UPDATE agenda_templates SET is_default = 1 WHERE id = ?`,
-        [templateId],
-      );
+      // Clear current default
+      await supabase
+        .from("agenda_template")
+        .update({ is_default: false })
+        .eq("board_id", boardId)
+        .eq("is_default", true)
+        .throwOnError();
+      // Set new default
+      await supabase
+        .from("agenda_template")
+        .update({ is_default: true })
+        .eq("id", templateId)
+        .throwOnError();
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+      });
     },
-    [powerSync, boardId],
+    [queryClient, boardId],
   );
 
   // ─── Loading ────────────────────────────────────────────────────────
@@ -235,9 +267,11 @@ export default function AgendaTemplateListPage({
               {templates.map((t) => {
                 const id = String(t.id);
                 const name = String(t.name ?? "");
-                const isDefault = t.is_default === 1;
+                const isDefault = !!t.is_default;
                 const sections = parseSections(
-                  (t.sections as string) ?? null,
+                  typeof t.sections === "string"
+                    ? t.sections
+                    : JSON.stringify(t.sections),
                 );
                 const sectionCount = sections.length;
 
@@ -286,7 +320,7 @@ export default function AgendaTemplateListPage({
                           onClick={() =>
                             setPreviewTemplate({
                               name,
-                              sections: (t.sections as string) ?? "[]",
+                              sections: t.sections ?? "[]",
                             })
                           }
                           title="Preview"
@@ -297,7 +331,7 @@ export default function AgendaTemplateListPage({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => void handleClone(t)}
+                          onClick={() => void handleClone(t as Record<string, unknown>)}
                           title="Clone"
                         >
                           <Copy className="h-3.5 w-3.5" />
@@ -323,7 +357,7 @@ export default function AgendaTemplateListPage({
                             setDeleteTemplate({
                               id,
                               name,
-                              is_default: isDefault ? 1 : 0,
+                              is_default: isDefault,
                             })
                           }
                           title="Delete"
@@ -347,7 +381,6 @@ export default function AgendaTemplateListPage({
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 async function createDefaultTemplate(
-  powerSync: { execute: (sql: string, params: unknown[]) => Promise<unknown> },
   boardId: string,
   townId: string,
   boardType: string,
@@ -357,10 +390,19 @@ async function createDefaultTemplate(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await powerSync.execute(
-    `INSERT INTO agenda_templates (id, board_id, town_id, name, is_default, sections, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, boardId, townId, name, 1, JSON.stringify(sections), now, now],
-  );
+  await supabase
+    .from("agenda_template")
+    .insert({
+      id,
+      board_id: boardId,
+      town_id: townId,
+      name,
+      is_default: true,
+      sections,
+      created_at: now,
+      updated_at: now,
+    })
+    .throwOnError();
 }
 
 export { RouteErrorBoundary as ErrorBoundary };

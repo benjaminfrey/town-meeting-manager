@@ -7,7 +7,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -59,11 +59,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { meetingId: params.meetingId };
+  const meetingId = params.meetingId;
+
+  // Prefetch meeting and agenda items
+  await Promise.all([
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.meetings.detail(meetingId),
+      queryFn: async () => {
+        const { data } = await supabase
+          .from("meeting")
+          .select("*")
+          .eq("id", meetingId)
+          .single()
+          .throwOnError();
+        return data;
+      },
+    }),
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+      queryFn: async () => {
+        const { data } = await supabase
+          .from("agenda_item")
+          .select("*")
+          .eq("meeting_id", meetingId)
+          .order("sort_order", { ascending: true })
+          .throwOnError();
+        return data ?? [];
+      },
+    }),
+  ]);
+
+  return { meetingId };
 }
 
 export default function AgendaBuilderPage({
@@ -71,7 +104,6 @@ export default function AgendaBuilderPage({
 }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
-  const powerSync = usePowerSync();
   const { session } = useAuth();
 
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -81,34 +113,78 @@ export default function AgendaBuilderPage({
   const [generatingPacket, setGeneratingPacket] = useState(false);
   const [generatingNotice, setGeneratingNotice] = useState(false);
 
-  // ─── Queries (no JOINs — separate queries, merge in JS) ─────────────
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE id = ? LIMIT 1",
-    [meetingId],
-  );
-  const meeting = meetingRows?.[0] as Record<string, unknown> | undefined;
+  // ─── Queries ──────────────────────────────────────────────────────
+  const { data: meeting } = useQuery({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
+
   const boardId_ = (meeting?.board_id as string) ?? "";
   const townId_ = (meeting?.town_id as string) ?? "";
 
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE id = ? LIMIT 1",
-    [boardId_],
-  );
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId_],
-  );
-  const { data: itemRows } = useQuery(
-    "SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order ASC",
-    [meetingId],
-  );
-  const { data: exhibitRows } = useQuery(
-    "SELECT * FROM exhibits WHERE town_id = ? ORDER BY sort_order ASC",
-    [townId_],
-  );
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId_),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("id", boardId_)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!boardId_,
+  });
 
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
+  const { data: town } = useQuery({
+    queryKey: queryKeys.towns.detail(townId_),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId_)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!townId_,
+  });
+
+  const { data: itemRows } = useQuery({
+    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_item")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .order("sort_order", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+
+  const { data: exhibitRows } = useQuery({
+    queryKey: [...queryKeys.exhibits.byMeeting(meetingId), townId_],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("exhibit")
+        .select("*")
+        .eq("town_id", townId_)
+        .order("sort_order", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId_,
+  });
+
   const allItems = (itemRows ?? []) as Record<string, unknown>[];
   // Filter exhibits to only those belonging to this meeting's items
   const allItemIds = useMemo(() => new Set(allItems.map((i) => String(i.id))), [allItems]);
@@ -179,6 +255,8 @@ export default function AgendaBuilderPage({
         throw new Error(body.message ?? `Error ${res.status}`);
       }
       const data = await res.json();
+      // Invalidate meeting to pick up new packet URL
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       toast.success("Agenda packet generated", {
         action: {
           label: "Download",
@@ -208,6 +286,8 @@ export default function AgendaBuilderPage({
         throw new Error(body.message ?? `Error ${res.status}`);
       }
       const data = await res.json();
+      // Invalidate meeting to pick up new notice URL
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       toast.success("Meeting notice generated", {
         action: {
           label: "Download",
@@ -249,17 +329,21 @@ export default function AgendaBuilderPage({
       const [moved] = reordered.splice(oldIndex, 1);
       reordered.splice(newIndex, 0, moved!);
 
-      for (let i = 0; i < reordered.length; i++) {
-        const s = reordered[i]!;
-        if (Number(s.sort_order) !== i) {
-          await powerSync.execute(
-            "UPDATE agenda_items SET sort_order = ?, updated_at = ? WHERE id = ?",
-            [i, now, String(s.id)],
-          );
-        }
-      }
+      // Batch update sort orders via Supabase
+      const updates = reordered
+        .filter((s, i) => Number(s.sort_order) !== i)
+        .map((s, i) =>
+          supabase
+            .from("agenda_item")
+            .update({ sort_order: i, updated_at: now })
+            .eq("id", String(s.id))
+            .throwOnError()
+        );
+
+      await Promise.all(updates);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     },
-    [sections, powerSync],
+    [sections, meetingId],
   );
 
   // ─── Add section handler ────────────────────────────────────────────
@@ -273,28 +357,30 @@ export default function AgendaBuilderPage({
       -1,
     );
 
-    await powerSync.execute(
-      `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+    await supabase
+      .from("agenda_item")
+      .insert({
         id,
-        meetingId,
-        townId,
-        addingSectionType,
-        maxSort + 1,
-        addingSectionTitle.trim(),
-        null,
-        null,
-        null,
-        null,
-        "pending",
-        now,
-        now,
-      ],
-    );
+        meeting_id: meetingId,
+        town_id: townId,
+        section_type: addingSectionType,
+        sort_order: maxSort + 1,
+        title: addingSectionTitle.trim(),
+        description: null,
+        presenter: null,
+        estimated_duration: null,
+        parent_item_id: null,
+        status: "pending",
+        created_at: now,
+        updated_at: now,
+      })
+      .throwOnError();
+
+    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
 
     setAddingSectionType(null);
     setAddingSectionTitle("");
-  }, [addingSectionType, addingSectionTitle, sections, powerSync, meetingId, townId]);
+  }, [addingSectionType, addingSectionTitle, sections, meetingId, townId]);
 
   // ─── Loading ────────────────────────────────────────────────────────
   if (!meeting) {

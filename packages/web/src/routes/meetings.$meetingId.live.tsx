@@ -18,6 +18,9 @@
  * - Meeting end flow: close transitions, defer unreached items, navigate to review
  */
 
+// TODO(M.09): This file still uses PowerSync-style useQuery(sql, params) calls.
+// The @powersync/react import resolves to the shim in hooks/usePowerSync.ts
+// via vite.config.ts alias until the full migration in session M.09.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useQuery, usePowerSync } from "@powersync/react";

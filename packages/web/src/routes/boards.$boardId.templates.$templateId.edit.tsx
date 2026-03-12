@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { usePowerSync, useQuery } from "@powersync/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Save } from "lucide-react";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import type { Route } from "./+types/boards.$boardId.templates.$templateId.edit";
@@ -17,6 +17,8 @@ import { SectionDetailPanel } from "@/components/templates/SectionDetailPanel";
 import { parseSections, serializeSections } from "@/lib/agenda-template-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -28,20 +30,35 @@ export default function AgendaTemplateEditorPage({
   loaderData,
 }: Route.ComponentProps) {
   const { boardId, templateId } = loaderData;
-  const powerSync = usePowerSync();
+  const queryClient = useQueryClient();
 
   // ─── Queries ──────────────────────────────────────────────────────
-  const { data: boardRows } = useQuery(
-    "SELECT id, name FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const { data: templateRows } = useQuery(
-    "SELECT * FROM agenda_templates WHERE id = ? LIMIT 1",
-    [templateId],
-  );
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("id, name")
+        .eq("id", boardId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
 
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
-  const templateRow = templateRows?.[0] as Record<string, unknown> | undefined;
+  const { data: templateRow } = useQuery({
+    queryKey: queryKeys.agendaTemplates.detail(templateId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_template")
+        .select("*")
+        .eq("id", templateId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
+
   const boardName = String(board?.name ?? "");
 
   // ─── Local state ──────────────────────────────────────────────────
@@ -55,7 +72,10 @@ export default function AgendaTemplateEditorPage({
   // Initialize from query result
   useEffect(() => {
     if (templateRow && !initialized) {
-      const parsed = parseSections((templateRow.sections as string) ?? null);
+      const raw = templateRow.sections;
+      const parsed = parseSections(
+        typeof raw === "string" ? raw : JSON.stringify(raw),
+      );
       setSections(parsed);
       setTemplateName(String(templateRow.name ?? ""));
       setInitialized(true);
@@ -127,15 +147,26 @@ export default function AgendaTemplateEditorPage({
     try {
       const serialized = serializeSections(sections);
       const now = new Date().toISOString();
-      await powerSync.execute(
-        `UPDATE agenda_templates SET name = ?, sections = ?, updated_at = ? WHERE id = ?`,
-        [templateName, serialized, now, templateId],
-      );
+      await supabase
+        .from("agenda_template")
+        .update({
+          name: templateName,
+          sections: JSON.parse(serialized),
+          updated_at: now,
+        })
+        .eq("id", templateId)
+        .throwOnError();
       setIsDirty(false);
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaTemplates.detail(templateId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaTemplates.byBoard(boardId),
+      });
     } finally {
       setIsSaving(false);
     }
-  }, [isDirty, sections, templateName, powerSync, templateId]);
+  }, [isDirty, sections, templateName, templateId, boardId, queryClient]);
 
   // ─── Loading ──────────────────────────────────────────────────────
   if (!templateRow || !initialized) {

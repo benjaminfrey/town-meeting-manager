@@ -7,7 +7,7 @@
  */
 
 import { Link } from "react-router";
-import { useQuery, useStatus } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CalendarDays,
   Clock,
@@ -37,6 +37,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -68,7 +71,7 @@ function formatDate(dateStr: string): string {
 
 function formatTime(timeStr: string): string {
   const [h, m] = timeStr.split(":");
-  const hour = parseInt(h, 10);
+  const hour = parseInt(h ?? "0", 10);
   const ampm = hour >= 12 ? "PM" : "AM";
   const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
   return `${displayHour}:${m} ${ampm}`;
@@ -95,74 +98,140 @@ const MINUTES_STATUS_COLORS: Record<string, string> = {
 // ─── Route ───────────────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { meetingId: params.meetingId };
+  const meetingId = params.meetingId;
+
+  // Prefetch meeting data
+  await queryClient.ensureQueryData({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
+
+  return { meetingId };
 }
 
 export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
-  const syncStatus = useStatus();
 
   // Meeting data
-  const { data: meetingRows } = useQuery(
-    "SELECT * FROM meetings WHERE id = ? LIMIT 1",
-    [meetingId],
-  );
-  const meeting = meetingRows?.[0] as Record<string, unknown> | undefined;
+  const { data: meeting, isLoading: meetingLoading } = useQuery({
+    queryKey: queryKeys.meetings.detail(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting")
+        .select("*")
+        .eq("id", meetingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+  });
 
-  // Board name
   const boardId = (meeting?.board_id as string) ?? "";
-  const { data: boardRows } = useQuery(
-    "SELECT id, name FROM boards WHERE id = ? LIMIT 1",
-    [boardId],
-  );
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
-
-  // Presiding officer & recording secretary names
   const presidingId = (meeting?.presiding_officer_id as string) ?? "";
   const secretaryId = (meeting?.recording_secretary_id as string) ?? "";
-  const { data: presidingRows } = useQuery(
-    "SELECT name FROM persons WHERE id = ? LIMIT 1",
-    [presidingId],
-  );
-  const { data: secretaryRows } = useQuery(
-    "SELECT name FROM persons WHERE id = ? LIMIT 1",
-    [secretaryId],
-  );
-  const presiding = presidingRows?.[0] as Record<string, unknown> | undefined;
-  const secretary = secretaryRows?.[0] as Record<string, unknown> | undefined;
+
+  // Board name
+  const { data: board } = useQuery({
+    queryKey: queryKeys.boards.detail(boardId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("id, name")
+        .eq("id", boardId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!boardId,
+  });
+
+  // Presiding officer name
+  const { data: presiding } = useQuery({
+    queryKey: queryKeys.persons.detail(presidingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("person")
+        .select("name")
+        .eq("id", presidingId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!presidingId,
+  });
+
+  // Recording secretary name
+  const { data: secretary } = useQuery({
+    queryKey: queryKeys.persons.detail(secretaryId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("person")
+        .select("name")
+        .eq("id", secretaryId)
+        .single()
+        .throwOnError();
+      return data;
+    },
+    enabled: !!secretaryId,
+  });
 
   // Agenda item count
-  const { data: agendaCountRows } = useQuery(
-    "SELECT COUNT(*) as count FROM agenda_items WHERE meeting_id = ?",
-    [meetingId],
-  );
-  const agendaItemCount = (agendaCountRows?.[0] as Record<string, unknown>)
-    ?.count as number | undefined;
+  const { data: agendaItems } = useQuery({
+    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("agenda_item")
+        .select("id")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+  const agendaItemCount = agendaItems?.length ?? 0;
 
   // Minutes document status
-  const { data: minutesRows } = useQuery(
-    "SELECT id, status FROM minutes_documents WHERE meeting_id = ? LIMIT 1",
-    [meetingId],
-  );
-  const minutes = minutesRows?.[0] as Record<string, unknown> | undefined;
+  const { data: minutesDocs } = useQuery({
+    queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("minutes_document")
+        .select("id, status")
+        .eq("meeting_id", meetingId)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+  const minutes = minutesDocs?.[0] ?? undefined;
 
   // Attendance count
-  const { data: attendanceRows } = useQuery(
-    "SELECT COUNT(*) as count FROM meeting_attendance WHERE meeting_id = ?",
-    [meetingId],
-  );
-  const attendanceCount = (attendanceRows?.[0] as Record<string, unknown>)
-    ?.count as number | undefined;
+  const { data: attendanceRecords } = useQuery({
+    queryKey: queryKeys.attendance.byMeeting(meetingId),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("meeting_attendance")
+        .select("id")
+        .eq("meeting_id", meetingId)
+        .throwOnError();
+      return data ?? [];
+    },
+  });
+  const attendanceCount = attendanceRecords?.length ?? 0;
 
   // ─── Loading state ───────────────────────────────────────────────────
 
   if (!meeting) {
-    // If PowerSync has fully synced and the meeting still isn't found, show not-found.
-    // Otherwise show a loading spinner while data arrives.
-    const hasSynced = syncStatus.hasSynced ?? false;
     return (
       <div className="flex items-center justify-center p-12">
-        {hasSynced ? (
+        {!meetingLoading ? (
           <div className="text-center">
             <p className="text-muted-foreground">Meeting not found.</p>
             <Link

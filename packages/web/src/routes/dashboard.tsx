@@ -11,9 +11,9 @@
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md — Dashboard
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useSearchParams, Navigate } from "react-router";
-import { useQuery, useStatus } from "@powersync/react";
+import { useQuery } from "@tanstack/react-query";
 import { PartyPopper, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Route } from "./+types/dashboard";
@@ -28,6 +28,9 @@ import { RetentionPolicyModal } from "@/components/dashboard/RetentionPolicyModa
 import { QuickTour, useShouldShowTour } from "@/components/QuickTour";
 import { Accordion } from "@/components/ui/accordion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { queryKeys } from "@/lib/queryKeys";
+import { supabase } from "@/lib/supabase";
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Label helpers ──────────────────────────────────────────────────
 
@@ -63,27 +66,68 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   const [retentionModalOpen, setRetentionModalOpen] = useState(false);
 
   // ─── Reactive queries ───────────────────────────────────────────
-  const { data: townRows } = useQuery(
-    "SELECT * FROM towns WHERE id = ? LIMIT 1",
-    [townId ?? ""]
-  );
-  const { data: boardRows } = useQuery(
-    "SELECT * FROM boards WHERE town_id = ? AND archived_at IS NULL ORDER BY is_governing_board DESC, name ASC",
-    [townId ?? ""]
-  );
-  const { data: meetingRows } = useQuery(
-    "SELECT COUNT(*) as count FROM meetings WHERE town_id = ? AND status IN ('scheduled', 'in_progress')",
-    [townId ?? ""]
-  );
-  const { data: pendingMinutesRows } = useQuery(
-    "SELECT COUNT(*) as count FROM minutes_documents WHERE town_id = ? AND status = 'draft'",
-    [townId ?? ""]
-  );
+  const { data: townRows, isLoading: townLoading } = useQuery({
+    queryKey: queryKeys.towns.detail(townId ?? ""),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("town")
+        .select("*")
+        .eq("id", townId!)
+        .limit(1)
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
+
+  const { data: boardRows } = useQuery({
+    queryKey: queryKeys.boards.byTown(townId ?? ""),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("board")
+        .select("*")
+        .eq("town_id", townId!)
+        .is("archived_at", null)
+        .order("is_governing_board", { ascending: false })
+        .order("name", { ascending: true })
+        .throwOnError();
+      return data ?? [];
+    },
+    enabled: !!townId,
+  });
+
+  const { data: meetingRows } = useQuery({
+    queryKey: [...queryKeys.meetings.byTown(townId ?? ""), "upcoming-count"],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("meeting")
+        .select("*", { count: "exact", head: true })
+        .eq("town_id", townId!)
+        .in("status", ["scheduled", "in_progress"])
+        .throwOnError();
+      return count ?? 0;
+    },
+    enabled: !!townId,
+  });
+
+  const { data: pendingMinutesCount } = useQuery({
+    queryKey: [...queryKeys.minutes.byMeeting("__town_drafts__"), townId ?? ""],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("minutes_document")
+        .select("*", { count: "exact", head: true })
+        .eq("town_id", townId!)
+        .eq("status", "draft")
+        .throwOnError();
+      return count ?? 0;
+    },
+    enabled: !!townId,
+  });
 
   const town = townRows?.[0] as Record<string, unknown> | undefined;
-  const boards = boardRows ?? [];
-  const meetingCount = (meetingRows?.[0] as Record<string, unknown>)?.count ?? 0;
-  const pendingMinutesCount = (pendingMinutesRows?.[0] as Record<string, unknown>)?.count ?? 0;
+  const boards = (boardRows ?? []) as Record<string, unknown>[];
+  const meetingCount = meetingRows ?? 0;
+  const pendingCount = pendingMinutesCount ?? 0;
   const boardCount = boards.length;
 
   // ─── Callbacks ──────────────────────────────────────────────────
@@ -96,24 +140,20 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     setSearchParams({}, { replace: true });
   }, [setSearchParams]);
 
-  // ─── Sync-aware loading state ───────────────────────────────────
-  const syncStatus = useStatus();
-
   // No townId at all → user hasn't completed onboarding
   if (!townId) {
     return <Navigate to="/setup" replace />;
   }
 
-  // townId exists but town data hasn't synced to local DB yet
+  // townId exists but town data hasn't loaded yet
   if (!town) {
-    const hasSynced = syncStatus.hasSynced;
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-12">
-        {!hasSynced ? (
+        {townLoading ? (
           <>
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             <p className="text-sm text-muted-foreground">
-              Syncing your town data...
+              Loading your town data...
             </p>
           </>
         ) : (
@@ -136,7 +176,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  // Cast town fields
+  // Cast town fields — Supabase returns native types
   const t = {
     id: town.id as string,
     name: (town.name as string) ?? "",
@@ -149,19 +189,14 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     minutes_style: (town.minutes_style as string) ?? "summary",
     presiding_officer_default: (town.presiding_officer_default as string) ?? "chair_of_board",
     minutes_recorder_default: (town.minutes_recorder_default as string) ?? "town_clerk",
-    staff_roles_present: town.staff_roles_present as string | null,
+    staff_roles_present: town.staff_roles_present as string[] | null,
     subdomain: town.subdomain as string | null,
     seal_url: town.seal_url as string | null,
     retention_policy_acknowledged_at: town.retention_policy_acknowledged_at as string | null,
   };
 
-  // Parse staff roles
-  let staffRoles: string[] = [];
-  try {
-    if (t.staff_roles_present) {
-      staffRoles = JSON.parse(t.staff_roles_present);
-    }
-  } catch { /* ignore */ }
+  // staff_roles_present comes as native JSONB array from Supabase
+  const staffRoles: string[] = Array.isArray(t.staff_roles_present) ? t.staff_roles_present : [];
 
   const STAFF_ROLE_LABELS: Record<string, string> = {
     town_manager: "Town Manager",
@@ -254,11 +289,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           <h3 className="text-sm font-medium text-muted-foreground">
             Pending Minutes
           </h3>
-          <p className="mt-2 text-3xl font-bold">{String(pendingMinutesCount)}</p>
+          <p className="mt-2 text-3xl font-bold">{String(pendingCount)}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {pendingMinutesCount === 0
+            {pendingCount === 0
               ? "All minutes approved"
-              : `${pendingMinutesCount} draft${pendingMinutesCount === 1 ? "" : "s"} pending`}
+              : `${pendingCount} draft${pendingCount === 1 ? "" : "s"} pending`}
           </p>
         </div>
       </div>
@@ -313,7 +348,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
             {/* ─── Governing Board ────────────────────────────── */}
             {(() => {
               const govBoard = boards.find(
-                (b: Record<string, unknown>) => b.is_governing_board === 1
+                (b: Record<string, unknown>) => b.is_governing_board === true
               ) as Record<string, unknown> | undefined;
               if (!govBoard) return null;
               return (
@@ -394,7 +429,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                       <div key={String(b.id)} className="flex items-center justify-between text-sm">
                         <span className="font-medium">
                           {String(b.name)}
-                          {b.is_governing_board === 1 && (
+                          {b.is_governing_board === true && (
                             <span className="ml-2 text-xs text-muted-foreground">(Governing)</span>
                           )}
                         </span>
