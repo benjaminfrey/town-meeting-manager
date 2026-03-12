@@ -1,10 +1,13 @@
 /**
- * Hook to access the Supabase client from context.
+ * Hook to access the Supabase client singleton.
  *
- * Re-exports useSupabaseClient from the PowerSyncProvider for convenience.
  * Usage:
  *   const supabase = useSupabase();
- *   const { data } = await supabase.auth.getUser();
+ *   const { data } = await supabase.from('meeting').select('*');
  */
 
-export { useSupabaseClient as useSupabase } from "@/providers/PowerSyncProvider";
+import { supabase } from '@/lib/supabase';
+
+export function useSupabase() {
+  return supabase;
+}

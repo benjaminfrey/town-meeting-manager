@@ -19,7 +19,7 @@ import { useTheme } from "@/providers/ThemeProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { ErrorFallback } from "@/components/ErrorFallback";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { SyncStatusBar } from "@/components/SyncStatusBar";
+import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
 import { LogoutDialog } from "@/components/LogoutDialog";
 import { cn } from "@/lib/utils";
 
@@ -219,7 +219,7 @@ export default function RootLayout() {
 
           {/* Header actions */}
           <div className="flex items-center gap-3">
-            <SyncStatusBar />
+            <ConnectionStatusBar />
             <ThemeToggle />
             {/* User menu with logout */}
             <LogoutDialog

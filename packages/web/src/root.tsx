@@ -8,15 +8,12 @@ import {
 } from "react-router";
 import type { Route } from "./+types/root";
 import { ThemeProvider } from "@/providers/ThemeProvider";
-import { AuthProvider, useAuth } from "@/providers/AuthProvider";
-import { PowerSyncProvider } from "@/providers/PowerSyncProvider";
+import { AuthProvider } from "@/providers/AuthProvider";
+import { QueryProvider } from "@/providers/QueryProvider";
 import { Toaster } from "@/components/ui/sonner";
-import { supabase } from "@/lib/supabase";
 import { detectPortalSubdomain } from "@/lib/portal";
 import { PortalApp } from "@/portal/PortalApp";
 import "./app.css";
-
-const powersyncUrl = import.meta.env.VITE_POWERSYNC_URL || "http://localhost:8080";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -51,25 +48,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Inner component that reads auth state and passes it to PowerSyncProvider.
- * Must be a child of AuthProvider to access useAuth().
- */
-function AppWithAuth() {
-  const { isAuthenticated } = useAuth();
-
-  return (
-    <PowerSyncProvider
-      supabaseClient={supabase}
-      powersyncUrl={powersyncUrl}
-      authenticated={isAuthenticated}
-    >
-      <Outlet />
-      <Toaster position="top-right" richColors closeButton />
-    </PowerSyncProvider>
-  );
-}
-
 export default function App() {
   const subdomain = detectPortalSubdomain(window.location.hostname);
 
@@ -80,7 +58,10 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppWithAuth />
+        <QueryProvider>
+          <Outlet />
+          <Toaster position="top-right" richColors closeButton />
+        </QueryProvider>
       </AuthProvider>
     </ThemeProvider>
   );
