@@ -1,16 +1,17 @@
 /**
- * Lightweight form management hook for wizard stages.
+ * Form management hook for wizard stages and dialogs.
  *
- * Provides react-hook-form-like ergonomics (field-level validation on
- * blur, computed isValid, validate-all on submit) using plain React
- * state + Zod — no external form library needed.
+ * Now backed by react-hook-form + zodResolver. The PowerSync bundle
+ * conflict that previously blocked react-hook-form has been removed.
  *
- * We avoid react-hook-form because it creates duplicate React instance
- * errors when @powersync/web is excluded from Vite's dep optimization.
- * This hook provides equivalent functionality for our use case.
+ * This wrapper preserves the same external API that all 17+ consumers
+ * depend on (values, errors, isValid, setValue, handleBlur, validate)
+ * so that no JSX changes are needed in consumer components.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 
 type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
@@ -52,81 +53,74 @@ export function useWizardForm<T extends Record<string, unknown>>(
   schema: SafeParseable<T>,
   initialValues: T
 ): UseWizardFormReturn<T> {
-  const [values, setValuesState] = useState<T>(initialValues);
-  const [errors, setErrors] = useState<FieldErrors<T>>({});
+  const form = useForm<T>({
+    // zodResolver expects a ZodSchema — our SafeParseable duck-type is compatible
+    resolver: zodResolver(schema as any),
+    defaultValues: initialValues as any,
+    mode: "onBlur",
+  });
+
+  const values = form.watch();
+
+  // Convert react-hook-form's nested errors to flat { field: "message" } shape
+  const errors = useMemo(() => {
+    const flat: FieldErrors<T> = {};
+    const rhfErrors = form.formState.errors;
+    for (const key of Object.keys(rhfErrors)) {
+      const err = rhfErrors[key as keyof typeof rhfErrors];
+      if (err && typeof err === "object" && "message" in err) {
+        flat[key as keyof T] = err.message as string;
+      }
+    }
+    return flat;
+  }, [form.formState.errors]);
+
+  const isValid = form.formState.isValid;
 
   const setValue = useCallback(
     <K extends keyof T>(field: K, value: T[K]) => {
-      setValuesState((prev) => ({ ...prev, [field]: value }));
-      // Clear error for this field so validation re-runs on next blur
-      setErrors((prev) => {
-        if (!(field in prev)) return prev;
-        const next = { ...prev };
-        delete next[field];
-        return next;
+      form.setValue(field as any, value as any, {
+        shouldValidate: false,
+        shouldDirty: true,
       });
+      // Clear error for this field (matches original behavior)
+      form.clearErrors(field as any);
     },
-    []
+    [form]
   );
 
-  const setValues = useCallback((newValues: T) => {
-    setValuesState(newValues);
-    setErrors({});
-  }, []);
+  const setValues = useCallback(
+    (newValues: T) => {
+      form.reset(newValues as any);
+    },
+    [form]
+  );
 
   const handleBlur = useCallback(
     (field: keyof T) => {
-      // Parse the full form to check this specific field
-      const result = schema.safeParse(values);
-      if (!result.success) {
-        const fieldIssue = result.error.issues.find(
-          (issue) => issue.path[0] === field
-        );
-        if (fieldIssue) {
-          setErrors((prev) => ({
-            ...prev,
-            [field]: fieldIssue.message,
-          }));
-        } else {
-          // This field is valid — clear any existing error
-          setErrors((prev) => {
-            if (!(field in prev)) return prev;
-            const next = { ...prev };
-            delete next[field];
-            return next;
-          });
-        }
-      } else {
-        // Entire form is valid — clear this field's error
-        setErrors((prev) => {
-          if (!(field in prev)) return prev;
-          const next = { ...prev };
-          delete next[field];
-          return next;
-        });
-      }
+      form.trigger(field as any);
     },
-    [schema, values]
+    [form]
   );
 
   const validate = useCallback(() => {
-    const result = schema.safeParse(values);
+    // Synchronous validation using the schema directly — matches original
+    // behavior where validate() returns T | null immediately.
+    const currentValues = form.getValues();
+    const result = schema.safeParse(currentValues);
     if (!result.success) {
-      const newErrors: FieldErrors<T> = {};
+      // Set errors on the form for display
       for (const issue of result.error.issues) {
-        const field = issue.path[0] as keyof T;
-        if (!newErrors[field]) {
-          newErrors[field] = issue.message;
+        const field = issue.path[0] as string;
+        if (field) {
+          form.setError(field as any, { message: issue.message });
         }
       }
-      setErrors(newErrors);
       return null;
     }
-    setErrors({});
+    form.clearErrors();
     return result.data;
-  }, [schema, values]);
-
-  const isValid = useMemo(() => schema.safeParse(values).success, [schema, values]);
+  }, [form, schema]);
 
   return { values, errors, isValid, setValue, setValues, handleBlur, validate };
 }
