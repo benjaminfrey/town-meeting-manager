@@ -376,7 +376,7 @@ function MotionCard({
   onWithdraw: () => void;
   onAmend?: () => void;
 }) {
-  const statusInfo = STATUS_BADGE[motion.status] ?? STATUS_BADGE.pending;
+  const statusInfo = (STATUS_BADGE[motion.status] ?? STATUS_BADGE.pending)!;
   const typeColor = TYPE_COLORS[motion.motionType] ?? TYPE_COLORS.main;
   const typeLabel = TYPE_LABELS[motion.motionType] ?? motion.motionType;
   const movedByName = motion.movedBy ? memberNameMap.get(motion.movedBy) ?? "Unknown" : null;
@@ -424,6 +424,7 @@ function MotionCard({
               votingMembers: voteSummary.yeas + voteSummary.nays,
               majorityNeeded: 0,
               passed: voteSummary.result === "passed",
+              result: voteSummary.result as "passed" | "failed",
             })}
           </span>
         )}
@@ -470,7 +471,7 @@ function MotionCard({
                 motion.motionText,
                 movedByName,
                 secondedByName,
-                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed" },
+                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed", result: voteSummary.result as "passed" | "failed" },
               )}
             </p>
           ) : movedByName ? (
@@ -479,7 +480,7 @@ function MotionCard({
                 motion.motionText,
                 movedByName,
                 secondedByName,
-                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed" },
+                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed", result: voteSummary.result as "passed" | "failed" },
               ).map((line) => (
                 <div key={line.label} className="flex gap-2 text-xs">
                   <span className="min-w-[80px] text-muted-foreground">{line.label}:</span>

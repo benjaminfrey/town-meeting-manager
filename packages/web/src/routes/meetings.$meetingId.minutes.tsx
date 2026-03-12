@@ -54,7 +54,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { hasPermission } from "@town-meeting/shared";
+import { hasPermission, type PermissionsMatrix } from "@town-meeting/shared";
 import type { MinutesContentJson } from "@town-meeting/shared/types";
 import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
@@ -244,19 +244,19 @@ export default function MinutesReviewPage({
 
   // ─── Permissions ────────────────────────────────────────────────
   const canEditDraft = user
-    ? hasPermission(user.permissions, "edit_draft_minutes")
+    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "edit_draft_minutes")
     : false;
   const canSubmitForReview = user
-    ? hasPermission(user.permissions, "submit_minutes_review")
+    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "submit_minutes_review")
     : false;
   const canGenerateAi = user
-    ? hasPermission(user.permissions, "generate_ai_minutes")
+    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "generate_ai_minutes")
     : false;
   const canPublish = user
-    ? hasPermission(user.permissions, "publish_approved_minutes")
+    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "publish_approved_minutes")
     : false;
   const canExport = user
-    ? hasPermission(user.permissions, "export_minutes")
+    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "export_minutes")
     : false;
   const isAdmin = user?.role === "admin" || user?.role === "sys_admin";
 
@@ -265,7 +265,7 @@ export default function MinutesReviewPage({
     if (!user) return false;
     if (status === "approved" || status === "published") return true;
     if (isAdmin) return true;
-    return hasPermission(user.permissions, "view_draft_minutes");
+    return hasPermission(user.permissions as unknown as PermissionsMatrix, "view_draft_minutes");
   }, [user, status, isAdmin]);
 
   // ─── Mutations ────────────────────────────────────────────────

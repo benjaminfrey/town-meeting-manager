@@ -27,7 +27,7 @@ const BOARD_COLORS = [
 ];
 
 function getBoardColor(index: number): string {
-  return BOARD_COLORS[index % BOARD_COLORS.length];
+  return BOARD_COLORS[index % BOARD_COLORS.length]!;
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -55,7 +55,7 @@ function formatDateLong(date: string): string {
 
 function getBoardAbbreviation(name: string): string {
   const words = name.split(/\s+/);
-  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  if (words.length === 1) return words[0]!.slice(0, 3).toUpperCase();
   return words
     .map((w) => w.charAt(0))
     .join("")
@@ -166,7 +166,7 @@ export default function MeetingCalendar() {
   const meetingsByDay = useMemo(() => {
     const map = new Map<number, PortalCalendarEvent[]>();
     for (const m of filteredMeetings) {
-      const day = parseInt(m.scheduled_date.split("-")[2], 10);
+      const day = parseInt(m.scheduled_date.split("-")[2] ?? "0", 10);
       if (!map.has(day)) map.set(day, []);
       map.get(day)!.push(m);
     }

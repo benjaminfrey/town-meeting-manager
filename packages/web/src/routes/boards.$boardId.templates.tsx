@@ -58,7 +58,7 @@ export default function AgendaTemplateListPage({
   } | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<{
     name: string;
-    sections: unknown;
+    sections: string;
   } | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ const BOARD_BADGE_COLORS = [
 
 function getBoardBadgeColor(boardId: string, boards: PortalBoardSummary[]): string {
   const index = boards.findIndex((b) => b.id === boardId);
-  return BOARD_BADGE_COLORS[index >= 0 ? index % BOARD_BADGE_COLORS.length : 0];
+  return BOARD_BADGE_COLORS[index >= 0 ? index % BOARD_BADGE_COLORS.length : 0]!;
 }
 
 function MeetingRow({
@@ -178,7 +178,7 @@ export default function MeetingsList() {
     loadMeetings(1, selectedBoard, false);
   }, [selectedBoard, loadMeetings]);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toISOString().split("T")[0]!;
   const upcomingMeetings = meetings
     .filter((m) => m.scheduled_date >= today)
     .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));

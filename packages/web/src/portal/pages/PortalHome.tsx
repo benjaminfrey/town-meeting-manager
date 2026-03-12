@@ -63,7 +63,7 @@ export default function PortalHome() {
 
         if (cancelled) return;
 
-        const today = new Date().toISOString().split("T")[0];
+        const today = new Date().toISOString().split("T")[0]!;
 
         const upcoming = meetingsRes.meetings
           .filter((m) => m.scheduled_date >= today)

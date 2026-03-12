@@ -8,48 +8,47 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { mockQueryResult } from "@/test/mocks/powersync-mock";
 import {
   calculateQuorum,
   hasQuorum,
   quorumAfterRecusal,
 } from "@town-meeting/shared";
 
-// ─── Mock PowerSync ────────────────────────────────────────────────
+// ─── Mock TanStack Query ────────────────────────────────────────────
 
-const { mockDb, mockUseQuery } = vi.hoisted(() => {
+const { mockUseQuery } = vi.hoisted(() => ({
+  mockUseQuery: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
   return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-    mockUseQuery: vi.fn(),
+    ...(actual as object),
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
   };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: (...args: unknown[]) => mockUseQuery(...args),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+// ─── Mock Supabase ──────────────────────────────────────────────────
+
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve),
+    }),
+  },
 }));
 
 import { useQuorumCheck } from "./useQuorumCheck";
 
 // ─── Test Helpers ──────────────────────────────────────────────────
+
+/** Build a mock useQuery return value with data and no loading/error state. */
+function mockQueryResult<T>(data: T[]) {
+  return { data, isLoading: false, isFetching: false, error: undefined };
+}
 
 function setupQuorumQuery(opts: {
   quorumType?: string;
@@ -66,18 +65,19 @@ function setupQuorumQuery(opts: {
     attendanceStatuses = [],
   } = opts;
 
-  mockUseQuery.mockImplementation((sql: string) => {
-    if (sql.includes("FROM boards")) {
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+    if (key === "boards") {
       return mockQueryResult([
         { quorum_type: quorumType, quorum_value: quorumValue, member_count: memberCount },
       ]);
     }
-    if (sql.includes("FROM board_members")) {
+    if (key === "members") {
       return mockQueryResult(
         Array.from({ length: totalActiveMembers }, (_, i) => ({ id: `bm-${i + 1}` })),
       );
     }
-    if (sql.includes("FROM meeting_attendance")) {
+    if (key === "attendance") {
       return mockQueryResult(
         attendanceStatuses.map((status, i) => ({
           id: `att-${i + 1}`,
@@ -98,7 +98,7 @@ describe("useQuorumCheck", () => {
   });
 
   it("returns null when board data is not loaded", () => {
-    mockUseQuery.mockReturnValue(mockQueryResult([]));
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: true, isFetching: false, error: undefined });
 
     const { result } = renderHook(() => useQuorumCheck("meeting-1", "board-1"));
 

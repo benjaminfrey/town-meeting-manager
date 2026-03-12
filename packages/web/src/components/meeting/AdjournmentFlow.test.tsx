@@ -4,33 +4,26 @@ import { fireEvent } from "@testing-library/react";
 import { AdjournmentControls } from "./AdjournmentControls";
 import { AdjournWithoutObjectionDialog } from "./AdjournWithoutObjectionDialog";
 
-const { mockDb } = vi.hoisted(() => {
-  return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-  };
+const { mockChain, mockFrom } = vi.hoisted(() => {
+  const chain: Record<string, unknown> = {};
+  chain['then'] = (resolve: any, reject?: any) =>
+    Promise.resolve({ data: null, error: null }).then(resolve, reject);
+  chain['catch'] = (reject: any) =>
+    Promise.resolve({ data: null, error: null }).catch(reject as any);
+  const methods = [
+    'select', 'insert', 'update', 'delete', 'upsert',
+    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
+    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+  ];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  const mockFrom = vi.fn().mockReturnValue(chain);
+  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: vi.fn().mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined }),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: mockFrom },
 }));
 
 // ─── AdjournmentControls ────────────────────────────────────────────

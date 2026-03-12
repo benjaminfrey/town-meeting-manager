@@ -29,7 +29,7 @@ export function detectPortalSubdomain(hostname: string): string | null {
   const parts = hostname.split(".");
   if (parts.length < 3) return null;
 
-  const subdomain = parts[0].toLowerCase();
+  const subdomain = parts[0]!.toLowerCase();
   if (RESERVED_SUBDOMAINS.has(subdomain)) return null;
 
   return subdomain;

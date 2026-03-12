@@ -103,7 +103,7 @@ export function MinutesEditor({
     ) => {
       setEditableContent((prev) => {
         const next = structuredClone(prev);
-        (next.sections[sectionIdx].items[itemIdx] as Record<string, unknown>)[
+        (next.sections[sectionIdx]!.items[itemIdx]! as unknown as Record<string, unknown>)[
           field
         ] = value;
         return next;
@@ -122,7 +122,7 @@ export function MinutesEditor({
     ) => {
       setEditableContent((prev) => {
         const next = structuredClone(prev);
-        next.sections[sectionIdx].items[itemIdx].speakers[speakerIdx].name =
+        next.sections[sectionIdx]!.items[itemIdx]!.speakers[speakerIdx]!.name =
           name;
         return next;
       });

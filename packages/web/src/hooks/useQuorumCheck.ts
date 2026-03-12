@@ -10,8 +10,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { calculateQuorum } from "@town-meeting/shared";
-import type { QuorumType } from "@town-meeting/shared/constants/enums";
+import { calculateQuorum, type QuorumType } from "@town-meeting/shared";
 
 export interface QuorumCheckResult {
   required: number;

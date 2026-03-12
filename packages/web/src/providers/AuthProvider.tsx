@@ -6,7 +6,7 @@
  * - Subscribes to Supabase onAuthStateChange for all auth events
  * - Provides auth state (user, session, isLoading, isAuthenticated) to the app
  * - Exposes signIn, signOut, and resetPassword methods via context
- * - Coordinates with PowerSyncProvider for sync connect/disconnect
+ * - Exposes ConnectionStatusBar-compatible state via Supabase Realtime
  */
 
 import {
@@ -220,9 +220,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ─── Sign out ────────────────────────────────────────────────────
 
   const signOut = useCallback(async (): Promise<void> => {
-    // Note: PowerSync disconnect is handled by the PowerSyncProvider
-    // listening to auth state changes — it will call disconnectAndClear()
-    // when it detects SIGNED_OUT
     await supabase.auth.signOut();
   }, []);
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import React from "react";
 import { renderWithProviders, screen } from "@/test/render";
 import {
@@ -6,12 +6,6 @@ import {
   createStaffUser,
   createBoardMemberUser,
 } from "@/test/mocks/auth-mock";
-import {
-  createMockPowerSync,
-  mockQueryResult,
-  mockQueryLoading,
-  mockQueryError,
-} from "@/test/mocks/powersync-mock";
 
 // ─── Tests ──────────────────────────────────────────────────────────
 
@@ -86,45 +80,5 @@ describe("user factories", () => {
   it("createBoardMemberUser has board_member role", () => {
     const user = createBoardMemberUser();
     expect(user.role).toBe("board_member");
-  });
-});
-
-describe("PowerSync mock helpers", () => {
-  it("createMockPowerSync creates database with stubs", () => {
-    const db = createMockPowerSync();
-    expect(db.execute).toBeDefined();
-    expect(db.getAll).toBeDefined();
-    expect(db.connected).toBe(true);
-    expect(db.currentStatus.hasSynced).toBe(true);
-  });
-
-  it("createMockPowerSync accepts overrides", async () => {
-    const db = createMockPowerSync({
-      getAll: vi.fn().mockResolvedValue([{ id: "1", name: "Test" }]),
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (db.getAll as any)("SELECT * FROM towns");
-    expect(result).toEqual([{ id: "1", name: "Test" }]);
-  });
-
-  it("mockQueryResult returns correct shape", () => {
-    const result = mockQueryResult([{ id: "1" }]);
-    expect(result.data).toEqual([{ id: "1" }]);
-    expect(result.isLoading).toBe(false);
-    expect(result.error).toBeUndefined();
-  });
-
-  it("mockQueryLoading returns loading state", () => {
-    const result = mockQueryLoading();
-    expect(result.data).toEqual([]);
-    expect(result.isLoading).toBe(true);
-  });
-
-  it("mockQueryError returns error state", () => {
-    const err = new Error("Query failed");
-    const result = mockQueryError(err);
-    expect(result.data).toEqual([]);
-    expect(result.isLoading).toBe(false);
-    expect(result.error).toBe(err);
   });
 });

@@ -1,37 +1,42 @@
 import React from "react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { mockQueryResult } from "@/test/mocks/powersync-mock";
 
-// ─── Mock PowerSync ───────────────────────────────────────────────────
+// ─── Mock TanStack Query ───────────────────────────────────────────────
 
-const { mockDb, mockUseQuery } = vi.hoisted(() => {
+const { mockUseQuery } = vi.hoisted(() => ({
+  mockUseQuery: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
   return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-    mockUseQuery: vi.fn(),
+    ...(actual as object),
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
   };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: (...args: unknown[]) => mockUseQuery(...args),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+// ─── Mock Supabase ─────────────────────────────────────────────────────
+
+const { mockChain, mockFrom } = vi.hoisted(() => {
+  const chain: Record<string, unknown> = {};
+  chain["then"] = (resolve: any, reject?: any) =>
+    Promise.resolve({ data: [], error: null }).then(resolve, reject);
+  chain["catch"] = (reject: any) =>
+    Promise.resolve({ data: [], error: null }).catch(reject as any);
+  const methods = [
+    "select", "insert", "update", "delete", "upsert",
+    "eq", "neq", "in", "gte", "lte", "order", "limit",
+    "single", "maybeSingle", "throwOnError", "or", "filter",
+  ];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  const mockFrom = vi.fn().mockReturnValue(chain);
+  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
+});
+
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: mockFrom },
 }));
 
 // ─── Mock child components ────────────────────────────────────────────
@@ -67,6 +72,12 @@ vi.mock("./+types/boards.$boardId.templates.$templateId.edit", () => ({}));
 
 import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.edit";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+function mockQueryResult<T>(data: T[]) {
+  return { data, isLoading: false, isFetching: false, error: undefined };
+}
 
 // ─── Mock data factory ───────────────────────────────────────────────
 
@@ -116,15 +127,12 @@ function setupQueryMocks(
   board: Record<string, unknown> | null = createMockBoard(),
   template: Record<string, unknown> | null = createMockTemplate(),
 ) {
-  mockUseQuery.mockImplementation(((sql: string) => {
-    if (sql.includes("FROM boards")) {
-      return mockQueryResult(board ? [board] : []);
-    }
-    if (sql.includes("FROM agenda_templates")) {
-      return mockQueryResult(template ? [template] : []);
-    }
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+    if (key === "boards") return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "agendaTemplates") return { data: template ?? undefined, isLoading: false, isFetching: false, error: undefined };
     return mockQueryResult([]);
-  }) as any);
+  });
 }
 
 const defaultLoaderData = { boardId: "board-1", templateId: "template-1" };
@@ -134,24 +142,20 @@ const defaultLoaderData = { boardId: "board-1", templateId: "template-1" };
 describe("AgendaTemplateEditorPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.execute.mockResolvedValue({
-      rows: { _array: [] },
-      insertId: undefined,
-      rowsAffected: 1,
-    });
-    mockUseQuery.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      error: undefined,
-    } as any);
+    mockFrom.mockReturnValue(mockChain);
+    for (const m of ["select", "insert", "update", "delete", "eq", "neq", "order", "limit", "single", "throwOnError", "or", "filter", "upsert", "in", "maybeSingle"]) {
+      if (typeof mockChain[m]?.mockReturnValue === "function") {
+        mockChain[m].mockReturnValue(mockChain);
+      }
+    }
+    mockUseQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined });
   });
 
   it("renders loading state when template not yet loaded", () => {
     setupQueryMocks(createMockBoard(), null);
 
     renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(screen.getByText("Loading template...")).toBeInTheDocument();
@@ -164,7 +168,7 @@ describe("AgendaTemplateEditorPage", () => {
     );
 
     renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Breadcrumb links
@@ -181,7 +185,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     const saveButton = screen.getByRole("button", { name: /save/i });
@@ -192,7 +196,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     const nameInput = screen.getByDisplayValue("Regular Meeting");
@@ -207,7 +211,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Verify initial section count (2 sections from mock template)
@@ -228,7 +232,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(screen.getByTestId("section-count")).toHaveTextContent("2");
@@ -244,11 +248,11 @@ describe("AgendaTemplateEditorPage", () => {
     expect(saveButton).toBeEnabled();
   });
 
-  it("saves template via powerSync.execute", async () => {
+  it("saves template via Supabase update", async () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Make the form dirty by changing the name
@@ -261,10 +265,11 @@ describe("AgendaTemplateEditorPage", () => {
     await user.click(saveButton);
 
     await waitFor(() => {
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE agenda_templates SET name = ?"),
-        expect.arrayContaining(["Updated Agenda", expect.any(String), "template-1"]),
+      expect(mockFrom).toHaveBeenCalledWith("agenda_template");
+      expect(mockChain.update).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Updated Agenda" }),
       );
+      expect(mockChain.eq).toHaveBeenCalledWith("id", "template-1");
     });
   });
 
@@ -272,7 +277,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage loaderData={defaultLoaderData} />,
+      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Initially the first section ("Call to Order") is selected (index 0)

@@ -60,7 +60,7 @@ export function FutureItemsQueue({ items }: FutureItemsQueueProps) {
   return (
     <div className="space-y-2">
       {pendingItems.map((item) => {
-        const config = SOURCE_CONFIG[item.source] ?? SOURCE_CONFIG.future_queue;
+        const config = (SOURCE_CONFIG[item.source] ?? SOURCE_CONFIG.future_queue)!;
         return (
           <div
             key={item.id}

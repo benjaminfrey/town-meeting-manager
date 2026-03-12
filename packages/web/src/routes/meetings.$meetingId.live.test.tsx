@@ -9,8 +9,12 @@
  */
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { mockQueryResult } from "@/test/mocks/powersync-mock";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
+
+/** Build a mock useQuery return value with data and no loading/error state. */
+function mockQueryResult<T>(data: T[]) {
+  return { data, isLoading: false, isFetching: false, error: undefined };
+}
 
 // ─── Module-level mocks ──────────────────────────────────────────
 
@@ -374,7 +378,7 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ meeting: noticedMeeting });
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByTestId("meeting-start-flow")).toBeInTheDocument();
     expect(screen.getByTestId("start-flow-meeting-id")).toHaveTextContent("meeting-1");
@@ -384,7 +388,7 @@ describe("LiveMeetingPage", () => {
   it("renders three-panel layout for in-progress meeting", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
@@ -395,7 +399,7 @@ describe("LiveMeetingPage", () => {
   it("displays meeting header with board name and status", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByText("Regular Meeting")).toBeInTheDocument();
     expect(screen.getByText("Planning Board")).toBeInTheDocument();
@@ -405,7 +409,7 @@ describe("LiveMeetingPage", () => {
   it("shows attendance panel with member count", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     const memberCount = screen.getByTestId("member-count");
     expect(memberCount).toHaveTextContent("3");
@@ -414,7 +418,7 @@ describe("LiveMeetingPage", () => {
   it("renders agenda navigation with correct sections", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     // mockAgendaItems has 1 section (section-1) with 1 child item
     const sectionCount = screen.getByTestId("nav-section-count");
@@ -424,7 +428,7 @@ describe("LiveMeetingPage", () => {
   it("renders detail panel for current agenda item", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     const detailTitle = screen.getByTestId("detail-title");
     expect(detailTitle).toHaveTextContent("Site Plan Review");
@@ -438,7 +442,7 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ meeting: adjournedMeeting });
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", {
       replace: true,
@@ -460,7 +464,7 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ execSessions: [activeExecSession] });
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByTestId("exec-banner")).toBeInTheDocument();
     expect(screen.getByTestId("exec-citation")).toHaveTextContent(
@@ -472,7 +476,7 @@ describe("LiveMeetingPage", () => {
   it("renders adjournment controls", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByTestId("adjournment-controls")).toBeInTheDocument();
     expect(screen.getByTestId("adjourn-motion")).toBeInTheDocument();
@@ -489,7 +493,7 @@ describe("LiveMeetingPage", () => {
       agendaItems: [],
     });
 
-    renderWithProviders(<LiveMeetingPage loaderData={{ meetingId: "meeting-1" }} />);
+    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
 
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();

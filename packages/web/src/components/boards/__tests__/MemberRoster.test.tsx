@@ -2,18 +2,32 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-// ─── Mock PowerSync ───────────────────────────────────────────────────
+// ─── Mock TanStack Query ──────────────────────────────────────────────
 
-const mockExecute = vi.fn();
-
-vi.mock("@powersync/react", () => ({
-  useQuery: vi.fn(() => ({ data: [] })),
-  usePowerSync: vi.fn(() => ({ execute: mockExecute })),
+const { mockUseQuery } = vi.hoisted(() => ({
+  mockUseQuery: vi.fn(),
 }));
 
-// Import after mocking so we can control return values
-import { useQuery } from "@powersync/react";
-const mockUseQuery = vi.mocked(useQuery);
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
+  return {
+    ...(actual as object),
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
+  };
+});
+
+// ─── Mock Supabase ────────────────────────────────────────────────────
+
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve),
+    }),
+  },
+}));
 
 // ─── Mock child dialogs ──────────────────────────────────────────────
 
@@ -47,26 +61,14 @@ function makeMockData(
     name?: string;
     email?: string;
     status?: string;
-    is_default_rec_sec?: number;
+    is_default_rec_sec?: boolean;
     seat_title?: string | null;
     term_start?: string | null;
     term_end?: string | null;
     board_id?: string;
   }>,
-  persons?: Array<Record<string, unknown>>,
   userAccounts?: Array<Record<string, unknown>>,
-  invitations?: Array<Record<string, unknown>>,
 ) {
-  // Default persons derived from members if not supplied
-  const defaultPersons =
-    persons ??
-    members.map((m) => ({
-      id: m.person_id ?? m.id ?? "p1",
-      name: m.name ?? "Test Person",
-      email: m.email ?? "test@test.com",
-      town_id: "town-1",
-    }));
-
   const defaultUAs =
     userAccounts ??
     members.map((m) => ({
@@ -77,37 +79,34 @@ function makeMockData(
       gov_title: null,
     }));
 
-  // Configure useQuery to return the right data per query
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mockUseQuery.mockImplementation(((sql: string) => {
-    if (sql.includes("board_members")) {
-      return {
-        data: members.map((m) => ({
-          id: m.id ?? "bm1",
-          person_id: m.person_id ?? m.id ?? "p1",
-          board_id: m.board_id ?? "board-1",
-          seat_title: m.seat_title ?? null,
-          term_start: m.term_start ?? null,
-          term_end: m.term_end ?? null,
-          status: m.status ?? "active",
-          is_default_rec_sec: m.is_default_rec_sec ?? 0,
-        })),
-        isLoading: false,
-        isFetching: false,
-        error: undefined,
-      };
+  // board_member rows with embedded person object
+  const bmRows = members.map((m) => ({
+    id: m.id ?? "bm1",
+    person_id: m.person_id ?? m.id ?? "p1",
+    board_id: m.board_id ?? "board-1",
+    seat_title: m.seat_title ?? null,
+    term_start: m.term_start ?? null,
+    term_end: m.term_end ?? null,
+    status: m.status ?? "active",
+    is_default_rec_sec: m.is_default_rec_sec ?? false,
+    person: {
+      id: m.person_id ?? m.id ?? "p1",
+      name: m.name ?? "Test Person",
+      email: m.email ?? "test@test.com",
+      town_id: "town-1",
+    },
+  }));
+
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+    if (key === "members") {
+      return { data: bmRows, isLoading: false, isFetching: false, error: undefined };
     }
-    if (sql.includes("persons")) {
-      return { data: defaultPersons, isLoading: false, isFetching: false, error: undefined };
-    }
-    if (sql.includes("user_accounts")) {
+    if (key === "userAccounts") {
       return { data: defaultUAs, isLoading: false, isFetching: false, error: undefined };
     }
-    if (sql.includes("invitations")) {
-      return { data: invitations ?? [], isLoading: false, isFetching: false, error: undefined };
-    }
     return { data: [], isLoading: false, isFetching: false, error: undefined };
-  }) as any);
+  });
 }
 
 const defaultProps = {
@@ -123,7 +122,7 @@ const defaultProps = {
 describe("MemberRoster", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined } as any);
+    mockUseQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined });
   });
 
   it("renders member names from mock data", () => {
@@ -155,7 +154,6 @@ describe("MemberRoster", () => {
   it("shows gov_title in parentheses next to name", () => {
     makeMockData(
       [{ id: "bm1", person_id: "p1", name: "Jane Doe" }],
-      [{ id: "p1", name: "Jane Doe", email: "jane@test.com", town_id: "town-1" }],
       [
         {
           id: "ua-p1",

@@ -1,39 +1,51 @@
 import React from "react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { mockQueryResult } from "@/test/mocks/powersync-mock";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
 
-// ─── Mock PowerSync ───────────────────────────────────────────────────
+// ─── Mock TanStack Query ───────────────────────────────────────────────
 
-const { mockDb, mockUseQuery } = vi.hoisted(() => {
+const { mockUseQuery } = vi.hoisted(() => ({
+  mockUseQuery: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
   return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-    mockUseQuery: vi.fn(),
+    ...(actual as object),
+    useQuery: (...args: unknown[]) => mockUseQuery(...args),
   };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: (...args: unknown[]) => mockUseQuery(...args),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+// ─── Mock Supabase ─────────────────────────────────────────────────────
+
+const { mockChain, mockFrom } = vi.hoisted(() => {
+  const chain: Record<string, unknown> = {};
+  chain["then"] = (resolve: any, reject?: any) =>
+    Promise.resolve({ data: [], error: null }).then(resolve, reject);
+  chain["catch"] = (reject: any) =>
+    Promise.resolve({ data: [], error: null }).catch(reject as any);
+  const methods = [
+    "select", "insert", "update", "delete", "upsert",
+    "eq", "neq", "in", "gte", "lte", "order", "limit",
+    "single", "maybeSingle", "throwOnError", "or", "filter",
+  ];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  const mockFrom = vi.fn().mockReturnValue(chain);
+  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
+});
+
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: mockFrom },
+}));
+
+// ─── Mock queryClient singleton ────────────────────────────────────────
+
+vi.mock("@/lib/queryClient", () => ({
+  queryClient: { invalidateQueries: vi.fn(), ensureQueryData: vi.fn().mockResolvedValue(undefined) },
+  resetQueryCache: vi.fn(),
 }));
 
 // ─── Mock route types ─────────────────────────────────────────────────
@@ -147,6 +159,12 @@ vi.mock("@dnd-kit/utilities", () => ({
 
 import AgendaBuilderPage from "./meetings.$meetingId.agenda";
 
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+function mockQueryResult<T>(data: T[]) {
+  return { data, isLoading: false, isFetching: false, error: undefined };
+}
+
 // ─── Mock data factories ──────────────────────────────────────────────
 
 function createMockMeeting(overrides: Record<string, unknown> = {}) {
@@ -237,24 +255,15 @@ function setupQueryMocks(opts: {
     exhibits = [],
   } = opts;
 
-  mockUseQuery.mockImplementation(((sql: string) => {
-    if (sql.includes("FROM meetings")) {
-      return mockQueryResult(meeting ? [meeting] : []);
-    }
-    if (sql.includes("FROM boards")) {
-      return mockQueryResult(board ? [board] : []);
-    }
-    if (sql.includes("FROM towns")) {
-      return mockQueryResult(town ? [town] : []);
-    }
-    if (sql.includes("FROM agenda_items")) {
-      return mockQueryResult(items);
-    }
-    if (sql.includes("FROM exhibits")) {
-      return mockQueryResult(exhibits);
-    }
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+    if (key === "meetings") return { data: meeting ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "boards") return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "towns") return { data: town ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "agendaItems") return mockQueryResult(items);
+    if (key === "exhibits") return mockQueryResult(exhibits);
     return mockQueryResult([]);
-  }) as any);
+  });
 }
 
 const defaultLoaderData = { meetingId: "meeting-1" };
@@ -264,24 +273,20 @@ const defaultLoaderData = { meetingId: "meeting-1" };
 describe("AgendaBuilderPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.execute.mockResolvedValue({
-      rows: { _array: [] },
-      insertId: undefined,
-      rowsAffected: 1,
-    });
-    mockUseQuery.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      error: undefined,
-    } as any);
+    mockFrom.mockReturnValue(mockChain);
+    for (const m of ["select", "insert", "update", "delete", "eq", "neq", "order", "limit", "single", "throwOnError", "or", "filter", "upsert", "in", "maybeSingle"]) {
+      if (typeof mockChain[m]?.mockReturnValue === "function") {
+        mockChain[m].mockReturnValue(mockChain);
+      }
+    }
+    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false, isFetching: false, error: undefined });
   });
 
   it("renders loading state when meeting not loaded", () => {
     setupQueryMocks({ meeting: null });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(screen.getByText("Loading meeting...")).toBeInTheDocument();
@@ -307,7 +312,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Meeting title in header
@@ -347,7 +352,7 @@ describe("AgendaBuilderPage", () => {
     setupQueryMocks({ items: [section, child1, child2] });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // The mock AgendaSection receives children_items prop; its mock renders item-count
@@ -358,7 +363,7 @@ describe("AgendaBuilderPage", () => {
     setupQueryMocks({ items: [] });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // No section elements rendered
@@ -373,7 +378,7 @@ describe("AgendaBuilderPage", () => {
     setupQueryMocks({ items: [] });
 
     const { user } = renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // Click "Add Section" button to open the form
@@ -391,16 +396,13 @@ describe("AgendaBuilderPage", () => {
     await user.click(addBtn);
 
     await waitFor(() => {
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO agenda_items"),
-        expect.arrayContaining([
-          expect.any(String), // id
-          "meeting-1",
-          "town-1",
-          "other", // default section type
-          0, // sort_order (max + 1, starting from -1)
-          "Public Comment",
-        ]),
+      expect(mockFrom).toHaveBeenCalledWith("agenda_item");
+      expect(mockChain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meeting_id: "meeting-1",
+          section_type: "other",
+          title: "Public Comment",
+        }),
       );
     });
   });
@@ -418,7 +420,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // The mocked AgendaSection renders the readOnly prop
@@ -436,7 +438,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
@@ -478,7 +480,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(screen.getByTestId("section-type-sec-proc")).toHaveTextContent(
@@ -498,7 +500,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(
@@ -539,7 +541,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     // 3 total items (1 section + 2 children)
@@ -559,7 +561,7 @@ describe("AgendaBuilderPage", () => {
     });
 
     renderWithProviders(
-      <AgendaBuilderPage loaderData={defaultLoaderData} />,
+      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
     expect(

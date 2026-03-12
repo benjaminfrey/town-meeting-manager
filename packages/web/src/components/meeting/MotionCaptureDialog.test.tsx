@@ -4,35 +4,28 @@ import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { MotionCaptureDialog } from "./MotionCaptureDialog";
 import type { MotionDialogMode } from "./MotionCaptureDialog";
 
-// ─── PowerSync module mock ───────────────────────────────────────────
+// ─── Supabase chainable mock ──────────────────────────────────────────────────
 
-const { mockDb } = vi.hoisted(() => {
-  return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-  };
+const { mockChain, mockFrom } = vi.hoisted(() => {
+  const chain: Record<string, unknown> = {};
+  chain['then'] = (resolve: any, reject?: any) =>
+    Promise.resolve({ data: null, error: null }).then(resolve, reject);
+  chain['catch'] = (reject: any) =>
+    Promise.resolve({ data: null, error: null }).catch(reject as any);
+  const methods = [
+    'select', 'insert', 'update', 'delete', 'upsert',
+    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
+    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+  ];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  const mockFrom = vi.fn().mockReturnValue(chain);
+  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: vi.fn().mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined }),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: mockFrom },
 }));
 
 // ─── Test data ───────────────────────────────────────────────────────
@@ -57,7 +50,13 @@ const defaultProps = {
 describe("MotionCaptureDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.execute.mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 });
+    // Restore chainable mock after clear
+    mockFrom.mockReturnValue(mockChain);
+    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'order', 'limit', 'single', 'throwOnError', 'or', 'filter', 'upsert', 'in', 'maybeSingle']) {
+      if (typeof mockChain[m]?.mockReturnValue === 'function') {
+        mockChain[m].mockReturnValue(mockChain);
+      }
+    }
   });
 
   it("renders dialog title for main motion mode", () => {
@@ -152,7 +151,7 @@ describe("MotionCaptureDialog", () => {
     expect(recordButton).not.toBeDisabled();
   });
 
-  it("submits motion via powerSync.execute and closes dialog", async () => {
+  it("submits motion via Supabase insert and closes dialog", async () => {
     const mode: MotionDialogMode = { type: "main" };
     const onOpenChange = vi.fn();
     const { user } = renderWithProviders(
@@ -172,25 +171,19 @@ describe("MotionCaptureDialog", () => {
     await user.click(recordButton);
 
     await waitFor(() => {
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
+      expect(mockFrom).toHaveBeenCalledWith("motion");
+      expect(mockChain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agenda_item_id: "item-1",
+          meeting_id: "meeting-1",
+          town_id: "town-1",
+          motion_text: "To approve the annual town report",
+          motion_type: "main",
+          moved_by: "bm-1",
+          seconded_by: "bm-2",
+        }),
+      );
     });
-
-    // Verify the INSERT INTO motions call
-    const callArgs = mockDb.execute.mock.calls[0];
-    expect(callArgs[0]).toContain("INSERT INTO motions");
-    expect(callArgs[1]).toEqual(
-      expect.arrayContaining([
-        "item-1",
-        "meeting-1",
-        "town-1",
-        "To approve the annual town report",
-        "main",
-        "bm-1",
-        "bm-2",
-      ]),
-    );
-
-    // Verify dialog closed
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

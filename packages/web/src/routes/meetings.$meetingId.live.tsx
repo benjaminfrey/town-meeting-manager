@@ -18,7 +18,7 @@
  * - Meeting end flow: close transitions, defer unreached items, navigate to review
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErrorBoundary } from "react-error-boundary";
@@ -45,7 +45,7 @@ import { ExecSessionBanner } from "@/components/meeting/ExecSessionBanner";
 import { ExitExecutiveSessionDialog } from "@/components/meeting/ExitExecutiveSessionDialog";
 import { AdjournmentControls } from "@/components/meeting/AdjournmentControls";
 import { MotionCaptureDialog, type MotionDialogMode } from "@/components/meeting/MotionCaptureDialog";
-import { hasPermission } from "@town-meeting/shared";
+import { hasPermission, type PermissionsMatrix } from "@town-meeting/shared";
 import { cn } from "@/lib/utils";
 
 // ─── Route Loader ─────────────────────────────────────────────────
@@ -164,8 +164,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   // ─── Permission check ─────────────────────────────────────────
   const canRunMeeting = currentUser
     ? hasPermission(
-        currentUser.permissions,
-        "M1",
+        currentUser.permissions as unknown as PermissionsMatrix,
+        "start_run_meeting",
         undefined,
         currentUser.role,
       )
@@ -1181,13 +1181,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         boardId={boardId}
         members={members}
         attendance={
-          (attendanceRows as Array<{
-            id: string;
-            board_member_id: string | null;
-            person_id: string;
-            status: string;
-            is_recording_secretary: boolean;
-          }>) ?? []
+          (attendanceRows as ComponentProps<typeof MeetingStartFlow>["attendance"]) ?? []
         }
         quorumRequired={quorum?.required ?? 0}
         quorumPresent={quorum?.present ?? 0}
@@ -1290,19 +1284,14 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
         <ErrorBoundary FallbackComponent={PanelErrorFallback}>
           <AgendaItemDetailPanel
-            item={currentItemDetail}
+            item={currentItemDetail as ComponentProps<typeof AgendaItemDetailPanel>["item"]}
             meetingId={meetingId}
             townId={townId}
             allMembers={members}
             presentMembers={presentMembers}
             memberNameMap={memberNameMap}
             attendanceRecords={
-              (attendanceRows as Array<{
-                id: string;
-                board_member_id: string | null;
-                person_id: string;
-                status: string;
-              }>) ?? []
+              (attendanceRows as ComponentProps<typeof AgendaItemDetailPanel>["attendanceRecords"]) ?? []
             }
             votesByMotion={
               votesByMotion as unknown as Map<
@@ -1342,15 +1331,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             townId={townId}
             members={members}
             attendance={
-              (attendanceRows as Array<{
-                id: string;
-                board_member_id: string | null;
-                person_id: string;
-                status: string;
-                arrived_at: string | null;
-                departed_at: string | null;
-                is_recording_secretary: boolean;
-              }>) ?? []
+              (attendanceRows as ComponentProps<typeof AttendancePanel>["attendance"]) ?? []
             }
             presidingOfficerId={
               (meeting.presiding_officer_id as string) ?? null

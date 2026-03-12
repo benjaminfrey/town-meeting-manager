@@ -185,10 +185,10 @@ export function AttendancePanel({
                     <div className="flex items-center gap-1">
                       <span className="truncate font-medium">{member.name}</span>
                       {isPresiding && (
-                        <Crown className="h-3 w-3 flex-shrink-0 text-amber-500" title="Presiding Officer" />
+                        <Crown className="h-3 w-3 flex-shrink-0 text-amber-500" aria-label="Presiding Officer" />
                       )}
                       {isSecretary && (
-                        <BookOpen className="h-3 w-3 flex-shrink-0 text-blue-500" title="Recording Secretary" />
+                        <BookOpen className="h-3 w-3 flex-shrink-0 text-blue-500" aria-label="Recording Secretary" />
                       )}
                     </div>
                     {member.seatTitle && (

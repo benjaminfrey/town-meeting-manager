@@ -3,33 +3,28 @@ import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
 import { VotePanel } from "./VotePanel";
 
-const { mockDb } = vi.hoisted(() => {
-  return {
-    mockDb: {
-      execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-      getAll: vi.fn().mockResolvedValue([]),
-      getOptional: vi.fn().mockResolvedValue(null),
-      get: vi.fn().mockResolvedValue(undefined),
-      watch: vi.fn(),
-      writeTransaction: vi.fn().mockImplementation(async (callback: any) => {
-        const mockTx = {
-          execute: vi.fn().mockResolvedValue({ rows: { _array: [] }, insertId: undefined, rowsAffected: 0 }),
-          getAll: vi.fn().mockResolvedValue([]),
-          getOptional: vi.fn().mockResolvedValue(null),
-          get: vi.fn().mockResolvedValue(undefined),
-        };
-        await callback(mockTx);
-      }),
-      connected: true,
-      currentStatus: { connected: true, hasSynced: true, dataFlowStatus: { uploading: false, downloading: false } },
-    },
-  };
+// ─── Supabase chainable mock ──────────────────────────────────────────────────
+
+const { mockChain, mockFrom } = vi.hoisted(() => {
+  const chain: Record<string, unknown> = {};
+  chain['then'] = (resolve: any, reject?: any) =>
+    Promise.resolve({ data: null, error: null }).then(resolve, reject);
+  chain['catch'] = (reject: any) =>
+    Promise.resolve({ data: null, error: null }).catch(reject as any);
+  const methods = [
+    'select', 'insert', 'update', 'delete', 'upsert',
+    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
+    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+  ];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  const mockFrom = vi.fn().mockReturnValue(chain);
+  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
 });
 
-vi.mock("@powersync/react", () => ({
-  useQuery: vi.fn().mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined }),
-  usePowerSync: vi.fn().mockReturnValue(mockDb),
-  PowerSyncContext: { Provider: ({ children }: any) => children },
+vi.mock("@/lib/supabase", () => ({
+  supabase: { from: mockFrom },
 }));
 
 // ─── Mock data ─────────────────────────────────────────────────────
@@ -75,7 +70,8 @@ const defaultProps = {
 /** Click a vote button (Yea/Nay/Abstain) for a specific eligible member by index (alphabetical order, absent excluded). */
 function clickVoteButton(label: "Yea" | "Nay" | "Abstain", eligibleIndex: number) {
   const buttons = screen.getAllByRole("button", { name: label });
-  fireEvent.click(buttons[eligibleIndex]);
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  fireEvent.click(buttons[eligibleIndex]!);
 }
 
 /** Vote all eligible members with a specific vote. */
@@ -90,6 +86,13 @@ function voteAllEligible(label: "Yea" | "Nay" | "Abstain", count: number) {
 describe("VotePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore chainable mock after clear
+    mockFrom.mockReturnValue(mockChain);
+    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'order', 'limit', 'single', 'throwOnError', 'or', 'filter', 'upsert', 'in', 'maybeSingle']) {
+      if (typeof mockChain[m]?.mockReturnValue === 'function') {
+        mockChain[m].mockReturnValue(mockChain);
+      }
+    }
   });
 
   it("renders all members with correct attendance status", () => {
@@ -201,7 +204,7 @@ describe("VotePanel", () => {
     expect(screen.getByText("Passed 3-1")).toBeInTheDocument();
   });
 
-  it("records votes via writeTransaction", async () => {
+  it("records votes via Supabase sequential inserts", async () => {
     renderWithProviders(<VotePanel {...defaultProps} />);
 
     // Vote all eligible members
@@ -215,7 +218,10 @@ describe("VotePanel", () => {
     fireEvent.click(recordButton);
 
     await waitFor(() => {
-      expect(mockDb.writeTransaction).toHaveBeenCalledTimes(1);
+      // delete old vote records, then insert new ones
+      expect(mockFrom).toHaveBeenCalledWith("vote_record");
+      expect(mockChain.delete).toHaveBeenCalled();
+      expect(mockChain.insert).toHaveBeenCalled();
     });
   });
 

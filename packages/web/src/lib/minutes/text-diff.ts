@@ -66,9 +66,9 @@ function buildLCSMatrix(oldWords: string[], newWords: string[]): number[][] {
   for (let i = 1; i < rows; i++) {
     for (let j = 1; j < cols; j++) {
       if (oldWords[i - 1] === newWords[j - 1]) {
-        matrix[i][j] = matrix[i - 1][j - 1] + 1;
+        matrix[i]![j] = matrix[i - 1]![j - 1]! + 1;
       } else {
-        matrix[i][j] = Math.max(matrix[i - 1][j], matrix[i][j - 1]);
+        matrix[i]![j] = Math.max(matrix[i - 1]![j]!, matrix[i]![j - 1]!);
       }
     }
   }
@@ -91,14 +91,14 @@ function backtrack(
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
-      segments.push({ type: 'same', text: oldWords[i - 1] });
+      segments.push({ type: 'same', text: oldWords[i - 1]! });
       i--;
       j--;
-    } else if (j > 0 && (i === 0 || lcs[i][j - 1] >= lcs[i - 1][j])) {
-      segments.push({ type: 'added', text: newWords[j - 1] });
+    } else if (j > 0 && (i === 0 || lcs[i]![j - 1]! >= lcs[i - 1]![j]!)) {
+      segments.push({ type: 'added', text: newWords[j - 1]! });
       j--;
     } else {
-      segments.push({ type: 'removed', text: oldWords[i - 1] });
+      segments.push({ type: 'removed', text: oldWords[i - 1]! });
       i--;
     }
   }
@@ -113,11 +113,11 @@ function backtrack(
 function mergeSegments(segments: DiffSegment[]): DiffSegment[] {
   if (segments.length === 0) return [];
 
-  const merged: DiffSegment[] = [{ ...segments[0] }];
+  const merged: DiffSegment[] = [{ ...segments[0]! }];
 
   for (let i = 1; i < segments.length; i++) {
-    const prev = merged[merged.length - 1];
-    const curr = segments[i];
+    const prev = merged[merged.length - 1]!;
+    const curr = segments[i]!;
 
     if (curr.type === prev.type) {
       prev.text += ' ' + curr.text;

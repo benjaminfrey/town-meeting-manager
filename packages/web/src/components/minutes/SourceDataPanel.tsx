@@ -189,6 +189,7 @@ export function SourceDataPanel({
           </h4>
           <div className="space-y-3">
             {sectionMotions.map((m: Record<string, unknown>, idx: number) => {
+              const hasVoteData: boolean = m.yeas != null || m.nays != null;
               const motionVotes = sectionVoteRecords.filter(
                 (vr: Record<string, unknown>) =>
                   (vr.motion_id as string) === (m.id as string),
@@ -202,15 +203,15 @@ export function SourceDataPanel({
                     {m.motion_text as string}
                   </p>
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    {m.moved_by_name && (
+                    {Boolean(m.moved_by_name) && (
                       <span>Moved: {m.moved_by_name as string}</span>
                     )}
-                    {m.seconded_by_name && (
+                    {Boolean(m.seconded_by_name) && (
                       <span>| Seconded: {m.seconded_by_name as string}</span>
                     )}
                   </div>
                   {/* Vote summary */}
-                  {(m.yeas != null || m.nays != null) && (
+                  {hasVoteData ? (
                     <div className="mt-1.5 flex items-center gap-2">
                       <Badge
                         variant="outline"
@@ -231,8 +232,8 @@ export function SourceDataPanel({
                         Abstentions: {(m.abstentions as number) ?? 0}
                       </Badge>
                     </div>
-                  )}
-                  {m.status && (
+                  ) : null}
+                  {Boolean(m.status) && (
                     <Badge
                       variant="secondary"
                       className="mt-1.5 text-xs text-muted-foreground"
@@ -286,7 +287,7 @@ export function SourceDataPanel({
                   className="rounded border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
                 >
                   <span className="font-medium">{gs.name as string}</span>
-                  {gs.topic && (
+                  {Boolean(gs.topic) && (
                     <span className="ml-2">- {gs.topic as string}</span>
                   )}
                 </div>

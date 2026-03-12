@@ -98,20 +98,22 @@ async function autoPopulateMinutesApproval(
   now: string,
 ): Promise<void> {
   // Query minutes documents in review status for this board
-  const { data: minutesDocs = [] } = await supabase
+  const { data: minutesDocsData } = await supabase
     .from("minutes_document")
     .select("id, meeting_id, approved_as_amended, amendments_history")
     .eq("board_id", boardId)
     .eq("status", "review");
+  const minutesDocs = minutesDocsData ?? [];
 
   // Find meetings with adjourned/minutes_draft status needing minutes approval
-  const { data: meetingRowsRaw = [] } = await supabase
+  const { data: meetingRowsData } = await supabase
     .from("meeting")
     .select("id, title, scheduled_date")
     .eq("board_id", boardId)
     .in("status", ["adjourned", "minutes_draft"])
     .neq("id", meetingId)
     .order("scheduled_date");
+  const meetingRowsRaw = meetingRowsData ?? [];
 
   // Get the board name for the suggested motion
   const { data: boardData } = await supabase

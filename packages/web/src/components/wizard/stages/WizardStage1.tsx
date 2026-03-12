@@ -2,9 +2,7 @@
  * WizardStage1 — "Your Town" form.
  *
  * Collects municipality identification and contact information.
- * Uses plain React state + Zod validation (via useWizardForm hook)
- * instead of react-hook-form to avoid dual-React instance issues
- * caused by @powersync/web's Vite dep optimization exclusion.
+ * Uses useWizardForm hook (react-hook-form + zodResolver) for validation.
  *
  * Fields: Town name, State, Municipality type, Population range,
  * Primary contact name, Primary contact role.
