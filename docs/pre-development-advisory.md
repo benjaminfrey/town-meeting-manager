@@ -57,15 +57,17 @@ A common scenario in small towns: the same person serves on both the Select Boar
 
 ---
 
-### 1.3 Supabase Realtime Stress Test for the Live Meeting Manager
+### 1.3 Supabase Realtime Proof-of-Concept for the Live Meeting Manager
 
-The live meeting manager relies on Supabase Realtime for synchronization between the administrator's device and board members' devices during a meeting. This is technically the riskiest piece of the entire stack — not because Supabase Realtime doesn't work, but because the use case has specific requirements that need to be validated:
+The live meeting manager relies on Supabase Realtime for synchronization between the administrator's device and board members' devices during a meeting. Supabase Realtime is the primary real-time mechanism for multi-device meeting sync — this is the most technically critical piece of the stack and needs to be validated before the live meeting manager is built.
 
-- **Reliability under poor connectivity.** Town meeting rooms often have poor WiFi. What happens to the live meeting manager if the administrator's device loses connectivity for 30 seconds? Does it reconnect gracefully? Does it lose data?
-- **Conflict resolution.** If a board member submits a vote at the same moment the administrator advances to the next agenda item, which wins? What does the UI show?
-- **RLS on Realtime channels.** Supabase Realtime + RLS has known quirks — RLS policies on `realtime.messages` work differently than on regular tables. This needs to be tested with the actual multi-tenant data model, not just assumed to work.
+Specific requirements to validate:
 
-**Recommendation:** Build a minimal Realtime proof-of-concept — one "meeting room" with simulated agenda items, one admin device advancing items, two board member devices receiving updates — before the live meeting manager is part of the main development sprint. This is a two-to-three day exercise that could save weeks of rework.
+- **Reliability under brief connectivity loss.** Town meeting rooms sometimes have poor WiFi. What happens if the administrator's device loses connectivity for 30 seconds? Does the Realtime subscription reconnect gracefully? Does the ConnectionStatusBar show the correct state during disconnect and reconnect? Does React Query's cache keep the UI functional during the gap?
+- **Conflict handling.** If a board member submits a vote at the same moment the administrator advances to the next agenda item, what does each device's UI show? Supabase processes changes in commit order — test that the `postgres_changes` events arrive in the correct sequence.
+- **RLS on Realtime channels.** Supabase Realtime + RLS has known quirks — RLS policies on `realtime.messages` work differently than on regular tables. This needs to be tested with the actual multi-tenant data model: verify that a user on Town A cannot receive `postgres_changes` events for Town B's data.
+
+**Recommendation:** Build a minimal Realtime proof-of-concept — one "meeting room" with simulated agenda items, one admin device advancing items, two board member devices receiving updates via `postgres_changes` subscriptions — before the live meeting manager is part of the main development sprint. This is a two-to-three day exercise that validates Supabase Realtime + TanStack Query + RLS working together, and could save weeks of rework.
 
 ---
 
@@ -201,7 +203,7 @@ Given the above, here is the recommended sequence of activities before and durin
 **Before Phase 1 MVP coding begins:**
 6. Complete the onboarding wizard UX specification (states, transitions, validation rules)
 7. Select and test the email provider (Resend or Postmark)
-8. Build the Supabase Realtime proof-of-concept
+8. Build the Supabase Realtime proof-of-concept for live meeting multi-device sync
 9. Decide document generation strategy (Puppeteer vs. pdfmake)
 10. Initialize the Supabase schema (all Phase 1 tables + PostGIS extension for future use)
 
@@ -223,11 +225,12 @@ Worth naming directly: **the live meeting manager failing during a real meeting 
 A town that tries this tool, has it crash or freeze during an actual Select Board meeting, and has to fall back to handwritten notes in front of the public — that town will never use it again, and they will tell every other town clerk they know. The municipal community is small and word travels fast in both directions.
 
 This means:
-- The live meeting manager must work completely offline. Network connectivity cannot be assumed. All meeting data must be stored locally (IndexedDB or similar) and synced when connectivity is restored.
+- The live meeting manager must be resilient to brief network interruptions. When the network drops, the `ConnectionStatusBar` must show a clear warning immediately. Supabase Realtime should reconnect automatically within 10–15 seconds in most cases. Meeting operations during a brief disconnect should show a non-blocking warning; after 30 seconds of failed reconnection, writes should block with an explicit error message rather than silently queuing or silently failing.
+- Full offline capability (persistent offline operation with a local write queue) is not required — a complete network outage during a meeting is an edge case in 2026, and graceful degradation (read-only mode with clear status) is the appropriate response.
 - The live meeting manager must be the most thoroughly tested part of the application before any pilot deployment.
 - Pilot town deployment should begin with the meeting manager in "shadow mode" — the administrator runs the tool alongside their existing process (not instead of it) for 2–3 meetings before trusting it as the record of truth.
 
-This is not a feature — it's a survival requirement.
+This is a resilience requirement, not a full offline requirement.
 
 ---
 
@@ -240,7 +243,7 @@ This is not a feature — it's a survival requirement.
 | 🔴 Do first | Monorepo structure decision & repo init | 1 day |
 | 🔴 Do first | Supabase Cloud vs. self-hosted decision | Half day |
 | 🟡 Before Phase 1 | Onboarding wizard UX spec | 2–3 days |
-| 🟡 Before Phase 1 | Supabase Realtime proof-of-concept | 2–3 days |
+| 🟡 Before Phase 1 | Supabase Realtime proof-of-concept (live meeting multi-device sync) | 2–3 days |
 | 🟡 Before Phase 1 | Sample minutes as AI output ground truth | 1–2 days |
 | 🟡 Before Phase 1 | Email provider selection & test | 1 day |
 | 🟡 Before Phase 1 | Document generation strategy decision | Half day |

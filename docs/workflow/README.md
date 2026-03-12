@@ -27,7 +27,7 @@ This directory contains the complete, step-by-step development workflow for the 
 | [01.01](phase-1-mvp/01.01-monorepo-init.md) | Monorepo Initialization | 12 | None |
 | [01.02](phase-1-mvp/01.02-shared-package.md) | Shared Package Scaffold | 14 | 01.01 |
 | [01.03](phase-1-mvp/01.03-docker-supabase.md) | Docker Compose & Self-Hosted Supabase | 11 | 01.01 |
-| [01.04](phase-1-mvp/01.04-powersync-config.md) | PowerSync Configuration | 9 | 01.03 |
+| [01.04](phase-1-mvp/01.04-powersync-config.md) | React Query & Push Notification Foundation | 9 | 01.03 |
 | [01.05](phase-1-mvp/01.05-schema-core.md) | Database Schema: Core Tables | 15 | 01.03 |
 | [01.06](phase-1-mvp/01.06-schema-extended.md) | Database Schema: Minutes, Templates, Exhibits, Notifications | 13 | 01.05 |
 | [01.07](phase-1-mvp/01.07-rls-policies.md) | Row-Level Security Policies | 12 | 01.06 |
@@ -37,7 +37,7 @@ This directory contains the complete, step-by-step development workflow for the 
 | Session | Title | Tasks | Dependencies |
 |---------|-------|-------|-------------|
 | [02.01](phase-1-mvp/02.01-react-web-setup.md) | React Router v7 + Tailwind v4 Web App Setup | 13 | 01.02 |
-| [02.02](phase-1-mvp/02.02-powersync-web.md) | PowerSync Web Integration | 10 | 02.01, 01.04, 01.08 |
+| [02.02](phase-1-mvp/02.02-powersync-web.md) | React Query Data Layer & Supabase Realtime | 9 | 02.01, 01.04, 01.08 |
 | [02.03](phase-1-mvp/02.03-auth-ui.md) | Authentication UI | 10 | 02.02 |
 
 #### Block 03: Onboarding Wizard
@@ -105,7 +105,7 @@ This directory contains the complete, step-by-step development workflow for the 
 #### Block 13: PWA Configuration
 | Session | Title | Tasks | Dependencies |
 |---------|-------|-------|-------------|
-| [13.01](phase-1-mvp/13.01-pwa-setup.md) | Progressive Web App Setup | 9 | 02.02 |
+| [13.01](phase-1-mvp/13.01-pwa-setup.md) | Progressive Web App Setup & Web Push Notifications | 17 | 02.02 |
 
 #### Block 14: Testing — Full Integration
 | Session | Title | Tasks | Dependencies |
@@ -202,7 +202,7 @@ Phase 1 Critical Path:
 
 01.01 ──> 01.02 ──> 02.01 ──> 02.02 ──> 02.03 ──> 03.01-03 ──> 04.01-03 ──> 06.01-03 ──> 07.01-03 ──> 09.01-02 ──> 10.01-02 ──> 15.01-02
   │                    │                                                         │
-  └──> 01.03 ──> 01.04 ┘                                                        └──> 08.01 (tests)
+  └──> 01.03 ──> 01.04 (React Query + Push foundation) ┘                                                        └──> 08.01 (tests)
          │
          └──> 01.05 ──> 01.06 ──> 01.07 ──> 01.08 ──> 02.02
                                                          │
