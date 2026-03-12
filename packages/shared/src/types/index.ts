@@ -1,3 +1,4 @@
+export type { Database } from "./database.js";
 export * from "./person.js";
 export * from "./town.js";
 export * from "./board.js";
