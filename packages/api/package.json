@@ -24,10 +24,12 @@
     "fastify-plugin": "^5.1.0",
     "handlebars": "^4.7.8",
     "pdf-lib": "^1.17.1",
-    "puppeteer": "^24.39.0"
+    "puppeteer": "^24.39.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0"
   }

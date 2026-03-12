@@ -60,13 +60,6 @@ export default defineConfig({
     plugins: () => [wasm(), topLevelAwait()],
   },
 
-  optimizeDeps: {
-    // @journeyapps/wa-sqlite and @powersync/web contain WASM + web workers
-    // that esbuild cannot process — exclude from Vite's dep pre-bundling.
-    exclude: ["@journeyapps/wa-sqlite", "@powersync/web"],
-    include: ["@powersync/web > js-logger"],
-  },
-
   resolve: {
     // "@" alias is required so Vite's import-analysis matchAlias() check
     // recognizes @/ imports and doesn't skip them in SSR mode. The actual
