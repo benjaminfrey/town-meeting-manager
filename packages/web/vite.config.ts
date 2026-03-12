@@ -67,8 +67,8 @@ export default defineConfig({
     alias: {
       "@": srcDir,
       // Migration shim: redirect removed @powersync/react to local stubs
-      // until M.05–M.09 migrate each consumer. Remove in M.11.
-      "@powersync/react": path.resolve(srcDir, "hooks/usePowerSync.ts"),
+      // until M.06–M.09 migrate each consumer. Remove in M.11.
+      "@powersync/react": path.resolve(srcDir, "lib/powersync/react-shim.ts"),
     },
     // Ensure all packages use the same React instance — prevents duplicate
     // React errors when packages like @powersync/web are excluded from dep
