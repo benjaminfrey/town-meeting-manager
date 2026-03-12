@@ -183,6 +183,7 @@ export default function AgendaTemplateListPage({
       {deleteTemplate && (
         <DeleteTemplateDialog
           template={deleteTemplate}
+          boardId={boardId}
           open={!!deleteTemplate}
           onOpenChange={(open) => {
             if (!open) setDeleteTemplate(null);

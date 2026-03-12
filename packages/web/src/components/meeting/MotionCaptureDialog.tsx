@@ -12,7 +12,9 @@
  */
 
 import { useState, useEffect } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -75,7 +77,8 @@ export function MotionCaptureDialog({
   agendaItemId,
   presentMembers,
 }: MotionCaptureDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
   // ─── Derive initial values from mode ─────────────────────────
   const getInitialValues = () => {
@@ -125,7 +128,6 @@ export function MotionCaptureDialog({
   const [secondedBy, setSecondedBy] = useState("");
   const [parentMotionId, setParentMotionId] = useState<string | null>(null);
   const [showSuggestedBanner, setShowSuggestedBanner] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset form when dialog opens / mode changes
@@ -138,7 +140,6 @@ export function MotionCaptureDialog({
       setShowSuggestedBanner(init.showSuggestedBanner);
       setMovedBy("");
       setSecondedBy("");
-      setSaving(false);
       setError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,39 +151,41 @@ export function MotionCaptureDialog({
   const movedByValid = !!movedBy;
   const secondedByValid = isProceduralType || !!secondedBy;
   const noSamePerson = !secondedBy || secondedBy !== movedBy;
-  const canSubmit = textValid && movedByValid && secondedByValid && noSamePerson && !saving;
+
+  const insertMotionMutation = useMutation({
+    mutationFn: async () => {
+      const { error: insertError } = await supabase.from("motion").insert({
+        id: crypto.randomUUID(),
+        agenda_item_id: agendaItemId,
+        meeting_id: meetingId,
+        town_id: townId,
+        motion_text: text.trim(),
+        motion_type: motionType,
+        moved_by: movedBy,
+        seconded_by: secondedBy || null,
+        status: "seconded",
+        parent_motion_id: parentMotionId,
+        created_at: new Date().toISOString(),
+      });
+      if (insertError) throw insertError;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byItem(agendaItemId) });
+      onOpenChange(false);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : "Failed to record motion");
+    },
+  });
+
+  const canSubmit = textValid && movedByValid && secondedByValid && noSamePerson && !insertMotionMutation.isPending;
 
   // ─── Submit ──────────────────────────────────────────────────
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!canSubmit) return;
-    setSaving(true);
     setError(null);
-
-    try {
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      await powerSync.execute(
-        `INSERT INTO motions (id, agenda_item_id, meeting_id, town_id, motion_text, motion_type, moved_by, seconded_by, status, parent_motion_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'seconded', ?, ?)`,
-        [
-          id,
-          agendaItemId,
-          meetingId,
-          townId,
-          text.trim(),
-          motionType,
-          movedBy,
-          secondedBy || null,
-          parentMotionId,
-          now,
-        ],
-      );
-      onOpenChange(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to record motion");
-    } finally {
-      setSaving(false);
-    }
+    insertMotionMutation.mutate();
   };
 
   // ─── Computed title ──────────────────────────────────────────
@@ -326,8 +329,8 @@ export function MotionCaptureDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {saving ? "Recording..." : "Record Motion"}
+          <Button onClick={() => handleSubmit()} disabled={!canSubmit}>
+            {insertMotionMutation.isPending ? "Recording..." : "Record Motion"}
           </Button>
         </DialogFooter>
       </DialogContent>

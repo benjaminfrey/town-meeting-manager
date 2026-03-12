@@ -6,13 +6,12 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
-import { usePowerSync } from "@powersync/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
-import type { PermissionsMatrix, PermissionAction, UserRole } from "@town-meeting/shared";
+import type { PermissionsMatrix, UserRole } from "@town-meeting/shared";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +23,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -34,8 +32,6 @@ import {
 } from "@/components/ui/select";
 import { RoleConflictDialog } from "./RoleConflictDialog";
 import { StaffAccountFlow } from "./StaffAccountFlow";
-import { BoardMemberConfigForm } from "./BoardMemberConfigForm";
-import type { BoardMemberFormData } from "./BoardMemberConfigForm";
 import type { StaffAccountResult } from "./StaffAccountFlow";
 
 interface MemberTransitionDialogProps {
@@ -67,23 +63,14 @@ export function MemberTransitionDialog({
   open,
   onOpenChange,
 }: MemberTransitionDialogProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [transition, setTransition] = useState<TransitionType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [pendingTransition, setPendingTransition] =
     useState<TransitionType | null>(null);
   const [targetBoardId, setTargetBoardId] = useState<string>("");
-
-  // Board member config for "to_board_member" transition
-  const [bmConfig, setBmConfig] = useState<BoardMemberFormData>({
-    seat_title: "",
-    term_start: new Date().toISOString().split("T")[0]!,
-    term_end: "",
-    gov_title: "",
-    is_default_rec_sec: false,
-  });
 
   // Active boards for "move to different board"
   const { data: boardRows = [] } = useQuery({
@@ -169,98 +156,112 @@ export function MemberTransitionDialog({
 
   // ─── Execute transitions ───────────────────────────────────────────
 
-  const handleArchive = useCallback(async () => {
-    setIsSaving(true);
-    try {
+  const { mutate: archiveMembership, isPending: isArchivingPending } = useMutation({
+    mutationFn: async () => {
       const today = new Date().toISOString().split("T")[0];
-      await powerSync.execute(
-        "UPDATE board_members SET status = 'archived', term_end = ? WHERE id = ?",
-        [today, member.id],
-      );
+      const { error } = await supabase
+        .from('board_member')
+        .update({ status: 'archived', term_end: today })
+        .eq('id', member.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       onOpenChange(false);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [powerSync, member.id, onOpenChange]);
+    },
+  });
 
-  const handleMoveBoard = useCallback(async () => {
-    if (!targetBoardId) return;
-    setIsSaving(true);
-    try {
+  const { mutate: moveMembership, isPending: isMovingPending } = useMutation({
+    mutationFn: async () => {
+      if (!targetBoardId) throw new Error("No target board selected");
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       const today = now.split("T")[0];
-
-      await powerSync.execute(
-        `INSERT INTO board_members (id, person_id, board_id, town_id, seat_title, term_start, term_end, status, is_default_rec_sec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          member.person_id,
-          targetBoardId,
-          townId,
-          null,
-          today,
-          null,
-          "active",
-          0,
-          now,
-        ],
-      );
-
+      const { error } = await supabase.from('board_member').insert({
+        id,
+        person_id: member.person_id,
+        board_id: targetBoardId,
+        town_id: townId,
+        seat_title: null,
+        term_start: today,
+        term_end: null,
+        status: "active",
+        is_default_rec_sec: false,
+        created_at: now,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(targetBoardId) });
       onOpenChange(false);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [powerSync, member.person_id, targetBoardId, townId, onOpenChange]);
+    },
+  });
 
-  const handleToStaff = useCallback(
-    async (staffResult: StaffAccountResult) => {
-      setIsSaving(true);
-      try {
-        const now = new Date().toISOString();
-        const today = now.split("T")[0];
+  const { mutate: convertToStaff, isPending: isConvertingPending } = useMutation({
+    mutationFn: async (staffResult: StaffAccountResult) => {
+      const now = new Date().toISOString();
+      const today = now.split("T")[0];
 
-        // Archive all active board memberships
-        await powerSync.execute(
-          "UPDATE board_members SET status = 'archived', term_end = ? WHERE person_id = ? AND status = 'active'",
-          [today, member.person_id],
-        );
+      // Archive all active board memberships
+      const { error: archiveError } = await supabase
+        .from('board_member')
+        .update({ status: 'archived', term_end: today })
+        .eq('person_id', member.person_id)
+        .eq('status', 'active');
+      if (archiveError) throw archiveError;
 
-        if (member.user_account_id) {
-          // Update existing user_account to staff role
-          await powerSync.execute(
-            "UPDATE user_accounts SET role = 'staff', permissions = ?, gov_title = ?, archived_at = NULL WHERE id = ?",
-            [
-              JSON.stringify(staffResult.permissions),
-              staffResult.gov_title || null,
-              member.user_account_id,
-            ],
-          );
-        } else {
-          // Create new staff user_account
-          const uaId = crypto.randomUUID();
-          await powerSync.execute(
-            `INSERT INTO user_accounts (id, person_id, town_id, role, gov_title, permissions, auth_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              uaId,
-              member.person_id,
-              townId,
-              "staff",
-              staffResult.gov_title || null,
-              JSON.stringify(staffResult.permissions),
-              "",
-              now,
-            ],
-          );
-        }
-
-        onOpenChange(false);
-      } finally {
-        setIsSaving(false);
+      if (member.user_account_id) {
+        // Update existing user_account to staff role
+        const { error } = await supabase
+          .from('user_account')
+          .update({
+            role: 'staff',
+            permissions: staffResult.permissions,
+            gov_title: staffResult.gov_title || null,
+            archived_at: null,
+          })
+          .eq('id', member.user_account_id);
+        if (error) throw error;
+      } else {
+        // Create new staff user_account
+        const uaId = crypto.randomUUID();
+        const { error } = await supabase.from('user_account').insert({
+          id: uaId,
+          person_id: member.person_id,
+          town_id: townId,
+          role: "staff",
+          gov_title: staffResult.gov_title || null,
+          permissions: staffResult.permissions,
+          auth_user_id: "",
+          created_at: now,
+        });
+        if (error) throw error;
       }
     },
-    [powerSync, member.person_id, member.user_account_id, townId, onOpenChange],
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(townId) });
+      onOpenChange(false);
+    },
+  });
+
+  const handleArchive = useCallback(() => {
+    archiveMembership();
+  }, [archiveMembership]);
+
+  const handleMoveBoard = useCallback(() => {
+    moveMembership();
+  }, [moveMembership]);
+
+  const handleToStaff = useCallback(
+    (staffResult: StaffAccountResult) => {
+      convertToStaff(staffResult);
+    },
+    [convertToStaff],
   );
+
+  const isPendingAny = isArchivingPending || isMovingPending || isConvertingPending || isSaving;
 
   return (
     <>
@@ -346,16 +347,16 @@ export function MemberTransitionDialog({
                 <Button
                   variant="outline"
                   onClick={() => setTransition(null)}
-                  disabled={isSaving}
+                  disabled={isPendingAny}
                 >
                   Back
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={() => void handleArchive()}
-                  disabled={isSaving}
+                  onClick={handleArchive}
+                  disabled={isPendingAny}
                 >
-                  {isSaving && (
+                  {isArchivingPending && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
                   Archive Membership
@@ -386,15 +387,15 @@ export function MemberTransitionDialog({
                 <Button
                   variant="outline"
                   onClick={() => setTransition(null)}
-                  disabled={isSaving}
+                  disabled={isPendingAny}
                 >
                   Back
                 </Button>
                 <Button
-                  onClick={() => void handleMoveBoard()}
-                  disabled={!targetBoardId || isSaving}
+                  onClick={handleMoveBoard}
+                  disabled={!targetBoardId || isPendingAny}
                 >
-                  {isSaving && (
+                  {isMovingPending && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
                   Add to Board
@@ -407,7 +408,7 @@ export function MemberTransitionDialog({
           {transition === "to_staff" && (
             <StaffAccountFlow
               townId={townId}
-              onComplete={(result) => void handleToStaff(result)}
+              onComplete={(result) => handleToStaff(result)}
               onBack={() => setTransition(null)}
             />
           )}

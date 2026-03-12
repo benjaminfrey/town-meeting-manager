@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -14,32 +15,35 @@ import { Button } from "@/components/ui/button";
 
 interface DeleteTemplateDialogProps {
   template: { id: string; name: string; is_default: boolean | number | null };
+  boardId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function DeleteTemplateDialog({
   template,
+  boardId,
   open,
   onOpenChange,
 }: DeleteTemplateDialogProps) {
-  const powerSync = usePowerSync();
-  const [isDeleting, setIsDeleting] = useState(false);
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
   const isDefault = !!template.is_default;
 
-  const handleDelete = useCallback(async () => {
-    setIsDeleting(true);
-    try {
-      await powerSync.execute(
-        `DELETE FROM agenda_templates WHERE id = ?`,
-        [template.id],
-      );
+  const { mutate: deleteTemplate, isPending: isDeleting } = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from('agenda_template')
+        .delete()
+        .eq('id', template.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) });
       onOpenChange(false);
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [powerSync, template.id, onOpenChange]);
+    },
+  });
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -63,7 +67,7 @@ export function DeleteTemplateDialog({
           <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
           <Button
             variant="destructive"
-            onClick={() => void handleDelete()}
+            onClick={() => deleteTemplate()}
             disabled={isDeleting}
           >
             {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

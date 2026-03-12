@@ -5,9 +5,8 @@
  * if the board has associated meetings (to preserve historical records).
  */
 
-import { useCallback, useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
@@ -62,9 +61,8 @@ interface EditBoardDialogProps {
 }
 
 export function EditBoardDialog({ townId, town, board, open, onOpenChange }: EditBoardDialogProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
-  const [isSaving, setIsSaving] = useState(false);
+  const queryClient = useQueryClient();
   const boardId = String(board.id);
 
   // Check if board has meetings (disables name editing)
@@ -112,35 +110,38 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
     [values.member_count, values.quorum_type, values.quorum_value]
   );
 
+  const updateMutation = useMutation({
+    mutationFn: async (data: EditBoardData) => {
+      const formality = data.meeting_formality_override || null;
+      const minutesStyle = data.minutes_style_override || null;
+      const { error } = await supabase.from('board').update({
+        name: data.name,
+        elected_or_appointed: data.elected_or_appointed,
+        member_count: data.member_count,
+        election_method: data.election_method,
+        meeting_formality_override: formality,
+        minutes_style_override: minutesStyle,
+        quorum_type: data.quorum_type,
+        quorum_value: data.quorum_value,
+        motion_display_format: data.motion_display_format,
+        updated_at: new Date().toISOString(),
+      }).eq('id', boardId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+      onOpenChange(false);
+    },
+  });
+
+  const isSaving = updateMutation.isPending;
+
   const handleSave = useCallback(async () => {
     const data = validate();
     if (!data) return;
-
-    setIsSaving(true);
-    try {
-      const formality = data.meeting_formality_override || null;
-      const minutesStyle = data.minutes_style_override || null;
-
-      await powerSync.execute(
-        `UPDATE boards SET name = ?, elected_or_appointed = ?, member_count = ?, election_method = ?, meeting_formality_override = ?, minutes_style_override = ?, quorum_type = ?, quorum_value = ?, motion_display_format = ? WHERE id = ?`,
-        [
-          data.name,
-          data.elected_or_appointed,
-          data.member_count,
-          data.election_method,
-          formality,
-          minutesStyle,
-          data.quorum_type,
-          data.quorum_value,
-          data.motion_display_format,
-          boardId,
-        ]
-      );
-      onOpenChange(false);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [validate, powerSync, boardId, onOpenChange]);
+    await updateMutation.mutateAsync(data);
+  }, [validate, updateMutation]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

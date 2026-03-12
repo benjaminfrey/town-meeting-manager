@@ -6,7 +6,9 @@
 
 import { useCallback } from "react";
 import { z } from "zod";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { MeetingFormality, MinutesStyle } from "@town-meeting/shared";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -87,20 +89,34 @@ export function MeetingDefaultsEditor({
   initial,
   onDone,
 }: MeetingDefaultsEditorProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const { values, isValid, setValue, validate } =
     useWizardForm<MeetingDefaultsData>(MeetingDefaultsSchema, initial);
 
-  const handleSave = useCallback(async () => {
+  const mutation = useMutation({
+    mutationFn: async (data: MeetingDefaultsData) => {
+      const { error } = await supabase
+        .from("town")
+        .update({
+          meeting_formality: data.meeting_formality,
+          minutes_style: data.minutes_style,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", townId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      onDone();
+    },
+  });
+
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
-
-    await powerSync.execute(
-      `UPDATE towns SET meeting_formality = ?, minutes_style = ?, updated_at = ? WHERE id = ?`,
-      [data.meeting_formality, data.minutes_style, new Date().toISOString(), townId]
-    );
-    onDone();
-  }, [validate, powerSync, townId, onDone]);
+    mutation.mutate(data);
+  }, [validate, mutation]);
 
   return (
     <div className="space-y-6">
@@ -156,7 +172,7 @@ export function MeetingDefaultsEditor({
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2">
-        <Button size="sm" disabled={!isValid} onClick={() => void handleSave()}>
+        <Button size="sm" disabled={!isValid || mutation.isPending} onClick={handleSave}>
           Save
         </Button>
         <Button variant="outline" size="sm" onClick={onDone}>

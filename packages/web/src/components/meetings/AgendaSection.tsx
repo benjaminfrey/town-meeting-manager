@@ -6,7 +6,9 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   DndContext,
   closestCenter,
@@ -56,7 +58,8 @@ export function AgendaSection({
   exhibits,
   readOnly,
 }: AgendaSectionProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [isExpanded, setIsExpanded] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -95,29 +98,36 @@ export function AgendaSection({
       for (let i = 0; i < reordered.length; i++) {
         const item = reordered[i]!;
         if (Number(item.sort_order) !== i) {
-          await powerSync.execute(
-            "UPDATE agenda_items SET sort_order = ?, updated_at = ? WHERE id = ?",
-            [i, now, String(item.id)],
-          );
+          const { error } = await supabase
+            .from('agenda_item')
+            .update({ sort_order: i, updated_at: now })
+            .eq('id', String(item.id));
+          if (error) throw error;
         }
       }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     },
-    [children_items, powerSync],
+    [children_items, supabase, queryClient, meetingId],
   );
 
   const handleDeleteSection = useCallback(async () => {
     // Delete all children first
     for (const child of children_items) {
-      await powerSync.execute("DELETE FROM agenda_items WHERE id = ?", [
-        String(child.id),
-      ]);
+      const { error } = await supabase
+        .from('agenda_item')
+        .delete()
+        .eq('id', String(child.id));
+      if (error) throw error;
     }
     // Delete the section itself
-    await powerSync.execute("DELETE FROM agenda_items WHERE id = ?", [
-      sectionId,
-    ]);
+    const { error } = await supabase
+      .from('agenda_item')
+      .delete()
+      .eq('id', sectionId);
+    if (error) throw error;
+    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     setConfirmDelete(false);
-  }, [powerSync, sectionId, children_items]);
+  }, [supabase, queryClient, sectionId, children_items, meetingId]);
 
   return (
     <div className="rounded-lg border bg-card shadow-sm">

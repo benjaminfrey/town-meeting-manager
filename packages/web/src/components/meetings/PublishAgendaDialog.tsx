@@ -6,7 +6,9 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -33,7 +35,8 @@ export function PublishAgendaDialog({
   meetingId,
   sections,
 }: PublishAgendaDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
 
   // Validation
@@ -64,15 +67,17 @@ export function PublishAgendaDialog({
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      await powerSync.execute(
-        `UPDATE meetings SET agenda_status = 'published', updated_at = ? WHERE id = ?`,
-        [now, meetingId],
-      );
+      const { error } = await supabase
+        .from('meeting')
+        .update({ agenda_status: 'published', updated_at: now })
+        .eq('id', meetingId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       onOpenChange(false);
     } finally {
       setIsSaving(false);
     }
-  }, [hasItems, powerSync, meetingId, onOpenChange]);
+  }, [hasItems, supabase, queryClient, meetingId, onOpenChange]);
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

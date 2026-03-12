@@ -3,14 +3,14 @@
  *
  * - instantiateAgendaFromTemplate: populates agenda_items from a template
  * - autoPopulateMinutesApproval: finds meetings needing minutes approval
+ *
+ * Uses the Supabase singleton directly (not a hook) so it can be called
+ * from outside React component lifecycle (e.g. during route loaders or
+ * one-shot async handlers).
  */
 
+import { supabase } from "@/lib/supabase";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
-
-interface PowerSyncLike {
-  execute: (sql: string, params: unknown[]) => Promise<unknown>;
-  getAll: (sql: string, params: unknown[]) => Promise<Record<string, unknown>[]>;
-}
 
 /**
  * Create agenda_items from a template's sections for a new meeting.
@@ -20,7 +20,6 @@ interface PowerSyncLike {
  * For minutes_approval sections, auto-populates with previous meetings.
  */
 export async function instantiateAgendaFromTemplate(
-  powerSync: PowerSyncLike,
   meetingId: string,
   boardId: string,
   townId: string,
@@ -33,29 +32,26 @@ export async function instantiateAgendaFromTemplate(
     const sectionId = crypto.randomUUID();
 
     // Insert the section-level agenda item (parent)
-    await powerSync.execute(
-      `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        sectionId,
-        meetingId,
-        townId,
-        section.section_type,
-        i,
-        section.title,
-        section.description ?? null,
-        null,
-        null,
-        null,
-        "pending",
-        now,
-        now,
-      ],
-    );
+    const { error: sectionError } = await supabase.from("agenda_item").insert({
+      id: sectionId,
+      meeting_id: meetingId,
+      town_id: townId,
+      section_type: section.section_type,
+      sort_order: i,
+      title: section.title,
+      description: section.description ?? null,
+      presenter: null,
+      estimated_duration: null,
+      parent_item_id: null,
+      status: "pending",
+      created_at: now,
+      updated_at: now,
+    });
+    if (sectionError) throw sectionError;
 
     // For minutes_approval sections, auto-populate with previous meetings
     if (section.section_type === "minutes_approval") {
       await autoPopulateMinutesApproval(
-        powerSync,
         meetingId,
         boardId,
         townId,
@@ -67,27 +63,25 @@ export async function instantiateAgendaFromTemplate(
 
     // Insert default items as children
     if (section.default_items && section.default_items.length > 0) {
-      for (let j = 0; j < section.default_items.length; j++) {
-        const childId = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            childId,
-            meetingId,
-            townId,
-            section.section_type,
-            j,
-            section.default_items[j],
-            null,
-            null,
-            null,
-            sectionId,
-            "pending",
-            now,
-            now,
-          ],
-        );
-      }
+      const childItems = section.default_items.map((title, j) => ({
+        id: crypto.randomUUID(),
+        meeting_id: meetingId,
+        town_id: townId,
+        section_type: section.section_type,
+        sort_order: j,
+        title,
+        description: null,
+        presenter: null,
+        estimated_duration: null,
+        parent_item_id: sectionId,
+        status: "pending",
+        created_at: now,
+        updated_at: now,
+      }));
+      const { error: childError } = await supabase
+        .from("agenda_item")
+        .insert(childItems);
+      if (childError) throw childError;
     }
   }
 }
@@ -95,13 +89,8 @@ export async function instantiateAgendaFromTemplate(
 /**
  * Find meetings needing minutes approval and insert them as child items
  * under the minutes_approval section.
- *
- * Queries minutes_documents in "review" status for this board and links
- * each approval agenda item to the minutes document via
- * source_minutes_document_id. Also pre-populates the suggested_motion.
  */
 async function autoPopulateMinutesApproval(
-  powerSync: PowerSyncLike,
   meetingId: string,
   boardId: string,
   townId: string,
@@ -109,45 +98,52 @@ async function autoPopulateMinutesApproval(
   now: string,
 ): Promise<void> {
   // Query minutes documents in review status for this board
-  const minutesDocs = await powerSync.getAll(
-    `SELECT id, meeting_id, approved_as_amended, amendments_history FROM minutes_documents WHERE board_id = ? AND status = 'review'`,
-    [boardId],
-  );
+  const { data: minutesDocs = [] } = await supabase
+    .from("minutes_document")
+    .select("id, meeting_id, approved_as_amended, amendments_history")
+    .eq("board_id", boardId)
+    .eq("status", "review");
 
-  // Also find meetings with adjourned/minutes_draft status that might not have minutes yet
-  const meetingRows = await powerSync.getAll(
-    `SELECT id, title, scheduled_date FROM meetings WHERE board_id = ? AND status IN ('adjourned', 'minutes_draft') AND id != ? ORDER BY scheduled_date ASC`,
-    [boardId, meetingId],
-  );
+  // Find meetings with adjourned/minutes_draft status needing minutes approval
+  const { data: meetingRowsRaw = [] } = await supabase
+    .from("meeting")
+    .select("id, title, scheduled_date")
+    .eq("board_id", boardId)
+    .in("status", ["adjourned", "minutes_draft"])
+    .neq("id", meetingId)
+    .order("scheduled_date");
 
   // Get the board name for the suggested motion
-  const boardRows = await powerSync.getAll(
-    `SELECT name FROM boards WHERE id = ?`,
-    [boardId],
-  );
-  const boardName = boardRows[0] ? String(boardRows[0].name ?? "") : "";
+  const { data: boardData } = await supabase
+    .from("board")
+    .select("name")
+    .eq("id", boardId)
+    .single();
+  const boardName = boardData?.name ?? "";
 
   // Build a lookup: meeting_id → minutes_document for reviewed minutes
-  const minutesByMeeting = new Map<string, Record<string, unknown>>();
+  const minutesByMeeting = new Map<string, (typeof minutesDocs)[0]>();
   for (const doc of minutesDocs) {
     minutesByMeeting.set(String(doc.meeting_id), doc);
   }
 
-  // Get meeting info for reviewed minutes that might not be in meetingRows
+  // Merge in any reviewed meetings not already in meetingRows
+  const meetingRows = [...meetingRowsRaw] as Array<{
+    id: string;
+    title: string | null;
+    scheduled_date: string | null;
+  }>;
+  const existingMeetingIds = new Set(meetingRows.map((r) => String(r.id)));
   const reviewedMeetingIds = minutesDocs
     .map((d) => String(d.meeting_id))
-    .filter((mid) => mid !== meetingId);
-  const existingMeetingIds = new Set(meetingRows.map((r) => String(r.id)));
+    .filter((mid) => mid !== meetingId && !existingMeetingIds.has(mid));
 
-  // Fetch any reviewed meeting dates not already in meetingRows
-  for (const mid of reviewedMeetingIds) {
-    if (!existingMeetingIds.has(mid)) {
-      const rows = await powerSync.getAll(
-        `SELECT id, title, scheduled_date FROM meetings WHERE id = ?`,
-        [mid],
-      );
-      if (rows[0]) meetingRows.push(rows[0]);
-    }
+  if (reviewedMeetingIds.length > 0) {
+    const { data: extraMeetings = [] } = await supabase
+      .from("meeting")
+      .select("id, title, scheduled_date")
+      .in("id", reviewedMeetingIds);
+    meetingRows.push(...(extraMeetings as typeof meetingRows));
   }
 
   // Sort by date
@@ -157,6 +153,7 @@ async function autoPopulateMinutesApproval(
     return da.localeCompare(db);
   });
 
+  const childItems: Array<Record<string, unknown>> = [];
   let sortOrder = 0;
   for (const row of meetingRows) {
     const mid = String(row.id);
@@ -174,44 +171,38 @@ async function autoPopulateMinutesApproval(
     const minutesDoc = minutesByMeeting.get(mid);
     const docId = minutesDoc ? String(minutesDoc.id) : null;
 
-    // Determine if amendments were applied
-    const hasAmendments = minutesDoc
-      ? (() => {
-          try {
-            const history = JSON.parse(String(minutesDoc.amendments_history || "[]"));
-            return Array.isArray(history) && history.length > 0;
-          } catch {
-            return false;
-          }
-        })()
-      : false;
+    // Determine if amendments were applied (amendments_history is JSONB — native array)
+    const historyRaw = minutesDoc?.amendments_history;
+    const hasAmendments =
+      Array.isArray(historyRaw) && historyRaw.length > 0;
 
     const suffix = hasAmendments ? "as amended" : "as presented";
     const suggestedMotion = boardName
       ? `to approve the minutes of the ${boardName} meeting of ${formattedDate} ${suffix}`
       : `to approve the minutes of the meeting of ${formattedDate} ${suffix}`;
 
-    const childId = crypto.randomUUID();
-    await powerSync.execute(
-      `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, suggested_motion, source_minutes_document_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        childId,
-        meetingId,
-        townId,
-        "minutes_approval",
-        sortOrder,
-        `Approval of Minutes — ${formattedDate}`,
-        null,
-        null,
-        null,
-        sectionId,
-        "pending",
-        suggestedMotion,
-        docId,
-        now,
-        now,
-      ],
-    );
+    childItems.push({
+      id: crypto.randomUUID(),
+      meeting_id: meetingId,
+      town_id: townId,
+      section_type: "minutes_approval",
+      sort_order: sortOrder,
+      title: `Approval of Minutes — ${formattedDate}`,
+      description: null,
+      presenter: null,
+      estimated_duration: null,
+      parent_item_id: sectionId,
+      status: "pending",
+      suggested_motion: suggestedMotion,
+      source_minutes_document_id: docId,
+      created_at: now,
+      updated_at: now,
+    });
     sortOrder++;
+  }
+
+  if (childItems.length > 0) {
+    const { error } = await supabase.from("agenda_item").insert(childItems);
+    if (error) throw error;
   }
 }

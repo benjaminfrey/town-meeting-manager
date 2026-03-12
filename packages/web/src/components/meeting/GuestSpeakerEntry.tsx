@@ -6,7 +6,9 @@
  */
 
 import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,35 +36,58 @@ export function GuestSpeakerEntry({
   speakers,
   readOnly,
 }: GuestSpeakerEntryProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [topic, setTopic] = useState("");
-  const [saving, setSaving] = useState(false);
 
-  const handleAdd = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      await powerSync.execute(
-        `INSERT INTO guest_speakers (id, meeting_id, agenda_item_id, town_id, name, address, topic, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, meetingId, agendaItemId, townId, name.trim(), address.trim() || null, topic.trim() || null, now],
-      );
+  const addSpeakerMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("guest_speaker").insert({
+        id: crypto.randomUUID(),
+        meeting_id: meetingId,
+        agenda_item_id: agendaItemId,
+        town_id: townId,
+        name: name.trim(),
+        address: address.trim() || null,
+        topic: topic.trim() || null,
+        created_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byItem(agendaItemId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
       setName("");
       setAddress("");
       setTopic("");
       setShowForm(false);
-    } finally {
-      setSaving(false);
-    }
+    },
+  });
+
+  const removeSpeakerMutation = useMutation({
+    mutationFn: async (speakerId: string) => {
+      const { error } = await supabase
+        .from("guest_speaker")
+        .delete()
+        .eq("id", speakerId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byItem(agendaItemId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
+    },
+  });
+
+  const handleAdd = () => {
+    if (!name.trim()) return;
+    addSpeakerMutation.mutate();
   };
 
-  const handleRemove = async (speakerId: string) => {
-    await powerSync.execute("DELETE FROM guest_speakers WHERE id = ?", [speakerId]);
+  const handleRemove = (speakerId: string) => {
+    removeSpeakerMutation.mutate(speakerId);
   };
 
   return (
@@ -95,7 +120,7 @@ export function GuestSpeakerEntry({
               </div>
               {!readOnly && (
                 <button
-                  onClick={() => void handleRemove(s.id)}
+                  onClick={() => handleRemove(s.id)}
                   className="ml-2 text-muted-foreground hover:text-destructive"
                   title="Remove speaker"
                 >
@@ -129,7 +154,7 @@ export function GuestSpeakerEntry({
             />
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => void handleAdd()} disabled={!name.trim() || saving}>
+            <Button size="sm" onClick={() => handleAdd()} disabled={!name.trim() || addSpeakerMutation.isPending}>
               Add
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setShowForm(false)}>

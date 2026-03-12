@@ -11,7 +11,9 @@
  */
 
 import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   Dialog,
   DialogContent,
@@ -51,43 +53,50 @@ export function RecusalDialog({
   activeMotionId,
   onRecusalRecorded,
 }: RecusalDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
   const [scope, setScope] = useState<"item" | "remaining">("item");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = reason.trim().length > 0 && !saving;
-
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setSaving(true);
-    setError(null);
-
-    try {
+  const recusalMutation = useMutation({
+    mutationFn: async ({ trimmedReason }: { trimmedReason: string }) => {
       // If there's an active motion being voted on, create the vote_record immediately
       if (activeMotionId) {
-        const id = crypto.randomUUID();
-        const now = new Date().toISOString();
-        await powerSync.execute(
-          `INSERT INTO vote_records (id, motion_id, meeting_id, town_id, board_member_id, vote, recusal_reason, created_at)
-           VALUES (?, ?, ?, ?, ?, 'recusal', ?, ?)`,
-          [id, activeMotionId, meetingId, townId, boardMemberId, reason.trim(), now],
-        );
+        const { error: insertError } = await supabase.from("vote_record").insert({
+          id: crypto.randomUUID(),
+          motion_id: activeMotionId,
+          meeting_id: meetingId,
+          town_id: townId,
+          board_member_id: boardMemberId,
+          vote: "recusal",
+          recusal_reason: trimmedReason,
+          created_at: new Date().toISOString(),
+        });
+        if (insertError) throw insertError;
       }
-
-      // Notify parent to track this recusal for future motions on this item
-      onRecusalRecorded(boardMemberId, reason.trim(), scope);
+    },
+    onSuccess: (_data, { trimmedReason }) => {
+      if (activeMotionId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(activeMotionId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
+      }
+      onRecusalRecorded(boardMemberId, trimmedReason, scope);
       onOpenChange(false);
-
-      // Reset form
       setReason("");
       setScope("item");
-    } catch (err) {
+    },
+    onError: (err) => {
       setError(err instanceof Error ? err.message : "Failed to record recusal");
-    } finally {
-      setSaving(false);
-    }
+    },
+  });
+
+  const canSubmit = reason.trim().length > 0 && !recusalMutation.isPending;
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    setError(null);
+    recusalMutation.mutate({ trimmedReason: reason.trim() });
   };
 
   return (
@@ -166,8 +175,8 @@ export function RecusalDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {saving ? "Recording..." : "Record Recusal"}
+          <Button onClick={() => handleSubmit()} disabled={!canSubmit}>
+            {recusalMutation.isPending ? "Recording..." : "Record Recusal"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -7,8 +7,7 @@
  * @see docs/advisory-resolutions/1.2 — Data retention rules
  */
 
-import { useCallback, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import {
   Dialog,
@@ -19,6 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 
 interface RetentionPolicyModalProps {
   townId: string;
@@ -31,21 +32,23 @@ export function RetentionPolicyModal({
   open,
   onOpenChange,
 }: RetentionPolicyModalProps) {
-  const powerSync = usePowerSync();
-  const [isSaving, setIsSaving] = useState(false);
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
-  const handleAcknowledge = useCallback(async () => {
-    setIsSaving(true);
-    try {
-      await powerSync.execute(
-        `UPDATE towns SET retention_policy_acknowledged_at = ?, updated_at = ? WHERE id = ?`,
-        [new Date().toISOString(), new Date().toISOString(), townId]
-      );
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("town")
+        .update({ retention_policy_acknowledged_at: now, updated_at: now })
+        .eq("id", townId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
       onOpenChange(false);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [powerSync, townId, onOpenChange]);
+    },
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -114,10 +117,10 @@ export function RetentionPolicyModal({
 
         <DialogFooter>
           <Button
-            onClick={() => void handleAcknowledge()}
-            disabled={isSaving}
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
           >
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             I acknowledge this retention policy
           </Button>
         </DialogFooter>

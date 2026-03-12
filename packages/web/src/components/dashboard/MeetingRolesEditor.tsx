@@ -6,7 +6,9 @@
 
 import { useCallback } from "react";
 import { z } from "zod";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -58,25 +60,34 @@ export function MeetingRolesEditor({
   initial,
   onDone,
 }: MeetingRolesEditorProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const { values, isValid, setValue, validate } =
     useWizardForm<MeetingRolesData>(MeetingRolesSchema, initial);
 
-  const handleSave = useCallback(async () => {
+  const mutation = useMutation({
+    mutationFn: async (data: MeetingRolesData) => {
+      const { error } = await supabase
+        .from("town")
+        .update({
+          presiding_officer_default: data.presiding_officer_default,
+          minutes_recorder_default: data.minutes_recorder_default,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", townId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      onDone();
+    },
+  });
+
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
-
-    await powerSync.execute(
-      `UPDATE towns SET presiding_officer_default = ?, minutes_recorder_default = ?, updated_at = ? WHERE id = ?`,
-      [
-        data.presiding_officer_default,
-        data.minutes_recorder_default,
-        new Date().toISOString(),
-        townId,
-      ]
-    );
-    onDone();
-  }, [validate, powerSync, townId, onDone]);
+    mutation.mutate(data);
+  }, [validate, mutation]);
 
   return (
     <div className="space-y-4">
@@ -124,7 +135,7 @@ export function MeetingRolesEditor({
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2">
-        <Button size="sm" disabled={!isValid} onClick={() => void handleSave()}>
+        <Button size="sm" disabled={!isValid || mutation.isPending} onClick={handleSave}>
           Save
         </Button>
         <Button variant="outline" size="sm" onClick={onDone}>

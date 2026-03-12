@@ -7,8 +7,7 @@
  */
 
 import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
@@ -42,13 +41,12 @@ interface MemberArchiveDialogProps {
 export function MemberArchiveDialog({
   member,
   boardId,
-  townId,
+  townId: _townId,
   open,
   onOpenChange,
 }: MemberArchiveDialogProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
-  const [isArchiving, setIsArchiving] = useState(false);
+  const queryClient = useQueryClient();
   const [archiveAccount, setArchiveAccount] = useState(false);
 
   // Check for other active board memberships
@@ -68,31 +66,35 @@ export function MemberArchiveDialog({
   });
   const hasOtherMemberships = otherActiveMemberships > 0;
 
-  const handleArchive = async () => {
-    setIsArchiving(true);
-    try {
+  const { mutate: archiveMember, isPending: isArchiving } = useMutation({
+    mutationFn: async () => {
       const today = new Date().toISOString().split("T")[0];
       const now = new Date().toISOString();
 
       // Archive board membership
-      await powerSync.execute(
-        "UPDATE board_members SET status = 'archived', term_end = ? WHERE id = ?",
-        [today, member.id],
-      );
+      const { error: bmError } = await supabase
+        .from('board_member')
+        .update({ status: 'archived', term_end: today })
+        .eq('id', member.id);
+      if (bmError) throw bmError;
 
       // Optionally archive user account
       if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
-        await powerSync.execute(
-          "UPDATE user_accounts SET archived_at = ? WHERE id = ?",
-          [now, member.user_account_id],
-        );
+        const { error: uaError } = await supabase
+          .from('user_account')
+          .update({ archived_at: now })
+          .eq('id', member.user_account_id);
+        if (uaError) throw uaError;
       }
-
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(_townId) });
+      }
       onOpenChange(false);
-    } finally {
-      setIsArchiving(false);
-    }
-  };
+    },
+  });
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -150,7 +152,7 @@ export function MemberArchiveDialog({
           </Button>
           <Button
             variant="destructive"
-            onClick={() => void handleArchive()}
+            onClick={() => archiveMember()}
             disabled={isArchiving}
           >
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

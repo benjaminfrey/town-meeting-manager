@@ -3,7 +3,9 @@
  */
 
 import { useCallback, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -28,22 +30,26 @@ export function CancelMeetingDialog({
   open,
   onOpenChange,
 }: CancelMeetingDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleCancel = useCallback(async () => {
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      await powerSync.execute(
-        `UPDATE meetings SET status = 'cancelled', updated_at = ? WHERE id = ?`,
-        [now, meetingId],
-      );
+      const { error } = await supabase
+        .from('meeting')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('id', meetingId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.all });
       onOpenChange(false);
     } finally {
       setIsSaving(false);
     }
-  }, [powerSync, meetingId, onOpenChange]);
+  }, [supabase, queryClient, meetingId, onOpenChange]);
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

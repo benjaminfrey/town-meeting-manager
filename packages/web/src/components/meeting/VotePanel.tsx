@@ -3,11 +3,13 @@
  *
  * Shows each board member with Yea/Nay/Abstain buttons. Absent members
  * are auto-filled and grayed. Recused members show reason and are not
- * clickable. Records all votes atomically via writeTransaction.
+ * clickable. Records all votes via sequential Supabase calls.
  */
 
 import { useState, useMemo, useCallback } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -73,8 +75,8 @@ export function VotePanel({
   memberNameMap,
   onComplete,
 }: VotePanelProps) {
-  const powerSync = usePowerSync();
-  const [saving, setSaving] = useState(false);
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
   // Build attendance status map
   const attendanceMap = useMemo(() => {
@@ -173,11 +175,8 @@ export function VotePanel({
 
   // ─── Record Vote ──────────────────────────────────────────────
 
-  const recordVote = useCallback(async () => {
-    if (!allVoted) return;
-    setSaving(true);
-
-    try {
+  const recordVoteMutation = useMutation({
+    mutationFn: async () => {
       // Build final vote entries
       const finalEntries: VoteEntry[] = memberVoteStatus.map((m) => {
         if (!m.isPresent)
@@ -196,7 +195,7 @@ export function VotePanel({
 
       const result = calculateVoteResult(finalEntries);
       const now = new Date().toISOString();
-      const voteSummary = JSON.stringify({
+      const voteSummary = {
         yeas: result.yeas,
         nays: result.nays,
         abstentions: result.abstentions,
@@ -204,57 +203,52 @@ export function VotePanel({
         absent: result.absent,
         result: result.result,
         passed: result.passed,
-      });
+      };
 
-      // Atomic: insert all vote records + update motion
-      await powerSync.writeTransaction(async (tx) => {
-        // Delete existing vote records for this motion (in case of re-vote)
-        await tx.execute("DELETE FROM vote_records WHERE motion_id = ?", [
-          motionId,
-        ]);
+      // Delete existing vote records for this motion (in case of re-vote)
+      const { error: deleteError } = await supabase
+        .from("vote_record")
+        .delete()
+        .eq("motion_id", motionId);
+      if (deleteError) throw deleteError;
 
-        // Insert vote records
-        for (const entry of finalEntries) {
-          const id = crypto.randomUUID();
-          await tx.execute(
-            `INSERT INTO vote_records (id, motion_id, meeting_id, town_id, board_member_id, vote, recusal_reason, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              id,
-              motionId,
-              meetingId,
-              townId,
-              entry.boardMemberId,
-              entry.vote,
-              entry.recusalReason ?? null,
-              now,
-            ],
-          );
-        }
+      // Insert vote records sequentially
+      for (const entry of finalEntries) {
+        const { error: insertError } = await supabase.from("vote_record").insert({
+          id: crypto.randomUUID(),
+          motion_id: motionId,
+          meeting_id: meetingId,
+          town_id: townId,
+          board_member_id: entry.boardMemberId,
+          vote: entry.vote,
+          recusal_reason: entry.recusalReason ?? null,
+          created_at: now,
+        });
+        if (insertError) throw insertError;
+      }
 
-        // Update motion status + vote summary
-        await tx.execute(
-          "UPDATE motions SET status = ?, vote_summary = ?, updated_at = ? WHERE id = ?",
-          [result.result, voteSummary, now, motionId],
-        );
-      });
-
+      // Update motion status + vote summary
+      const { error: updateError } = await supabase
+        .from("motion")
+        .update({ status: result.result, vote_summary: voteSummary, updated_at: now })
+        .eq("id", motionId);
+      if (updateError) throw updateError;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(motionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
       onComplete();
-    } catch (err) {
+    },
+    onError: (err) => {
       console.error("Failed to record vote:", err);
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    allVoted,
-    memberVoteStatus,
-    votes,
-    motionId,
-    meetingId,
-    townId,
-    powerSync,
-    onComplete,
-  ]);
+    },
+  });
+
+  const recordVote = useCallback(() => {
+    if (!allVoted) return;
+    recordVoteMutation.mutate();
+  }, [allVoted, recordVoteMutation]);
 
   // ─── Render ───────────────────────────────────────────────────
 
@@ -361,10 +355,10 @@ export function VotePanel({
         {!allVoted && <span />}
         <Button
           size="sm"
-          onClick={() => void recordVote()}
-          disabled={!allVoted || saving}
+          onClick={() => recordVote()}
+          disabled={!allVoted || recordVoteMutation.isPending}
         >
-          {saving ? "Recording..." : "Record Vote"}
+          {recordVoteMutation.isPending ? "Recording..." : "Record Vote"}
         </Button>
       </div>
     </div>

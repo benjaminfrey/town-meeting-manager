@@ -9,8 +9,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
@@ -83,8 +82,8 @@ export function AddMemberDialog({
   open,
   onOpenChange,
 }: AddMemberDialogProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -94,7 +93,6 @@ export function AddMemberDialog({
   const [selectedRole, setSelectedRole] = useState<
     "board_member" | "staff" | null
   >(null);
-  const [isSaving, setIsSaving] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
 
   // Board member config
@@ -295,20 +293,23 @@ export function AddMemberDialog({
   };
 
   // ─── Save board member ─────────────────────────────────────────────
-  const handleSaveBoardMember = useCallback(async () => {
-    if (!selectedPerson) return;
-    setIsSaving(true);
-    try {
+  const { mutate: saveBoardMember, isPending: isSavingBoardMember } = useMutation({
+    mutationFn: async () => {
+      if (!selectedPerson) throw new Error("No person selected");
       const now = new Date().toISOString();
       let personId = selectedPerson.id;
 
       // Create new person if needed
       if (!personId) {
         personId = crypto.randomUUID();
-        await powerSync.execute(
-          "INSERT INTO persons (id, town_id, name, email, created_at) VALUES (?, ?, ?, ?, ?)",
-          [personId, townId, selectedPerson.name, selectedPerson.email, now],
-        );
+        const { error } = await supabase.from('person').insert({
+          id: personId,
+          town_id: townId,
+          name: selectedPerson.name,
+          email: selectedPerson.email,
+          created_at: now,
+        });
+        if (error) throw error;
       }
 
       // Create or update user_account
@@ -324,132 +325,149 @@ export function AddMemberDialog({
           emptyPerms.global[action] = false;
         }
 
-        await powerSync.execute(
-          `INSERT INTO user_accounts (id, person_id, town_id, role, gov_title, permissions, auth_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            userAccountId,
-            personId,
-            townId,
-            "board_member",
-            bmConfig.gov_title.trim() || null,
-            JSON.stringify(emptyPerms),
-            "",
-            now,
-          ],
-        );
+        const { error } = await supabase.from('user_account').insert({
+          id: userAccountId,
+          person_id: personId,
+          town_id: townId,
+          role: "board_member",
+          gov_title: bmConfig.gov_title.trim() || null,
+          permissions: emptyPerms,
+          auth_user_id: "",
+          created_at: now,
+        });
+        if (error) throw error;
       } else if (bmConfig.gov_title.trim()) {
         // Update gov_title on existing account
-        await powerSync.execute(
-          "UPDATE user_accounts SET gov_title = ? WHERE id = ?",
-          [bmConfig.gov_title.trim(), userAccountId],
-        );
+        const { error } = await supabase
+          .from('user_account')
+          .update({ gov_title: bmConfig.gov_title.trim() })
+          .eq('id', userAccountId);
+        if (error) throw error;
       }
 
       // Unset previous default rec sec if needed
       if (bmConfig.is_default_rec_sec) {
-        await powerSync.execute(
-          "UPDATE board_members SET is_default_rec_sec = 0 WHERE board_id = ? AND is_default_rec_sec = 1",
-          [boardId],
-        );
+        const { error } = await supabase
+          .from('board_member')
+          .update({ is_default_rec_sec: false })
+          .eq('board_id', boardId)
+          .eq('is_default_rec_sec', true);
+        if (error) throw error;
       }
 
       // Create board_members entry
       const bmId = crypto.randomUUID();
-      await powerSync.execute(
-        `INSERT INTO board_members (id, person_id, board_id, town_id, seat_title, term_start, term_end, status, is_default_rec_sec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          bmId,
-          personId,
-          boardId,
-          townId,
-          bmConfig.seat_title.trim() || null,
-          bmConfig.term_start || null,
-          bmConfig.term_end || null,
-          "active",
-          bmConfig.is_default_rec_sec ? 1 : 0,
-          now,
-        ],
-      );
+      const { error: bmError } = await supabase.from('board_member').insert({
+        id: bmId,
+        person_id: personId,
+        board_id: boardId,
+        town_id: townId,
+        seat_title: bmConfig.seat_title.trim() || null,
+        term_start: bmConfig.term_start || null,
+        term_end: bmConfig.term_end || null,
+        status: "active",
+        is_default_rec_sec: bmConfig.is_default_rec_sec,
+        created_at: now,
+      });
+      if (bmError) throw bmError;
 
       // Create invitation
       const invId = crypto.randomUUID();
       const token = crypto.randomUUID();
-      const expiresAt = new Date(
-        Date.now() + 7 * 24 * 60 * 60 * 1000,
-      ).toISOString();
-      await powerSync.execute(
-        `INSERT INTO invitations (id, person_id, user_account_id, town_id, token, expires_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [invId, personId, userAccountId, townId, token, expiresAt, "pending", now],
-      );
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { error: invError } = await supabase.from('invitation').insert({
+        id: invId,
+        person_id: personId,
+        user_account_id: userAccountId,
+        town_id: townId,
+        token,
+        expires_at: expiresAt,
+        status: "pending",
+        created_at: now,
+      });
+      if (invError) throw invError;
 
-      toast.success(`${selectedPerson.name} added to ${boardName}`);
+      return selectedPerson.name;
+    },
+    onSuccess: (name) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
+      toast.success(`${name} added to ${boardName}`);
       resetAndClose();
-    } finally {
-      setIsSaving(false);
-    }
-  }, [selectedPerson, bmConfig, boardId, boardName, townId, powerSync]);
+    },
+  });
 
   // ─── Save staff ───────────────────────────────────────────────────
-  const handleSaveStaff = useCallback(
-    async (staffResult: StaffAccountResult) => {
-      if (!selectedPerson) return;
-      setIsSaving(true);
-      try {
-        const now = new Date().toISOString();
-        let personId = selectedPerson.id;
+  const { mutate: saveStaff, isPending: isSavingStaff } = useMutation({
+    mutationFn: async (staffResult: StaffAccountResult) => {
+      if (!selectedPerson) throw new Error("No person selected");
+      const now = new Date().toISOString();
+      let personId = selectedPerson.id;
 
-        // Create new person if needed
-        if (!personId) {
-          personId = crypto.randomUUID();
-          await powerSync.execute(
-            "INSERT INTO persons (id, town_id, name, email, created_at) VALUES (?, ?, ?, ?, ?)",
-            [personId, townId, selectedPerson.name, selectedPerson.email, now],
-          );
-        }
-
-        // Create user_account as staff
-        const userAccountId = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO user_accounts (id, person_id, town_id, role, gov_title, permissions, auth_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            userAccountId,
-            personId,
-            townId,
-            "staff",
-            staffResult.gov_title || null,
-            JSON.stringify(staffResult.permissions),
-            "",
-            now,
-          ],
-        );
-
-        // Create invitation
-        const invId = crypto.randomUUID();
-        const token = crypto.randomUUID();
-        const expiresAt = new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000,
-        ).toISOString();
-        await powerSync.execute(
-          `INSERT INTO invitations (id, person_id, user_account_id, town_id, token, expires_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            invId,
-            personId,
-            userAccountId,
-            townId,
-            token,
-            expiresAt,
-            "pending",
-            now,
-          ],
-        );
-
-        toast.success(`${selectedPerson.name} added as staff`);
-        resetAndClose();
-      } finally {
-        setIsSaving(false);
+      // Create new person if needed
+      if (!personId) {
+        personId = crypto.randomUUID();
+        const { error } = await supabase.from('person').insert({
+          id: personId,
+          town_id: townId,
+          name: selectedPerson.name,
+          email: selectedPerson.email,
+          created_at: now,
+        });
+        if (error) throw error;
       }
+
+      // Create user_account as staff
+      const userAccountId = crypto.randomUUID();
+      const { error: uaError } = await supabase.from('user_account').insert({
+        id: userAccountId,
+        person_id: personId,
+        town_id: townId,
+        role: "staff",
+        gov_title: staffResult.gov_title || null,
+        permissions: staffResult.permissions,
+        auth_user_id: "",
+        created_at: now,
+      });
+      if (uaError) throw uaError;
+
+      // Create invitation
+      const invId = crypto.randomUUID();
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { error: invError } = await supabase.from('invitation').insert({
+        id: invId,
+        person_id: personId,
+        user_account_id: userAccountId,
+        town_id: townId,
+        token,
+        expires_at: expiresAt,
+        status: "pending",
+        created_at: now,
+      });
+      if (invError) throw invError;
+
+      return selectedPerson.name;
     },
-    [selectedPerson, townId, powerSync],
+    onSuccess: (name) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
+      toast.success(`${name} added as staff`);
+      resetAndClose();
+    },
+  });
+
+  const isSaving = isSavingBoardMember || isSavingStaff;
+
+  const handleSaveBoardMember = useCallback(() => {
+    saveBoardMember();
+  }, [saveBoardMember]);
+
+  const handleSaveStaff = useCallback(
+    (staffResult: StaffAccountResult) => {
+      saveStaff(staffResult);
+    },
+    [saveStaff],
   );
 
   const resetAndClose = () => {
@@ -708,7 +726,7 @@ export function AddMemberDialog({
                       Back
                     </Button>
                     <Button
-                      onClick={() => void handleSaveBoardMember()}
+                      onClick={handleSaveBoardMember}
                       disabled={isSaving}
                     >
                       {isSaving && (
@@ -724,7 +742,7 @@ export function AddMemberDialog({
               {selectedRole === "staff" && (
                 <StaffAccountFlow
                   townId={townId}
-                  onComplete={(result) => void handleSaveStaff(result)}
+                  onComplete={(result) => handleSaveStaff(result)}
                   onBack={() => {
                     setStep(1);
                     setSelectedPerson(null);

@@ -3,7 +3,9 @@
  */
 
 import { useCallback, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { FileText, Link as LinkIcon, Trash2 } from "lucide-react";
 import { EXHIBIT_TYPE_LABELS } from "./meeting-labels";
 import { Button } from "@/components/ui/button";
@@ -23,7 +25,8 @@ interface ExhibitRowProps {
 }
 
 export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const title = String(exhibit.title ?? `Exhibit ${index + 1}`);
@@ -32,11 +35,17 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
   const isUrl = fileType === "url";
 
   const handleDelete = useCallback(async () => {
-    await powerSync.execute("DELETE FROM exhibits WHERE id = ?", [
-      String(exhibit.id),
-    ]);
+    const { error } = await supabase
+      .from('exhibit')
+      .delete()
+      .eq('id', String(exhibit.id));
+    if (error) throw error;
+    const agendaItemId = String(exhibit.agenda_item_id ?? '');
+    if (agendaItemId) {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
+    }
     setConfirmDelete(false);
-  }, [powerSync, exhibit.id]);
+  }, [supabase, queryClient, exhibit.id, exhibit.agenda_item_id]);
 
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 text-sm">

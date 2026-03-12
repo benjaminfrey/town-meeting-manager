@@ -8,8 +8,7 @@
 
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePowerSync } from "@powersync/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
@@ -70,8 +69,8 @@ export function CreateMeetingDialog({
   open,
   onOpenChange,
 }: CreateMeetingDialogProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
   const [isSaving, setIsSaving] = useState(false);
@@ -163,25 +162,23 @@ export function CreateMeetingDialog({
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
 
-      await powerSync.execute(
-        `INSERT INTO meetings (id, board_id, town_id, title, meeting_type, scheduled_date, scheduled_time, location, status, agenda_status, formality_override, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          boardId,
-          townId,
-          data.title,
-          data.meeting_type,
-          data.scheduled_date,
-          data.scheduled_time,
-          data.location,
-          "draft",
-          "draft",
-          null,
-          currentUser?.id ?? "",
-          now,
-          now,
-        ],
-      );
+      const { error } = await supabase.from('meeting').insert({
+        id,
+        board_id: boardId,
+        town_id: townId,
+        title: data.title,
+        meeting_type: data.meeting_type,
+        scheduled_date: data.scheduled_date,
+        scheduled_time: data.scheduled_time,
+        location: data.location || null,
+        status: 'draft',
+        agenda_status: 'draft',
+        formality_override: null,
+        created_by: currentUser?.id ?? '',
+        created_at: now,
+        updated_at: now,
+      });
+      if (error) throw error;
 
       // Instantiate agenda from selected template
       const selectedTemplate = templates.find(
@@ -192,7 +189,6 @@ export function CreateMeetingDialog({
           selectedTemplate.sections as string,
         ) as AgendaTemplateSection[];
         await instantiateAgendaFromTemplate(
-          powerSync,
           id,
           boardId,
           townId,
@@ -200,6 +196,7 @@ export function CreateMeetingDialog({
         );
       }
 
+      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(boardId) });
       onOpenChange(false);
       void navigate(`/meetings/${id}/agenda`);
     } finally {
@@ -208,7 +205,8 @@ export function CreateMeetingDialog({
   }, [
     validate,
     prereqValidation.valid,
-    powerSync,
+    supabase,
+    queryClient,
     boardId,
     townId,
     currentUser,

@@ -13,7 +13,9 @@
  */
 
 import { useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Check, X, AlertTriangle, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -69,11 +71,11 @@ export function MeetingStartFlow({
   hasQuorum,
   firstItemId,
 }: MeetingStartFlowProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("attendance");
   const [presidingId, setPresidingId] = useState<string>("");
   const [secretaryId, setSecretaryId] = useState<string>("");
-  const [starting, setStarting] = useState(false);
 
   const stepIdx = STEPS.indexOf(step);
 
@@ -120,65 +122,101 @@ export function MeetingStartFlow({
     }
   }
 
-  const toggleAttendance = async (member: MemberInfo) => {
-    const record = getAttendance(member.boardMemberId);
-    const currentStatus = (record?.status as string) ?? "absent";
-    const nextStatus = currentStatus === "present" ? "absent" : "present";
+  const toggleAttendanceMutation = useMutation({
+    mutationFn: async (member: MemberInfo) => {
+      const record = getAttendance(member.boardMemberId);
+      const currentStatus = (record?.status as string) ?? "absent";
+      const nextStatus = currentStatus === "present" ? "absent" : "present";
 
-    if (record) {
-      await powerSync.execute(
-        "UPDATE meeting_attendance SET status = ? WHERE id = ?",
-        [nextStatus, record.id],
-      );
-    } else {
-      const id = crypto.randomUUID();
-      await powerSync.execute(
-        `INSERT INTO meeting_attendance (id, meeting_id, town_id, board_member_id, person_id, status, is_recording_secretary, arrived_at, departed_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL)`,
-        [id, meetingId, townId, member.boardMemberId, member.personId, nextStatus],
-      );
-    }
+      if (record) {
+        const { error } = await supabase
+          .from("meeting_attendance")
+          .update({ status: nextStatus })
+          .eq("id", record.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("meeting_attendance").insert({
+          id: crypto.randomUUID(),
+          meeting_id: meetingId,
+          town_id: townId,
+          board_member_id: member.boardMemberId,
+          person_id: member.personId,
+          status: nextStatus,
+          is_recording_secretary: 0,
+          arrived_at: null,
+          departed_at: null,
+        });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+    },
+  });
+
+  const toggleAttendance = (member: MemberInfo): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      toggleAttendanceMutation.mutate(member, { onSuccess: () => resolve(), onError: reject });
+    });
   };
 
-  const startMeeting = async () => {
-    setStarting(true);
-    try {
+  const startMeetingMutation = useMutation({
+    mutationFn: async () => {
       const now = new Date().toISOString();
 
       // Set recording secretary flag
       const secAttendance = attendance.find((a) => a.person_id === secretaryId);
       if (secAttendance) {
-        await powerSync.execute(
-          "UPDATE meeting_attendance SET is_recording_secretary = 1 WHERE id = ?",
-          [secAttendance.id],
-        );
+        const { error } = await supabase
+          .from("meeting_attendance")
+          .update({ is_recording_secretary: 1 })
+          .eq("id", secAttendance.id);
+        if (error) throw error;
       }
 
       // Update meeting
-      await powerSync.execute(
-        `UPDATE meetings SET status = 'open', started_at = ?, presiding_officer_id = ?, recording_secretary_id = ?,
-         current_agenda_item_id = ?, updated_at = ? WHERE id = ?`,
-        [now, presidingId, secretaryId, firstItemId, now, meetingId],
-      );
+      const { error: meetingError } = await supabase
+        .from("meeting")
+        .update({
+          status: "open",
+          started_at: now,
+          presiding_officer_id: presidingId,
+          recording_secretary_id: secretaryId,
+          current_agenda_item_id: firstItemId,
+          updated_at: now,
+        })
+        .eq("id", meetingId);
+      if (meetingError) throw meetingError;
 
-      // Set first item to active
+      // Set first item to active and create transition
       if (firstItemId) {
-        await powerSync.execute(
-          "UPDATE agenda_items SET status = 'active', updated_at = ? WHERE id = ?",
-          [now, firstItemId],
-        );
+        const { error: itemError } = await supabase
+          .from("agenda_item")
+          .update({ status: "active", updated_at: now })
+          .eq("id", firstItemId);
+        if (itemError) throw itemError;
 
-        // Create first transition
-        const transId = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO agenda_item_transitions (id, meeting_id, agenda_item_id, town_id, started_at, ended_at)
-           VALUES (?, ?, ?, ?, ?, NULL)`,
-          [transId, meetingId, firstItemId, townId, now],
-        );
+        const { error: transError } = await supabase.from("agenda_item_transition").insert({
+          id: crypto.randomUUID(),
+          meeting_id: meetingId,
+          agenda_item_id: firstItemId,
+          town_id: townId,
+          started_at: now,
+          ended_at: null,
+        });
+        if (transError) throw transError;
       }
-    } finally {
-      setStarting(false);
-    }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId) });
+    },
+  });
+
+  const startMeeting = () => {
+    startMeetingMutation.mutate();
   };
 
   return (
@@ -264,11 +302,11 @@ export function MeetingStartFlow({
           ) : (
             <Button
               size="sm"
-              onClick={() => void startMeeting()}
-              disabled={!presidingId || !secretaryId || starting}
+              onClick={() => startMeeting()}
+              disabled={!presidingId || !secretaryId || startMeetingMutation.isPending}
             >
               <Play className="mr-1 h-4 w-4" />
-              {starting ? "Starting..." : "Start Meeting"}
+              {startMeetingMutation.isPending ? "Starting..." : "Start Meeting"}
             </Button>
           )}
         </div>

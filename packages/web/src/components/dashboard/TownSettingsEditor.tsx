@@ -2,13 +2,14 @@
  * TownSettingsEditor — inline editor for town identity settings.
  *
  * Edits town name, state, municipality type, population range,
- * contact name, and contact role. Writes directly to PowerSync
- * local SQLite for instant updates.
+ * contact name, and contact role.
  */
 
 import { useCallback } from "react";
 import { z } from "zod";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   MunicipalityType,
   PopulationRange,
@@ -87,30 +88,38 @@ export function TownSettingsEditor({
   initial,
   onDone,
 }: TownSettingsEditorProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const { values, errors, isValid, setValue, handleBlur, validate } =
     useWizardForm<TownSettingsData>(TownSettingsSchema, initial);
 
-  const handleSave = useCallback(async () => {
+  const mutation = useMutation({
+    mutationFn: async (data: TownSettingsData) => {
+      const { error } = await supabase
+        .from("town")
+        .update({
+          name: data.name,
+          state: data.state,
+          municipality_type: data.municipality_type,
+          population_range: data.population_range,
+          contact_name: data.contact_name,
+          contact_role: data.contact_role,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", townId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      onDone();
+    },
+  });
+
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
-
-    await powerSync.execute(
-      `UPDATE towns SET name = ?, state = ?, municipality_type = ?, population_range = ?,
-       contact_name = ?, contact_role = ?, updated_at = ? WHERE id = ?`,
-      [
-        data.name,
-        data.state,
-        data.municipality_type,
-        data.population_range,
-        data.contact_name,
-        data.contact_role,
-        new Date().toISOString(),
-        townId,
-      ]
-    );
-    onDone();
-  }, [validate, powerSync, townId, onDone]);
+    mutation.mutate(data);
+  }, [validate, mutation]);
 
   return (
     <div className="space-y-4">
@@ -224,7 +233,7 @@ export function TownSettingsEditor({
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2">
-        <Button size="sm" disabled={!isValid} onClick={() => void handleSave()}>
+        <Button size="sm" disabled={!isValid || mutation.isPending} onClick={handleSave}>
           Save
         </Button>
         <Button variant="outline" size="sm" onClick={onDone}>

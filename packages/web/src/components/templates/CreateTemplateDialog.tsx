@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import {
@@ -52,32 +54,41 @@ export function CreateTemplateDialog({
   open,
   onOpenChange,
 }: CreateTemplateDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
 
-  const handleCreate = useCallback(async () => {
-    const trimmed = name.trim();
-    if (trimmed.length < 2) return;
-
-    setIsSaving(true);
-    try {
+  const { mutate: createTemplate, isPending } = useMutation({
+    mutationFn: async (trimmed: string) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
-
-      await powerSync.execute(
-        `INSERT INTO agenda_templates (id, board_id, town_id, name, is_default, sections, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, boardId, townId, trimmed, 0, JSON.stringify(INITIAL_SECTIONS), now, now],
-      );
-
+      const { error } = await supabase.from('agenda_template').insert({
+        id,
+        board_id: boardId,
+        town_id: townId,
+        name: trimmed,
+        is_default: false,
+        sections: INITIAL_SECTIONS,
+        created_at: now,
+        updated_at: now,
+      });
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (id) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) });
       onOpenChange(false);
       setName("");
       void navigate(`/boards/${boardId}/templates/${id}/edit`);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [name, powerSync, boardId, townId, onOpenChange, navigate]);
+    },
+  });
+
+  const handleCreate = useCallback(() => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) return;
+    createTemplate(trimmed);
+  }, [name, createTemplate]);
 
   return (
     <Dialog
@@ -103,7 +114,7 @@ export function CreateTemplateDialog({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Regular Meeting Agenda"
             onKeyDown={(e) => {
-              if (e.key === "Enter") void handleCreate();
+              if (e.key === "Enter") handleCreate();
             }}
           />
         </div>
@@ -112,15 +123,15 @@ export function CreateTemplateDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={isSaving}
+            disabled={isPending}
           >
             Cancel
           </Button>
           <Button
-            onClick={() => void handleCreate()}
-            disabled={name.trim().length < 2 || isSaving}
+            onClick={handleCreate}
+            disabled={name.trim().length < 2 || isPending}
           >
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Create
           </Button>
         </DialogFooter>

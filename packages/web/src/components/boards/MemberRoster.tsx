@@ -7,7 +7,6 @@
  */
 
 import { useMemo, useState } from "react";
-import { usePowerSync } from "@powersync/react";
 import { useQuery } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
@@ -90,7 +89,6 @@ export function MemberRoster({
   townId,
   isArchived,
 }: MemberRosterProps) {
-  const powerSync = usePowerSync();
   const supabase = useSupabase();
   const [showArchived, setShowArchived] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);

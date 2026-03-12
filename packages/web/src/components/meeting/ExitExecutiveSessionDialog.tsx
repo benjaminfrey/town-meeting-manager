@@ -4,7 +4,9 @@
  */
 
 import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
@@ -29,24 +31,29 @@ export function ExitExecutiveSessionDialog({
   onReturnWithActions,
   onReturnNoActions,
 }: ExitExecutiveSessionDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<"confirm" | "post_actions">("confirm");
-  const [saving, setSaving] = useState(false);
 
-  const handleConfirmReturn = async () => {
-    setSaving(true);
-    try {
-      const now = new Date().toISOString();
-      await powerSync.execute(
-        "UPDATE executive_sessions SET exited_at = ? WHERE id = ?",
-        [now, execSessionId],
-      );
+  const exitSessionMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("executive_session")
+        .update({ exited_at: new Date().toISOString() })
+        .eq("id", execSessionId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.executiveSessions.detail(execSessionId) });
       setStep("post_actions");
-    } catch (err) {
+    },
+    onError: (err) => {
       console.error("Failed to exit executive session:", err);
-    } finally {
-      setSaving(false);
-    }
+    },
+  });
+
+  const handleConfirmReturn = () => {
+    exitSessionMutation.mutate();
   };
 
   const handleClose = () => {
@@ -72,8 +79,8 @@ export function ExitExecutiveSessionDialog({
               <Button variant="ghost" onClick={handleClose}>
                 Cancel
               </Button>
-              <Button onClick={() => void handleConfirmReturn()} disabled={saving}>
-                {saving ? "Recording..." : "Confirm Return"}
+              <Button onClick={() => handleConfirmReturn()} disabled={exitSessionMutation.isPending}>
+                {exitSessionMutation.isPending ? "Recording..." : "Confirm Return"}
               </Button>
             </DialogFooter>
           </>

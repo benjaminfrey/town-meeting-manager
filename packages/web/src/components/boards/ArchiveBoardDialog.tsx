@@ -7,7 +7,9 @@
 
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -29,41 +31,50 @@ interface ArchiveBoardDialogProps {
 }
 
 export function ArchiveBoardDialog({ board, open, onOpenChange }: ArchiveBoardDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
 
   const boardId = String(board.id);
   const boardName = String(board.name ?? "");
+  const townId = String(board.town_id ?? "");
   const isConfirmed = confirmation === boardName;
 
-  const handleArchive = useCallback(async () => {
-    if (!isConfirmed) return;
-
-    setIsSaving(true);
-    try {
+  const archiveMutation = useMutation({
+    mutationFn: async () => {
       const now = new Date().toISOString();
 
       // Archive the board
-      await powerSync.execute(
-        `UPDATE boards SET archived_at = ? WHERE id = ?`,
-        [now, boardId]
-      );
+      const { error: boardError } = await supabase.from('board').update({
+        archived_at: now,
+        updated_at: now,
+      }).eq('id', boardId);
+      if (boardError) throw boardError;
 
       // Archive all active board members
-      await powerSync.execute(
-        `UPDATE board_members SET status = 'archived' WHERE board_id = ? AND status = 'active'`,
-        [boardId]
-      );
-
+      const { error: membersError } = await supabase.from('board_member')
+        .update({ status: 'archived' })
+        .eq('board_id', boardId)
+        .eq('status', 'active');
+      if (membersError) throw membersError;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       onOpenChange(false);
       setConfirmation("");
       void navigate("/boards");
-    } finally {
-      setIsSaving(false);
-    }
-  }, [isConfirmed, powerSync, boardId, onOpenChange, navigate]);
+    },
+  });
+
+  const isSaving = archiveMutation.isPending;
+
+  const handleArchive = useCallback(async () => {
+    if (!isConfirmed) return;
+    await archiveMutation.mutateAsync();
+  }, [isConfirmed, archiveMutation]);
 
   return (
     <AlertDialog open={open} onOpenChange={(val) => {

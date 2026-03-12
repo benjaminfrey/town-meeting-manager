@@ -10,7 +10,9 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   Gavel,
   Vote,
@@ -149,7 +151,8 @@ export function MotionPanel({
   readOnly,
   onAmend,
 }: MotionPanelProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [expandedMotionId, setExpandedMotionId] = useState<string | null>(null);
   const [votingMotionId, setVotingMotionId] = useState<string | null>(null);
   const [withdrawConfirmId, setWithdrawConfirmId] = useState<string | null>(null);
@@ -174,28 +177,46 @@ export function MotionPanel({
 
   // ─── Handlers ─────────────────────────────────────────────────
 
-  const callVote = useCallback(
-    async (motionId: string) => {
-      const now = new Date().toISOString();
-      await powerSync.execute(
-        "UPDATE motions SET status = 'in_vote', updated_at = ? WHERE id = ?",
-        [now, motionId],
-      );
-      setVotingMotionId(motionId);
+  const callVoteMutation = useMutation({
+    mutationFn: async (motionId: string) => {
+      const { error } = await supabase
+        .from("motion")
+        .update({ status: "in_vote", updated_at: new Date().toISOString() })
+        .eq("id", motionId);
+      if (error) throw error;
     },
-    [powerSync],
+    onSuccess: (_data, motionId) => {
+      setVotingMotionId(motionId);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+    },
+  });
+
+  const withdrawMotionMutation = useMutation({
+    mutationFn: async (motionId: string) => {
+      const { error } = await supabase
+        .from("motion")
+        .update({ status: "withdrawn", updated_at: new Date().toISOString() })
+        .eq("id", motionId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setWithdrawConfirmId(null);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+    },
+  });
+
+  const callVote = useCallback(
+    (motionId: string) => {
+      callVoteMutation.mutate(motionId);
+    },
+    [callVoteMutation],
   );
 
   const withdrawMotion = useCallback(
-    async (motionId: string) => {
-      const now = new Date().toISOString();
-      await powerSync.execute(
-        "UPDATE motions SET status = 'withdrawn', updated_at = ? WHERE id = ?",
-        [now, motionId],
-      );
-      setWithdrawConfirmId(null);
+    (motionId: string) => {
+      withdrawMotionMutation.mutate(motionId);
     },
-    [powerSync],
+    [withdrawMotionMutation],
   );
 
   const handleVoteComplete = useCallback(() => {
@@ -234,7 +255,7 @@ export function MotionPanel({
               isVoting={votingMotionId === motion.id}
               quorumBlocked={quorumBlocked}
               readOnly={readOnly}
-              onCallVote={() => void callVote(motion.id)}
+              onCallVote={() => callVote(motion.id)}
               onWithdraw={() => setWithdrawConfirmId(motion.id)}
               onAmend={onAmend ? () => onAmend(motion.id, motion.motionText) : undefined}
             />
@@ -273,7 +294,7 @@ export function MotionPanel({
                   isVoting={votingMotionId === amendment.id}
                   quorumBlocked={quorumBlocked}
                   readOnly={readOnly}
-                  onCallVote={() => void callVote(amendment.id)}
+                  onCallVote={() => callVote(amendment.id)}
                   onWithdraw={() => setWithdrawConfirmId(amendment.id)}
                 />
 
@@ -315,7 +336,7 @@ export function MotionPanel({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => withdrawConfirmId && void withdrawMotion(withdrawConfirmId)}
+              onClick={() => withdrawConfirmId && withdrawMotion(withdrawConfirmId)}
             >
               Confirm Withdrawal
             </AlertDialogAction>

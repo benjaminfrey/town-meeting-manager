@@ -6,8 +6,8 @@
  * cannot simultaneously serve as staff and a board member.
  */
 
-import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
 import { Loader2, AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
@@ -38,27 +38,26 @@ export function RoleConflictDialog({
   onOpenChange,
   onResolved,
 }: RoleConflictDialogProps) {
-  const powerSync = usePowerSync();
-  const [isArchiving, setIsArchiving] = useState(false);
+  const supabase = useSupabase();
 
   const existingLabel = conflict.existingRole
     ? ROLE_LABELS[conflict.existingRole]?.toLowerCase() ?? conflict.existingRole
     : "current";
 
-  const handleArchiveAndContinue = async () => {
-    setIsArchiving(true);
-    try {
+  const { mutate: archiveAccount, isPending: isArchiving } = useMutation({
+    mutationFn: async () => {
       const now = new Date().toISOString();
-      await powerSync.execute(
-        "UPDATE user_accounts SET archived_at = ? WHERE id = ?",
-        [now, userAccountId],
-      );
+      const { error } = await supabase
+        .from('user_account')
+        .update({ archived_at: now })
+        .eq('id', userAccountId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
       onResolved();
       onOpenChange(false);
-    } finally {
-      setIsArchiving(false);
-    }
-  };
+    },
+  });
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -94,7 +93,7 @@ export function RoleConflictDialog({
           </Button>
           <Button
             variant="destructive"
-            onClick={() => void handleArchiveAndContinue()}
+            onClick={() => archiveAccount()}
             disabled={isArchiving}
           >
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

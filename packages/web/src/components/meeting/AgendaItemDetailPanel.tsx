@@ -11,7 +11,9 @@
  */
 
 import { useCallback, useEffect, useState, useMemo } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import {
   ChevronLeft,
   ChevronRight,
@@ -164,7 +166,8 @@ export function AgendaItemDetailPanel({
   isInExecSession,
   onEnterExecSession,
 }: AgendaItemDetailPanelProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [notesValue, setNotesValue] = useState(item?.operatorNotes ?? "");
 
   // ─── Motion dialog state ──────────────────────────────────────
@@ -215,23 +218,43 @@ export function AgendaItemDetailPanel({
 
   // ─── Handlers ─────────────────────────────────────────────────
 
-  const saveNotes = useCallback(async () => {
-    if (!item || readOnly) return;
-    const now = new Date().toISOString();
-    await powerSync.execute(
-      "UPDATE agenda_items SET operator_notes = ?, updated_at = ? WHERE id = ?",
-      [notesValue.trim() || null, now, item.id],
-    );
-  }, [item, notesValue, powerSync, readOnly]);
+  const saveNotesMutation = useMutation({
+    mutationFn: async ({ itemId, notes }: { itemId: string; notes: string | null }) => {
+      const { error } = await supabase
+        .from("agenda_item")
+        .update({ operator_notes: notes, updated_at: new Date().toISOString() })
+        .eq("id", itemId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, { itemId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    },
+  });
 
-  const markComplete = async () => {
+  const saveNotes = useCallback(() => {
     if (!item || readOnly) return;
-    const now = new Date().toISOString();
-    await powerSync.execute(
-      "UPDATE agenda_items SET status = 'completed', updated_at = ? WHERE id = ?",
-      [now, item.id],
-    );
-    onNavigateNext();
+    saveNotesMutation.mutate({ itemId: item.id, notes: notesValue.trim() || null });
+  }, [item, notesValue, saveNotesMutation, readOnly]);
+
+  const markCompleteMutation = useMutation({
+    mutationFn: async (itemId: string) => {
+      const { error } = await supabase
+        .from("agenda_item")
+        .update({ status: "completed", updated_at: new Date().toISOString() })
+        .eq("id", itemId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, itemId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      onNavigateNext();
+    },
+  });
+
+  const markComplete = () => {
+    if (!item || readOnly) return;
+    markCompleteMutation.mutate(item.id);
   };
 
   const openMotionDialog = (mode: MotionDialogMode) => {
@@ -471,7 +494,7 @@ export function AgendaItemDetailPanel({
               rows={3}
               value={notesValue}
               onChange={(e) => setNotesValue(e.target.value)}
-              onBlur={() => void saveNotes()}
+              onBlur={() => saveNotes()}
             />
           </div>
         )}
@@ -541,7 +564,7 @@ export function AgendaItemDetailPanel({
             >
               <Pause className="mr-1 h-4 w-4" /> Table
             </Button>
-            <Button size="sm" onClick={() => void markComplete()}>
+            <Button size="sm" onClick={() => markComplete()}>
               <Check className="mr-1 h-4 w-4" /> Complete
             </Button>
           </div>

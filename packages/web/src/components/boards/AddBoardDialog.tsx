@@ -7,7 +7,9 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -71,9 +73,9 @@ interface AddBoardDialogProps {
 }
 
 export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [isSaving, setIsSaving] = useState(false);
   const [seatTitles, setSeatTitles] = useState<string[]>([]);
 
   const { values, errors, isValid, setValue, handleBlur, validate } =
@@ -102,48 +104,49 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
     return titles.slice(0, count);
   }, [values.election_method, values.member_count, seatTitles]);
 
-  const handleSave = useCallback(async () => {
-    const data = validate();
-    if (!data) return;
-
-    setIsSaving(true);
-    try {
+  const insertMutation = useMutation({
+    mutationFn: async (data: AddBoardData) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
-
-      // Empty string → null for override fields
       const formality = data.meeting_formality_override || null;
       const minutesStyle = data.minutes_style_override || null;
 
-      await powerSync.execute(
-        `INSERT INTO boards (id, town_id, name, board_type, elected_or_appointed, member_count, election_method, officer_election_method, district_based, staggered_terms, is_governing_board, meeting_formality_override, minutes_style_override, quorum_type, quorum_value, motion_display_format, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          townId,
-          data.name,
-          "other",
-          data.elected_or_appointed,
-          data.member_count,
-          data.election_method,
-          "vote_of_board",
-          0,
-          0,
-          0,
-          formality,
-          minutesStyle,
-          data.quorum_type,
-          data.quorum_value,
-          data.motion_display_format,
-          now,
-        ]
-      );
-
+      const { error } = await supabase.from('board').insert({
+        id,
+        town_id: townId,
+        name: data.name,
+        board_type: 'other',
+        elected_or_appointed: data.elected_or_appointed,
+        member_count: data.member_count,
+        election_method: data.election_method,
+        officer_election_method: 'vote_of_board',
+        district_based: false,
+        staggered_terms: false,
+        is_governing_board: false,
+        meeting_formality_override: formality,
+        minutes_style_override: minutesStyle,
+        quorum_type: data.quorum_type,
+        quorum_value: data.quorum_value,
+        motion_display_format: data.motion_display_format,
+        created_at: now,
+      });
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (id) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
       onOpenChange(false);
       void navigate(`/boards/${id}`);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [validate, powerSync, townId, onOpenChange, navigate]);
+    },
+  });
+
+  const isSaving = insertMutation.isPending;
+
+  const handleSave = useCallback(async () => {
+    const data = validate();
+    if (!data) return;
+    await insertMutation.mutateAsync(data);
+  }, [validate, insertMutation]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

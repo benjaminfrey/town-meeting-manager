@@ -6,7 +6,9 @@
  */
 
 import { useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Info } from "lucide-react";
 import {
   Dialog,
@@ -25,33 +27,43 @@ interface EditGovTitleDialogProps {
     name: string;
     user_account_id: string | null;
     gov_title: string | null;
+    person_id?: string;
   };
+  boardId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function EditGovTitleDialog({
   member,
+  boardId,
   open,
   onOpenChange,
 }: EditGovTitleDialogProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState(member.gov_title ?? "");
-  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = async () => {
-    if (!member.user_account_id) return;
-    setIsSaving(true);
-    try {
-      await powerSync.execute(
-        "UPDATE user_accounts SET gov_title = ? WHERE id = ?",
-        [title.trim() || null, member.user_account_id],
-      );
+  const { mutate: saveTitle, isPending: isSaving } = useMutation({
+    mutationFn: async () => {
+      if (!member.user_account_id) return;
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('user_account')
+        .update({ gov_title: title.trim() || null, updated_at: now })
+        .eq('id', member.user_account_id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      if (boardId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      }
+      if (member.person_id) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byPerson(member.person_id) });
+      }
       onOpenChange(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+    },
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -88,7 +100,7 @@ export function EditGovTitleDialog({
           >
             Cancel
           </Button>
-          <Button onClick={() => void handleSave()} disabled={isSaving}>
+          <Button onClick={() => saveTitle()} disabled={isSaving || !member.user_account_id}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Save
           </Button>

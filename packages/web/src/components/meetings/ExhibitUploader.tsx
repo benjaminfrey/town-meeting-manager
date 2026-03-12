@@ -6,7 +6,9 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Plus, Link as LinkIcon } from "lucide-react";
 import { ExhibitRow } from "./ExhibitRow";
 import { useExhibitUpload } from "@/hooks/useExhibitUpload";
@@ -46,7 +48,8 @@ export function ExhibitUploader({
   exhibits,
   readOnly,
 }: ExhibitUploaderProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const { upload, isUploading } = useExhibitUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -87,29 +90,28 @@ export function ExhibitUploader({
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
 
-        await powerSync.execute(
-          `INSERT INTO exhibits (id, agenda_item_id, town_id, title, file_storage_path, file_type, file_size, file_name, exhibit_type, visibility, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            agendaItemId,
-            townId,
-            title || file.name,
-            storagePath,
-            file.type,
-            file.size,
-            file.name,
-            exhibitType,
-            "public",
-            exhibits.length,
-            now,
-          ],
-        );
+        const { error } = await supabase.from('exhibit').insert({
+          id,
+          agenda_item_id: agendaItemId,
+          town_id: townId,
+          title: title || file.name,
+          file_storage_path: storagePath,
+          file_type: file.type,
+          file_size: file.size,
+          file_name: file.name,
+          exhibit_type: exhibitType,
+          visibility: 'public',
+          sort_order: exhibits.length,
+          created_at: now,
+        });
+        if (error) throw error;
+        await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
         resetForm();
       } catch {
         // Error handled by useExhibitUpload
       }
     },
-    [upload, townId, meetingId, agendaItemId, title, exhibitType, exhibits.length, powerSync, resetForm],
+    [upload, supabase, queryClient, townId, meetingId, agendaItemId, title, exhibitType, exhibits.length, resetForm],
   );
 
   const handleAddUrl = useCallback(async () => {
@@ -118,25 +120,24 @@ export function ExhibitUploader({
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
-    await powerSync.execute(
-      `INSERT INTO exhibits (id, agenda_item_id, town_id, title, file_storage_path, file_type, file_size, file_name, exhibit_type, visibility, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        agendaItemId,
-        townId,
-        title.trim(),
-        url.trim(),
-        "url",
-        0,
-        null,
-        exhibitType,
-        "public",
-        exhibits.length,
-        now,
-      ],
-    );
+    const { error } = await supabase.from('exhibit').insert({
+      id,
+      agenda_item_id: agendaItemId,
+      town_id: townId,
+      title: title.trim(),
+      file_storage_path: url.trim(),
+      file_type: 'url',
+      file_size: 0,
+      file_name: null,
+      exhibit_type: exhibitType,
+      visibility: 'public',
+      sort_order: exhibits.length,
+      created_at: now,
+    });
+    if (error) throw error;
+    await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
     resetForm();
-  }, [title, url, exhibitType, agendaItemId, townId, exhibits.length, powerSync, resetForm]);
+  }, [title, url, exhibitType, agendaItemId, townId, exhibits.length, supabase, queryClient, resetForm]);
 
   if (readOnly && exhibits.length === 0) return null;
 

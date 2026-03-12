@@ -7,7 +7,9 @@
  */
 
 import { useCallback, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useWizardForm } from "@/hooks/useWizardForm";
@@ -63,7 +65,8 @@ export function InlineItemForm({
   onSaved,
   onCancel,
 }: InlineItemFormProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isEditing = !!existingItem;
@@ -95,46 +98,45 @@ export function InlineItemForm({
       const now = new Date().toISOString();
 
       if (isEditing) {
-        await powerSync.execute(
-          `UPDATE agenda_items SET title = ?, description = ?, presenter = ?, estimated_duration = ?, staff_resource = ?, background = ?, recommendation = ?, suggested_motion = ?, updated_at = ? WHERE id = ?`,
-          [
-            data.title,
-            data.description,
-            data.presenter,
-            data.estimated_duration,
-            data.staff_resource,
-            data.background,
-            data.recommendation,
-            data.suggested_motion,
-            now,
-            String(existingItem.id),
-          ],
-        );
+        const { error } = await supabase
+          .from('agenda_item')
+          .update({
+            title: data.title,
+            description: data.description,
+            presenter: data.presenter,
+            estimated_duration: data.estimated_duration,
+            staff_resource: data.staff_resource,
+            background: data.background,
+            recommendation: data.recommendation,
+            suggested_motion: data.suggested_motion,
+            updated_at: now,
+          })
+          .eq('id', String(existingItem.id));
+        if (error) throw error;
       } else {
         const id = crypto.randomUUID();
-        await powerSync.execute(
-          `INSERT INTO agenda_items (id, meeting_id, town_id, section_type, sort_order, title, description, presenter, estimated_duration, parent_item_id, status, staff_resource, background, recommendation, suggested_motion, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            meetingId,
-            townId,
-            sectionType,
-            sortOrder,
-            data.title,
-            data.description,
-            data.presenter,
-            data.estimated_duration,
-            parentItemId,
-            "pending",
-            data.staff_resource,
-            data.background,
-            data.recommendation,
-            data.suggested_motion,
-            now,
-            now,
-          ],
-        );
+        const { error } = await supabase.from('agenda_item').insert({
+          id,
+          meeting_id: meetingId,
+          town_id: townId,
+          section_type: sectionType,
+          sort_order: sortOrder,
+          title: data.title,
+          description: data.description,
+          presenter: data.presenter,
+          estimated_duration: data.estimated_duration,
+          parent_item_id: parentItemId,
+          status: 'pending',
+          staff_resource: data.staff_resource,
+          background: data.background,
+          recommendation: data.recommendation,
+          suggested_motion: data.suggested_motion,
+          created_at: now,
+          updated_at: now,
+        });
+        if (error) throw error;
       }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
       onSaved();
     } finally {
       setIsSaving(false);
@@ -143,7 +145,8 @@ export function InlineItemForm({
     validate,
     isEditing,
     existingItem,
-    powerSync,
+    supabase,
+    queryClient,
     meetingId,
     townId,
     sectionType,
@@ -154,18 +157,30 @@ export function InlineItemForm({
 
   const handleDelete = useCallback(async () => {
     if (!existingItem) return;
-    await powerSync.execute("DELETE FROM exhibits WHERE agenda_item_id = ?", [
-      String(existingItem.id),
-    ]);
-    await powerSync.execute("DELETE FROM agenda_items WHERE parent_item_id = ?", [
-      String(existingItem.id),
-    ]);
-    await powerSync.execute("DELETE FROM agenda_items WHERE id = ?", [
-      String(existingItem.id),
-    ]);
+    const itemId = String(existingItem.id);
+    // Delete exhibits first
+    const { error: exhibitError } = await supabase
+      .from('exhibit')
+      .delete()
+      .eq('agenda_item_id', itemId);
+    if (exhibitError) throw exhibitError;
+    // Delete child items
+    const { error: childError } = await supabase
+      .from('agenda_item')
+      .delete()
+      .eq('parent_item_id', itemId);
+    if (childError) throw childError;
+    // Delete the item itself
+    const { error } = await supabase
+      .from('agenda_item')
+      .delete()
+      .eq('id', itemId);
+    if (error) throw error;
+    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
     setConfirmDelete(false);
     onSaved();
-  }, [existingItem, powerSync, onSaved]);
+  }, [existingItem, supabase, queryClient, meetingId, onSaved]);
 
   return (
     <div className="space-y-3">

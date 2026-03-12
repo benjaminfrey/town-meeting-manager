@@ -7,8 +7,10 @@
  * present or absent, without per-item scope tracking.
  */
 
-import { usePowerSync } from "@powersync/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MeetingTimer } from "./MeetingTimer";
@@ -77,36 +79,57 @@ export function AttendancePanel({
   readOnly,
   onRecuse,
 }: AttendancePanelProps) {
-  const powerSync = usePowerSync();
+  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
   const getAttendance = (boardMemberId: string): AttendanceRecord | undefined =>
     attendance.find((a) => a.board_member_id === boardMemberId);
 
-  const cycleStatus = async (member: MemberInfo) => {
+  const cycleStatusMutation = useMutation({
+    mutationFn: async (member: MemberInfo) => {
+      const record = getAttendance(member.boardMemberId);
+      const currentStatus = (record?.status as string) ?? "absent";
+      const currentIdx = CYCLE_ORDER.indexOf(currentStatus as typeof CYCLE_ORDER[number]);
+      const nextStatus = CYCLE_ORDER[(currentIdx + 1) % CYCLE_ORDER.length];
+      const now = new Date().toISOString();
+
+      if (record) {
+        const arrivedAt = nextStatus === "late_arrival" ? now : record.arrived_at;
+        const departedAt = nextStatus === "early_departure" ? now : null;
+        const { error } = await supabase
+          .from("meeting_attendance")
+          .update({
+            status: nextStatus,
+            arrived_at: arrivedAt,
+            departed_at: departedAt,
+            is_recording_secretary: record.is_recording_secretary,
+          })
+          .eq("id", record.id);
+        if (error) throw error;
+      } else {
+        const arrivedAt = nextStatus === "late_arrival" ? now : null;
+        const { error } = await supabase.from("meeting_attendance").insert({
+          id: crypto.randomUUID(),
+          meeting_id: meetingId,
+          town_id: townId,
+          board_member_id: member.boardMemberId,
+          person_id: member.personId,
+          status: nextStatus,
+          is_recording_secretary: 0,
+          arrived_at: arrivedAt,
+          departed_at: null,
+        });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+    },
+  });
+
+  const cycleStatus = (member: MemberInfo) => {
     if (readOnly) return;
-
-    const record = getAttendance(member.boardMemberId);
-    const currentStatus = (record?.status as string) ?? "absent";
-    const currentIdx = CYCLE_ORDER.indexOf(currentStatus as typeof CYCLE_ORDER[number]);
-    const nextStatus = CYCLE_ORDER[(currentIdx + 1) % CYCLE_ORDER.length];
-    const now = new Date().toISOString();
-
-    if (record) {
-      const arrivedAt = nextStatus === "late_arrival" ? now : record.arrived_at;
-      const departedAt = nextStatus === "early_departure" ? now : null;
-      await powerSync.execute(
-        `UPDATE meeting_attendance SET status = ?, arrived_at = ?, departed_at = ?, is_recording_secretary = ? WHERE id = ?`,
-        [nextStatus, arrivedAt, departedAt, record.is_recording_secretary, record.id],
-      );
-    } else {
-      const id = crypto.randomUUID();
-      const arrivedAt = nextStatus === "late_arrival" ? now : null;
-      await powerSync.execute(
-        `INSERT INTO meeting_attendance (id, meeting_id, town_id, board_member_id, person_id, status, is_recording_secretary, arrived_at, departed_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL)`,
-        [id, meetingId, townId, member.boardMemberId, member.personId, nextStatus, arrivedAt],
-      );
-    }
+    cycleStatusMutation.mutate(member);
   };
 
   return (
@@ -148,7 +171,7 @@ export function AttendancePanel({
             return (
               <div key={member.boardMemberId} className="flex items-center gap-0.5">
                 <button
-                  onClick={() => void cycleStatus(member)}
+                  onClick={() => cycleStatus(member)}
                   disabled={readOnly}
                   className={cn(
                     "flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors",

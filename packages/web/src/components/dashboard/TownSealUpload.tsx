@@ -5,11 +5,12 @@
  * Updates the TOWN record with seal_url on success.
  */
 
-import { useCallback, useRef, useState } from "react";
-import { usePowerSync } from "@powersync/react";
+import { useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, X, ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/svg+xml"];
@@ -21,87 +22,91 @@ interface TownSealUploadProps {
 
 export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
   const supabase = useSupabase();
-  const powerSync = usePowerSync();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileSelect = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const ext = file.name.split(".").pop() ?? "png";
+      const storagePath = `${townId}/seal.${ext}`;
 
-      // Client-side validation
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        setError("Please upload a PNG, JPEG, or SVG image.");
-        return;
-      }
-      if (file.size > MAX_FILE_SIZE) {
-        setError("File must be less than 2 MB.");
-        return;
-      }
+      const { error: uploadError } = await supabase.storage
+        .from("town-seals")
+        .upload(storagePath, file, { upsert: true });
 
-      setError(null);
-      setIsUploading(true);
+      if (uploadError) throw uploadError;
 
-      try {
-        const ext = file.name.split(".").pop() ?? "png";
-        const storagePath = `${townId}/seal.${ext}`;
+      const { data: urlData } = supabase.storage
+        .from("town-seals")
+        .getPublicUrl(storagePath);
 
-        const { error: uploadError } = await supabase.storage
-          .from("town-seals")
-          .upload(storagePath, file, { upsert: true });
+      const publicUrl = urlData.publicUrl;
 
-        if (uploadError) throw uploadError;
-
-        // Get the public URL
-        const { data: urlData } = supabase.storage
-          .from("town-seals")
-          .getPublicUrl(storagePath);
-
-        const publicUrl = urlData.publicUrl;
-
-        // Update town record locally
-        await powerSync.execute(
-          `UPDATE towns SET seal_url = ?, updated_at = ? WHERE id = ?`,
-          [publicUrl, new Date().toISOString(), townId]
-        );
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Upload failed. Please try again."
-        );
-      } finally {
-        setIsUploading(false);
-        // Reset file input
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
+      const { error: dbError } = await supabase
+        .from("town")
+        .update({ seal_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq("id", townId);
+      if (dbError) throw dbError;
     },
-    [supabase, powerSync, townId]
-  );
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      setError(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+  });
 
-  const handleRemove = useCallback(async () => {
-    setIsUploading(true);
-    try {
-      // Remove from storage
+  const removeMutation = useMutation({
+    mutationFn: async () => {
       const { error: removeError } = await supabase.storage
         .from("town-seals")
-        .remove([`${townId}/seal.png`, `${townId}/seal.jpg`, `${townId}/seal.jpeg`, `${townId}/seal.svg`]);
+        .remove([
+          `${townId}/seal.png`,
+          `${townId}/seal.jpg`,
+          `${townId}/seal.jpeg`,
+          `${townId}/seal.svg`,
+        ]);
 
       if (removeError) throw removeError;
 
-      // Clear URL in town record
-      await powerSync.execute(
-        `UPDATE towns SET seal_url = NULL, updated_at = ? WHERE id = ?`,
-        [new Date().toISOString(), townId]
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Remove failed. Please try again."
-      );
-    } finally {
-      setIsUploading(false);
+      const { error: dbError } = await supabase
+        .from("town")
+        .update({ seal_url: null, updated_at: new Date().toISOString() })
+        .eq("id", townId);
+      if (dbError) throw dbError;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      setError(null);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : "Remove failed. Please try again.");
+    },
+  });
+
+  const isUploading = uploadMutation.isPending || removeMutation.isPending;
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Client-side validation
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      setError("Please upload a PNG, JPEG, or SVG image.");
+      return;
     }
-  }, [supabase, powerSync, townId]);
+    if (file.size > MAX_FILE_SIZE) {
+      setError("File must be less than 2 MB.");
+      return;
+    }
+
+    setError(null);
+    uploadMutation.mutate(file);
+  };
 
   return (
     <div className="space-y-3">
@@ -120,7 +125,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void handleRemove()}
+              onClick={() => removeMutation.mutate()}
               disabled={isUploading}
             >
               {isUploading ? (
