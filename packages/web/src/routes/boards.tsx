@@ -22,6 +22,7 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import { BoardListSkeleton } from "@/components/skeletons";
 
 export async function clientLoader() {
   return {};
@@ -37,7 +38,7 @@ export default function BoardListPage(_props: Route.ComponentProps) {
   const [archiveBoard, setArchiveBoard] = useState<Record<string, unknown> | null>(null);
 
   // ─── Reactive queries ─────────────────────────────────────────────
-  const { data: boardRows } = useQuery({
+  const { data: boardRows, isLoading: boardsLoading } = useQuery({
     queryKey: queryKeys.boards.byTown(townId ?? ""),
     queryFn: async () => {
       const { data } = await supabase
@@ -103,10 +104,14 @@ export default function BoardListPage(_props: Route.ComponentProps) {
   }, [boardRows]);
 
   // ─── Loading state ────────────────────────────────────────────────
-  if (!townId) {
+  if (!townId || boardsLoading) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <p className="text-sm text-muted-foreground">Loading...</p>
+      <div className="p-6">
+        <div className="mb-6">
+          <div className="h-8 w-48 rounded-md bg-muted animate-pulse" />
+          <div className="mt-1 h-4 w-72 rounded-md bg-muted animate-pulse" />
+        </div>
+        <BoardListSkeleton rows={4} />
       </div>
     );
   }

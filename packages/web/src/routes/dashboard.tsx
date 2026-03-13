@@ -31,6 +31,7 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import { DashboardStatsSkeleton, DashboardChecklistSkeleton, SettingsSectionSkeleton } from "@/components/skeletons";
 
 // ─── Label helpers ──────────────────────────────────────────────────
 
@@ -145,33 +146,34 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     return <Navigate to="/setup" replace />;
   }
 
-  // townId exists but town data hasn't loaded yet
+  // townId exists but town data hasn't loaded yet — show skeleton
+  if (townLoading) {
+    return (
+      <div className="p-6 max-w-4xl space-y-6">
+        <div className="h-8 w-56 rounded-md bg-muted animate-pulse" />
+        <DashboardStatsSkeleton />
+        <DashboardChecklistSkeleton />
+        <SettingsSectionSkeleton rows={5} />
+      </div>
+    );
+  }
+
+  // Town query settled but no data — DB not yet ready
   if (!town) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-12">
-        {townLoading ? (
-          <>
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <p className="text-sm text-muted-foreground">
-              Loading your town data...
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-sm text-muted-foreground">
-              Town data not found. This can happen if the initial sync
-              hasn&apos;t completed yet.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.location.reload()}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Reload
-            </Button>
-          </>
-        )}
+        <p className="text-sm text-muted-foreground">
+          Town data not found. This can happen if the initial sync
+          hasn&apos;t completed yet.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.location.reload()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Reload
+        </Button>
       </div>
     );
   }

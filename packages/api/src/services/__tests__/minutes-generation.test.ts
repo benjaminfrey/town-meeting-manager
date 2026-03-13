@@ -1,3 +1,4 @@
+// @ts-nocheck -- test file: array index accesses are safe by construction
 /**
  * Minutes Generation Pipeline Tests
  *
@@ -8,8 +9,8 @@
 
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { assembleMinutesJson } from "../minutes-assembler";
-import { formatMinutes } from "../minutes-formatters";
+import { assembleMinutesJson } from "../minutes-assembler.js";
+import { formatMinutes } from "../minutes-formatters.js";
 import type { MinutesContentJson, MinutesRenderOptions } from "@town-meeting/shared";
 
 // ─── Mock Supabase builder ────────────────────────────────────────────
@@ -416,7 +417,7 @@ describe("assembleMinutesJson", () => {
       const result = await assembleMinutesJson(supabase, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
-      const policyItem = newBiz.items.find((i) => i.title === "Personnel Policy Amendment")!;
+      const policyItem = newBiz.items.find((i: { title: string; motions: { vote: { yeas: number; nays: number; result: string } | null }[] }) => i.title === "Personnel Policy Amendment")!;
       const vote = policyItem.motions[0].vote!;
 
       expect(vote.yeas).toBe(1);
@@ -599,7 +600,7 @@ describe("formatMinutes", () => {
 
     it("returns 'Passed X-Y' when there are dissenting nays", () => {
       const content = makeContent();
-      content.sections[0].items[0].motions[0].vote = {
+      content.sections[0]!.items[0]!.motions[0]!.vote = {
         type: "roll_call", result: "passed", yeas: 3, nays: 2, abstentions: 0, absent: 0, individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
@@ -609,10 +610,10 @@ describe("formatMinutes", () => {
 
     it("returns 'Failed X-Y' for a failed motion", () => {
       const content = makeContent();
-      content.sections[0].items[0].motions[0].vote = {
+      content.sections[0]!.items[0]!.motions[0]!.vote = {
         type: "roll_call", result: "failed", yeas: 1, nays: 3, abstentions: 0, absent: 0, individual_votes: [],
       };
-      content.sections[0].items[0].motions[0].status = "failed";
+      content.sections[0]!.items[0]!.motions[0]!.status = "failed";
       const formatted = formatMinutes(content, BASE_OPTIONS);
 
       expect(formatted.sections[0].formatted_text).toContain("Failed 1-3");
@@ -620,7 +621,7 @@ describe("formatMinutes", () => {
 
     it("appends abstention count to vote result", () => {
       const content = makeContent();
-      content.sections[0].items[0].motions[0].vote = {
+      content.sections[0]!.items[0]!.motions[0]!.vote = {
         type: "roll_call", result: "passed", yeas: 3, nays: 1, abstentions: 1, absent: 0, individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
@@ -630,7 +631,7 @@ describe("formatMinutes", () => {
 
     it("does NOT say 'unanimously' when absent > 0", () => {
       const content = makeContent();
-      content.sections[0].items[0].motions[0].vote = {
+      content.sections[0]!.items[0]!.motions[0]!.vote = {
         type: "roll_call", result: "passed", yeas: 4, nays: 0, abstentions: 0, absent: 1, individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
@@ -653,7 +654,7 @@ describe("formatMinutes", () => {
     it("full_name_first_then_last: uses full name first mention, last name after", () => {
       const content = makeContent();
       // Add second motion with same mover to test subsequent-mention behavior
-      content.sections[0].items[0].motions.push({
+      content.sections[0]!.items[0]!.motions.push({
         text: "Approve the consent agenda.",
         motion_type: "main",
         moved_by: "Alice Johnson",
@@ -725,8 +726,8 @@ describe("formatMinutes", () => {
 
     it("block_format: failed motion shows 'The motion failed.'", () => {
       const content = makeContent();
-      content.sections[0].items[0].motions[0].status = "failed";
-      content.sections[0].items[0].motions[0].vote = {
+      content.sections[0]!.items[0]!.motions[0]!.status = "failed";
+      content.sections[0]!.items[0]!.motions[0]!.vote = {
         type: "roll_call", result: "failed", yeas: 1, nays: 3, abstentions: 0, absent: 0, individual_votes: [],
       };
       const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "block_format" });
@@ -757,7 +758,7 @@ describe("formatMinutes", () => {
 
     it("summary: shows placeholder when no discussion summary is present", () => {
       const content = makeContent();
-      content.sections[0].items[0].discussion_summary = null;
+      content.sections[0]!.items[0]!.discussion_summary = null;
       const formatted = formatMinutes(content, { ...BASE_OPTIONS, minutes_style: "summary" });
       const text = formatted.sections[0].formatted_text;
 
@@ -766,7 +767,7 @@ describe("formatMinutes", () => {
 
     it("narrative: shows 'Detailed discussion' placeholder when no summary", () => {
       const content = makeContent();
-      content.sections[0].items[0].discussion_summary = null;
+      content.sections[0]!.items[0]!.discussion_summary = null;
       const formatted = formatMinutes(content, { ...BASE_OPTIONS, minutes_style: "narrative" });
       const text = formatted.sections[0].formatted_text;
 
@@ -935,7 +936,7 @@ describe("formatMinutes", () => {
                 recusals: [],
                 speakers: [
                   { name: "Mary Public", address: "789 Oak Ave", topic: "road conditions" },
-                  { name: "", address: null, topic: "budget concerns" },
+                  { name: "", address: undefined, topic: "budget concerns" },
                 ],
                 operator_notes: null,
                 staff_resource: null,

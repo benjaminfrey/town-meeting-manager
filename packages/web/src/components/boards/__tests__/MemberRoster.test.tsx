@@ -13,6 +13,8 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...(actual as object),
     useQuery: (...args: unknown[]) => mockUseQuery(...args),
+    useQueryClient: vi.fn().mockReturnValue({ invalidateQueries: vi.fn() }),
+    useMutation: vi.fn().mockReturnValue({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   };
 });
 

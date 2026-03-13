@@ -32,6 +32,7 @@ import { useQuorumCheck } from "@/hooks/useQuorumCheck";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
+import { ConnectionStatusBarErrorBoundary } from "@/components/FeatureErrorBoundaries";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase as supabaseSingleton } from "@/lib/supabase";
 import { queryClient as sharedQueryClient } from "@/lib/queryClient";
@@ -1196,8 +1197,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      {/* Connection status banner (prominent in live meeting context) */}
-      <ConnectionStatusBar prominent={true} />
+      {/* Connection status banner (prominent in live meeting context)
+          Wrapped in error boundary — must never crash and take the whole meeting view */}
+      <ConnectionStatusBarErrorBoundary>
+        <ConnectionStatusBar prominent={true} />
+      </ConnectionStatusBarErrorBoundary>
 
       {/* Header bar */}
       <div className="flex items-center justify-between border-b px-4 py-2">

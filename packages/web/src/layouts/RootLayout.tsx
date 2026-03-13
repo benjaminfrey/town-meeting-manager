@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { ErrorBoundary } from "react-error-boundary";
+import { NavigationProgress } from "@/components/NavigationProgress";
 import {
   LayoutDashboard,
   List,
@@ -42,13 +43,13 @@ function ThemeToggle() {
   return (
     <button
       onClick={cycleTheme}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-md border bg-background text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={`Switch color theme (current: ${theme})`}
       title={`Theme: ${theme}`}
     >
-      {theme === "light" && <Sun className="h-4 w-4" />}
-      {theme === "dark" && <Moon className="h-4 w-4" />}
-      {theme === "system" && <Monitor className="h-4 w-4" />}
-      <span className="sr-only">Toggle theme ({theme})</span>
+      {theme === "light" && <Sun className="h-4 w-4" aria-hidden="true" />}
+      {theme === "dark" && <Moon className="h-4 w-4" aria-hidden="true" />}
+      {theme === "system" && <Monitor className="h-4 w-4" aria-hidden="true" />}
     </button>
   );
 }
@@ -174,6 +175,17 @@ export default function RootLayout() {
 
   return (
     <ProtectedRoute>
+    {/* Route-transition loading bar (NProgress-style) */}
+    <NavigationProgress />
+
+    {/* Skip-to-content for keyboard/screen-reader users (WCAG 2.4.1) */}
+    <a
+      href="#main-content"
+      className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[10000] focus:inline-flex focus:items-center focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg"
+    >
+      Skip to main content
+    </a>
+
     <div className="flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden md:flex">
@@ -236,7 +248,7 @@ export default function RootLayout() {
         </header>
 
         {/* Main content with error boundary */}
-        <main className="flex-1 overflow-auto">
+        <main id="main-content" className="flex-1 overflow-auto" tabIndex={-1}>
           <ErrorBoundary FallbackComponent={ErrorFallback}>
             <Outlet />
           </ErrorBoundary>

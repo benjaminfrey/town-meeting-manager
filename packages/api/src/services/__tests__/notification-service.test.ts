@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { NotificationService } from "../notification-service";
+import { NotificationService } from "../notification-service.js";
 
 // ─── Module mocks ─────────────────────────────────────────────────────
 
@@ -269,7 +269,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const from = (mockSendEmail.mock.calls[0][0] as { from: string }).from;
+      const from = (mockSendEmail.mock.calls as unknown as [[{ from: string }]])[0][0].from;
       expect(from).toContain("notifications@testville.gov");
       expect(from).toContain("Town of Testville");
     });
@@ -280,7 +280,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const from = (mockSendEmail.mock.calls[0][0] as { from: string }).from;
+      const from = (mockSendEmail.mock.calls as unknown as [[{ from: string }]])[0][0].from;
       expect(from).toContain("testville.townmeetingmanager.com");
     });
 
@@ -407,7 +407,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const tag = (mockSendEmail.mock.calls[0][0] as { tag: string }).tag;
+      const tag = (mockSendEmail.mock.calls as unknown as [[{ tag: string }]])[0][0].tag;
       expect(tag).toBe("agenda_published");
     });
 
@@ -417,11 +417,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const meta = (
-        mockSendEmail.mock.calls[0][0] as {
-          metadata: { town_id: string; event_id: string; delivery_id: string };
-        }
-      ).metadata;
+      const meta = (mockSendEmail.mock.calls as unknown as [[{ metadata: { town_id: string; event_id: string; delivery_id: string } }]])[0][0].metadata;
       expect(meta.town_id).toBe(TOWN_ID);
       expect(meta.event_id).toBe(EVENT_ID);
       expect(meta.delivery_id).toBeTruthy();
@@ -434,9 +430,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = vi.mocked(renderEmailTemplate).mock.calls[0][1] as {
-        preferencesUrl: string;
-      };
+      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { preferencesUrl: string }]])[0][1];
       expect(vars.preferencesUrl).toContain("/settings/notifications");
     });
 
@@ -447,9 +441,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = vi.mocked(renderEmailTemplate).mock.calls[0][1] as {
-        recipientName: string;
-      };
+      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { recipientName: string }]])[0][1];
       expect(vars.recipientName).toBe("Alice Johnson");
     });
 
@@ -461,9 +453,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = vi.mocked(renderEmailTemplate).mock.calls[0][1] as {
-        recipientName: string;
-      };
+      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { recipientName: string }]])[0][1];
       expect(vars.recipientName).toBe("alice@testville.gov");
     });
   });

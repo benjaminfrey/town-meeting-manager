@@ -23,6 +23,7 @@ import {
   MEETING_STATUS_COLORS,
   MEETING_TYPE_LABELS,
 } from "@/components/meetings/meeting-labels";
+import { MeetingListSkeleton } from "@/components/skeletons";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -103,9 +104,7 @@ export default function MeetingsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <p className="text-sm text-muted-foreground">Loading meetings…</p>
-        </div>
+        <MeetingListSkeleton rows={5} />
       ) : meetings.length === 0 ? (
         <div className="rounded-lg border bg-card p-12 text-center text-card-foreground shadow-sm">
           <CalendarDays className="mx-auto h-10 w-10 text-muted-foreground" />
