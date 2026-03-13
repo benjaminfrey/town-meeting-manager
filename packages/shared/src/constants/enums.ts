@@ -93,7 +93,10 @@ export type MeetingStatus =
 export const MeetingType = {
   REGULAR: "regular",
   SPECIAL: "special",
+  ANNUAL_TOWN_MEETING: "annual_town_meeting",
+  SPECIAL_TOWN_MEETING: "special_town_meeting",
   PUBLIC_HEARING: "public_hearing",
+  WORKSHOP: "workshop",
   EMERGENCY: "emergency",
 } as const;
 export type MeetingType = (typeof MeetingType)[keyof typeof MeetingType];
