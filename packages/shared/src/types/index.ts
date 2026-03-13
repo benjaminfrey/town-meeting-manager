@@ -9,3 +9,4 @@ export * from "./minutes.js";
 export * from "./notification.js";
 export * from "./permissions.js";
 export * from "./portal.js";
+export * from "./notice-template.js";

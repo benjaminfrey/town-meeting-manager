@@ -29,6 +29,8 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { EditBoardDialog } from "@/components/boards/EditBoardDialog";
 import { ArchiveBoardDialog } from "@/components/boards/ArchiveBoardDialog";
 import { MemberRoster } from "@/components/boards/MemberRoster";
+import { NoticeTemplateEditor } from "@/components/boards/NoticeTemplateEditor";
+import type { NoticeTemplateBlock } from "@town-meeting/shared";
 import {
   FORMALITY_LABELS,
   MINUTES_STYLE_LABELS,
@@ -574,17 +576,24 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
       )}
 
       {activeTab === "settings" && (
-        <div className="space-y-6 max-w-2xl">
+        <div className="space-y-6 max-w-3xl">
+          <NoticeTemplateEditor
+            boardId={b.id}
+            initialBlocks={
+              (board.notice_template_blocks as unknown as NoticeTemplateBlock[]) ?? null
+            }
+          />
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Board Settings</CardTitle>
+              <CardTitle className="text-lg">Minutes Workflow</CardTitle>
               <CardDescription>
-                Configure notice templates and minutes workflow for this board.
+                Board-level minutes approval workflow settings.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                Board-level settings for meeting notice templates and minutes approval workflow will appear here.
+                Minutes workflow configuration will appear here.
               </p>
             </CardContent>
           </Card>

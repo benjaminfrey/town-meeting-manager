@@ -166,6 +166,29 @@ export function ProgressChecklist({
     enabled: !!townId,
   });
 
+  // Count boards without notice templates
+  const { data: boardCounts } = useQuery({
+    queryKey: [...queryKeys.boards.byTown(townId), "templateStatus"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("board")
+        .select("id, notice_template_blocks")
+        .eq("town_id", townId);
+      if (error) throw error;
+      const total = data?.length ?? 0;
+      const configured = (data ?? []).filter(
+        (b) => b.notice_template_blocks !== null
+      ).length;
+      return { total, configured };
+    },
+    enabled: !!townId,
+  });
+
+  const totalBoardCount = boardCounts?.total ?? 0;
+  const configuredTemplateCount = boardCounts?.configured ?? 0;
+  const hasAllNoticeTemplates =
+    totalBoardCount > 0 && configuredTemplateCount === totalBoardCount;
+
   const hasBoardMembers = memberCount > 0;
   const hasSeal = !!sealUrl;
   const hasSubdomain = !!subdomain;
@@ -185,10 +208,12 @@ export function ProgressChecklist({
     },
     {
       key: "meeting-notice",
-      label: "Set meeting notice template",
+      label: hasAllNoticeTemplates
+        ? "Meeting notice templates configured"
+        : `Set meeting notice templates (${configuredTemplateCount} of ${totalBoardCount} boards configured)`,
       description: "Customize how meeting notices are formatted",
-      completed: false,
-      linkTo: "/settings",
+      completed: hasAllNoticeTemplates,
+      linkTo: "/settings/meeting-notices",
     },
     {
       key: "minutes-workflow",

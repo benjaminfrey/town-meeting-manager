@@ -6,14 +6,18 @@
  * and navigates to the agenda builder.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { z } from "zod";
-import { AlertCircle, Loader2 } from "lucide-react";
-import { validateMeetingCreation } from "@town-meeting/shared";
+import { AlertCircle, Info, Loader2 } from "lucide-react";
+import {
+  validateMeetingCreation,
+  forecastEarliestMeetingDate,
+  type MeetingType,
+} from "@town-meeting/shared";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import {
   Dialog,
@@ -43,7 +47,7 @@ import { MEETING_TYPE_LABELS } from "./meeting-labels";
 
 const CreateMeetingFormSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters").max(200),
-  meeting_type: z.enum(["regular", "special", "public_hearing", "emergency"]),
+  meeting_type: z.enum(["regular", "special", "annual_town_meeting", "special_town_meeting", "public_hearing", "workshop", "emergency"]),
   scheduled_date: z.string().min(1, "Date is required"),
   scheduled_time: z.string().regex(/^\d{2}:\d{2}$/, "Must be HH:MM format"),
   location: z.string().max(200),
@@ -112,7 +116,7 @@ export function CreateMeetingDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('town')
-        .select('retention_policy_acknowledged_at')
+        .select('retention_policy_acknowledged_at, state')
         .eq('id', townId)
         .single();
       if (error) throw error;
@@ -137,6 +141,17 @@ export function CreateMeetingDialog({
   });
 
   const retentionAck = townData?.retention_policy_acknowledged_at ?? null;
+  const townState = String((townData as Record<string, unknown> | undefined)?.state ?? "ME");
+
+  // Compliance forecast — show when meeting type has special notice requirements
+  const forecast = useMemo(() => {
+    if (!values.meeting_type || values.meeting_type === "regular") return null;
+    return forecastEarliestMeetingDate({
+      fromDate: new Date(),
+      state: townState,
+      meetingType: values.meeting_type as MeetingType,
+    });
+  }, [values.meeting_type, townState]);
 
   // Auto-select default template
   if (values.template_id === "" && templates.length > 0) {
@@ -308,6 +323,18 @@ export function CreateMeetingDialog({
               )}
             </div>
           </div>
+
+          {/* Compliance forecast callout */}
+          {forecast?.rule && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+              <div className="flex items-start gap-2">
+                <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  {forecast.explanation}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Location */}
           <div className="space-y-1.5">

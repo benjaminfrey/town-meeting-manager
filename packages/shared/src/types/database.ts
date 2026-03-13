@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       agenda_item: {
@@ -283,6 +258,7 @@ export type Database = {
             | null
           motion_display_format: string | null
           name: string
+          notice_template_blocks: Json | null
           officer_election_method: string | null
           quorum_type: string | null
           quorum_value: number | null
@@ -308,6 +284,7 @@ export type Database = {
             | null
           motion_display_format?: string | null
           name: string
+          notice_template_blocks?: Json | null
           officer_election_method?: string | null
           quorum_type?: string | null
           quorum_value?: number | null
@@ -333,6 +310,7 @@ export type Database = {
             | null
           motion_display_format?: string | null
           name?: string
+          notice_template_blocks?: Json | null
           officer_election_method?: string | null
           quorum_type?: string | null
           quorum_value?: number | null
@@ -685,6 +663,83 @@ export type Database = {
           },
         ]
       }
+      invitation: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string | null
+          expires_at: string | null
+          id: string
+          invited_by: string | null
+          person_id: string
+          role: string | null
+          sent_at: string | null
+          status: string
+          token: string
+          town_id: string
+          user_account_id: string | null
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string | null
+          expires_at?: string | null
+          id?: string
+          invited_by?: string | null
+          person_id: string
+          role?: string | null
+          sent_at?: string | null
+          status?: string
+          token: string
+          town_id: string
+          user_account_id?: string | null
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string | null
+          expires_at?: string | null
+          id?: string
+          invited_by?: string | null
+          person_id?: string
+          role?: string | null
+          sent_at?: string | null
+          status?: string
+          token?: string
+          town_id?: string
+          user_account_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invitation_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "user_account"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitation_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "person"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitation_town_id_fkey"
+            columns: ["town_id"]
+            isOneToOne: false
+            referencedRelation: "town"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitation_user_account_id_fkey"
+            columns: ["user_account_id"]
+            isOneToOne: false
+            referencedRelation: "user_account"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meeting: {
         Row: {
           adjournment: Json | null
@@ -698,6 +753,9 @@ export type Database = {
           id: string
           location: string | null
           meeting_type: string
+          notice_generated_at: string | null
+          notice_pdf_storage_path: string | null
+          notice_published_at: string | null
           presiding_officer_id: string | null
           recording_secretary_id: string | null
           scheduled_date: string
@@ -720,6 +778,9 @@ export type Database = {
           id?: string
           location?: string | null
           meeting_type?: string
+          notice_generated_at?: string | null
+          notice_pdf_storage_path?: string | null
+          notice_published_at?: string | null
           presiding_officer_id?: string | null
           recording_secretary_id?: string | null
           scheduled_date: string
@@ -742,6 +803,9 @@ export type Database = {
           id?: string
           location?: string | null
           meeting_type?: string
+          notice_generated_at?: string | null
+          notice_pdf_storage_path?: string | null
+          notice_published_at?: string | null
           presiding_officer_id?: string | null
           recording_secretary_id?: string | null
           scheduled_date?: string
@@ -1080,6 +1144,11 @@ export type Database = {
           event_id: string
           external_id: string | null
           id: string
+          next_retry_at: string | null
+          opened_at: string | null
+          postmark_message_id: string | null
+          retry_count: number
+          sent_at: string | null
           status: Database["public"]["Enums"]["notification_status"]
           subscriber_id: string
           town_id: string
@@ -1092,6 +1161,11 @@ export type Database = {
           event_id: string
           external_id?: string | null
           id?: string
+          next_retry_at?: string | null
+          opened_at?: string | null
+          postmark_message_id?: string | null
+          retry_count?: number
+          sent_at?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           subscriber_id: string
           town_id: string
@@ -1104,6 +1178,11 @@ export type Database = {
           event_id?: string
           external_id?: string | null
           id?: string
+          next_retry_at?: string | null
+          opened_at?: string | null
+          postmark_message_id?: string | null
+          retry_count?: number
+          sent_at?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           subscriber_id?: string
           town_id?: string
@@ -1436,6 +1515,12 @@ export type Database = {
           archived_at: string | null
           auth_user_id: string | null
           created_at: string
+          display_name: string | null
+          email: string | null
+          email_bounced: boolean
+          email_bounced_at: string | null
+          email_complained: boolean
+          email_complained_at: string | null
           gov_title: string | null
           id: string
           permissions: Json
@@ -1447,6 +1532,12 @@ export type Database = {
           archived_at?: string | null
           auth_user_id?: string | null
           created_at?: string
+          display_name?: string | null
+          email?: string | null
+          email_bounced?: boolean
+          email_bounced_at?: string | null
+          email_complained?: boolean
+          email_complained_at?: string | null
           gov_title?: string | null
           id?: string
           permissions?: Json
@@ -1458,6 +1549,12 @@ export type Database = {
           archived_at?: string | null
           auth_user_id?: string | null
           created_at?: string
+          display_name?: string | null
+          email?: string | null
+          email_bounced?: boolean
+          email_bounced_at?: string | null
+          email_complained?: boolean
+          email_complained_at?: string | null
           gov_title?: string | null
           id?: string
           permissions?: Json
@@ -2654,6 +2751,29 @@ export type Database = {
         | "adjourn"
       municipality_type: "town" | "city" | "plantation"
       notification_channel: "email" | "sms"
+      notification_delivery_status:
+        | "pending"
+        | "sent"
+        | "delivered"
+        | "bounced"
+        | "failed"
+        | "complained"
+      notification_event_status:
+        | "pending"
+        | "processing"
+        | "completed"
+        | "failed"
+      notification_event_type:
+        | "meeting_scheduled"
+        | "meeting_cancelled"
+        | "agenda_published"
+        | "minutes_review"
+        | "minutes_approved"
+        | "minutes_published"
+        | "admin_alert"
+        | "user_invited"
+        | "password_reset"
+        | "straw_poll_created"
       notification_status:
         | "pending"
         | "processing"
@@ -2796,9 +2916,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       agenda_item_status: [
@@ -2867,6 +2984,32 @@ export const Constants = {
       ],
       municipality_type: ["town", "city", "plantation"],
       notification_channel: ["email", "sms"],
+      notification_delivery_status: [
+        "pending",
+        "sent",
+        "delivered",
+        "bounced",
+        "failed",
+        "complained",
+      ],
+      notification_event_status: [
+        "pending",
+        "processing",
+        "completed",
+        "failed",
+      ],
+      notification_event_type: [
+        "meeting_scheduled",
+        "meeting_cancelled",
+        "agenda_published",
+        "minutes_review",
+        "minutes_approved",
+        "minutes_published",
+        "admin_alert",
+        "user_invited",
+        "password_reset",
+        "straw_poll_created",
+      ],
       notification_status: [
         "pending",
         "processing",

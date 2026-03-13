@@ -131,4 +131,9 @@ export const queryKeys = {
   notificationPreferences: {
     mine: ['notificationPreferences', 'mine'] as const,
   },
+
+  // Notice templates (stored on board.notice_template_blocks)
+  noticeTemplates: {
+    byBoard: (boardId: string) => ['noticeTemplates', boardId] as const,
+  },
 } as const;

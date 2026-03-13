@@ -25,7 +25,10 @@ export const MEETING_STATUS_COLORS: Record<string, string> = {
 export const MEETING_TYPE_LABELS: Record<string, string> = {
   regular: "Regular",
   special: "Special",
+  annual_town_meeting: "Annual Town Meeting",
+  special_town_meeting: "Special Town Meeting",
   public_hearing: "Public Hearing",
+  workshop: "Workshop",
   emergency: "Emergency",
 };
 

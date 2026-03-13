@@ -28,6 +28,7 @@ export default [
     route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
     route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
     route("settings", "routes/settings.tsx"),
+    route("settings/meeting-notices", "routes/settings.meeting-notices.tsx"),
     route("settings/notifications", "routes/settings.notifications.tsx"),
     route("admin/notifications", "routes/admin.notifications.tsx"),
   ]),

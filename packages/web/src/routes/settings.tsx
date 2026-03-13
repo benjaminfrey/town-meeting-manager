@@ -1,11 +1,14 @@
 import { Link } from "react-router";
-import { Bell, ChevronRight } from "lucide-react";
+import { Bell, ChevronRight, FileText } from "lucide-react";
 import type { Route } from "./+types/settings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 export async function clientLoader() {
   return {};
 }
+
+const LINK_CLASS =
+  "flex items-center justify-between rounded-lg border bg-card p-4 text-card-foreground shadow-sm hover:bg-accent transition-colors";
 
 export default function SettingsPage() {
   return (
@@ -18,10 +21,20 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-2">
-        <Link
-          to="/settings/notifications"
-          className="flex items-center justify-between rounded-lg border bg-card p-4 text-card-foreground shadow-sm hover:bg-accent transition-colors"
-        >
+        <Link to="/settings/meeting-notices" className={LINK_CLASS}>
+          <div className="flex items-center gap-3">
+            <FileText className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Meeting Notice Templates</p>
+              <p className="text-xs text-muted-foreground">
+                Configure notice templates for each board
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
+
+        <Link to="/settings/notifications" className={LINK_CLASS}>
           <div className="flex items-center gap-3">
             <Bell className="h-5 w-5 text-muted-foreground" />
             <div>

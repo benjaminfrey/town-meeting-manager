@@ -62,6 +62,61 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import {
+  getNoticeDeadline,
+  type MeetingType,
+  type ComplianceResult,
+} from "@town-meeting/shared";
+
+// ─── Compliance Banner ──────────────────────────────────────────────
+
+const COMPLIANCE_COLORS: Record<string, string> = {
+  ok: "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200",
+  warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
+  danger: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200",
+  overdue: "border-red-300 bg-red-100 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200",
+};
+
+function NoticeComplianceBanner({
+  meetingDate,
+  meetingTime,
+  meetingType,
+  state,
+}: {
+  meetingDate: string;
+  meetingTime: string;
+  meetingType: string;
+  state: string;
+}) {
+  const result = useMemo<ComplianceResult>(() => {
+    if (!meetingDate || !state) {
+      return {
+        rule: null,
+        deadlineDate: null,
+        daysUntilDeadline: null,
+        warningLevel: "ok",
+        advisoryMessage: "",
+        statuteCitation: null,
+      };
+    }
+    return getNoticeDeadline({
+      meetingDate: new Date(meetingDate + "T00:00:00"),
+      meetingTime: meetingTime || undefined,
+      state,
+      meetingType: meetingType as MeetingType,
+    });
+  }, [meetingDate, meetingTime, meetingType, state]);
+
+  if (!result.rule) return null;
+
+  return (
+    <div
+      className={`rounded-lg border p-3 text-sm ${COMPLIANCE_COLORS[result.warningLevel] ?? ""}`}
+    >
+      <p className="font-medium">{result.advisoryMessage}</p>
+    </div>
+  );
+}
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -476,6 +531,12 @@ export default function AgendaBuilderPage({
         </div>
         {!isCancelled && (
           <div className="flex flex-col items-end gap-2">
+            <NoticeComplianceBanner
+              meetingDate={scheduledDate}
+              meetingTime={scheduledTime}
+              meetingType={String(meeting?.meeting_type ?? "regular")}
+              state={String(town?.state ?? "ME")}
+            />
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
