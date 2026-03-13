@@ -26,7 +26,8 @@
     "pdf-lib": "^1.17.1",
     "postmark": "^4.0.7",
     "puppeteer": "^24.39.0",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

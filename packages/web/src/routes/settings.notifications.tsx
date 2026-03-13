@@ -9,10 +9,12 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Bell, BellOff, Smartphone } from "lucide-react";
 import type { Route } from "./+types/settings.notifications";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useSupabase } from "@/hooks/useSupabase";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { queryKeys } from "@/lib/queryKeys";
 import {
   Card,
@@ -162,11 +164,14 @@ export default function NotificationPreferencesPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Notification Preferences</h1>
         <p className="mt-1 text-muted-foreground">
-          Choose which emails you'd like to receive. You can unsubscribe at any time.
+          Manage how you receive notifications — email and push.
         </p>
       </div>
 
       <div className="space-y-6">
+        {/* Push Notifications */}
+        <PushNotificationCard />
+
         {categories.map((category, catIdx) => {
           const items = NOTIFICATION_SETTINGS.filter((s) => s.category === category);
           return (
@@ -217,6 +222,80 @@ export default function NotificationPreferencesPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// ─── Push Notification Card ──────────────────────────────────────
+
+function PushNotificationCard() {
+  const {
+    isSupported,
+    permission,
+    isSubscribed,
+    subscribe,
+    unsubscribe,
+    isLoading,
+  } = usePushNotifications();
+
+  const handleTogglePush = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await subscribe();
+        toast.success("Push notifications enabled");
+      } else {
+        await unsubscribe();
+        toast.success("Push notifications disabled");
+      }
+    } catch {
+      toast.error("Failed to update push notification settings");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Smartphone className="h-4 w-4" />
+          Push Notifications
+        </CardTitle>
+        <CardDescription className="text-sm">
+          Receive real-time alerts on this device
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {!isSupported ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <BellOff className="h-4 w-4" />
+            Push notifications are not supported in this browser.
+          </div>
+        ) : permission === "denied" ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <BellOff className="h-4 w-4" />
+            Notifications are blocked. Please update your browser settings to allow notifications for this site.
+          </div>
+        ) : (
+          <div className="flex items-start justify-between gap-4 py-1">
+            <div className="space-y-0.5">
+              <Label htmlFor="push-toggle" className="text-sm font-medium leading-none cursor-pointer">
+                {isSubscribed ? "Enabled" : "Disabled"}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {isSubscribed
+                  ? "You'll receive push alerts for meetings, agendas, and minutes on this device."
+                  : "Enable push notifications to get real-time alerts on this device."}
+              </p>
+            </div>
+            <Switch
+              id="push-toggle"
+              checked={isSubscribed}
+              onCheckedChange={handleTogglePush}
+              disabled={isLoading}
+              aria-label="Toggle push notifications"
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

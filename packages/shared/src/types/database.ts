@@ -1415,6 +1415,47 @@ export type Database = {
           },
         ]
       }
+      push_subscription: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          id: string
+          p256dh: string
+          updated_at: string
+          user_account_id: string
+          user_agent: string | null
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          p256dh: string
+          updated_at?: string
+          user_account_id: string
+          user_agent?: string | null
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          p256dh?: string
+          updated_at?: string
+          user_account_id?: string
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscription_user_account_id_fkey"
+            columns: ["user_account_id"]
+            isOneToOne: false
+            referencedRelation: "user_account"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       spatial_ref_sys: {
         Row: {
           auth_name: string | null
@@ -1628,6 +1669,7 @@ export type Database = {
           email_complained_at: string | null
           gov_title: string | null
           id: string
+          notification_preferences: Json | null
           permissions: Json
           person_id: string
           role: Database["public"]["Enums"]["user_role"]
@@ -1645,6 +1687,7 @@ export type Database = {
           email_complained_at?: string | null
           gov_title?: string | null
           id?: string
+          notification_preferences?: Json | null
           permissions?: Json
           person_id: string
           role: Database["public"]["Enums"]["user_role"]
@@ -1662,6 +1705,7 @@ export type Database = {
           email_complained_at?: string | null
           gov_title?: string | null
           id?: string
+          notification_preferences?: Json | null
           permissions?: Json
           person_id?: string
           role?: Database["public"]["Enums"]["user_role"]

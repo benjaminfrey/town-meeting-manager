@@ -17,6 +17,10 @@ import {
   isBroadcastEvent,
   renderEmailTemplate,
 } from "./email-sender.js";
+import {
+  dispatchPushToTown,
+  type PushEventType,
+} from "../lib/push.js";
 
 // ─── Retry backoff schedule (seconds after failure) ──────────────────
 
@@ -310,7 +314,10 @@ export class NotificationService {
         );
       }
 
-      // 7. Mark event completed
+      // 7. Dispatch push notifications (if event type maps to a push event)
+      await this.dispatchPushForEvent(eventType, townId, payload);
+
+      // 8. Mark event completed
       await this.supabase
         .from("notification_event")
         .update({ status: "completed", processed_at: new Date().toISOString() })
@@ -549,6 +556,54 @@ export class NotificationService {
           `[notification] Delivery ${delivery.id} permanently failed after ${MAX_RETRIES} attempts`,
         );
       }
+    }
+  }
+
+  // ── Push dispatch ──────────────────────────────────────────────────
+
+  private async dispatchPushForEvent(
+    eventType: NotificationEventType,
+    townId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const PUSH_EVENT_MAP: Partial<Record<NotificationEventType, PushEventType>> = {
+      agenda_published: "agenda_published",
+      minutes_approved: "minutes_approved",
+      meeting_cancelled: "meeting_cancelled",
+    };
+
+    const pushEventType = PUSH_EVENT_MAP[eventType];
+    if (!pushEventType) return;
+
+    const PUSH_PAYLOAD_MAP: Record<string, (p: Record<string, unknown>) => { title: string; body: string; tag: string; url: string }> = {
+      agenda_published: (p) => ({
+        title: "Agenda Published",
+        body: `The agenda for ${(p.meeting_title as string) ?? "a meeting"} has been published.`,
+        tag: `agenda-${(p.meeting_id as string) ?? "unknown"}`,
+        url: `/meetings/${(p.meeting_id as string) ?? ""}`,
+      }),
+      minutes_approved: (p) => ({
+        title: "Minutes Approved",
+        body: `Minutes for ${(p.meeting_title as string) ?? "a meeting"} have been approved.`,
+        tag: `minutes-${(p.meeting_id as string) ?? "unknown"}`,
+        url: `/meetings/${(p.meeting_id as string) ?? ""}/minutes`,
+      }),
+      meeting_cancelled: (p) => ({
+        title: "Meeting Cancelled",
+        body: `${(p.meeting_title as string) ?? "A meeting"} has been cancelled.`,
+        tag: `cancelled-${(p.meeting_id as string) ?? "unknown"}`,
+        url: `/meetings/${(p.meeting_id as string) ?? ""}`,
+      }),
+    };
+
+    const buildPayload = PUSH_PAYLOAD_MAP[pushEventType];
+    if (!buildPayload) return;
+
+    try {
+      await dispatchPushToTown(this.supabase, townId, pushEventType, buildPayload(payload));
+    } catch (err) {
+      // Push failures should not break the notification pipeline
+      console.error(`[notification] Push dispatch failed for ${pushEventType}:`, err);
     }
   }
 

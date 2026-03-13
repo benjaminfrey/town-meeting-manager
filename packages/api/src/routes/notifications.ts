@@ -11,7 +11,9 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { NotificationService } from "../services/notification-service.js";
+import { dispatchPushToUser } from "../lib/push.js";
 import type { NotificationEventType } from "@town-meeting/shared";
 
 // ─── Postmark webhook body types ─────────────────────────────────────
@@ -261,6 +263,92 @@ export async function notificationRoutes(app: FastifyInstance) {
       return reply.send({ ok: true });
     },
   );
+
+  // ── Push Subscription: Subscribe ─────────────────────────────────
+
+  const pushSubscriptionSchema = z.object({
+    endpoint: z.string().url(),
+    keys: z.object({
+      p256dh: z.string().min(1),
+      auth: z.string().min(1),
+    }),
+    userAgent: z.string().optional(),
+  });
+
+  app.post<{
+    Body: { endpoint: string; keys: { p256dh: string; auth: string }; userAgent?: string };
+  }>("/notifications/push/subscribe", async (request, reply) => {
+    await app.verifyAuth(request, reply);
+    if (!request.user) return;
+
+    const parsed = pushSubscriptionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.badRequest("Invalid push subscription data");
+    }
+
+    const { endpoint, keys, userAgent } = parsed.data;
+
+    const { error } = await supabase
+      .from("push_subscription")
+      .upsert(
+        {
+          user_account_id: request.user.id,
+          endpoint,
+          p256dh: keys.p256dh,
+          auth: keys.auth,
+          user_agent: userAgent ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_account_id,endpoint" },
+      );
+
+    if (error) {
+      app.log.error({ error }, "Failed to save push subscription");
+      return reply.internalServerError("Failed to save subscription");
+    }
+
+    return reply.send({ ok: true });
+  });
+
+  // ── Push Subscription: Unsubscribe ──────────────────────────────
+
+  app.delete<{
+    Body: { endpoint: string };
+  }>("/notifications/push/unsubscribe", async (request, reply) => {
+    await app.verifyAuth(request, reply);
+    if (!request.user) return;
+
+    const { endpoint } = request.body ?? {};
+    if (!endpoint) {
+      return reply.badRequest("Missing endpoint");
+    }
+
+    await supabase
+      .from("push_subscription")
+      .delete()
+      .eq("user_account_id", request.user.id)
+      .eq("endpoint", endpoint);
+
+    return reply.code(204).send();
+  });
+
+  // ── Push Test Endpoint (dev only) ───────────────────────────────
+
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/test/push", async (request, reply) => {
+      await app.verifyAuth(request, reply);
+      if (!request.user) return;
+
+      const body = request.body as { title?: string; body?: string } | undefined;
+      await dispatchPushToUser(supabase, request.user.id, {
+        title: body?.title ?? "Test Notification",
+        body: body?.body ?? "This is a test push notification from Town Meeting Manager.",
+        url: "/dashboard",
+      });
+
+      return reply.send({ ok: true });
+    });
+  }
 
   // ── Internal: Create Notification Event ──────────────────────────
 

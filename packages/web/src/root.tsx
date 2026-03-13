@@ -13,6 +13,9 @@ import { QueryProvider } from "@/providers/QueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { detectPortalSubdomain } from "@/lib/portal";
 import { PortalApp } from "@/portal/PortalApp";
+import { InstallBanner } from "@/components/pwa/InstallBanner";
+import { UpdateNotification } from "@/components/pwa/UpdateNotification";
+import { NotificationPermissionPrompt } from "@/components/pwa/NotificationPermissionPrompt";
 import "./app.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -23,6 +26,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        {/* PWA meta tags */}
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#1e3a5f" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="TownMeet" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
         {/* Inline script to prevent FOUC for dark mode */}
         <script
           dangerouslySetInnerHTML={{
@@ -61,6 +73,9 @@ export default function App() {
         <QueryProvider>
           <Outlet />
           <Toaster position="top-right" richColors closeButton />
+          <UpdateNotification />
+          <InstallBanner />
+          <NotificationPermissionPrompt />
         </QueryProvider>
       </AuthProvider>
     </ThemeProvider>
