@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Bell, ChevronRight, FileText } from "lucide-react";
+import { Bell, ChevronRight, ClipboardCheck, FileText } from "lucide-react";
 import type { Route } from "./+types/settings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
@@ -28,6 +28,19 @@ export default function SettingsPage() {
               <p className="text-sm font-medium">Meeting Notice Templates</p>
               <p className="text-xs text-muted-foreground">
                 Configure notice templates for each board
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </Link>
+
+        <Link to="/settings/minutes-workflow" className={LINK_CLASS}>
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Minutes Approval Workflow</p>
+              <p className="text-xs text-muted-foreground">
+                Configure how minutes are reviewed and approved
               </p>
             </div>
           </div>

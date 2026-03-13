@@ -193,6 +193,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     subdomain: town.subdomain as string | null,
     seal_url: town.seal_url as string | null,
     retention_policy_acknowledged_at: town.retention_policy_acknowledged_at as string | null,
+    minutes_workflow_configured_at: town.minutes_workflow_configured_at as string | null,
   };
 
   // staff_roles_present comes as native JSONB array from Supabase
@@ -258,6 +259,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           sealUrl={t.seal_url}
           subdomain={(t as Record<string, unknown>).subdomain as string | null}
           retentionAcknowledgedAt={t.retention_policy_acknowledged_at}
+          minutesWorkflowConfiguredAt={t.minutes_workflow_configured_at}
           onRetentionPolicyClick={() => setRetentionModalOpen(true)}
         />
       </div>

@@ -30,6 +30,7 @@ import { EditBoardDialog } from "@/components/boards/EditBoardDialog";
 import { ArchiveBoardDialog } from "@/components/boards/ArchiveBoardDialog";
 import { MemberRoster } from "@/components/boards/MemberRoster";
 import { NoticeTemplateEditor } from "@/components/boards/NoticeTemplateEditor";
+import { MinutesWorkflowEditor } from "@/components/boards/MinutesWorkflowEditor";
 import type { NoticeTemplateBlock } from "@town-meeting/shared";
 import {
   FORMALITY_LABELS,
@@ -584,19 +585,20 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
             }
           />
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Minutes Workflow</CardTitle>
-              <CardDescription>
-                Board-level minutes approval workflow settings.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Minutes workflow configuration will appear here.
-              </p>
-            </CardContent>
-          </Card>
+          <MinutesWorkflowEditor
+            boardId={b.id}
+            initialValues={{
+              minutes_consent_agenda: (board.minutes_consent_agenda as boolean) ?? false,
+              minutes_requires_second: (board.minutes_requires_second as boolean) ?? true,
+              r4_board_member_default: (board.r4_board_member_default as boolean) ?? true,
+              audio_retention_policy_override: (board.audio_retention_policy_override as string | null) ?? null,
+              auto_publish_on_approval_override: (board.auto_publish_on_approval_override as boolean | null) ?? null,
+            }}
+            townDefaults={{
+              audio_retention_policy: (town?.audio_retention_policy as string) ?? "retain_30_days",
+              auto_publish_on_approval: (town?.auto_publish_on_approval as boolean) ?? false,
+            }}
+          />
         </div>
       )}
     </div>

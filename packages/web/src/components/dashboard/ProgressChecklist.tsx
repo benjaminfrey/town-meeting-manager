@@ -128,6 +128,7 @@ interface ProgressChecklistProps {
   sealUrl: string | null;
   subdomain: string | null;
   retentionAcknowledgedAt: string | null;
+  minutesWorkflowConfiguredAt: string | null;
   onRetentionPolicyClick: () => void;
 }
 
@@ -136,6 +137,7 @@ export function ProgressChecklist({
   sealUrl,
   subdomain,
   retentionAcknowledgedAt,
+  minutesWorkflowConfiguredAt,
   onRetentionPolicyClick,
 }: ProgressChecklistProps) {
   const supabase = useSupabase();
@@ -192,6 +194,7 @@ export function ProgressChecklist({
   const hasBoardMembers = memberCount > 0;
   const hasSeal = !!sealUrl;
   const hasSubdomain = !!subdomain;
+  const hasMinutesWorkflow = !!minutesWorkflowConfiguredAt;
   const hasRetentionPolicy = !!retentionAcknowledgedAt;
 
   // Define checklist items
@@ -217,10 +220,12 @@ export function ProgressChecklist({
     },
     {
       key: "minutes-workflow",
-      label: "Configure minutes approval workflow",
+      label: hasMinutesWorkflow
+        ? "Minutes approval workflow configured"
+        : "Configure minutes approval workflow",
       description: "Set up how draft minutes are reviewed and approved",
-      completed: false,
-      linkTo: "/settings",
+      completed: hasMinutesWorkflow,
+      linkTo: "/settings/minutes-workflow",
     },
     {
       key: "town-seal",

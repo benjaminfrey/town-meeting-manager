@@ -242,6 +242,8 @@ export type Database = {
       board: {
         Row: {
           archived_at: string | null
+          audio_retention_policy_override: string | null
+          auto_publish_on_approval_override: boolean | null
           board_type: Database["public"]["Enums"]["board_type"]
           created_at: string
           district_based: boolean
@@ -253,6 +255,8 @@ export type Database = {
             | Database["public"]["Enums"]["meeting_formality"]
             | null
           member_count: number | null
+          minutes_consent_agenda: boolean
+          minutes_requires_second: boolean
           minutes_style_override:
             | Database["public"]["Enums"]["minutes_style"]
             | null
@@ -262,12 +266,15 @@ export type Database = {
           officer_election_method: string | null
           quorum_type: string | null
           quorum_value: number | null
+          r4_board_member_default: boolean
           seat_titles: Json | null
           staggered_terms: boolean
           town_id: string
         }
         Insert: {
           archived_at?: string | null
+          audio_retention_policy_override?: string | null
+          auto_publish_on_approval_override?: boolean | null
           board_type?: Database["public"]["Enums"]["board_type"]
           created_at?: string
           district_based?: boolean
@@ -279,6 +286,8 @@ export type Database = {
             | Database["public"]["Enums"]["meeting_formality"]
             | null
           member_count?: number | null
+          minutes_consent_agenda?: boolean
+          minutes_requires_second?: boolean
           minutes_style_override?:
             | Database["public"]["Enums"]["minutes_style"]
             | null
@@ -288,12 +297,15 @@ export type Database = {
           officer_election_method?: string | null
           quorum_type?: string | null
           quorum_value?: number | null
+          r4_board_member_default?: boolean
           seat_titles?: Json | null
           staggered_terms?: boolean
           town_id: string
         }
         Update: {
           archived_at?: string | null
+          audio_retention_policy_override?: string | null
+          auto_publish_on_approval_override?: boolean | null
           board_type?: Database["public"]["Enums"]["board_type"]
           created_at?: string
           district_based?: boolean
@@ -305,6 +317,8 @@ export type Database = {
             | Database["public"]["Enums"]["meeting_formality"]
             | null
           member_count?: number | null
+          minutes_consent_agenda?: boolean
+          minutes_requires_second?: boolean
           minutes_style_override?:
             | Database["public"]["Enums"]["minutes_style"]
             | null
@@ -314,6 +328,7 @@ export type Database = {
           officer_election_method?: string | null
           quorum_type?: string | null
           quorum_value?: number | null
+          r4_board_member_default?: boolean
           seat_titles?: Json | null
           staggered_terms?: boolean
           town_id?: string
@@ -919,6 +934,84 @@ export type Database = {
           },
         ]
       }
+      minutes_addendum: {
+        Row: {
+          adopting_meeting_id: string
+          adopting_motion_id: string | null
+          content_json: Json
+          created_at: string
+          created_by: string | null
+          description: string
+          html_rendered: string | null
+          id: string
+          minutes_document_id: string
+          published_at: string | null
+          town_id: string
+        }
+        Insert: {
+          adopting_meeting_id: string
+          adopting_motion_id?: string | null
+          content_json: Json
+          created_at?: string
+          created_by?: string | null
+          description: string
+          html_rendered?: string | null
+          id?: string
+          minutes_document_id: string
+          published_at?: string | null
+          town_id: string
+        }
+        Update: {
+          adopting_meeting_id?: string
+          adopting_motion_id?: string | null
+          content_json?: Json
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          html_rendered?: string | null
+          id?: string
+          minutes_document_id?: string
+          published_at?: string | null
+          town_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "minutes_addendum_adopting_meeting_id_fkey"
+            columns: ["adopting_meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meeting"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "minutes_addendum_adopting_motion_id_fkey"
+            columns: ["adopting_motion_id"]
+            isOneToOne: false
+            referencedRelation: "motion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "minutes_addendum_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_account"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "minutes_addendum_minutes_document_id_fkey"
+            columns: ["minutes_document_id"]
+            isOneToOne: false
+            referencedRelation: "minutes_document"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "minutes_addendum_town_id_fkey"
+            columns: ["town_id"]
+            isOneToOne: false
+            referencedRelation: "town"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       minutes_document: {
         Row: {
           approved_at: string | null
@@ -1399,13 +1492,17 @@ export type Database = {
       }
       town: {
         Row: {
+          audio_retention_policy: string
+          auto_publish_on_approval: boolean
           contact_name: string | null
           contact_role: string | null
           created_at: string
           id: string
           meeting_formality: Database["public"]["Enums"]["meeting_formality"]
           minutes_recorder_default: string | null
+          minutes_review_window_days: number
           minutes_style: Database["public"]["Enums"]["minutes_style"]
+          minutes_workflow_configured_at: string | null
           municipality_type: Database["public"]["Enums"]["municipality_type"]
           name: string
           population_range: string | null
@@ -1418,13 +1515,17 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          audio_retention_policy?: string
+          auto_publish_on_approval?: boolean
           contact_name?: string | null
           contact_role?: string | null
           created_at?: string
           id?: string
           meeting_formality?: Database["public"]["Enums"]["meeting_formality"]
           minutes_recorder_default?: string | null
+          minutes_review_window_days?: number
           minutes_style?: Database["public"]["Enums"]["minutes_style"]
+          minutes_workflow_configured_at?: string | null
           municipality_type?: Database["public"]["Enums"]["municipality_type"]
           name: string
           population_range?: string | null
@@ -1437,13 +1538,17 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          audio_retention_policy?: string
+          auto_publish_on_approval?: boolean
           contact_name?: string | null
           contact_role?: string | null
           created_at?: string
           id?: string
           meeting_formality?: Database["public"]["Enums"]["meeting_formality"]
           minutes_recorder_default?: string | null
+          minutes_review_window_days?: number
           minutes_style?: Database["public"]["Enums"]["minutes_style"]
+          minutes_workflow_configured_at?: string | null
           municipality_type?: Database["public"]["Enums"]["municipality_type"]
           name?: string
           population_range?: string | null

@@ -29,6 +29,7 @@ export default [
     route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
     route("settings", "routes/settings.tsx"),
     route("settings/meeting-notices", "routes/settings.meeting-notices.tsx"),
+    route("settings/minutes-workflow", "routes/settings.minutes-workflow.tsx"),
     route("settings/notifications", "routes/settings.notifications.tsx"),
     route("admin/notifications", "routes/admin.notifications.tsx"),
   ]),
