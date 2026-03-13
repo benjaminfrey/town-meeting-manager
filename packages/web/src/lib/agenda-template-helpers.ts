@@ -2,7 +2,7 @@ import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import { AgendaTemplateSectionSchema } from "@town-meeting/shared";
 
 /**
- * Parse a JSON string from the PowerSync TEXT column into typed sections.
+ * Parse a JSON string into typed sections.
  * Returns empty array if the input is null or validation fails.
  */
 export function parseSections(
@@ -31,7 +31,7 @@ export function parseSections(
 }
 
 /**
- * Serialize sections array to JSON string for PowerSync TEXT storage.
+ * Serialize sections array to JSON string.
  * Re-derives sort_order from array index. Validates each section with Zod.
  * Throws on invalid data.
  */

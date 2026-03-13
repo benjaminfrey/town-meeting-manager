@@ -4,8 +4,7 @@
  * Mocks all child panels/dialogs to isolate page-level routing,
  * status transitions, and data wiring.
  *
- * NOTE(M.09): PowerSync mocks replaced with TanStack Query + Supabase mocks.
- * Full test rewrite with proper query mocking is in M.10.
+ * Uses TanStack Query + Supabase mocks (migrated in M.09–M.10).
  */
 
 import { vi, describe, it, expect, beforeEach } from "vitest";

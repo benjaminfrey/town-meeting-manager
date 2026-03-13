@@ -1,8 +1,7 @@
 /**
  * Form management hook for wizard stages and dialogs.
  *
- * Now backed by react-hook-form + zodResolver. The PowerSync bundle
- * conflict that previously blocked react-hook-form has been removed.
+ * Backed by react-hook-form + zodResolver.
  *
  * This wrapper preserves the same external API that all 17+ consumers
  * depend on (values, errors, isValid, setValue, handleBlur, validate)

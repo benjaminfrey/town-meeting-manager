@@ -1,7 +1,7 @@
 /**
  * AddBoardDialog — dialog for creating a new board.
  *
- * Uses useWizardForm + Zod for validation. Writes to PowerSync local SQLite.
+ * Uses useWizardForm + Zod for validation. Writes via Supabase mutation.
  * Navigates to the new board's detail page on success.
  */
 

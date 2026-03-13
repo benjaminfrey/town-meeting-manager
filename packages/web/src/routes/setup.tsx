@@ -104,9 +104,8 @@ function WizardContent() {
       // Refresh session so the JWT picks up the new town_id claim
       await supabase.auth.refreshSession();
 
-      // Full page reload to reinitialize PowerSync with the new JWT
-      // (which now contains town_id for sync rules). A client-side
-      // navigate would leave PowerSync connected with the old token.
+      // Full page reload so the new JWT claims (town_id) take effect
+      // across all providers before navigating to the dashboard.
       window.location.href = "/dashboard?welcome=true";
     } catch (err) {
       setSubmitError(

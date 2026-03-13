@@ -66,13 +66,8 @@ export default defineConfig({
     // resolution is handled by srcAliasPlugin above.
     alias: {
       "@": srcDir,
-      // Migration shim: redirect removed @powersync/react to local stubs
-      // until M.06–M.09 migrate each consumer. Remove in M.11.
-      "@powersync/react": path.resolve(srcDir, "lib/powersync/react-shim.ts"),
     },
-    // Ensure all packages use the same React instance — prevents duplicate
-    // React errors when packages like @powersync/web are excluded from dep
-    // optimization and resolve their own React copy.
+    // Ensure all packages use the same React instance.
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
   },
 

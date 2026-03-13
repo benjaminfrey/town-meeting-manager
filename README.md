@@ -97,8 +97,7 @@ town-meeting-manager/
 | **Language** | TypeScript | Across all packages — shared types via monorepo |
 | **Frontend (Web)** | React 19 + React Router v7 | Framework mode with clientLoader/clientAction pattern |
 | **Styling** | Tailwind CSS v4 + shadcn/ui | CSS-first config (Rust engine), Radix UI primitives |
-| **Offline Sync** | PowerSync | SQLite on client, bidirectional sync, offline writes |
-| **Client ORM** | Kysely | Type-safe SQL via @powersync/kysely-driver |
+| **Data / Sync** | TanStack Query v5 + Supabase Realtime | Server state, caching, and live multi-device sync |
 | **Forms** | React Hook Form + Zod | Shared validation schemas in `packages/shared` |
 | **Database** | PostgreSQL + PostGIS | Self-hosted via Supabase Docker Compose |
 | **Auth** | Supabase Auth (GoTrue) | Magic links (Phase 1), email/password + MFA (later) |

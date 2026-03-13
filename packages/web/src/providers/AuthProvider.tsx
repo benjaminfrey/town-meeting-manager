@@ -116,8 +116,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           break;
 
         case "TOKEN_REFRESHED":
-          // Update the session reference — PowerSync handles this internally
-          // via fetchCredentials() which calls getSession()
+          // Update the session reference in state
           setState((prev) => ({
             ...prev,
             session: session ?? null,
