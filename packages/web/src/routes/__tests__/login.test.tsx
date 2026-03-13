@@ -134,7 +134,7 @@ describe("LoginPage", () => {
       townId: "town-1",
       role: "admin" as any,
       govTitle: null,
-      permissions: {},
+      permissions: null,
     });
 
     renderWithProviders(<LoginPage />, { route: "/login" });

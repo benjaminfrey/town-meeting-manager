@@ -65,16 +65,16 @@ describe("user factories", () => {
     expect(user.role).toBe("staff");
     expect(user.permissions).toBeDefined();
     // Town Clerk template includes meeting and agenda permissions
-    expect(user.permissions.create_meeting).toBe(true);
-    expect(user.permissions.edit_agenda).toBe(true);
+    expect(user.permissions?.global.create_meeting).toBe(true);
+    expect(user.permissions?.global.edit_agenda).toBe(true);
     // Town Clerk does NOT get admin-only permissions
-    expect(user.permissions.manage_town_settings).toBe(false);
+    expect(user.permissions?.global.manage_town_settings).toBe(false);
   });
 
-  it("createStaffUser without template has empty permissions", () => {
+  it("createStaffUser without template has null permissions", () => {
     const user = createStaffUser();
     expect(user.role).toBe("staff");
-    expect(user.permissions).toEqual({});
+    expect(user.permissions).toBeNull();
   });
 
   it("createBoardMemberUser has board_member role", () => {

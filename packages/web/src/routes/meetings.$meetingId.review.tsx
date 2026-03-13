@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/select";
 import { FutureItemsQueue } from "@/components/meeting/FutureItemsQueue";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { hasPermission, type PermissionsMatrix } from "@town-meeting/shared";
+import { hasPermission } from "@town-meeting/shared";
 import {
   buildStructuredMeetingRecord,
   downloadMeetingRecord,
@@ -311,7 +311,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     if (!currentUser) return false;
     const role = currentUser.role;
     if (role === "admin" || role === "sys_admin") return true;
-    return hasPermission((currentUser.permissions ?? {}) as unknown as PermissionsMatrix, "generate_ai_minutes");
+    return hasPermission(currentUser.permissions, "generate_ai_minutes");
   }, [currentUser]);
 
   // ─── Data merging ─────────────────────────────────────────────

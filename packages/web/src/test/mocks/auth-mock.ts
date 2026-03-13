@@ -8,11 +8,10 @@
 import React, { createContext, useContext, type ReactNode } from "react";
 import { vi } from "vitest";
 import type { CurrentUser } from "@/hooks/useCurrentUser";
-import type { UserRole } from "@town-meeting/shared";
+import type { UserRole, PermissionsMatrix } from "@town-meeting/shared";
 import {
   buildPermissionsFromTemplate,
   DEFAULT_PERMISSION_TEMPLATES,
-  type PermissionAction,
 } from "@town-meeting/shared";
 
 // ─── Mock user factories ────────────────────────────────────────────
@@ -24,7 +23,7 @@ const DEFAULT_MOCK_USER: CurrentUser = {
   townId: "town-1",
   role: "admin" as UserRole,
   govTitle: null,
-  permissions: {},
+  permissions: null, // admin bypasses all permission checks
 };
 
 /**
@@ -50,12 +49,15 @@ export function createStaffUser(
   templateName?: string,
   overrides: Partial<CurrentUser> = {},
 ): CurrentUser {
-  let permissions: Record<string, boolean> = {};
+  let permissions: PermissionsMatrix | null = null;
 
   if (templateName) {
     const template = DEFAULT_PERMISSION_TEMPLATES.find((t) => t.name === templateName);
     if (template) {
-      permissions = buildPermissionsFromTemplate(template) as Record<string, boolean>;
+      permissions = {
+        global: buildPermissionsFromTemplate(template),
+        board_overrides: [],
+      };
     }
   }
 

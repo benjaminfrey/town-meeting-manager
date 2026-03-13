@@ -12,7 +12,7 @@
 
 import { useMemo } from "react";
 import { useAuth } from "@/providers/AuthProvider";
-import type { UserRole } from "@town-meeting/shared";
+import type { UserRole, PermissionsMatrix } from "@town-meeting/shared";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -29,8 +29,8 @@ export interface CurrentUser {
   role: UserRole;
   /** Display title like "Town Clerk" — from user_account.gov_title */
   govTitle: string | null;
-  /** JSONB permissions from user_account */
-  permissions: Record<string, boolean>;
+  /** JSONB permissions matrix from user_account */
+  permissions: PermissionsMatrix | null;
 }
 
 // ─── JWT payload decoder ──────────────────────────────────────────────
@@ -42,20 +42,20 @@ interface JwtPayload {
   role?: string;
   person_id?: string;
   gov_title?: string;
-  permissions?: Record<string, boolean>;
+  permissions?: PermissionsMatrix;
   user_metadata?: {
     town_id?: string;
     role?: string;
     person_id?: string;
     gov_title?: string;
-    permissions?: Record<string, boolean>;
+    permissions?: PermissionsMatrix;
   };
   app_metadata?: {
     town_id?: string;
     role?: string;
     person_id?: string;
     gov_title?: string;
-    permissions?: Record<string, boolean>;
+    permissions?: PermissionsMatrix;
   };
 }
 
@@ -112,11 +112,16 @@ export function useCurrentUser(): CurrentUser | null {
       payload?.user_metadata?.gov_title ??
       null;
 
-    const permissions =
+    const rawPerms =
       payload?.permissions ??
       payload?.app_metadata?.permissions ??
       payload?.user_metadata?.permissions ??
-      {};
+      null;
+
+    const permissions: PermissionsMatrix | null =
+      rawPerms && typeof rawPerms === "object" && "global" in rawPerms
+        ? (rawPerms as PermissionsMatrix)
+        : null;
 
     return {
       id: user.id,
@@ -125,7 +130,7 @@ export function useCurrentUser(): CurrentUser | null {
       townId,
       role,
       govTitle,
-      permissions: typeof permissions === "object" ? permissions : {},
+      permissions,
     };
   }, [user, session, isAuthenticated]);
 }

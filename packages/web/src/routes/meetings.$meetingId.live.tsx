@@ -45,7 +45,7 @@ import { ExecSessionBanner } from "@/components/meeting/ExecSessionBanner";
 import { ExitExecutiveSessionDialog } from "@/components/meeting/ExitExecutiveSessionDialog";
 import { AdjournmentControls } from "@/components/meeting/AdjournmentControls";
 import { MotionCaptureDialog, type MotionDialogMode } from "@/components/meeting/MotionCaptureDialog";
-import { hasPermission, type PermissionsMatrix } from "@town-meeting/shared";
+import { hasPermission } from "@town-meeting/shared";
 import { cn } from "@/lib/utils";
 
 // ─── Route Loader ─────────────────────────────────────────────────
@@ -164,7 +164,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   // ─── Permission check ─────────────────────────────────────────
   const canRunMeeting = currentUser
     ? hasPermission(
-        currentUser.permissions as unknown as PermissionsMatrix,
+        currentUser.permissions,
         "start_run_meeting",
         undefined,
         currentUser.role,
