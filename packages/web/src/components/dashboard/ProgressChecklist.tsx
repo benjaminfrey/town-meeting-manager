@@ -2,8 +2,8 @@
  * ProgressChecklist — post-wizard setup completion tracker.
  *
  * Shows a card on the dashboard with checklist items for completing
- * town setup. Items are checked off as completed via reactive PowerSync
- * queries. Required items are tagged. Hides when all items are complete.
+ * town setup. Items are checked off as completed via TanStack Query.
+ * Required items are tagged. Hides when all items are complete.
  *
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md — Progress Checklist
  */
@@ -126,6 +126,7 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 interface ProgressChecklistProps {
   townId: string;
   sealUrl: string | null;
+  subdomain: string | null;
   retentionAcknowledgedAt: string | null;
   onRetentionPolicyClick: () => void;
 }
@@ -133,6 +134,7 @@ interface ProgressChecklistProps {
 export function ProgressChecklist({
   townId,
   sealUrl,
+  subdomain,
   retentionAcknowledgedAt,
   onRetentionPolicyClick,
 }: ProgressChecklistProps) {
@@ -166,6 +168,7 @@ export function ProgressChecklist({
 
   const hasBoardMembers = memberCount > 0;
   const hasSeal = !!sealUrl;
+  const hasSubdomain = !!subdomain;
   const hasRetentionPolicy = !!retentionAcknowledgedAt;
 
   // Define checklist items
@@ -203,9 +206,9 @@ export function ProgressChecklist({
     },
     {
       key: "portal-subdomain",
-      label: "Set public portal subdomain",
+      label: hasSubdomain ? `Public portal subdomain set (${subdomain})` : "Set public portal subdomain",
       description: "Choose your town's public URL",
-      completed: false,
+      completed: hasSubdomain,
       linkTo: "/settings",
     },
     {

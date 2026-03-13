@@ -256,6 +256,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         <ProgressChecklist
           townId={t.id}
           sealUrl={t.seal_url}
+          subdomain={(t as Record<string, unknown>).subdomain as string | null}
           retentionAcknowledgedAt={t.retention_policy_acknowledged_at}
           onRetentionPolicyClick={() => setRetentionModalOpen(true)}
         />
