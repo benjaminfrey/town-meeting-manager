@@ -29,6 +29,9 @@ export default [
     ),
     route("boards/:boardId/meetings", "routes/boards.$boardId.meetings.tsx"),
 
+    route("members", "routes/members.tsx"),
+    route("templates", "routes/templates.tsx"),
+
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
     // Live operator screen — full-screen focus mode, no sub-nav header
     route("meetings/:meetingId/live", "routes/meetings.$meetingId.live.tsx"),

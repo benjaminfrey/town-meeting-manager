@@ -14,6 +14,8 @@ import {
   Home as HomeIcon,
   CalendarDays,
   List,
+  Users,
+  FileText,
   Settings,
   Menu,
   X,
@@ -44,6 +46,8 @@ const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: HomeIcon, exact: true },
   { label: "Meetings", href: "/meetings", icon: CalendarDays },
   { label: "Boards", href: "/boards", icon: List },
+  { label: "Members", href: "/members", icon: Users },
+  { label: "Templates", href: "/templates", icon: FileText },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
