@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { ErrorBoundary } from "react-error-boundary";
 import { Clock, AlertTriangle } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.live";
@@ -1082,6 +1083,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItems.byMeeting(meetingId),
       });
+
+      toast.success("Meeting adjourned");
 
       // 6. Navigate to review page
       void navigate(`/meetings/${meetingId}/review`);

@@ -8,6 +8,7 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
@@ -124,6 +125,9 @@ export function AttendancePanel({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+    },
+    onError: () => {
+      toast.error("Couldn't update attendance — please try again.");
     },
   });
 
