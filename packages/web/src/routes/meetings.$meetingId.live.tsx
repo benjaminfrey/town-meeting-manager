@@ -1225,9 +1225,12 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             </div>
           )}
           {quorum && !quorum.hasQuorum && (
-            <Badge variant="destructive" className="text-xs">
+            <Badge
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400"
+            >
               <AlertTriangle className="mr-1 h-3 w-3" />
-              No Quorum
+              No quorum
             </Badge>
           )}
           {isPostExecSession && (
