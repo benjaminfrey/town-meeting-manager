@@ -39,17 +39,17 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       {/* Skip to content */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-slate-900 focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground focus:shadow-lg focus:outline-none"
       >
         Skip to content
       </a>
 
       {/* Header */}
-      <header className="bg-slate-800 text-white">
+      <header className="border-b bg-card">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-4 sm:px-6">
           {sealUrl ? (
             <img
@@ -58,15 +58,15 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               className="h-12 w-12 rounded-full object-cover"
             />
           ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-700">
-              <Building className="h-6 w-6 text-slate-300" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Building className="h-6 w-6 text-muted-foreground" />
             </div>
           )}
           <div className="flex-1">
             <h1 className="text-lg font-bold leading-tight sm:text-xl">
               {fullName}
             </h1>
-            <p className="text-sm text-slate-300">Municipal Government</p>
+            <p className="text-sm text-muted-foreground">Municipal Government</p>
           </div>
 
           {/* Desktop search */}
@@ -77,13 +77,13 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             className="hidden sm:flex sm:items-center"
           >
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search agendas and minutes..."
-                className="w-full max-w-xs rounded-md border border-slate-600 bg-slate-700 py-1.5 pl-9 pr-3 text-sm text-white placeholder-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full max-w-xs rounded-md border bg-background py-1.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           </form>
@@ -92,7 +92,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setShowMobileSearch(!showMobileSearch)}
-            className="inline-flex items-center justify-center rounded-md p-2 text-slate-300 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400 sm:hidden"
+            className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring sm:hidden"
             aria-label={showMobileSearch ? "Close search" : "Open search"}
           >
             {showMobileSearch ? (
@@ -105,21 +105,21 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
 
         {/* Mobile search bar (expanded) */}
         {showMobileSearch && (
-          <div className="border-t border-slate-700 px-4 py-3 sm:hidden">
+          <div className="border-t px-4 py-3 sm:hidden">
             <form
               role="search"
               aria-label="Search portal"
               onSubmit={handleSearch}
             >
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search agendas and minutes..."
                   autoFocus
-                  className="w-full rounded-md border border-slate-600 bg-slate-700 py-2 pl-10 pr-3 text-sm text-white placeholder-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  className="w-full rounded-md border bg-background py-2 pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
             </form>
@@ -128,7 +128,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Navigation */}
-      <nav className="bg-slate-700" aria-label="Main navigation">
+      <nav className="border-b bg-card" aria-label="Main navigation">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           {/* Desktop nav */}
           <ul className="hidden sm:flex sm:gap-1">
@@ -136,7 +136,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               <li key={item.href}>
                 <a
                   href={item.href}
-                  className="inline-block px-4 py-2.5 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                  className="inline-block border-b-2 border-transparent px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
                 >
                   {item.label}
                 </a>
@@ -149,7 +149,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setMobileNavOpen(!mobileNavOpen)}
-              className="inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-slate-200 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400"
+              className="inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
               aria-expanded={mobileNavOpen}
               aria-controls="mobile-nav"
             >
@@ -164,15 +164,12 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
 
           {/* Mobile nav menu */}
           {mobileNavOpen && (
-            <ul
-              id="mobile-nav"
-              className="border-t border-slate-600 pb-2 sm:hidden"
-            >
+            <ul id="mobile-nav" className="border-t pb-2 sm:hidden">
               {NAV_ITEMS.map((item) => (
                 <li key={item.href}>
                   <a
                     href={item.href}
-                    className="block px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                    className="block px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
                     onClick={() => setMobileNavOpen(false)}
                   >
                     {item.label}
@@ -185,19 +182,22 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {/* Main content */}
-      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+      <main
+        id="main-content"
+        className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8"
+      >
         {children}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-800 text-gray-300">
+      <footer className="border-t bg-muted text-muted-foreground">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium text-white">{fullName}</p>
+              <p className="font-medium text-foreground">{fullName}</p>
               <p className="mt-1 text-sm">
                 Contact: {contactRole}
-                {contactName && ` \u00B7 ${contactName}`}
+                {contactName && ` · ${contactName}`}
               </p>
             </div>
             <div className="text-sm">
@@ -205,14 +205,14 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
                 Powered by{" "}
                 <a
                   href="https://townmeetingmanager.com"
-                  className="underline hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="underline hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   Town Meeting Manager
                 </a>
               </p>
               <a
                 href="/accessibility"
-                className="mt-1 inline-block underline hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="mt-1 inline-block underline hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 Accessibility Statement
               </a>
