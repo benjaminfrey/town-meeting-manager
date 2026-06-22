@@ -29,7 +29,8 @@ export default [
     ),
     route("boards/:boardId/meetings", "routes/boards.$boardId.meetings.tsx"),
 
-    route("members", "routes/members.tsx"),
+    route("people", "routes/people.tsx"),
+    route("members", "routes/redirect-people.tsx"),
     route("templates", "routes/templates.tsx"),
 
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
