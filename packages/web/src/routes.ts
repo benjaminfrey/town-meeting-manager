@@ -40,6 +40,7 @@ export default [
     ]),
 
     route("settings", "routes/settings.tsx"),
+    route("settings/town", "routes/settings.town.tsx"),
     route("settings/meeting-notices", "routes/settings.meeting-notices.tsx"),
     route("settings/minutes-workflow", "routes/settings.minutes-workflow.tsx"),
     route("settings/notifications", "routes/settings.notifications.tsx"),
