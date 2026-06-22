@@ -12,6 +12,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import {
@@ -81,6 +82,7 @@ export function RecusalDialog({
         void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(activeMotionId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
       }
+      toast.success("Recusal recorded");
       onRecusalRecorded(boardMemberId, trimmedReason, scope);
       onOpenChange(false);
       setReason("");

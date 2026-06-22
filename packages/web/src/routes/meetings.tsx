@@ -268,7 +268,7 @@ export default function MeetingsPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col px-6 lg:px-10">
+    <div className="flex h-full flex-col px-6 lg:px-10">
       {/* Kanban board */}
       {isLoading ? (
         <div className="py-12 px-4">
