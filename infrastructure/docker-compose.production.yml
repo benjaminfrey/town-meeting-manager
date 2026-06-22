@@ -1,0 +1,336 @@
+# ─────────────────────────────────────────────────────────────────────
+# Town Meeting Manager — Production Stack (self-hosted)
+#
+# Mirrors the development Supabase stack in docker/docker-compose.yml
+# (same image versions, same volume config) and adds the Fastify API and
+# an Nginx reverse proxy that is the ONLY service published to the host.
+#
+# Run from the repository root:
+#   docker compose --env-file .env.production \
+#     -f infrastructure/docker-compose.production.yml up -d
+#
+# Relative paths below resolve from this file's directory (infrastructure/):
+#   ./nginx/...            → infrastructure/nginx/...
+#   ../docker/volumes/...  → the existing, tested Supabase config
+#
+# Notes / deliberate deviations from the 15.02 plan, grounded in the code:
+#  - POSTGRES_DB is `postgres` (NOT town_meeting_manager): the supabase/postgres
+#    image initializes its roles/schemas in the `postgres` database, and every
+#    migration in supabase/migrations + the app assume it. Renaming it breaks
+#    self-hosted Supabase.
+#  - There is no separate Puppeteer container: packages/api/src/services/puppeteer.ts
+#    launches Puppeteer in-process, so Chromium lives in the api image and PDF
+#    memory is bounded by the api service's mem_limit + NODE_OPTIONS.
+#  - Studio is locked down by Nginx (studio.* host, IP allowlist); the public
+#    Supabase API the browser talks to is Kong on the supabase.* host.
+# ─────────────────────────────────────────────────────────────────────
+
+name: town-meeting-prod
+
+x-restart: &restart always
+
+networks:
+  # Single user-defined bridge. Only nginx publishes ports to the host;
+  # every other service is reachable only on this internal network.
+  tmm:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  storage-data:
+
+services:
+  # ─── PostgreSQL + PostGIS ──────────────────────────────────────────
+  db:
+    container_name: tmm-db
+    image: supabase/postgres:15.8.1.085
+    restart: *restart
+    networks: [tmm]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c log_min_messages=fatal
+      -c wal_level=logical
+      -c max_replication_slots=4
+      -c max_wal_senders=4
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:Z
+      - ../docker/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro,Z
+      - ../docker/volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro,Z
+      - ../docker/scripts/init.sql:/docker-entrypoint-initdb.d/init-scripts/100-project-init.sql:ro,Z
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: 5432
+      POSTGRES_PORT: 5432
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.production}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+
+  # ─── Kong API Gateway (the public Supabase API the browser talks to) ─
+  kong:
+    container_name: tmm-kong
+    image: kong:2.8.1
+    restart: *restart
+    networks: [tmm]
+    depends_on:
+      auth: { condition: service_healthy }
+      rest: { condition: service_started }
+      realtime: { condition: service_started }
+      storage: { condition: service_healthy }
+    volumes:
+      - ../docker/volumes/api/kong.yml:/home/kong/temp.yml:ro,z
+    entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${ANON_KEY:?set ANON_KEY in .env.production}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY in .env.production}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-supabase}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set a strong DASHBOARD_PASSWORD}
+
+  # ─── GoTrue (Auth) ─────────────────────────────────────────────────
+  auth:
+    container_name: tmm-auth
+    image: supabase/gotrue:v2.186.0
+    restart: *restart
+    networks: [tmm]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:9999/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      db: { condition: service_healthy }
+    volumes:
+      - ../docker/templates:/templates:ro
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL:?set SUPABASE_PUBLIC_URL (e.g. https://supabase.townmeetingmanager.com)}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+
+      GOTRUE_SITE_URL: ${SITE_URL:?set SITE_URL (e.g. https://app.townmeetingmanager.com)}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      # Production: confirm email addresses (never autoconfirm).
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+
+      # Real SMTP relay (e.g. Postmark: smtp.postmarkapp.com:587, user=pass=server token).
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:?set SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:?set SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Town Meeting Manager}
+
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+      # Custom access-token hook — injects town_id, role, person_id into the JWT.
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
+
+      GOTRUE_MAILER_TEMPLATES_INVITE: "/templates/invite.html"
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: "/templates/confirmation.html"
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: "/templates/recovery.html"
+
+  # ─── PostgREST ─────────────────────────────────────────────────────
+  rest:
+    container_name: tmm-rest
+    image: postgrest/postgrest:v14.5
+    restart: *restart
+    networks: [tmm]
+    depends_on:
+      db: { condition: service_healthy }
+    command: postgrest
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+
+  # ─── Realtime ──────────────────────────────────────────────────────
+  realtime:
+    container_name: tmm-realtime
+    image: supabase/realtime:v2.76.5
+    restart: *restart
+    networks: [tmm]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: ${REALTIME_ENC_KEY:-subaserealtime00}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE (openssl rand -base64 48)}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: 10000
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+
+  # ─── Storage ───────────────────────────────────────────────────────
+  storage:
+    container_name: tmm-storage
+    image: supabase/storage-api:v1.37.8
+    restart: *restart
+    networks: [tmm]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      timeout: 5s
+      interval: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_started }
+    volumes:
+      - storage-data:/var/lib/storage:z
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: local
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:-stub}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:-stub}
+
+  # ─── Postgres Meta (used by Studio) ────────────────────────────────
+  meta:
+    container_name: tmm-meta
+    image: supabase/postgres-meta:v0.95.2
+    restart: *restart
+    networks: [tmm]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # ─── Studio (admin UI — reachable only via the IP-restricted Nginx host) ─
+  studio:
+    container_name: tmm-studio
+    image: supabase/studio:2026.02.16-sha-26c615c
+    restart: unless-stopped
+    networks: [tmm]
+    depends_on:
+      meta: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/platform/profile', (r) => { if (r.statusCode !== 200) throw new Error(r.statusCode) })"]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+    environment:
+      HOSTNAME: "::"
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-Town Meeting Manager}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-Town Meeting Manager}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+
+  # ─── Fastify API (document generation, notifications, portal, invites) ─
+  # Puppeteer runs in-process; Chromium ships in the image (see packages/api/Dockerfile).
+  api:
+    container_name: tmm-api
+    build:
+      context: ..
+      dockerfile: packages/api/Dockerfile
+    restart: *restart
+    networks: [tmm]
+    depends_on:
+      db: { condition: service_healthy }
+      kong: { condition: service_started }
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      # Internal Supabase endpoint (Kong on the private network — no TLS hop needed).
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      CORS_ORIGIN: ${SITE_URL}
+      APP_URL: ${SITE_URL}
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET (HMAC key for unsubscribe tokens)}
+      POSTMARK_SERVER_TOKEN: ${POSTMARK_SERVER_TOKEN:?set POSTMARK_SERVER_TOKEN}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?set VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?set VAPID_PRIVATE_KEY}
+      VAPID_CONTACT_EMAIL: ${VAPID_CONTACT_EMAIL:-mailto:admin@townmeetingmanager.com}
+
+  # ─── Nginx (the only host-published service) ───────────────────────
+  nginx:
+    container_name: tmm-nginx
+    image: nginx:1.27-alpine
+    restart: *restart
+    networks: [tmm]
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      api: { condition: service_started }
+      kong: { condition: service_started }
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Static web build (deploy.sh copies packages/web/build/client/* here).
+      - ${WEB_ROOT:-/var/www/townmeetingmanager/web}:/var/www/web:ro
+      # Wildcard TLS certificate from certbot on the host.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -41,8 +41,9 @@ COPY tsconfig.base.json ./
 # Build shared package first, then API
 RUN pnpm --filter @town-meeting/shared build && pnpm --filter @town-meeting/api build
 
-# Set Puppeteer to use installed Chrome
+# Bound Puppeteer/Node memory (PDF generation) and run in production mode.
 ENV NODE_OPTIONS="--max-old-space-size=512"
+ENV NODE_ENV=production
 
 EXPOSE 3001
 

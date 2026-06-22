@@ -38,7 +38,26 @@ export async function buildServer() {
   await app.register(authPlugin);
 
   // ─── Routes ──────────────────────────────────────────────────────
-  app.get("/api/health", async () => ({ status: "ok" }));
+  // Health check — verifies database connectivity so orchestrators and the
+  // monitoring script can detect a degraded API. Returns 503 if the DB is
+  // unreachable.
+  app.get("/api/health", async (_request, reply) => {
+    let database: "connected" | "disconnected" = "disconnected";
+    try {
+      const { error } = await app.supabase
+        .from("town")
+        .select("id", { head: true, count: "exact" })
+        .limit(1);
+      if (!error) database = "connected";
+    } catch {
+      database = "disconnected";
+    }
+    return reply.code(database === "connected" ? 200 : 503).send({
+      status: database === "connected" ? "ok" : "degraded",
+      uptime: Math.round(process.uptime()),
+      database,
+    });
+  });
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });
