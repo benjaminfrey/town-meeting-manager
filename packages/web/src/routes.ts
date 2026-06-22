@@ -1,32 +1,40 @@
 import { type RouteConfig, index, layout, route } from "@react-router/dev/routes";
 
 export default [
-  // Auth routes — minimal layout (no sidebar)
+  // Auth — centered card layout
   layout("layouts/AuthLayout.tsx", [
     route("login", "routes/login.tsx"),
     route("signup", "routes/signup.tsx"),
     route("forgot-password", "routes/forgot-password.tsx"),
   ]),
 
-  // Onboarding wizard — standalone layout (wider than auth, no sidebar)
+  // Onboarding wizard — standalone, full-screen
   route("setup", "routes/setup.tsx"),
 
-  // App routes — full layout with sidebar
-  layout("layouts/RootLayout.tsx", [
-    // Index route redirects to /dashboard
+  // Authenticated application — ONE shell (sidebar + top bar + command palette)
+  layout("layouts/AppShell.tsx", [
     index("routes/home.tsx"),
-    route("dashboard", "routes/dashboard.tsx"),
+    route("meetings", "routes/meetings.tsx"), // Kanban board (a view, not the landing)
+
+    // Back-compat redirects to the canonical home
+    route("home", "routes/redirect-home.tsx", { id: "redirect-home" }),
+    route("dashboard", "routes/redirect-home.tsx", { id: "redirect-dashboard" }),
+
     route("boards", "routes/boards.tsx"),
     route("boards/:boardId", "routes/boards.$boardId.tsx"),
     route("boards/:boardId/templates", "routes/boards.$boardId.templates.tsx"),
-    route("boards/:boardId/templates/:templateId/edit", "routes/boards.$boardId.templates.$templateId.edit.tsx"),
+    route(
+      "boards/:boardId/templates/:templateId/edit",
+      "routes/boards.$boardId.templates.$templateId.edit.tsx",
+    ),
     route("boards/:boardId/meetings", "routes/boards.$boardId.meetings.tsx"),
-    route("meetings", "routes/meetings.tsx"),
+
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
     route("meetings/:meetingId/agenda", "routes/meetings.$meetingId.agenda.tsx"),
     route("meetings/:meetingId/live", "routes/meetings.$meetingId.live.tsx"),
     route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
     route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
+
     route("settings", "routes/settings.tsx"),
     route("settings/meeting-notices", "routes/settings.meeting-notices.tsx"),
     route("settings/minutes-workflow", "routes/settings.minutes-workflow.tsx"),
@@ -34,6 +42,6 @@ export default [
     route("admin/notifications", "routes/admin.notifications.tsx"),
   ]),
 
-  // Standalone routes — no layout
+  // Standalone — no shell
   route("invite/accept", "routes/invite.accept.tsx"),
 ] satisfies RouteConfig;
