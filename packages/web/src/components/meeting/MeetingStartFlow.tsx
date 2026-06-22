@@ -20,6 +20,7 @@ import { Check, X, AlertTriangle, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface MemberInfo {
   boardMemberId: string;
@@ -212,6 +213,11 @@ export function MeetingStartFlow({
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId) });
+      toast.success("Meeting called to order");
+    },
+    onError: (err) => {
+      console.error("Failed to start meeting:", err);
+      toast.error("Couldn't start the meeting — please try again.");
     },
   });
 

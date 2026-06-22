@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import {
@@ -45,10 +46,12 @@ export function ExitExecutiveSessionDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.executiveSessions.detail(execSessionId) });
+      toast.success("Returned to open session");
       setStep("post_actions");
     },
     onError: (err) => {
       console.error("Failed to exit executive session:", err);
+      toast.error("Couldn't return to open session — please try again.");
     },
   });
 

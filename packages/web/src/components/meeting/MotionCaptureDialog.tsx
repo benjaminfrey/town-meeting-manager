@@ -13,6 +13,7 @@
 
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { AlertTriangle } from "lucide-react";
@@ -172,6 +173,7 @@ export function MotionCaptureDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byItem(agendaItemId) });
+      toast.success("Motion recorded");
       onOpenChange(false);
     },
     onError: (err) => {

@@ -13,6 +13,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import {
   calculateVoteResult,
   formatVoteCompact,
@@ -238,10 +239,12 @@ export function VotePanel({
       void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(motionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+      toast.success("Vote recorded");
       onComplete();
     },
     onError: (err) => {
       console.error("Failed to record vote:", err);
+      toast.error("Couldn't record the vote — please try again.");
     },
   });
 
