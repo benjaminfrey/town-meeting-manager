@@ -30,10 +30,14 @@ export default [
     route("boards/:boardId/meetings", "routes/boards.$boardId.meetings.tsx"),
 
     route("meetings/:meetingId", "routes/meetings.$meetingId.tsx"),
-    route("meetings/:meetingId/agenda", "routes/meetings.$meetingId.agenda.tsx"),
+    // Live operator screen — full-screen focus mode, no sub-nav header
     route("meetings/:meetingId/live", "routes/meetings.$meetingId.live.tsx"),
-    route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
-    route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
+    // Document screens share the meeting sub-nav header (board · status · tabs)
+    layout("layouts/MeetingLayout.tsx", [
+      route("meetings/:meetingId/agenda", "routes/meetings.$meetingId.agenda.tsx"),
+      route("meetings/:meetingId/review", "routes/meetings.$meetingId.review.tsx"),
+      route("meetings/:meetingId/minutes", "routes/meetings.$meetingId.minutes.tsx"),
+    ]),
 
     route("settings", "routes/settings.tsx"),
     route("settings/meeting-notices", "routes/settings.meeting-notices.tsx"),

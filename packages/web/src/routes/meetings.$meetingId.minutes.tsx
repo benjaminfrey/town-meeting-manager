@@ -615,14 +615,6 @@ export default function MinutesReviewPage({
   if (!minutesDoc) {
     return (
       <div className="mx-auto max-w-4xl space-y-6 p-6">
-        {/* Breadcrumb */}
-        <Breadcrumb
-          boardId={boardId}
-          boardName={boardName}
-          meetingId={meetingId}
-          meetingDate={formattedDate}
-        />
-
         <Card className="mx-auto max-w-md text-center">
           <CardHeader>
             <FileText className="mx-auto mb-2 h-12 w-12 text-muted-foreground" />
@@ -652,13 +644,6 @@ export default function MinutesReviewPage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-      {/* Breadcrumb */}
-      <Breadcrumb
-        boardId={boardId}
-        boardName={boardName}
-        meetingId={meetingId}
-        meetingDate={formattedDate}
-      />
 
       {/* Header section */}
       <div className="flex items-start justify-between">
@@ -966,48 +951,6 @@ export default function MinutesReviewPage({
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-// ─── Breadcrumb ──────────────────────────────────────────────────
-
-function Breadcrumb({
-  boardId,
-  boardName,
-  meetingId,
-  meetingDate,
-}: {
-  boardId: string;
-  boardName: string;
-  meetingId: string;
-  meetingDate: string;
-}) {
-  return (
-    <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
-      <Link to="/" className="hover:text-foreground hover:underline">
-        Dashboard
-      </Link>
-      <span>/</span>
-      <Link to="/boards" className="hover:text-foreground hover:underline">
-        Boards
-      </Link>
-      <span>/</span>
-      <Link
-        to={`/boards/${boardId}`}
-        className="hover:text-foreground hover:underline"
-      >
-        {boardName || "Board"}
-      </Link>
-      <span>/</span>
-      <Link
-        to={`/meetings/${meetingId}/review`}
-        className="hover:text-foreground hover:underline"
-      >
-        {meetingDate || "Meeting"}
-      </Link>
-      <span>/</span>
-      <span className="font-medium text-foreground">Minutes</span>
-    </nav>
   );
 }
 

@@ -25,9 +25,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  ChevronRight,
-  Eye,
+import {  Eye,
   FileText,
   GripVertical,
   Loader2,
@@ -476,36 +474,6 @@ export default function AgendaBuilderPage({
         meetingId={meetingId}
         sections={sections}
       />
-
-      {/* Breadcrumb */}
-      <nav className="mb-4 flex items-center gap-1 text-sm text-muted-foreground">
-        <Link
-          to="/dashboard"
-          className="hover:text-foreground transition-colors"
-        >
-          Dashboard
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link to="/boards" className="hover:text-foreground transition-colors">
-          Boards
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link
-          to={`/boards/${boardId}`}
-          className="hover:text-foreground transition-colors"
-        >
-          {boardName}
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link
-          to={`/boards/${boardId}/meetings`}
-          className="hover:text-foreground transition-colors"
-        >
-          Meetings
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <span className="text-foreground font-medium">Agenda</span>
-      </nav>
 
       {/* Header */}
       <div className="mb-6 flex items-start justify-between">

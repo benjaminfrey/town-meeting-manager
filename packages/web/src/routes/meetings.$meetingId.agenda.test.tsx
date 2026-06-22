@@ -432,7 +432,7 @@ describe("AgendaBuilderPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders breadcrumb with board name and navigation links", () => {
+  it("no longer renders an inline breadcrumb (moved to the shared meeting header)", () => {
     setupQueryMocks({
       board: createMockBoard({ id: "board-1", name: "Select Board" }),
     });
@@ -441,18 +441,9 @@ describe("AgendaBuilderPage", () => {
       <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
     );
 
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
-    expect(screen.getByText("Boards")).toBeInTheDocument();
-    expect(screen.getByText("Select Board")).toBeInTheDocument();
-    expect(screen.getByText("Meetings")).toBeInTheDocument();
-    expect(screen.getByText("Agenda")).toBeInTheDocument();
-
-    // Verify links point to correct routes
-    const boardLink = screen.getByText("Select Board").closest("a");
-    expect(boardLink).toHaveAttribute("href", "/boards/board-1");
-
-    const meetingsLink = screen.getByText("Meetings").closest("a");
-    expect(meetingsLink).toHaveAttribute("href", "/boards/board-1/meetings");
+    // Navigation context now lives in MeetingSubnavHeader (rendered by
+    // MeetingLayout), so the page itself no longer renders the old breadcrumb.
+    expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
   });
 
   it("shows section_type from template in the mocked section", () => {
