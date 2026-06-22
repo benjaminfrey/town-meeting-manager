@@ -23,18 +23,18 @@ function formatDate(date: string): string {
 
 function SkeletonCard() {
   return (
-    <div className="border-b border-gray-200 py-4 animate-pulse">
+    <div className="border-b border-border py-4 animate-pulse">
       <div className="flex items-center gap-2 mb-2">
-        <div className="h-5 w-16 rounded-full bg-gray-200" />
-        <div className="h-4 w-32 rounded bg-gray-200" />
-        <div className="h-4 w-28 rounded bg-gray-200" />
+        <div className="h-5 w-16 rounded-full bg-muted" />
+        <div className="h-4 w-32 rounded bg-muted" />
+        <div className="h-4 w-28 rounded bg-muted" />
       </div>
-      <div className="h-5 w-3/4 rounded bg-gray-200 mb-2" />
+      <div className="h-5 w-3/4 rounded bg-muted mb-2" />
       <div className="space-y-1.5">
-        <div className="h-3.5 w-full rounded bg-gray-100" />
-        <div className="h-3.5 w-5/6 rounded bg-gray-100" />
+        <div className="h-3.5 w-full rounded bg-muted" />
+        <div className="h-3.5 w-5/6 rounded bg-muted" />
       </div>
-      <div className="h-4 w-24 rounded bg-gray-200 mt-2" />
+      <div className="h-4 w-24 rounded bg-muted mt-2" />
     </div>
   );
 }
@@ -50,7 +50,7 @@ function ResultCard({ result }: { result: PortalSearchResult }) {
     : `/meetings/${result.meeting_id}/agenda`;
 
   return (
-    <article className="border-b border-gray-200 py-4">
+    <article className="border-b border-border py-4">
       <div className="flex flex-wrap items-center gap-2 mb-1">
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${badgeClass}`}
@@ -58,22 +58,22 @@ function ResultCard({ result }: { result: PortalSearchResult }) {
           <FileText className="h-3 w-3" aria-hidden="true" />
           {label}
         </span>
-        <span className="text-sm text-gray-500">{result.board_name}</span>
-        <span className="text-sm text-gray-400" aria-hidden="true">
+        <span className="text-sm text-muted-foreground">{result.board_name}</span>
+        <span className="text-sm text-muted-foreground" aria-hidden="true">
           &middot;
         </span>
-        <span className="text-sm text-gray-500">
+        <span className="text-sm text-muted-foreground">
           {formatDate(result.meeting_date)}
         </span>
       </div>
 
-      <h3 className="text-base font-semibold text-slate-900 mb-1">
+      <h3 className="text-base font-semibold text-foreground mb-1">
         {result.title}
       </h3>
 
       {result.snippet && (
         <p
-          className="search-snippet text-sm text-gray-600 mb-1.5"
+          className="search-snippet text-sm text-muted-foreground mb-1.5"
           dangerouslySetInnerHTML={{ __html: result.snippet }}
         />
       )}
@@ -320,15 +320,15 @@ export default function SearchResults() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder="Search agendas and minutes..."
-            className="w-full rounded-lg border-2 border-slate-300 px-4 py-3 pl-11 text-lg text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1"
+            className="w-full rounded-lg border-2 border-border px-4 py-3 pl-11 text-lg text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
           />
           <Search
-            className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+            className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
           />
           <button
             type="submit"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
             Search
           </button>
@@ -344,10 +344,10 @@ export default function SearchResults() {
               key={btn.value}
               type="button"
               onClick={() => handleFilterChange({ type: btn.value })}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 ${
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
                 contentType === btn.value
-                  ? "bg-slate-700 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-foreground hover:bg-muted"
               }`}
               aria-pressed={contentType === btn.value}
             >
@@ -358,14 +358,14 @@ export default function SearchResults() {
 
         {/* Board filter */}
         <div className="flex items-center gap-2">
-          <label htmlFor="board-filter" className="text-sm font-medium text-slate-700">
+          <label htmlFor="board-filter" className="text-sm font-medium text-foreground">
             Board:
           </label>
           <select
             id="board-filter"
             value={boardFilter}
             onChange={(e) => handleFilterChange({ board: e.target.value })}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground shadow-sm focus:border-border focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">All Boards</option>
             {boards.map((board) => (
@@ -378,7 +378,7 @@ export default function SearchResults() {
 
         {/* Date range */}
         <div className="flex items-center gap-2">
-          <label htmlFor="date-from" className="text-sm font-medium text-slate-700">
+          <label htmlFor="date-from" className="text-sm font-medium text-foreground">
             From:
           </label>
           <input
@@ -386,11 +386,11 @@ export default function SearchResults() {
             type="date"
             value={fromDate}
             onChange={(e) => handleFilterChange({ from: e.target.value })}
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground shadow-sm focus:border-border focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
         <div className="flex items-center gap-2">
-          <label htmlFor="date-to" className="text-sm font-medium text-slate-700">
+          <label htmlFor="date-to" className="text-sm font-medium text-foreground">
             To:
           </label>
           <input
@@ -398,7 +398,7 @@ export default function SearchResults() {
             type="date"
             value={toDate}
             onChange={(e) => handleFilterChange({ to: e.target.value })}
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground shadow-sm focus:border-border focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       </div>
@@ -412,9 +412,9 @@ export default function SearchResults() {
 
       {/* No query state */}
       {!query.trim() && !loading && (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <Search className="mx-auto mb-3 h-10 w-10 text-slate-300" aria-hidden="true" />
-          <p className="text-slate-500">
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
+          <Search className="mx-auto mb-3 h-10 w-10 text-muted-foreground" aria-hidden="true" />
+          <p className="text-muted-foreground">
             Enter a search term to find agendas and minutes.
           </p>
         </div>
@@ -433,15 +433,15 @@ export default function SearchResults() {
       {!loading && results && query.trim() && (
         <>
           {results.results.length === 0 ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
-              <p className="text-slate-500">
+            <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
+              <p className="text-muted-foreground">
                 No results found for &ldquo;{query}&rdquo;. Try different search
                 terms or adjust your filters.
               </p>
             </div>
           ) : (
             <>
-              <p className="mb-4 text-sm text-slate-500">
+              <p className="mb-4 text-sm text-muted-foreground">
                 {results.total} result{results.total !== 1 ? "s" : ""} found
               </p>
 
@@ -461,13 +461,13 @@ export default function SearchResults() {
                     type="button"
                     onClick={() => handlePageChange(page - 1)}
                     disabled={page <= 1}
-                    className="inline-flex items-center gap-1 rounded border border-gray-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-sm font-medium text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                     Previous
                   </button>
 
-                  <span className="text-sm text-slate-600">
+                  <span className="text-sm text-muted-foreground">
                     Page {results.page} of {results.pages}
                   </span>
 
@@ -475,7 +475,7 @@ export default function SearchResults() {
                     type="button"
                     onClick={() => handlePageChange(page + 1)}
                     disabled={page >= results.pages}
-                    className="inline-flex items-center gap-1 rounded border border-gray-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-sm font-medium text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Next
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />

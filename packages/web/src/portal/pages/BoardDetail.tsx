@@ -24,7 +24,7 @@ function formatDate(date: string): string {
 function Spinner() {
   return (
     <div className="flex justify-center py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-600" />
     </div>
   );
 }
@@ -88,7 +88,7 @@ export default function BoardDetail() {
     <div>
       {/* Breadcrumb */}
       <nav aria-label="Breadcrumb" className="mb-6">
-        <ol className="flex items-center gap-1 text-sm text-slate-500">
+        <ol className="flex items-center gap-1 text-sm text-muted-foreground">
           <li>
             <a
               href="/boards"
@@ -100,24 +100,24 @@ export default function BoardDetail() {
           <li aria-hidden="true">
             <ChevronRight className="h-4 w-4" />
           </li>
-          <li className="font-medium text-slate-700">{board.name}</li>
+          <li className="font-medium text-foreground">{board.name}</li>
         </ol>
       </nav>
 
       {/* Board Header Card */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 sm:text-3xl">
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground sm:text-3xl">
               <Building2
-                className="h-7 w-7 text-slate-500"
+                className="h-7 w-7 text-muted-foreground"
                 aria-hidden="true"
               />
               {board.name}
             </h1>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+              <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-foreground">
                 {formatBoardType(board.board_type)}
               </span>
               {board.elected_or_appointed && (
@@ -127,7 +127,7 @@ export default function BoardDetail() {
                     : "Appointed"}
                 </span>
               )}
-              <span className="inline-flex items-center gap-1 text-sm text-slate-500">
+              <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
                 <Users className="h-4 w-4" aria-hidden="true" />
                 {board.member_count}{" "}
                 {board.member_count === 1 ? "Member" : "Members"}
@@ -141,28 +141,28 @@ export default function BoardDetail() {
       <section className="mt-6" aria-labelledby="members-heading">
         <h2
           id="members-heading"
-          className="mb-4 text-lg font-semibold text-slate-900"
+          className="mb-4 text-lg font-semibold text-foreground"
         >
           Current Members
         </h2>
 
         {board.members.length === 0 ? (
-          <p className="text-sm text-slate-500">No active members.</p>
+          <p className="text-sm text-muted-foreground">No active members.</p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-gray-200">
+          <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full">
-              <thead className="bg-slate-100">
+              <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-foreground">
                     Name
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-foreground">
                     Title / Seat
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-foreground">
                     Term Start
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-foreground">
                     Term End
                   </th>
                 </tr>
@@ -170,16 +170,16 @@ export default function BoardDetail() {
               <tbody>
                 {board.members.map((member, i) => (
                   <tr key={i}>
-                    <td className="border-t px-4 py-3 text-sm text-gray-600">
+                    <td className="border-t px-4 py-3 text-sm text-muted-foreground">
                       {member.name}
                     </td>
-                    <td className="border-t px-4 py-3 text-sm text-gray-600">
+                    <td className="border-t px-4 py-3 text-sm text-muted-foreground">
                       {member.seat_title || "\u2014"}
                     </td>
-                    <td className="border-t px-4 py-3 text-sm text-gray-600">
+                    <td className="border-t px-4 py-3 text-sm text-muted-foreground">
                       {member.term_start ? formatDate(member.term_start) : "\u2014"}
                     </td>
-                    <td className="border-t px-4 py-3 text-sm text-gray-600">
+                    <td className="border-t px-4 py-3 text-sm text-muted-foreground">
                       {member.term_end ? formatDate(member.term_end) : "\u2014"}
                     </td>
                   </tr>

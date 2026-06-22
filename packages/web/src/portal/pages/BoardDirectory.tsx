@@ -15,7 +15,7 @@ function formatBoardType(type: string): string {
 function Spinner() {
   return (
     <div className="flex justify-center py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-600" />
     </div>
   );
 }
@@ -65,8 +65,8 @@ export default function BoardDirectory() {
   return (
     <div>
       <section className="mb-8">
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 sm:text-3xl">
-          <Building2 className="h-7 w-7 text-slate-500" aria-hidden="true" />
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground sm:text-3xl">
+          <Building2 className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
           Boards &amp; Committees
         </h1>
       </section>
@@ -80,7 +80,7 @@ export default function BoardDirectory() {
       {loading && <Spinner />}
 
       {!loading && !error && boards.length === 0 && (
-        <p className="text-sm text-slate-500">No active boards.</p>
+        <p className="text-sm text-muted-foreground">No active boards.</p>
       )}
 
       {!loading && !error && boards.length > 0 && (
@@ -89,14 +89,14 @@ export default function BoardDirectory() {
             <a
               key={board.id}
               href={`/boards/${board.id}`}
-              className="group rounded-lg border border-gray-200 bg-white p-6 shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="group rounded-lg border border-border bg-card p-6 shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
-              <h2 className="text-lg font-semibold text-slate-900 group-hover:text-blue-900">
+              <h2 className="text-lg font-semibold text-foreground group-hover:text-blue-900">
                 {board.name}
               </h2>
 
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-foreground">
                   {formatBoardType(board.board_type)}
                 </span>
                 {board.elected_or_appointed && (
@@ -108,7 +108,7 @@ export default function BoardDirectory() {
                 )}
               </div>
 
-              <p className="mt-3 flex items-center gap-1.5 text-sm text-slate-500">
+              <p className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Users className="h-4 w-4" aria-hidden="true" />
                 {board.member_count}{" "}
                 {board.member_count === 1 ? "Member" : "Members"}

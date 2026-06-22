@@ -68,10 +68,10 @@ export function PortalProvider({
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-screen items-center justify-center bg-muted">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-slate-700" />
-          <p className="text-sm text-slate-500">Loading portal...</p>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-border border-t-slate-700" />
+          <p className="text-sm text-muted-foreground">Loading portal...</p>
         </div>
       </div>
     );
@@ -99,14 +99,14 @@ export function PortalProvider({
 
 function TownNotFound({ subdomain }: { subdomain: string }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="mx-auto max-w-md rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-900">Town Not Found</h1>
-        <p className="mt-3 text-gray-600">
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center shadow-sm">
+        <h1 className="text-2xl font-bold text-foreground">Town Not Found</h1>
+        <p className="mt-3 text-muted-foreground">
           We couldn&apos;t find a portal for &ldquo;{subdomain}
           .townmeetingmanager.com&rdquo;.
         </p>
-        <p className="mt-6 text-sm text-gray-500">
+        <p className="mt-6 text-sm text-muted-foreground">
           Are you a town administrator?{" "}
           <a
             href="https://app.townmeetingmanager.com"

@@ -4,11 +4,11 @@ export default function Portal404() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="mx-auto max-w-md text-center">
-        <p className="text-6xl font-bold text-gray-300">404</p>
-        <h1 className="mt-4 text-2xl font-bold text-slate-900">
+        <p className="text-6xl font-bold text-muted-foreground">404</p>
+        <h1 className="mt-4 text-2xl font-bold text-foreground">
           Page Not Found
         </h1>
-        <p className="mt-2 text-slate-600">
+        <p className="mt-2 text-muted-foreground">
           The page you&apos;re looking for doesn&apos;t exist or may have been
           moved.
         </p>

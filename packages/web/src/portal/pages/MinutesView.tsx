@@ -69,7 +69,7 @@ export default function MinutesView() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-slate-700" />
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-700" />
       </div>
     );
   }
@@ -77,20 +77,20 @@ export default function MinutesView() {
   if (error === "not_found") {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
           <AlertCircle
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-muted-foreground"
             aria-hidden="true"
           />
-          <h1 className="mt-4 text-xl font-bold text-gray-900">
+          <h1 className="mt-4 text-xl font-bold text-foreground">
             Minutes Not Available
           </h1>
-          <p className="mt-2 text-gray-600">
+          <p className="mt-2 text-muted-foreground">
             The minutes for this meeting have not been published yet.
           </p>
           <Link
             to={`/meetings/${meetingId}`}
-            className="mt-6 inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="mt-6 inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground hover:bg-muted"
           >
             Back to meeting details
           </Link>
@@ -102,15 +102,15 @@ export default function MinutesView() {
   if (error === "error" || !minutes) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
           <AlertCircle
             className="mx-auto h-12 w-12 text-red-400"
             aria-hidden="true"
           />
-          <h1 className="mt-4 text-xl font-bold text-gray-900">
+          <h1 className="mt-4 text-xl font-bold text-foreground">
             Error Loading Minutes
           </h1>
-          <p className="mt-2 text-gray-600">
+          <p className="mt-2 text-muted-foreground">
             An unexpected error occurred while loading the minutes. Please try
             again later.
           </p>
@@ -211,12 +211,12 @@ export default function MinutesView() {
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
         <nav
-          className="no-print mb-6 text-sm text-gray-500"
+          className="no-print mb-6 text-sm text-muted-foreground"
           aria-label="Breadcrumb"
         >
           <ol className="flex items-center gap-1">
             <li>
-              <Link to="/meetings" className="hover:text-gray-700">
+              <Link to="/meetings" className="hover:text-foreground">
                 Meetings
               </Link>
             </li>
@@ -232,7 +232,7 @@ export default function MinutesView() {
             <li>
               <Link
                 to={`/meetings/${meetingId}`}
-                className="hover:text-gray-700"
+                className="hover:text-foreground"
               >
                 {formatDate(minutes.meeting_date)}
               </Link>
@@ -240,24 +240,24 @@ export default function MinutesView() {
             <li>
               <ChevronRight className="h-3 w-3" aria-hidden="true" />
             </li>
-            <li className="text-gray-900">Minutes</li>
+            <li className="text-foreground">Minutes</li>
           </ol>
         </nav>
 
         {/* Main card */}
-        <div className="minutes-card rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="minutes-card rounded-lg border border-border bg-card shadow-sm">
           {/* Header */}
-          <div className="border-b border-gray-200 px-6 py-6 sm:px-8">
+          <div className="border-b border-border px-6 py-6 sm:px-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   Minutes of the {minutes.board_name}
                 </h1>
-                <p className="mt-1 text-gray-600">
+                <p className="mt-1 text-muted-foreground">
                   {formatDate(minutes.meeting_date)}
                 </p>
                 {minutes.approved_at && (
-                  <p className="mt-1 text-sm text-gray-500">
+                  <p className="mt-1 text-sm text-muted-foreground">
                     Approved on {formatDate(minutes.approved_at)}
                   </p>
                 )}
@@ -268,7 +268,7 @@ export default function MinutesView() {
                     href={getMinutesPdfUrl(townId, meetingId!)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-800"
+                    className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
                   >
                     <Download className="h-4 w-4" aria-hidden="true" />
                     Download PDF
@@ -277,7 +277,7 @@ export default function MinutesView() {
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground hover:bg-muted"
                 >
                   <Printer className="h-4 w-4" aria-hidden="true" />
                   Print

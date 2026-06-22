@@ -74,50 +74,50 @@ function AgendaItemDetails({
 }) {
   return (
     <div className="mb-4">
-      <p className="font-semibold text-gray-900">
+      <p className="font-semibold text-foreground">
         {label}. {item.title}
       </p>
 
       {item.description && (
-        <p className="mt-1 text-gray-700">{item.description}</p>
+        <p className="mt-1 text-foreground">{item.description}</p>
       )}
 
       {item.background && (
-        <div className="mt-2 rounded-md bg-gray-50 px-4 py-3 text-sm text-gray-700">
-          <span className="font-medium text-gray-600">Background:</span>{" "}
+        <div className="mt-2 rounded-md bg-muted px-4 py-3 text-sm text-foreground">
+          <span className="font-medium text-muted-foreground">Background:</span>{" "}
           {item.background}
         </div>
       )}
 
       {item.presenter && (
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           <span className="font-medium">Presenter:</span> {item.presenter}
         </p>
       )}
 
       {item.staff_resource && (
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           <span className="font-medium">Staff Resource:</span>{" "}
           {item.staff_resource}
         </p>
       )}
 
       {item.recommendation && (
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           <span className="font-medium">Recommendation:</span>{" "}
           {item.recommendation}
         </p>
       )}
 
       {item.suggested_motion && (
-        <p className="mt-2 text-sm italic text-gray-700">
+        <p className="mt-2 text-sm italic text-foreground">
           Suggested Motion: &ldquo;{item.suggested_motion}&rdquo;
         </p>
       )}
 
       {item.exhibits.length > 0 && (
         <div className="mt-3">
-          <p className="text-sm font-medium text-gray-600">Exhibits:</p>
+          <p className="text-sm font-medium text-muted-foreground">Exhibits:</p>
           <ul className="mt-1 space-y-1">
             {item.exhibits.map((exhibit) => (
               <li key={exhibit.id}>
@@ -141,7 +141,7 @@ function AgendaItemDetails({
 
       {/* Render children (nested items) */}
       {item.children.length > 0 && (
-        <div className="ml-6 mt-3 space-y-3 border-l-2 border-gray-100 pl-4">
+        <div className="ml-6 mt-3 space-y-3 border-l-2 border-border pl-4">
           {item.children.map((child, childIdx) => (
             <AgendaItemDetails
               key={child.id}
@@ -201,7 +201,7 @@ export default function AgendaView() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-slate-700" />
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-700" />
       </div>
     );
   }
@@ -209,20 +209,20 @@ export default function AgendaView() {
   if (error === "not_found") {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
           <AlertCircle
-            className="mx-auto h-12 w-12 text-gray-400"
+            className="mx-auto h-12 w-12 text-muted-foreground"
             aria-hidden="true"
           />
-          <h1 className="mt-4 text-xl font-bold text-gray-900">
+          <h1 className="mt-4 text-xl font-bold text-foreground">
             Agenda Not Available
           </h1>
-          <p className="mt-2 text-gray-600">
+          <p className="mt-2 text-muted-foreground">
             The agenda for this meeting has not been published yet.
           </p>
           <Link
             to={`/meetings/${meetingId}`}
-            className="mt-6 inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            className="mt-6 inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground hover:bg-muted"
           >
             Back to meeting details
           </Link>
@@ -234,15 +234,15 @@ export default function AgendaView() {
   if (error === "error" || !agenda) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
           <AlertCircle
             className="mx-auto h-12 w-12 text-red-400"
             aria-hidden="true"
           />
-          <h1 className="mt-4 text-xl font-bold text-gray-900">
+          <h1 className="mt-4 text-xl font-bold text-foreground">
             Error Loading Agenda
           </h1>
-          <p className="mt-2 text-gray-600">
+          <p className="mt-2 text-muted-foreground">
             An unexpected error occurred while loading the agenda. Please try
             again later.
           </p>
@@ -270,12 +270,12 @@ export default function AgendaView() {
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
         <nav
-          className="no-print mb-6 text-sm text-gray-500"
+          className="no-print mb-6 text-sm text-muted-foreground"
           aria-label="Breadcrumb"
         >
           <ol className="flex items-center gap-1">
             <li>
-              <Link to="/meetings" className="hover:text-gray-700">
+              <Link to="/meetings" className="hover:text-foreground">
                 Meetings
               </Link>
             </li>
@@ -291,7 +291,7 @@ export default function AgendaView() {
             <li>
               <Link
                 to={`/meetings/${meeting.id}`}
-                className="hover:text-gray-700"
+                className="hover:text-foreground"
               >
                 {formatDate(meeting.scheduled_date)}
               </Link>
@@ -299,37 +299,37 @@ export default function AgendaView() {
             <li>
               <ChevronRight className="h-3 w-3" aria-hidden="true" />
             </li>
-            <li className="text-gray-900">Agenda</li>
+            <li className="text-foreground">Agenda</li>
           </ol>
         </nav>
 
         {/* Main card */}
-        <div className="agenda-card rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="agenda-card rounded-lg border border-border bg-card shadow-sm">
           {/* Header */}
-          <div className="border-b border-gray-200 px-6 py-6 sm:px-8">
+          <div className="border-b border-border px-6 py-6 sm:px-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   Meeting Agenda
                 </h1>
-                <p className="mt-1 text-lg text-gray-700">
+                <p className="mt-1 text-lg text-foreground">
                   {meeting.board_name}
                 </p>
-                <p className="mt-1 text-gray-600">
+                <p className="mt-1 text-muted-foreground">
                   {meeting.meeting_type} Meeting
                 </p>
-                <p className="mt-1 text-gray-600">
+                <p className="mt-1 text-muted-foreground">
                   {formatDate(meeting.scheduled_date)} at{" "}
                   {formatTime(meeting.scheduled_time)}
                 </p>
-                <p className="text-gray-600">{meeting.location}</p>
+                <p className="text-muted-foreground">{meeting.location}</p>
               </div>
               <div className="no-print flex shrink-0 gap-2">
                 <a
                   href={getAgendaPdfUrl(townId, meeting.id)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-md bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-800"
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
                   Download PDF
@@ -337,7 +337,7 @@ export default function AgendaView() {
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground hover:bg-muted"
                 >
                   <Printer className="h-4 w-4" aria-hidden="true" />
                   Print
@@ -349,29 +349,29 @@ export default function AgendaView() {
           {/* Agenda body */}
           <div className="px-6 py-6 sm:px-8">
             {sections.length === 0 && (
-              <p className="text-gray-500">No agenda sections available.</p>
+              <p className="text-muted-foreground">No agenda sections available.</p>
             )}
 
             {sections.map((section, sectionIdx) => (
               <div key={section.id} className="mb-6">
                 {/* Section heading */}
-                <h2 className="mb-3 text-lg font-bold text-gray-900">
+                <h2 className="mb-3 text-lg font-bold text-foreground">
                   {toRoman(sectionIdx + 1)}. {section.title}
                 </h2>
 
                 {section.description && (
-                  <p className="mb-3 text-gray-700">{section.description}</p>
+                  <p className="mb-3 text-foreground">{section.description}</p>
                 )}
 
                 {section.suggested_motion && (
-                  <p className="mb-3 text-sm italic text-gray-700">
+                  <p className="mb-3 text-sm italic text-foreground">
                     Suggested Motion: &ldquo;{section.suggested_motion}&rdquo;
                   </p>
                 )}
 
                 {section.exhibits.length > 0 && (
                   <div className="mb-3">
-                    <p className="text-sm font-medium text-gray-600">
+                    <p className="text-sm font-medium text-muted-foreground">
                       Exhibits:
                     </p>
                     <ul className="mt-1 space-y-1">

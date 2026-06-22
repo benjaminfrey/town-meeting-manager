@@ -66,7 +66,7 @@ function getBoardAbbreviation(name: string): string {
 function Spinner() {
   return (
     <div className="flex justify-center py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-600" />
     </div>
   );
 }
@@ -192,8 +192,8 @@ export default function MeetingCalendar() {
   return (
     <div>
       <section className="mb-6">
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 sm:text-3xl">
-          <Calendar className="h-7 w-7 text-slate-500" aria-hidden="true" />
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground sm:text-3xl">
+          <Calendar className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
           Meeting Calendar
         </h1>
       </section>
@@ -205,23 +205,23 @@ export default function MeetingCalendar() {
           <button
             onClick={prevMonth}
             aria-label="Previous month"
-            className="rounded-lg border border-gray-200 bg-white p-2 text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="rounded-lg border border-border bg-card p-2 text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <h2 className="min-w-[180px] text-center text-lg font-semibold text-slate-900">
+          <h2 className="min-w-[180px] text-center text-lg font-semibold text-foreground">
             {formatMonthYear(currentMonth)}
           </h2>
           <button
             onClick={nextMonth}
             aria-label="Next month"
-            className="rounded-lg border border-gray-200 bg-white p-2 text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="rounded-lg border border-border bg-card p-2 text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
           <button
             onClick={goToday}
-            className="ml-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="ml-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             Today
           </button>
@@ -237,7 +237,7 @@ export default function MeetingCalendar() {
               id="board-filter"
               value={selectedBoard}
               onChange={(e) => setSelectedBoard(e.target.value)}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               <option value="">All Boards</option>
               {boards.map((b) => (
@@ -256,13 +256,13 @@ export default function MeetingCalendar() {
         <>
           {/* Desktop Calendar Grid */}
           <div className="hidden md:block">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
               {/* Day headers */}
-              <div className="grid grid-cols-7 border-b bg-slate-100">
+              <div className="grid grid-cols-7 border-b bg-muted">
                 {DAY_NAMES.map((day) => (
                   <div
                     key={day}
-                    className="px-2 py-2 text-center text-sm font-semibold text-gray-700"
+                    className="px-2 py-2 text-center text-sm font-semibold text-foreground"
                   >
                     {day}
                   </div>
@@ -287,11 +287,11 @@ export default function MeetingCalendar() {
                         key={col}
                         className={`min-h-[90px] border-t border-r last:border-r-0 p-1.5 ${
                           isValidDay ? "cursor-pointer" : ""
-                        } ${!isValidDay ? "bg-gray-50" : ""} ${
+                        } ${!isValidDay ? "bg-muted" : ""} ${
                           isToday ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : ""
                         } ${
                           isSelected && !isToday
-                            ? "bg-slate-50 ring-2 ring-inset ring-slate-400"
+                            ? "bg-muted ring-2 ring-inset ring-ring"
                             : ""
                         }`}
                         onClick={() => {
@@ -321,7 +321,7 @@ export default function MeetingCalendar() {
                               className={`inline-block text-sm ${
                                 isToday
                                   ? "font-bold text-blue-700"
-                                  : "text-slate-700"
+                                  : "text-foreground"
                               }`}
                             >
                               {day}
@@ -333,16 +333,16 @@ export default function MeetingCalendar() {
                                   className="flex items-center gap-1"
                                 >
                                   <span
-                                    className={`inline-block h-2 w-2 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-gray-400"}`}
+                                    className={`inline-block h-2 w-2 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                                     aria-hidden="true"
                                   />
-                                  <span className="truncate text-xs text-slate-600">
+                                  <span className="truncate text-xs text-muted-foreground">
                                     {getBoardAbbreviation(m.board_name)}
                                   </span>
                                 </div>
                               ))}
                               {dayMeetings.length > 3 && (
-                                <span className="text-xs text-slate-400">
+                                <span className="text-xs text-muted-foreground">
                                   +{dayMeetings.length - 3} more
                                 </span>
                               )}
@@ -358,34 +358,34 @@ export default function MeetingCalendar() {
 
             {/* Day Detail Panel */}
             {selectedDay !== null && selectedDayMeetings.length > 0 && (
-              <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mt-4 rounded-lg border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">
+                  <h3 className="font-semibold text-foreground">
                     {formatDateLong(toDateString(year, month, selectedDay))}
                   </h3>
                   <button
                     onClick={() => setSelectedDay(null)}
                     aria-label="Close day detail"
-                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <ul className="mt-3 divide-y divide-gray-100">
+                <ul className="mt-3 divide-y divide-border">
                   {selectedDayMeetings.map((m) => (
                     <li key={m.id} className="py-3 first:pt-0 last:pb-0">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="flex items-center gap-2">
                             <span
-                              className={`inline-block h-2.5 w-2.5 rounded-full ${boardColorMap.get(m.board_id) || "bg-gray-400"}`}
+                              className={`inline-block h-2.5 w-2.5 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                               aria-hidden="true"
                             />
-                            <span className="font-medium text-slate-900">
+                            <span className="font-medium text-foreground">
                               {m.board_name}
                             </span>
                           </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Clock
                                 className="h-3.5 w-3.5"
@@ -420,20 +420,20 @@ export default function MeetingCalendar() {
             )}
 
             {selectedDay !== null && selectedDayMeetings.length === 0 && (
-              <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mt-4 rounded-lg border border-border bg-card p-4 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">
+                  <h3 className="font-semibold text-foreground">
                     {formatDateLong(toDateString(year, month, selectedDay))}
                   </h3>
                   <button
                     onClick={() => setSelectedDay(null)}
                     aria-label="Close day detail"
-                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">
+                <p className="mt-2 text-sm text-muted-foreground">
                   No meetings scheduled for this day.
                 </p>
               </div>
@@ -443,12 +443,12 @@ export default function MeetingCalendar() {
           {/* Mobile List View */}
           <div className="md:hidden">
             {filteredMeetings.length === 0 ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 No meetings scheduled for {formatMonthYear(currentMonth)}.
               </p>
             ) : (
-              <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-                <ul className="divide-y divide-gray-100">
+              <div className="rounded-lg border border-border bg-card shadow-sm">
+                <ul className="divide-y divide-border">
                   {filteredMeetings
                     .sort((a, b) =>
                       a.scheduled_date.localeCompare(b.scheduled_date) ||
@@ -458,20 +458,20 @@ export default function MeetingCalendar() {
                       <li key={m.id}>
                         <a
                           href={`/meetings/${m.id}`}
-                          className="block px-4 py-3 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+                          className="block px-4 py-3 transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
                                 <span
-                                  className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-gray-400"}`}
+                                  className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                                   aria-hidden="true"
                                 />
-                                <span className="font-medium text-slate-900">
+                                <span className="font-medium text-foreground">
                                   {m.board_name}
                                 </span>
                               </div>
-                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
+                              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                                 <span className="flex items-center gap-1">
                                   <Calendar
                                     className="h-3.5 w-3.5"
@@ -501,7 +501,7 @@ export default function MeetingCalendar() {
                               </div>
                             </div>
                             <ChevronRight
-                              className="mt-1 h-4 w-4 shrink-0 text-slate-400"
+                              className="mt-1 h-4 w-4 shrink-0 text-muted-foreground"
                               aria-hidden="true"
                             />
                           </div>

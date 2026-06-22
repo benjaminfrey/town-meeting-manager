@@ -25,7 +25,7 @@ function formatDate(date: string): string {
 function Spinner() {
   return (
     <div className="flex justify-center py-8">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-600" />
     </div>
   );
 }
@@ -56,7 +56,7 @@ function MeetingRow({
   const badgeColor = getBoardBadgeColor(meeting.board_id, boards);
 
   return (
-    <li className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <li className="rounded-lg border border-border bg-card p-4 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -66,7 +66,7 @@ function MeetingRow({
               {meeting.board_name}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
               {formatDate(meeting.scheduled_date)}
@@ -199,13 +199,13 @@ export default function MeetingsList() {
   return (
     <div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-slate-900">Meetings</h2>
+        <h2 className="text-2xl font-bold text-foreground">Meetings</h2>
 
         {/* Board Filter */}
         <div className="flex items-center gap-2">
           <label
             htmlFor="board-filter"
-            className="text-sm font-medium text-slate-700"
+            className="text-sm font-medium text-foreground"
           >
             Board:
           </label>
@@ -213,7 +213,7 @@ export default function MeetingsList() {
             id="board-filter"
             value={selectedBoard}
             onChange={handleBoardChange}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">All Boards</option>
             {boards.map((board) => (
@@ -234,8 +234,8 @@ export default function MeetingsList() {
       {loading ? (
         <Spinner />
       ) : meetings.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-slate-500">No meetings found.</p>
+        <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
+          <p className="text-muted-foreground">No meetings found.</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -244,9 +244,9 @@ export default function MeetingsList() {
             <section aria-labelledby="upcoming-heading">
               <h3
                 id="upcoming-heading"
-                className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"
+                className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground"
               >
-                <Calendar className="h-5 w-5 text-slate-500" aria-hidden="true" />
+                <Calendar className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                 Upcoming Meetings
               </h3>
               <ul className="space-y-3">
@@ -266,9 +266,9 @@ export default function MeetingsList() {
             <section aria-labelledby="past-heading">
               <h3
                 id="past-heading"
-                className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"
+                className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground"
               >
-                <FileText className="h-5 w-5 text-slate-500" aria-hidden="true" />
+                <FileText className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                 Past Meetings
               </h3>
               <ul className="space-y-3">
@@ -292,11 +292,11 @@ export default function MeetingsList() {
             type="button"
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-5 py-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
           >
             {loadingMore ? (
               <>
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-slate-600" />
                 Loading...
               </>
             ) : (

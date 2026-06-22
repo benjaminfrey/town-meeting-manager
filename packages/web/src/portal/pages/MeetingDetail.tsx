@@ -33,7 +33,7 @@ const MEETING_TYPE_LABELS: Record<string, string> = {
 };
 
 const MEETING_TYPE_COLORS: Record<string, string> = {
-  regular: "bg-slate-100 text-slate-800",
+  regular: "bg-muted text-foreground",
   special: "bg-amber-100 text-amber-800",
   public_hearing: "bg-blue-100 text-blue-800",
   emergency: "bg-red-100 text-red-800",
@@ -49,14 +49,14 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
   scheduled: "bg-blue-100 text-blue-800",
   in_progress: "bg-green-100 text-green-800",
-  completed: "bg-slate-100 text-slate-700",
+  completed: "bg-muted text-foreground",
   cancelled: "bg-red-100 text-red-800",
 };
 
 function Spinner() {
   return (
     <div className="flex justify-center py-16">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-slate-600" />
     </div>
   );
 }
@@ -127,16 +127,16 @@ export default function MeetingDetail() {
   const typeLabel =
     MEETING_TYPE_LABELS[meeting.meeting_type] ?? meeting.meeting_type;
   const typeColor =
-    MEETING_TYPE_COLORS[meeting.meeting_type] ?? "bg-slate-100 text-slate-800";
+    MEETING_TYPE_COLORS[meeting.meeting_type] ?? "bg-muted text-foreground";
   const statusLabel = STATUS_LABELS[meeting.status] ?? meeting.status;
   const statusColor =
-    STATUS_COLORS[meeting.status] ?? "bg-slate-100 text-slate-700";
+    STATUS_COLORS[meeting.status] ?? "bg-muted text-foreground";
 
   return (
     <div>
       {/* Breadcrumb */}
       <nav aria-label="Breadcrumb" className="mb-6">
-        <ol className="flex flex-wrap items-center gap-1 text-sm text-slate-500">
+        <ol className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
           <li>
             <a
               href="/meetings"
@@ -159,17 +159,17 @@ export default function MeetingDetail() {
           <li aria-hidden="true">
             <ChevronRight className="h-3.5 w-3.5" />
           </li>
-          <li aria-current="page" className="text-slate-700">
+          <li aria-current="page" className="text-foreground">
             {formatDate(meeting.scheduled_date)}
           </li>
         </ol>
       </nav>
 
       {/* Header Card */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-3">
-            <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">
+            <h2 className="text-xl font-bold text-foreground sm:text-2xl">
               {meeting.board_name}
             </h2>
 
@@ -186,20 +186,20 @@ export default function MeetingDetail() {
               </span>
             </div>
 
-            <dl className="space-y-2 text-sm text-slate-600">
+            <dl className="space-y-2 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <dt className="sr-only">Date</dt>
-                <Calendar className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                <Calendar className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <dd>{formatDate(meeting.scheduled_date)}</dd>
               </div>
               <div className="flex items-center gap-2">
                 <dt className="sr-only">Time</dt>
-                <Clock className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <dd>{meeting.scheduled_time}</dd>
               </div>
               <div className="flex items-center gap-2">
                 <dt className="sr-only">Location</dt>
-                <MapPin className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                <MapPin className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <dd>{meeting.location}</dd>
               </div>
             </dl>
@@ -211,14 +211,14 @@ export default function MeetingDetail() {
       <section className="mt-6" aria-labelledby="documents-heading">
         <h3
           id="documents-heading"
-          className="mb-4 text-lg font-semibold text-slate-900"
+          className="mb-4 text-lg font-semibold text-foreground"
         >
           Available Documents
         </h3>
 
         <div className="grid gap-4 sm:grid-cols-2">
           {/* Agenda */}
-          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="rounded-md bg-blue-50 p-2">
                 <FileText
@@ -227,7 +227,7 @@ export default function MeetingDetail() {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <h4 className="font-medium text-slate-900">
+                <h4 className="font-medium text-foreground">
                   {meeting.has_published_agenda
                     ? "Published Agenda"
                     : "Meeting Agenda"}
@@ -258,7 +258,7 @@ export default function MeetingDetail() {
                     </a>
                   </div>
                 ) : (
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-muted-foreground">
                     Agenda not yet published.
                   </p>
                 )}
@@ -267,7 +267,7 @@ export default function MeetingDetail() {
           </div>
 
           {/* Minutes */}
-          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="rounded-md bg-green-50 p-2">
                 <FileText
@@ -276,7 +276,7 @@ export default function MeetingDetail() {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <h4 className="font-medium text-slate-900">
+                <h4 className="font-medium text-foreground">
                   {meeting.has_published_minutes
                     ? "Approved Minutes"
                     : "Meeting Minutes"}
@@ -307,7 +307,7 @@ export default function MeetingDetail() {
                     </a>
                   </div>
                 ) : (
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-muted-foreground">
                     Minutes pending approval.
                   </p>
                 )}
