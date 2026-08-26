@@ -13,7 +13,7 @@ Meeting lifecycle management for New England's Select Board / Town Meeting form 
 
 Town Meeting Manager is a purpose-built civic platform that covers the full meeting lifecycle for small New England towns: agenda drafting, meeting notice compliance, live meeting management, AI-assisted minutes drafting, public records archiving, and resident civic engagement — all tuned to the Select Board / Town Meeting form of government and Maine open meetings law.
 
-The application is **offline-first** — the live meeting manager works without network connectivity, critical for rural Maine town halls with unreliable WiFi. Data syncs automatically when connectivity is restored.
+The application is **online-first** — TanStack Query v5 handles data fetching and caching, and Supabase Realtime powers live multi-device sync for the live meeting manager. (A Stage 1 revival plan targets moving the sync layer to tRPC and Server-Sent Events; that migration has not started — see `docs/superpowers/` for the current plan.)
 
 It serves four internal roles and one public audience:
 
@@ -38,7 +38,7 @@ town-meeting-manager/
 │   ├── town_meeting_manager_plan.docx       # Original project plan & specification
 │   ├── advisory-resolutions/                # 11 resolved architectural decisions
 │   │   ├── 1.2-roles-permissions.md         #   PERSON entity, 4 roles, permissions matrix
-│   │   ├── 1.3-tech-stack-evaluation.md     #   Offline-first stack (PowerSync + Supabase)
+│   │   ├── 1.3-tech-stack-evaluation.md     #   Original stack pick (PowerSync + Supabase) — superseded, see Tech Stack below
 │   │   ├── 1.3a-frontend-architecture.md    #   React Router v7, shadcn/ui, Kysely, testing
 │   │   ├── 2.1-onboarding-wizard-ux-spec.md #   5-stage wizard, field specs, completion flow
 │   │   ├── 2.2-ai-minutes-architecture.md   #   Minutes pipeline, Claude API, review UX
@@ -79,14 +79,14 @@ town-meeting-manager/
 
 ## Six Product Modules
 
-| #   | Module                     | Phase | Key Features                                                                              |
-| --- | -------------------------- | ----- | ----------------------------------------------------------------------------------------- |
-| 1   | Onboarding & Configuration | 1     | 5-stage setup wizard, PERSON entity management, per-board permissions matrix              |
-| 2   | Agenda Building            | 1     | Templates, drag-and-drop ordering, notice compliance, agenda packet PDF generation        |
-| 3   | Live Meeting Manager       | 1     | Offline-first, roll call, motion/vote capture, executive session, adjournment             |
-| 4   | Minutes & Records          | 1–2   | AI-drafted minutes (Claude API), structured JSON → HTML → PDF pipeline, approval workflow |
-| 5   | Annual Town Meeting        | 2     | Warrant article drafting, fiscal impact, floor amendments, multiple vote methods          |
-| 6   | Civic Engagement           | 2–3   | Email/SMS notifications, resident straw polls, parcel proximity matching, public portal   |
+| #   | Module                     | Phase | Key Features                                                                                |
+| --- | -------------------------- | ----- | ------------------------------------------------------------------------------------------- |
+| 1   | Onboarding & Configuration | 1     | 5-stage setup wizard, PERSON entity management, per-board permissions matrix                |
+| 2   | Agenda Building            | 1     | Templates, drag-and-drop ordering, notice compliance, agenda packet PDF generation          |
+| 3   | Live Meeting Manager       | 1     | Real-time multi-device sync, roll call, motion/vote capture, executive session, adjournment |
+| 4   | Minutes & Records          | 1–2   | AI-drafted minutes (Claude API), structured JSON → HTML → PDF pipeline, approval workflow   |
+| 5   | Annual Town Meeting        | 2     | Warrant article drafting, fiscal impact, floor amendments, multiple vote methods            |
+| 6   | Civic Engagement           | 2–3   | Email/SMS notifications, resident straw polls, parcel proximity matching, public portal     |
 
 ---
 
