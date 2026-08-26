@@ -293,6 +293,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # packages/web/src/lib/supabase.ts throws at import time when
+      # VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are unset, and React Router's
+      # SPA-mode build prerenders a shell that pulls that module in. The local
+      # packages/web/.env is git-ignored by design, so a clean CI checkout has no
+      # values. The checked-in .env.example holds public placeholders
+      # (http://localhost:54321, your-anon-key) — no secrets. Every web test that
+      # imports the client also vi.mock()s it, so these values only satisfy the
+      # non-empty guard; they never reach a real Supabase client.
+      # Stage 1 deletes supabase.ts entirely, at which point this step goes too.
+      - name: Configure web environment
+        run: cp packages/web/.env.example packages/web/.env
+
       - name: Typecheck
         run: pnpm typecheck
 
