@@ -243,6 +243,13 @@ function formatSpeakers(speakers: MinutesSpeaker[], sectionType: string): string
   return lines.join("\n");
 }
 
+// ─── Helper: format operator notes ───────────────────────────────────
+
+function formatOperatorNotes(notes: string | null): string {
+  if (!notes || notes.trim() === "") return "";
+  return `<p class="operator-notes">${escapeHtml(notes.trim())}</p>`;
+}
+
 // ─── Helper: format motions for a given display format ──────────────
 
 function formatMotions(
@@ -351,6 +358,10 @@ function formatActionMinutes(
           itemParts.push("<p>No action was taken.</p>");
         }
       }
+
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
 
       if (itemParts.length > 0) {
         if (section.items.length > 1) {
@@ -470,6 +481,10 @@ function formatSummaryMinutes(
         }
       }
 
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
+
       parts.push(itemParts.join("\n"));
     }
 
@@ -582,6 +597,10 @@ function formatNarrativeMinutes(
           itemParts.push("<p>No action was taken.</p>");
         }
       }
+
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
 
       parts.push(itemParts.join("\n"));
     }

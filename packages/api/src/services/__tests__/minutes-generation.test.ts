@@ -1482,4 +1482,45 @@ describe("formatMinutes", () => {
       expect(formatted.certification).toEqual(content.certification);
     });
   });
+
+  describe("operator notes", () => {
+    it.each(["action", "summary", "narrative"] as const)(
+      "renders operator notes in %s style",
+      (style) => {
+        const content = makeContent();
+        content.sections[0]!.items[0]!.operator_notes =
+          "Chair noted the shortfall stems from the culvert repair.";
+
+        const formatted = formatMinutes(content, {
+          ...BASE_OPTIONS,
+          minutes_style: style,
+        });
+
+        const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+        expect(allText).toContain("culvert repair");
+        expect(allText).toContain('class="operator-notes"');
+      },
+    );
+
+    it("escapes HTML in operator notes", () => {
+      const content = makeContent();
+      content.sections[0]!.items[0]!.operator_notes = "<script>alert(1)</script>";
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+
+      expect(allText).not.toContain("<script>");
+      expect(allText).toContain("&lt;script&gt;");
+    });
+
+    it("emits nothing when notes are absent", () => {
+      const content = makeContent();
+      content.sections[0]!.items[0]!.operator_notes = null;
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+
+      expect(allText).not.toContain("operator-notes");
+    });
+  });
 });
