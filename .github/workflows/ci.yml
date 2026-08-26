@@ -30,6 +30,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # packages/web/.env is git-ignored (by design — dev instances point at
+      # a local Supabase). The client throws at import time if
+      # VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are unset, which the
+      # build's SPA prerender step and several test files hit. These are
+      # public client-side values (embedded in the shipped bundle either
+      # way), so the checked-in example placeholders are sufficient for
+      # build and test — they never need to resolve a real Supabase.
+      - name: Configure web environment
+        run: cp packages/web/.env.example packages/web/.env
+
       - name: Typecheck
         run: pnpm typecheck
 
