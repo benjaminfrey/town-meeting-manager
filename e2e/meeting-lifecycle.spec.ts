@@ -142,10 +142,7 @@ test.describe("Full Meeting Lifecycle", () => {
     await expect(reviewContent).toBeVisible();
   });
 
-  test("records a motion and vote during meeting", async ({
-    authenticatedPage: page,
-    seededTown,
-  }) => {
+  test("records a motion and vote during meeting", async ({ authenticatedPage: page }) => {
     // Navigate to meetings list
     await page.goto("/meetings");
     await page.waitForTimeout(2000);

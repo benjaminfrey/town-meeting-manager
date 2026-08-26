@@ -5,12 +5,16 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
-// turbo (and each package's own "lint" script) runs eslint with the package
-// directory as cwd. Flat-config `files`/`ignores` globs are resolved relative
-// to cwd by default, so a plain "packages/web/**" pattern silently matches
-// nothing when eslint is invoked from inside packages/web itself. Anchoring
-// this one block's basePath to the config file's own directory (the repo
-// root) makes the pattern behave the same regardless of invoking cwd.
+// The root "lint" script runs a single `eslint .` from the repo root, so cwd
+// is always the repo root today. Each package previously had its own "lint"
+// script ("eslint src --config ../../eslint.config.js", cwd = the package
+// dir) — those were removed because they scoped every run to that package's
+// src/, so nothing at the repo root (e2e/, configs, this file) was ever
+// linted. Flat-config `files`/`ignores` globs resolve relative to cwd by
+// default, so a plain "packages/web/**" pattern would have silently matched
+// nothing under the old per-package invocation. basePath is kept anchored to
+// the config file's own directory (the repo root) so this block's pattern
+// stays correct even if something invokes eslint from a different cwd again.
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
@@ -23,8 +27,9 @@ export default tseslint.config(
     // All entries use a "**/" prefix so they match regardless of invoking
     // cwd, consistent with the dist/build/coverage/turbo/react-router
     // entries already written that way. (.superpowers is the SDD scratch
-    // workspace, gitignored; added here for defense-in-depth even though
-    // "eslint src" per package never reaches repo-root paths in practice.)
+    // workspace, gitignored; added here for defense-in-depth. Now that
+    // `eslint .` runs from the repo root, these repo-root paths are actually
+    // reached — this is no longer just defense-in-depth.)
     ignores: [
       "**/dist/**",
       "**/build/**",
