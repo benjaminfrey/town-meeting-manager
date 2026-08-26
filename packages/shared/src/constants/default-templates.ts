@@ -246,13 +246,9 @@ export const DEFAULT_OTHER_BOARD_SECTIONS: AgendaTemplateSection[] = [
  * Get default template sections for a given board type.
  * Returns a deep clone so callers can mutate safely.
  */
-export function getDefaultTemplateSections(
-  boardType: string,
-): AgendaTemplateSection[] {
-  if (boardType === "select_board")
-    return deepClone(DEFAULT_SELECT_BOARD_SECTIONS);
-  if (boardType === "planning_board")
-    return deepClone(DEFAULT_PLANNING_BOARD_SECTIONS);
+export function getDefaultTemplateSections(boardType: string): AgendaTemplateSection[] {
+  if (boardType === "select_board") return deepClone(DEFAULT_SELECT_BOARD_SECTIONS);
+  if (boardType === "planning_board") return deepClone(DEFAULT_PLANNING_BOARD_SECTIONS);
   return deepClone(DEFAULT_OTHER_BOARD_SECTIONS);
 }
 

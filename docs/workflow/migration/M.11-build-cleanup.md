@@ -12,14 +12,14 @@ Final cleanup session. Delete all remaining PowerSync source files, remove the S
 
 ## Files Deleted
 
-| File | Reason |
-|------|--------|
-| `packages/web/src/providers/PowerSyncProvider.tsx` | Replaced by QueryProvider |
-| `packages/web/src/components/SyncStatusBar.tsx` | Replaced by ConnectionStatusBar; shim no longer needed |
-| `packages/web/src/lib/powersync/SupabaseConnector.ts` | PowerSync removed |
-| `packages/web/src/lib/powersync/db.ts` | PowerSync removed |
-| `packages/web/src/lib/powersync/types.ts` | PowerSync removed |
-| `packages/web/src/lib/powersync/` (directory) | Now empty |
+| File                                                  | Reason                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------ |
+| `packages/web/src/providers/PowerSyncProvider.tsx`    | Replaced by QueryProvider                              |
+| `packages/web/src/components/SyncStatusBar.tsx`       | Replaced by ConnectionStatusBar; shim no longer needed |
+| `packages/web/src/lib/powersync/SupabaseConnector.ts` | PowerSync removed                                      |
+| `packages/web/src/lib/powersync/db.ts`                | PowerSync removed                                      |
+| `packages/web/src/lib/powersync/types.ts`             | PowerSync removed                                      |
+| `packages/web/src/lib/powersync/` (directory)         | Now empty                                              |
 
 Note: `packages/web/src/hooks/usePowerSync.ts`, `useDb.ts`, `useWizardForm.ts` were already deleted in M.05. `packages/shared/src/powersync/` was already deleted in M.03.
 
@@ -42,7 +42,7 @@ Note: `packages/web/src/hooks/usePowerSync.ts`, `useDb.ts`, `useWizardForm.ts` w
 
 ## Prompt
 
-```
+````
 You are completing the PowerSync → TanStack Query migration for the Town Meeting Manager. This final session deletes all remaining PowerSync files, verifies the codebase is clean, and runs a full build to confirm everything works.
 
 PROJECT CONTEXT:
@@ -68,7 +68,7 @@ echo "=== useWizardForm calls ===" && grep -r "useWizardForm" packages/web/src/ 
 
 # Check for remaining PowerSyncProvider
 echo "=== PowerSyncProvider ===" && grep -r "PowerSyncProvider\|SyncStatusBar" packages/web/src/ --include="*.ts" --include="*.tsx" -l
-```
+````
 
 Expected: all searches return zero matches (except possibly in test files that mock things with those strings).
 
@@ -96,9 +96,11 @@ rmdir packages/web/src/lib/powersync/ 2>/dev/null || ls packages/web/src/lib/pow
 ```
 
 If `rmdir` fails because the directory still has files, list them:
+
 ```bash
 ls packages/web/src/lib/powersync/
 ```
+
 Delete any remaining files, then remove the directory.
 
 STEP 3: UPDATE MEMORY.MD
@@ -106,6 +108,7 @@ STEP 3: UPDATE MEMORY.MD
 Update the project MEMORY.md at /Users/ben/.claude/projects/-Users-ben-Documents-GitHub-town-meeting-manager/memory/MEMORY.md to reflect the completed migration:
 
 Remove the "Key Patterns" section entries about PowerSync and replace with the React Query patterns:
+
 - Remove: `useWizardForm`, `powerSync.execute()`, `useQuery() from @powersync/react`, `Booleans: SQLite stores as 0/1`, `JSONB: Stored as TEXT in PowerSync`
 - Add: `DB reads: useQuery from @tanstack/react-query with supabase.from().select()`, `DB writes: useMutation with supabase.from().insert/update/delete(), then queryClient.invalidateQueries()`, `Forms: useForm from react-hook-form with zodResolver`, `Realtime: useRealtimeSubscription hook from @/hooks/useRealtimeSubscription`
 
@@ -120,12 +123,14 @@ cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeti
 ```
 
 Fix any errors. Common remaining issues after migration:
+
 - Type mismatches between PowerSync's SQLite types (strings for booleans/dates) and Supabase's proper types
 - Components that did `row.archived === 1` instead of `row.archived === true`
 - Components that did `JSON.parse(row.settings)` for JSONB fields now receiving objects
 - Missing `?` optional chaining where Supabase JOINs can return null for related records
 
 For null JOIN handling:
+
 ```typescript
 // Old PowerSync (separate queries merged in JS — always had data):
 const board = boards.find(b => b.id === boardId); // never null
@@ -142,6 +147,7 @@ cd /Users/ben/Documents/GitHub/town-meeting-manager && npx turbo run build
 ```
 
 This builds shared, web, and api in dependency order. Fix any build errors:
+
 - Shared package errors: likely missing exports or type issues in database.ts
 - Web package errors: TypeScript or Vite bundling issues
 - API package errors: should be unaffected by this migration (it uses Supabase directly already)
@@ -157,11 +163,13 @@ All tests should pass. If any fail, fix them before committing.
 STEP 7: DEV SERVER SMOKE TEST
 
 Start the dev server:
+
 ```bash
 cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeting/web dev
 ```
 
 Open http://localhost:5173 and verify:
+
 1. Login page renders
 2. After login, dashboard loads with town info and recent meetings
 3. Boards list loads
@@ -176,9 +184,11 @@ Check the browser console for any remaining PowerSync-related errors.
 STEP 8: VERIFY DOCKER COMPOSE
 
 Check that the docker-compose.yml no longer starts a PowerSync service:
+
 ```bash
 grep -i "powersync\|mongo" docker/docker-compose.yml
 ```
+
 Expected: zero matches (both should have been removed in M.01).
 
 STEP 9: UPDATE THE MIGRATION README
@@ -186,6 +196,7 @@ STEP 9: UPDATE THE MIGRATION README
 Update packages/web/src/docs/workflow/migration/README.md status if there's a status column, or add a completion note.
 
 VERIFICATION CHECKLIST:
+
 1. `grep -r "@powersync" packages/ --include="*.ts" --include="*.tsx"` → zero matches
 2. `packages/web/src/providers/PowerSyncProvider.tsx` does not exist
 3. `packages/web/src/components/SyncStatusBar.tsx` does not exist
@@ -197,12 +208,15 @@ VERIFICATION CHECKLIST:
 9. React Query DevTools visible in dev mode
 10. MEMORY.md updated to reflect new patterns
 11. docker-compose.yml has no powersync or mongo services
+
 ```
 
 ## Commit Message
 
 ```
+
 M.11: Final cleanup — delete PowerSync files, full build passes, migration complete
+
 ```
 
 ---
@@ -219,3 +233,4 @@ After M.11, the migration is complete. Key things to remember going forward:
 - **Booleans**: Native booleans (not `0`/`1`)
 - **JSONB**: Native objects (no `JSON.stringify`/`JSON.parse`)
 - **JOINs**: Use Supabase `select('*, relation(*)')` syntax — now fully supported
+```

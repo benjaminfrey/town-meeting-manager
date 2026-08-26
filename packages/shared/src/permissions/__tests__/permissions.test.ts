@@ -226,7 +226,11 @@ describe("buildPermissionsFromTemplate", () => {
   });
 
   it("all templates cover all 30 actions", () => {
-    for (const template of [TEMPLATE_TOWN_CLERK, TEMPLATE_GENERAL_STAFF, TEMPLATE_RECORDING_SECRETARY]) {
+    for (const template of [
+      TEMPLATE_TOWN_CLERK,
+      TEMPLATE_GENERAL_STAFF,
+      TEMPLATE_RECORDING_SECRETARY,
+    ]) {
       const perms = buildPermissionsFromTemplate(template);
       expect(Object.keys(perms).length).toBe(ALL_PERMISSION_ACTIONS.length);
     }

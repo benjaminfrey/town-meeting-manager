@@ -1,19 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
-import {
-  Download,
-  Printer,
-  ChevronRight,
-  AlertCircle,
-} from "lucide-react";
+import { Download, Printer, ChevronRight, AlertCircle } from "lucide-react";
 import type { PortalMinutes } from "@town-meeting/shared";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
-import {
-  fetchMinutes,
-  getMinutesPdfUrl,
-  PortalApiError,
-} from "@/lib/portal-api";
+import { fetchMinutes, getMinutesPdfUrl, PortalApiError } from "@/lib/portal-api";
 
 function formatDate(date: string): string {
   return new Date(date + "T00:00:00").toLocaleDateString("en-US", {
@@ -30,12 +21,16 @@ export default function MinutesView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<"not_found" | "error" | null>(null);
 
-  usePortalMeta(minutes ? {
-    title: `${minutes.board_name} Minutes - ${formatDate(minutes.meeting_date)} - ${townName}`,
-    description: `Approved minutes for ${minutes.board_name} meeting on ${formatDate(minutes.meeting_date)}.`,
-    siteName: townName ?? undefined,
-    ogImage: sealUrl,
-  } : null);
+  usePortalMeta(
+    minutes
+      ? {
+          title: `${minutes.board_name} Minutes - ${formatDate(minutes.meeting_date)} - ${townName}`,
+          description: `Approved minutes for ${minutes.board_name} meeting on ${formatDate(minutes.meeting_date)}.`,
+          siteName: townName ?? undefined,
+          ogImage: sealUrl,
+        }
+      : null,
+  );
 
   useEffect(() => {
     if (!meetingId) return;
@@ -78,13 +73,8 @@ export default function MinutesView() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
-          <AlertCircle
-            className="mx-auto h-12 w-12 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <h1 className="mt-4 text-xl font-bold text-foreground">
-            Minutes Not Available
-          </h1>
+          <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground" aria-hidden="true" />
+          <h1 className="mt-4 text-xl font-bold text-foreground">Minutes Not Available</h1>
           <p className="mt-2 text-muted-foreground">
             The minutes for this meeting have not been published yet.
           </p>
@@ -103,16 +93,10 @@ export default function MinutesView() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
-          <AlertCircle
-            className="mx-auto h-12 w-12 text-red-400"
-            aria-hidden="true"
-          />
-          <h1 className="mt-4 text-xl font-bold text-foreground">
-            Error Loading Minutes
-          </h1>
+          <AlertCircle className="mx-auto h-12 w-12 text-red-400" aria-hidden="true" />
+          <h1 className="mt-4 text-xl font-bold text-foreground">Error Loading Minutes</h1>
           <p className="mt-2 text-muted-foreground">
-            An unexpected error occurred while loading the minutes. Please try
-            again later.
+            An unexpected error occurred while loading the minutes. Please try again later.
           </p>
         </div>
       </div>
@@ -210,10 +194,7 @@ export default function MinutesView() {
 
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
-        <nav
-          className="no-print mb-6 text-sm text-muted-foreground"
-          aria-label="Breadcrumb"
-        >
+        <nav className="no-print mb-6 text-sm text-muted-foreground" aria-label="Breadcrumb">
           <ol className="flex items-center gap-1">
             <li>
               <Link to="/meetings" className="hover:text-foreground">
@@ -230,10 +211,7 @@ export default function MinutesView() {
               <ChevronRight className="h-3 w-3" aria-hidden="true" />
             </li>
             <li>
-              <Link
-                to={`/meetings/${meetingId}`}
-                className="hover:text-foreground"
-              >
+              <Link to={`/meetings/${meetingId}`} className="hover:text-foreground">
                 {formatDate(minutes.meeting_date)}
               </Link>
             </li>
@@ -253,9 +231,7 @@ export default function MinutesView() {
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   Minutes of the {minutes.board_name}
                 </h1>
-                <p className="mt-1 text-muted-foreground">
-                  {formatDate(minutes.meeting_date)}
-                </p>
+                <p className="mt-1 text-muted-foreground">{formatDate(minutes.meeting_date)}</p>
                 {minutes.approved_at && (
                   <p className="mt-1 text-sm text-muted-foreground">
                     Approved on {formatDate(minutes.approved_at)}

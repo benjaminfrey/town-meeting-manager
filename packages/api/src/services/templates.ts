@@ -17,9 +17,7 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
 
 Handlebars.registerHelper("sectionNumber", (index: number) => index + 1);
 
-Handlebars.registerHelper("itemLetter", (index: number) =>
-  String.fromCharCode(65 + index),
-);
+Handlebars.registerHelper("itemLetter", (index: number) => String.fromCharCode(65 + index));
 
 Handlebars.registerHelper(
   "itemLabel",
@@ -28,10 +26,7 @@ Handlebars.registerHelper(
 );
 
 const ROMAN = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
-Handlebars.registerHelper(
-  "romanNumeral",
-  (index: number) => ROMAN[index] ?? `${index + 1}`,
-);
+Handlebars.registerHelper("romanNumeral", (index: number) => ROMAN[index] ?? `${index + 1}`);
 
 Handlebars.registerHelper("formatDate", (dateStr: string) => {
   if (!dateStr) return "";
@@ -63,12 +58,15 @@ Handlebars.registerHelper("currentDate", () =>
 );
 
 // Block helper: {{#ifPresent value}}...{{/ifPresent}}
-Handlebars.registerHelper("ifPresent", function (this: unknown, value: unknown, options: Handlebars.HelperOptions) {
-  if (value && String(value).trim()) {
-    return options.fn(this);
-  }
-  return options.inverse(this);
-});
+Handlebars.registerHelper(
+  "ifPresent",
+  function (this: unknown, value: unknown, options: Handlebars.HelperOptions) {
+    if (value && String(value).trim()) {
+      return options.fn(this);
+    }
+    return options.inverse(this);
+  },
+);
 
 Handlebars.registerHelper("formatTime", (isoStr: string) => {
   if (!isoStr) return "";
@@ -188,9 +186,7 @@ export function renderAgendaPacket(data: AgendaPacketData): string {
   const template = loadTemplate("agenda-packet");
   const css = loadCss("agenda-packet");
 
-  const hasExhibits = data.sections.some((s) =>
-    s.items.some((i) => i.exhibits.length > 0),
-  );
+  const hasExhibits = data.sections.some((s) => s.items.some((i) => i.exhibits.length > 0));
 
   return template({ ...data, css, hasExhibits });
 }

@@ -31,8 +31,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // ─── Stage renderer ──────────────────────────────────────────────────
 
 function WizardContent() {
-  const { state, updateStage, markStageComplete, goNext, goBack, getWizardData } =
-    useWizard();
+  const { state, updateStage, markStageComplete, goNext, goBack, getWizardData } = useWizard();
   const { currentStage } = state;
   const supabase = useSupabase();
 
@@ -55,7 +54,7 @@ function WizardContent() {
     (handlers: { validate: () => unknown; getData?: () => unknown }) => {
       stageHandlersRef.current = handlers;
     },
-    []
+    [],
   );
 
   const handleNext = useCallback(() => {
@@ -108,9 +107,7 @@ function WizardContent() {
       // across all providers before navigating to the dashboard.
       window.location.href = "/dashboard?welcome=true";
     } catch (err) {
-      setSubmitError(
-        err instanceof Error ? err.message : "An unexpected error occurred."
-      );
+      setSubmitError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setIsSubmitting(false);
     }

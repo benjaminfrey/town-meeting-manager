@@ -78,8 +78,7 @@ export default function ForgotPasswordPage() {
           <div>
             <CardTitle className="text-xl">Check your email</CardTitle>
             <CardDescription className="mt-1">
-              If an account exists with that email, we've sent a password
-              reset link.
+              If an account exists with that email, we've sent a password reset link.
             </CardDescription>
           </div>
         </CardHeader>
@@ -133,9 +132,7 @@ export default function ForgotPasswordPage() {
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!emailError}
             />
-            {emailError && (
-              <p className="text-sm text-destructive">{emailError}</p>
-            )}
+            {emailError && <p className="text-sm text-destructive">{emailError}</p>}
           </div>
 
           {/* Submit button */}

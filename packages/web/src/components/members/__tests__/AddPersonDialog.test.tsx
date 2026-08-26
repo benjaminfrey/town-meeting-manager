@@ -33,9 +33,7 @@ vi.mock("@/hooks/useSupabase", () => ({
 // StaffAccountFlow → a button that fires onComplete
 vi.mock("../StaffAccountFlow", () => ({
   StaffAccountFlow: ({ onComplete }: { onComplete: (r: unknown) => void }) => (
-    <button onClick={() => onComplete({ permissions: {}, gov_title: "" })}>
-      finish-staff
-    </button>
+    <button onClick={() => onComplete({ permissions: {}, gov_title: "" })}>finish-staff</button>
   ),
 }));
 

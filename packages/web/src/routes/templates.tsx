@@ -43,21 +43,15 @@ export default function TemplatesPage() {
   });
 
   const groups = useMemo(() => {
-    const byBoard = new Map<
-      string,
-      { boardId: string; boardName: string; items: TemplateRow[] }
-    >();
+    const byBoard = new Map<string, { boardId: string; boardName: string; items: TemplateRow[] }>();
     for (const t of templates) {
       const boardId = t.board?.id ?? "none";
       const boardName = t.board?.name ?? "Unassigned";
-      const g =
-        byBoard.get(boardId) ?? { boardId, boardName, items: [] as TemplateRow[] };
+      const g = byBoard.get(boardId) ?? { boardId, boardName, items: [] as TemplateRow[] };
       g.items.push(t);
       byBoard.set(boardId, g);
     }
-    return [...byBoard.values()].sort((a, b) =>
-      a.boardName.localeCompare(b.boardName),
-    );
+    return [...byBoard.values()].sort((a, b) => a.boardName.localeCompare(b.boardName));
   }, [templates]);
 
   return (
@@ -65,8 +59,8 @@ export default function TemplatesPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Agenda Templates</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Reusable agenda structures, grouped by board. Create and edit them in a
-          board's Templates tab.
+          Reusable agenda structures, grouped by board. Create and edit them in a board's Templates
+          tab.
         </p>
       </div>
 

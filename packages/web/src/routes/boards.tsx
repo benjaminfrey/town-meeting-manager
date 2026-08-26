@@ -131,14 +131,18 @@ export default function BoardListPage(_props: Route.ComponentProps) {
           town={town}
           board={editBoard}
           open={!!editBoard}
-          onOpenChange={(open) => { if (!open) setEditBoard(null); }}
+          onOpenChange={(open) => {
+            if (!open) setEditBoard(null);
+          }}
         />
       )}
       {archiveBoard && (
         <ArchiveBoardDialog
           board={archiveBoard}
           open={!!archiveBoard}
-          onOpenChange={(open) => { if (!open) setArchiveBoard(null); }}
+          onOpenChange={(open) => {
+            if (!open) setArchiveBoard(null);
+          }}
         />
       )}
 
@@ -159,11 +163,7 @@ export default function BoardListPage(_props: Route.ComponentProps) {
       {/* Show archived toggle */}
       {archivedCount > 0 && (
         <div className="mb-4 flex items-center gap-2">
-          <Switch
-            id="show-archived"
-            checked={showArchived}
-            onCheckedChange={setShowArchived}
-          />
+          <Switch id="show-archived" checked={showArchived} onCheckedChange={setShowArchived} />
           <Label htmlFor="show-archived" className="text-sm text-muted-foreground">
             Show archived ({archivedCount})
           </Label>
@@ -204,7 +204,10 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                 const seatCount = Number(board.member_count ?? 0);
 
                 return (
-                  <tr key={id} className="border-b last:border-b-0 hover:bg-muted/30 transition-colors">
+                  <tr
+                    key={id}
+                    className="border-b last:border-b-0 hover:bg-muted/30 transition-colors"
+                  >
                     <td className="px-4 py-3">
                       <Link
                         to={`/boards/${id}`}

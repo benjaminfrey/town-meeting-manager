@@ -51,14 +51,14 @@ export function MemberArchiveDialog({
 
   // Check for other active board memberships
   const { data: otherActiveMemberships = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byPerson(member.person_id), 'otherActive', boardId],
+    queryKey: [...queryKeys.members.byPerson(member.person_id), "otherActive", boardId],
     queryFn: async () => {
       const { count, error } = await supabase
-        .from('board_member')
-        .select('*', { count: 'exact', head: true })
-        .eq('person_id', member.person_id)
-        .neq('board_id', boardId)
-        .eq('status', 'active');
+        .from("board_member")
+        .select("*", { count: "exact", head: true })
+        .eq("person_id", member.person_id)
+        .neq("board_id", boardId)
+        .eq("status", "active");
       if (error) throw error;
       return count ?? 0;
     },
@@ -73,17 +73,17 @@ export function MemberArchiveDialog({
 
       // Archive board membership
       const { error: bmError } = await supabase
-        .from('board_member')
-        .update({ status: 'archived', term_end: today })
-        .eq('id', member.id);
+        .from("board_member")
+        .update({ status: "archived", term_end: today })
+        .eq("id", member.id);
       if (bmError) throw bmError;
 
       // Optionally archive user account
       if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
         const { error: uaError } = await supabase
-          .from('user_account')
+          .from("user_account")
           .update({ archived_at: now })
-          .eq('id', member.user_account_id);
+          .eq("id", member.user_account_id);
         if (uaError) throw uaError;
       }
     },
@@ -104,12 +104,14 @@ export function MemberArchiveDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-3">
               <p>
-                Are you sure you want to archive{" "}
-                <strong>{member.name}</strong>'s membership on this board?
+                Are you sure you want to archive <strong>{member.name}</strong>'s membership on this
+                board?
               </p>
               <ul className="list-disc pl-5 space-y-1 text-sm">
                 <li>Board membership will be archived and term end set to today</li>
-                <li>Name and government title retained indefinitely (public record per Maine law)</li>
+                <li>
+                  Name and government title retained indefinitely (public record per Maine law)
+                </li>
                 <li>Historical records (votes, motions, attendance) preserved forever</li>
                 <li>Personal contact info scrubbed after retention period (default 1 year)</li>
               </ul>
@@ -136,25 +138,16 @@ export function MemberArchiveDialog({
 
         {hasOtherMemberships && member.user_account_id && (
           <p className="text-xs text-muted-foreground px-1">
-            {member.name} has {otherActiveMemberships} other active board
-            membership{otherActiveMemberships !== 1 ? "s" : ""}. Their user
-            account will remain active.
+            {member.name} has {otherActiveMemberships} other active board membership
+            {otherActiveMemberships !== 1 ? "s" : ""}. Their user account will remain active.
           </p>
         )}
 
         <AlertDialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isArchiving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isArchiving}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => archiveMember()}
-            disabled={isArchiving}
-          >
+          <Button variant="destructive" onClick={() => archiveMember()} disabled={isArchiving}>
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Archive Member
           </Button>

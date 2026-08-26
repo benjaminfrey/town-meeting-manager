@@ -25,18 +25,18 @@ Two things happened during the dormancy that force a re-plan rather than a resum
 
 ### What the audit found
 
-| Dimension | Score /100 |
-|---|---|
-| Security, auth & RBAC | 18 |
-| API, documents & email | 20 |
-| Testing & CI | 26 |
-| Deployment & observability | 27 |
-| Data model & schema drift | 30 |
-| Product completeness | 31 |
-| Architecture & code health | 38 |
-| Plan-vs-reality drift | 38 |
-| Frontend & accessibility | 42 |
-| Dependencies & tooling | 55 |
+| Dimension                  | Score /100 |
+| -------------------------- | ---------- |
+| Security, auth & RBAC      | 18         |
+| API, documents & email     | 20         |
+| Testing & CI               | 26         |
+| Deployment & observability | 27         |
+| Data model & schema drift  | 30         |
+| Product completeness       | 31         |
+| Architecture & code health | 38         |
+| Plan-vs-reality drift      | 38         |
+| Frontend & accessibility   | 42         |
+| Dependencies & tooling     | 55         |
 
 The governing finding: **415 tests pass with approximately zero route coverage, against Supabase
 mocks whose `.eq()` is an identity function.** There is no CI and no linter. The green build is not
@@ -79,7 +79,7 @@ at stage boundaries, not per step.
 ## 3. The architectural pivot: drop Supabase, keep Postgres
 
 Self-hosted Supabase is eight containers — Kong, GoTrue, PostgREST, Realtime, Storage, imgproxy,
-postgres-meta, Studio. On a 2 vCPU / 4 GB VM that leaves almost nothing for Postgres *and*
+postgres-meta, Studio. On a 2 vCPU / 4 GB VM that leaves almost nothing for Postgres _and_
 Puppeteer, which wants 300–500 MB per Chromium instance. Postgres plus one Fastify process is the
 shape that fits the hardware. The overhead motivation and the hardware agree.
 
@@ -109,16 +109,16 @@ does not change shape — only its transport.
 
 ### Migration surface, measured
 
-| Surface | Extent |
-|---|---|
-| `supabase.from()` call sites in `packages/web` | **244**, across 93 files, 14 distinct tables |
-| `supabase.auth.*` call sites | 24 |
-| Realtime call sites | 6 |
-| PostgREST RPC calls | 2 |
-| RLS policies | 83 across 25 tables (26 tables total; `push_subscription` has none) |
-| `SECURITY DEFINER` functions | 14 |
-| Existing Fastify routes | 36 |
-| Storage in use | town seal, exhibit uploads, generated PDFs |
+| Surface                                        | Extent                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `supabase.from()` call sites in `packages/web` | **244**, across 93 files, 14 distinct tables                        |
+| `supabase.auth.*` call sites                   | 24                                                                  |
+| Realtime call sites                            | 6                                                                   |
+| PostgREST RPC calls                            | 2                                                                   |
+| RLS policies                                   | 83 across 25 tables (26 tables total; `push_subscription` has none) |
+| `SECURITY DEFINER` functions                   | 14                                                                  |
+| Existing Fastify routes                        | 36                                                                  |
+| Storage in use                                 | town seal, exhibit uploads, generated PDFs                          |
 
 For calibration: this is comparable in scale to the PowerSync → TanStack Query migration already
 completed in this repo (sessions M.01–M.11, eleven sessions).
@@ -150,7 +150,7 @@ This replaces 83 subtle policies with roughly 26 trivial ones plus tested applic
 
 #### 4.2.1 The RLS bypass that must be closed in the baseline
 
-PostgreSQL: *"Table owners normally bypass row security."* Under Supabase this never surfaced,
+PostgreSQL: _"Table owners normally bypass row security."_ Under Supabase this never surfaced,
 because PostgREST connects as `authenticator` and `SET ROLE`s to `authenticated` — a non-owner, so
 policies applied. The moment a single Drizzle connection owns the tables (which it will, if it runs
 the migrations), **every policy silently becomes a no-op.** No error, no warning, total cross-tenant
@@ -171,13 +171,13 @@ Three mandatory, non-negotiable mitigations, all landing in the baseline migrati
 
 Policies call helper functions rather than inlining `auth.jwt()`. Verified reference counts:
 
-| Helper | References |
-|---|---|
-| `get_current_town_id()` | 69 |
-| `is_admin()` | 29 |
-| `has_permission()` | 24 |
-| `get_current_role()` | 9 |
-| `get_current_person_id()` | 8 |
+| Helper                    | References |
+| ------------------------- | ---------- |
+| `get_current_town_id()`   | 69         |
+| `is_admin()`              | 29         |
+| `has_permission()`        | 24         |
+| `get_current_role()`      | 9          |
+| `get_current_person_id()` | 8          |
 
 Rewriting roughly five helper bodies to read `current_setting('app.town_id', true)` instead of
 `auth.jwt()` keeps all 69 call sites working untouched. Only six migration files contain inline
@@ -205,9 +205,9 @@ standardize there.
 ```ts
 async function withTenant<T>(ctx, fn: (tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select set_config('app.town_id', ${ctx.townId}, true)`)
-    return fn(tx)
-  })
+    await tx.execute(sql`select set_config('app.town_id', ${ctx.townId}, true)`);
+    return fn(tx);
+  });
 }
 ```
 
@@ -514,7 +514,7 @@ failure produces an alert.
 
 The original Phase 2, built only on the new stack.
 
-- **AI minutes.** Render `operator_notes` first. The clerk's live notes *are* assembled —
+- **AI minutes.** Render `operator_notes` first. The clerk's live notes _are_ assembled —
   [`minutes-assembler.ts:565`](../../../packages/api/src/services/minutes-assembler.ts) passes them
   through — but `templates/minutes.hbs` never renders them, so they reach the document pipeline and
   vanish. That is a small fix with immediate value, and it also supplies the only narrative input
@@ -535,16 +535,16 @@ postal mail, multi-town consortiums, advanced zoning.
 
 ## 6. Risks and open items
 
-| Risk | Handling |
-|---|---|
-| **tRPC SSE on the Fastify adapter is undocumented** | Day-one spike in Stage 1. WebSockets is the documented fallback, ~10 lines behind `splitLink`. |
-| **`drizzle-kit pull` fidelity for RLS policies and CHECK constraints** | Open upstream bugs. Diff the pulled schema against the live database before trusting it; hand-write anything missed into the baseline. |
-| **`drizzle-kit` may drop the new application role** | Set `entities.roles` exclude in `drizzle.config.ts`. |
-| **drizzle-zod + Zod 4 type-level friction** | Known: `z.coerce` infers `unknown`; `.omit()`/`.pick()` produce `'true' is not assignable to 'never'`. Runtime is unaffected. Budget time; do not adopt the v1 RC to escape it. |
-| **drizzle-orm v1.0.0 timing unknown** | Plan on 0.45.2. Revisit only after the migration is complete. |
-| **Better Auth advisory volume** | All known advisories patched at ≤1.7.1. Apply the §4.4 hardening, enable only used plugins, track the GHSA feed. |
-| **Migrating 244 call sites risks silent behaviour change** | The vertical slice establishes the template first; CI exists before the fan-out; the 21-rule checklist prevents dropped authorization. |
-| **4 GB RAM ceiling** | Puppeteer pinned to concurrency 1. Dropping eight Supabase containers is what makes the budget work; do not reintroduce a service without re-measuring. |
+| Risk                                                                   | Handling                                                                                                                                                                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **tRPC SSE on the Fastify adapter is undocumented**                    | Day-one spike in Stage 1. WebSockets is the documented fallback, ~10 lines behind `splitLink`.                                                                                  |
+| **`drizzle-kit pull` fidelity for RLS policies and CHECK constraints** | Open upstream bugs. Diff the pulled schema against the live database before trusting it; hand-write anything missed into the baseline.                                          |
+| **`drizzle-kit` may drop the new application role**                    | Set `entities.roles` exclude in `drizzle.config.ts`.                                                                                                                            |
+| **drizzle-zod + Zod 4 type-level friction**                            | Known: `z.coerce` infers `unknown`; `.omit()`/`.pick()` produce `'true' is not assignable to 'never'`. Runtime is unaffected. Budget time; do not adopt the v1 RC to escape it. |
+| **drizzle-orm v1.0.0 timing unknown**                                  | Plan on 0.45.2. Revisit only after the migration is complete.                                                                                                                   |
+| **Better Auth advisory volume**                                        | All known advisories patched at ≤1.7.1. Apply the §4.4 hardening, enable only used plugins, track the GHSA feed.                                                                |
+| **Migrating 244 call sites risks silent behaviour change**             | The vertical slice establishes the template first; CI exists before the fan-out; the 21-rule checklist prevents dropped authorization.                                          |
+| **4 GB RAM ceiling**                                                   | Puppeteer pinned to concurrency 1. Dropping eight Supabase containers is what makes the budget work; do not reintroduce a service without re-measuring.                         |
 
 ---
 

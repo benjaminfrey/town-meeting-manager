@@ -58,8 +58,12 @@ export function GuestSpeakerEntry({
       if (error) throw error;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byItem(agendaItemId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.guestSpeakers.byItem(agendaItemId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+      });
       setName("");
       setAddress("");
       setTopic("");
@@ -69,15 +73,16 @@ export function GuestSpeakerEntry({
 
   const removeSpeakerMutation = useMutation({
     mutationFn: async (speakerId: string) => {
-      const { error } = await supabase
-        .from("guest_speaker")
-        .delete()
-        .eq("id", speakerId);
+      const { error } = await supabase.from("guest_speaker").delete().eq("id", speakerId);
       if (error) throw error;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byItem(agendaItemId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.guestSpeakers.byItem(agendaItemId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+      });
     },
   });
 
@@ -108,15 +113,14 @@ export function GuestSpeakerEntry({
       {speakers.length > 0 && (
         <ul className="space-y-1">
           {speakers.map((s) => (
-            <li key={s.id} className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-1.5 text-sm">
+            <li
+              key={s.id}
+              className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-1.5 text-sm"
+            >
               <div>
                 <span className="font-medium">{s.name}</span>
-                {s.address && (
-                  <span className="ml-2 text-muted-foreground">— {s.address}</span>
-                )}
-                {s.topic && (
-                  <span className="ml-2 text-xs text-muted-foreground">({s.topic})</span>
-                )}
+                {s.address && <span className="ml-2 text-muted-foreground">— {s.address}</span>}
+                {s.topic && <span className="ml-2 text-xs text-muted-foreground">({s.topic})</span>}
               </div>
               {!readOnly && (
                 <button
@@ -154,7 +158,11 @@ export function GuestSpeakerEntry({
             />
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => handleAdd()} disabled={!name.trim() || addSpeakerMutation.isPending}>
+            <Button
+              size="sm"
+              onClick={() => handleAdd()}
+              disabled={!name.trim() || addSpeakerMutation.isPending}
+            >
               Add
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setShowForm(false)}>

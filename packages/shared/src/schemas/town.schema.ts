@@ -29,11 +29,7 @@ export const TownSchema = z.object({
     MeetingFormality.SEMI_FORMAL,
     MeetingFormality.FORMAL,
   ]),
-  minutes_style: z.enum([
-    MinutesStyle.ACTION,
-    MinutesStyle.SUMMARY,
-    MinutesStyle.NARRATIVE,
-  ]),
+  minutes_style: z.enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE]),
   presiding_officer_default: z.string().max(100),
   minutes_recorder_default: z.string().max(100),
   subdomain: z.string().max(50).nullable(),

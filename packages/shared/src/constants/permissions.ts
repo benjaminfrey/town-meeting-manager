@@ -43,13 +43,10 @@ export const PERMISSIONS = {
   C5: "configure_public_portal",
 } as const;
 
-export type PermissionAction =
-  (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+export type PermissionAction = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
 /** All 30 permission action values as an array */
-export const ALL_PERMISSION_ACTIONS = Object.values(
-  PERMISSIONS,
-) as PermissionAction[];
+export const ALL_PERMISSION_ACTIONS = Object.values(PERMISSIONS) as PermissionAction[];
 
 /** Actions that are admin-only and cannot be delegated to staff */
 export const ADMIN_ONLY_ACTIONS: PermissionAction[] = [
@@ -105,8 +102,7 @@ export interface PermissionTemplateDefinition {
 /** Town Clerk: Full operational access, closest to admin without T1-T4 */
 export const TEMPLATE_TOWN_CLERK: PermissionTemplateDefinition = {
   name: "Town Clerk",
-  description:
-    "Full operational access. Closest to admin without system governance (T1-T4).",
+  description: "Full operational access. Closest to admin without system governance (T1-T4).",
   scope: "all_boards",
   permissions: [
     // Agenda & Meeting Prep
@@ -165,8 +161,7 @@ export const TEMPLATE_DEPUTY_CLERK: PermissionTemplateDefinition = {
 /** Board-Specific Staff: Full operational access but only for designated boards. */
 export const TEMPLATE_BOARD_SPECIFIC_STAFF: PermissionTemplateDefinition = {
   name: "Board-Specific Staff",
-  description:
-    "Full operational access but only for designated boards (e.g., Town Planner, CEO).",
+  description: "Full operational access but only for designated boards (e.g., Town Planner, CEO).",
   scope: "designated_boards",
   permissions: [
     PERMISSIONS.A1,

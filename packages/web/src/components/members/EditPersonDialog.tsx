@@ -37,12 +37,7 @@ interface EditPersonDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function EditPersonDialog({
-  person,
-  townId,
-  open,
-  onOpenChange,
-}: EditPersonDialogProps) {
+export function EditPersonDialog({ person, townId, open, onOpenChange }: EditPersonDialogProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
   const form = useWizardForm(EditPersonSchema, {
@@ -64,11 +59,7 @@ export function EditPersonDialog({
       if (error) throw error;
       return data ?? [];
     },
-    enabled:
-      !!townId &&
-      !!email &&
-      email.includes("@") &&
-      email !== person.email.toLowerCase(),
+    enabled: !!townId && !!email && email.includes("@") && email !== person.email.toLowerCase(),
   });
   const emailTaken = dupRows.length > 0;
 
@@ -95,9 +86,7 @@ export function EditPersonDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Edit person</DialogTitle>
-          <DialogDescription>
-            Update this person's name and email.
-          </DialogDescription>
+          <DialogDescription>Update this person's name and email.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -107,9 +96,7 @@ export function EditPersonDialog({
               onChange={(e) => form.setValue("name", e.target.value)}
               onBlur={() => form.handleBlur("name")}
             />
-            {form.errors.name && (
-              <p className="text-xs text-destructive">{form.errors.name}</p>
-            )}
+            {form.errors.name && <p className="text-xs text-destructive">{form.errors.name}</p>}
           </div>
           <div className="space-y-1.5">
             <Label>Email</Label>
@@ -119,22 +106,14 @@ export function EditPersonDialog({
               onChange={(e) => form.setValue("email", e.target.value)}
               onBlur={() => form.handleBlur("email")}
             />
-            {form.errors.email && (
-              <p className="text-xs text-destructive">{form.errors.email}</p>
-            )}
+            {form.errors.email && <p className="text-xs text-destructive">{form.errors.email}</p>}
             {emailTaken && (
-              <p className="text-xs text-destructive">
-                Another person already uses this email.
-              </p>
+              <p className="text-xs text-destructive">Another person already uses this email.</p>
             )}
           </div>
         </div>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={save.isPending}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={save.isPending}>
             Cancel
           </Button>
           <Button

@@ -49,7 +49,7 @@ export const WizardStage1Schema = z.object({
     .max(100, "Town name must be less than 100 characters")
     .regex(
       TOWN_NAME_REGEX,
-      "Town name can only contain letters, numbers, spaces, hyphens, apostrophes, and periods"
+      "Town name can only contain letters, numbers, spaces, hyphens, apostrophes, and periods",
     ),
   state: z.enum(["ME", "NH", "VT", "MA", "CT", "RI"]),
   municipalityType: z.enum([
@@ -89,7 +89,7 @@ const WizardStage2Base = z.object({
     z
       .string()
       .min(2, "Seat title must be at least 2 characters")
-      .max(50, "Seat title must be less than 50 characters")
+      .max(50, "Seat title must be less than 50 characters"),
   ),
   officerElectionMethod: z.enum([
     OfficerElectionMethod.VOTE_OF_BOARD,
@@ -105,8 +105,7 @@ export const WizardStage2Schema = WizardStage2Base.refine(
   (data) => {
     if (data.electionMethod === "role_titled" && data.memberCount > 0) {
       return (
-        data.seatTitles.length === data.memberCount &&
-        data.seatTitles.every((t) => t.length >= 2)
+        data.seatTitles.length === data.memberCount && data.seatTitles.every((t) => t.length >= 2)
       );
     }
     return true;
@@ -114,7 +113,7 @@ export const WizardStage2Schema = WizardStage2Base.refine(
   {
     message: "Each seat must have a title of at least 2 characters",
     path: ["seatTitles"],
-  }
+  },
 );
 
 export type WizardStage2Data = z.infer<typeof WizardStage2Base>;
@@ -155,11 +154,7 @@ export const WizardStage5Schema = z.object({
     MeetingFormality.SEMI_FORMAL,
     MeetingFormality.FORMAL,
   ]),
-  minutesStyle: z.enum([
-    MinutesStyle.ACTION,
-    MinutesStyle.SUMMARY,
-    MinutesStyle.NARRATIVE,
-  ]),
+  minutesStyle: z.enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE]),
 });
 
 export type WizardStage5Data = z.infer<typeof WizardStage5Schema>;

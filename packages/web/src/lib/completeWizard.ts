@@ -28,10 +28,7 @@ interface WizardData {
 /**
  * Create all town records from wizard data via a single RPC call.
  */
-export async function completeWizard(
-  data: WizardData,
-  supabase: SupabaseClient
-): Promise<void> {
+export async function completeWizard(data: WizardData, supabase: SupabaseClient): Promise<void> {
   const { stage1, stage2, stage3, stage4, stage5 } = data;
 
   // Get the current user (for email)
@@ -68,8 +65,7 @@ export async function completeWizard(
     p_member_count: stage2.memberCount,
     p_election_method: stage2.electionMethod || null,
     p_officer_election_method: stage2.officerElectionMethod || null,
-    p_seat_titles:
-      stage2.electionMethod === "role_titled" ? stage2.seatTitles : [],
+    p_seat_titles: stage2.electionMethod === "role_titled" ? stage2.seatTitles : [],
     p_district_based: stage2.districtBased,
     p_staggered_terms: stage2.staggeredTerms,
     // Additional boards
@@ -82,12 +78,12 @@ export async function completeWizard(
   if (error) {
     if (error.message?.includes("already belongs to a town")) {
       throw new Error(
-        "Your account is already associated with a town. Please contact support if you need to create a new one."
+        "Your account is already associated with a town. Please contact support if you need to create a new one.",
       );
     }
     if (error.code === "23505") {
       throw new Error(
-        "A town with this name already exists. Please go back to Step 1 and choose a different name."
+        "A town with this name already exists. Please go back to Step 1 and choose a different name.",
       );
     }
     throw new Error(error.message || "Setup failed. Please try again.");

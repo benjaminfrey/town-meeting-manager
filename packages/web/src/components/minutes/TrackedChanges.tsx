@@ -13,20 +13,14 @@ function DiffDisplay({ segments }: { segments: DiffSegment[] }) {
       {segments.map((seg, i) => {
         if (seg.type === "added") {
           return (
-            <span
-              key={i}
-              className="bg-green-100 text-green-900 px-0.5 rounded"
-            >
+            <span key={i} className="bg-green-100 text-green-900 px-0.5 rounded">
               {seg.text}
             </span>
           );
         }
         if (seg.type === "removed") {
           return (
-            <span
-              key={i}
-              className="bg-red-100 text-red-900 line-through px-0.5 rounded"
-            >
+            <span key={i} className="bg-red-100 text-red-900 line-through px-0.5 rounded">
               {seg.text}
             </span>
           );
@@ -141,17 +135,10 @@ export function TrackedChanges({
         const sectionTitle = currSection?.title ?? `Section ${sd.sectionIndex + 1}`;
 
         return (
-          <div
-            key={sd.sectionIndex}
-            className="rounded-lg border border-gray-200 bg-white"
-          >
+          <div key={sd.sectionIndex} className="rounded-lg border border-gray-200 bg-white">
             <div className="border-b border-gray-100 px-4 py-3">
               <h3 className="text-sm font-semibold text-gray-900">
-                {sd.titleDiff ? (
-                  <DiffDisplay segments={sd.titleDiff} />
-                ) : (
-                  sectionTitle
-                )}
+                {sd.titleDiff ? <DiffDisplay segments={sd.titleDiff} /> : sectionTitle}
               </h3>
             </div>
 
@@ -159,20 +146,13 @@ export function TrackedChanges({
               <div className="divide-y divide-gray-50 px-4 py-2">
                 {sd.items.map((item) => {
                   const currItem =
-                    currentContentJson.sections[sd.sectionIndex]?.items[
-                      item.itemIndex
-                    ];
-                  const itemTitle =
-                    currItem?.title ?? `Item ${item.itemIndex + 1}`;
+                    currentContentJson.sections[sd.sectionIndex]?.items[item.itemIndex];
+                  const itemTitle = currItem?.title ?? `Item ${item.itemIndex + 1}`;
 
                   return (
                     <div key={item.itemIndex} className="py-3">
                       <p className="text-sm font-medium text-gray-700 mb-1">
-                        {item.titleDiff ? (
-                          <DiffDisplay segments={item.titleDiff} />
-                        ) : (
-                          itemTitle
-                        )}
+                        {item.titleDiff ? <DiffDisplay segments={item.titleDiff} /> : itemTitle}
                       </p>
                       {item.discussionDiff && (
                         <p className="text-sm text-gray-600 leading-relaxed">

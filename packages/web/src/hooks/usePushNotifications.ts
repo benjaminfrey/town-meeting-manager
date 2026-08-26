@@ -23,9 +23,7 @@ export interface UsePushNotificationsReturn {
 
 export function usePushNotifications(): UsePushNotificationsReturn {
   const isSupported =
-    typeof window !== "undefined" &&
-    "PushManager" in window &&
-    "serviceWorker" in navigator;
+    typeof window !== "undefined" && "PushManager" in window && "serviceWorker" in navigator;
 
   const [permission, setPermission] = useState<PushPermissionState>(
     isSupported ? (Notification.permission as PushPermissionState) : "denied",
@@ -33,9 +31,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as
-    | string
-    | undefined;
+  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
 
   // Check existing subscription on mount
   useEffect(() => {
@@ -118,9 +114,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; i++) {

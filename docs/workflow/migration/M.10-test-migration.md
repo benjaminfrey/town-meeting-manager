@@ -46,7 +46,7 @@ packages/shared/src/utils/__tests__/sample.test.ts
 
 ## Prompt
 
-```
+````
 You are updating the test files in the Town Meeting Manager to remove PowerSync mocks and use TanStack Query + Supabase test utilities. The production code is fully migrated at this point.
 
 PROJECT CONTEXT:
@@ -117,11 +117,12 @@ export function renderWithProviders(
     ...render(ui, { wrapper: Wrapper, ...options }),
   };
 }
-```
+````
 
 STEP 3: MIGRATION PATTERN FOR TESTS
 
 Old PowerSync test pattern:
+
 ```typescript
 import { render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
@@ -148,6 +149,7 @@ test('renders board list', () => {
 ```
 
 New TanStack Query test pattern:
+
 ```typescript
 import { renderWithProviders, createTestQueryClient } from '@/test-utils';
 import { screen, waitFor } from '@testing-library/react';
@@ -195,6 +197,7 @@ test('renders board list', async () => {
 ```
 
 KEY DIFFERENCES IN NEW PATTERN:
+
 1. No PowerSync mocks — mock `@/lib/supabase` instead
 2. The Supabase mock uses chained methods that eventually resolve with `{ data, error }`
 3. `waitFor` is often needed because React Query fetches asynchronously (even with mocked data)
@@ -215,18 +218,21 @@ For each test file:
 8. Add `await waitFor(...)` where needed for async queries
 
 For `useQuorumCheck.test.ts`:
+
 - The hook uses `useQuery` internally
 - Use `@testing-library/react`'s `renderHook` with a QueryClient wrapper
 - Mock the Supabase calls to return test attendance and board data
 - Verify the calculated output (hasQuorum, presentCount, etc.)
 
 For `MotionCaptureDialog.test.tsx`:
+
 - This test likely mocks `powerSync.execute` for the motion creation write
 - Replace with `vi.mock('@/lib/supabase')` and mock `supabase.from('motion').insert()`
 - Test that the mutation is called with the right arguments
 - Use `mutate` spy or check the mock call count
 
 For `meetings.$meetingId.live.test.tsx`:
+
 - This test likely mocks the Realtime subscription channels
 - Add `channel: vi.fn(() => ({ on: vi.fn().mockReturnThis(), subscribe: vi.fn() }))` to the Supabase mock
 - Add `removeChannel: vi.fn()` to verify cleanup
@@ -239,6 +245,7 @@ cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeti
 ```
 
 Fix any failing tests. Common issues:
+
 - `waitFor` timeout: the mock async resolution may be slow — increase timeout if needed with `{ timeout: 5000 }`
 - Supabase mock chain: the chainable mock pattern must return `this` for each method except the final one
 - QueryClient not provided: components that use `useQuery` need a QueryClientProvider wrapper — use `renderWithProviders`
@@ -254,16 +261,22 @@ cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeti
 If any shared package test references PowerSync types (from the deleted schema.ts), update the import to use the new database types from `./types/database`.
 
 VERIFICATION CHECKLIST:
+
 1. packages/web/src/test-utils/index.tsx exists with renderWithProviders and createTestQueryClient
 2. No test file imports from @powersync/react or @powersync/web
 3. All test files mock @/lib/supabase instead
 4. All test renders use renderWithProviders or provide a QueryClient wrapper
 5. `pnpm --filter @town-meeting/web test` passes with 0 failures
 6. `pnpm --filter @town-meeting/shared test` passes with 0 failures
+
 ```
 
 ## Commit Message
 
 ```
+
 M.10: Migrate test files from PowerSync mocks to TanStack Query + Supabase mocks
+
+```
+
 ```

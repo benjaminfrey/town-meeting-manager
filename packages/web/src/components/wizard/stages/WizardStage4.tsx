@@ -19,13 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useWizardForm } from "@/hooks/useWizardForm";
@@ -42,14 +36,44 @@ const STANDARD_BOARDS: Array<{
   { id: "planning_board", name: "Planning Board", defaultType: "elected", note: null },
   { id: "zba", name: "Zoning Board of Appeals", defaultType: "appointed", note: null },
   { id: "budget_committee", name: "Budget Committee", defaultType: "elected", note: null },
-  { id: "conservation_commission", name: "Conservation Commission", defaultType: "appointed", note: null },
-  { id: "parks_recreation", name: "Parks & Recreation Committee", defaultType: "appointed", note: null },
-  { id: "harbor_committee", name: "Harbor Committee", defaultType: "appointed", note: "Coastal towns" },
-  { id: "shellfish_commission", name: "Shellfish Conservation Commission", defaultType: "appointed", note: "Coastal towns" },
+  {
+    id: "conservation_commission",
+    name: "Conservation Commission",
+    defaultType: "appointed",
+    note: null,
+  },
+  {
+    id: "parks_recreation",
+    name: "Parks & Recreation Committee",
+    defaultType: "appointed",
+    note: null,
+  },
+  {
+    id: "harbor_committee",
+    name: "Harbor Committee",
+    defaultType: "appointed",
+    note: "Coastal towns",
+  },
+  {
+    id: "shellfish_commission",
+    name: "Shellfish Conservation Commission",
+    defaultType: "appointed",
+    note: "Coastal towns",
+  },
   { id: "cemetery_committee", name: "Cemetery Committee", defaultType: "appointed", note: null },
   { id: "road_committee", name: "Road Committee", defaultType: "appointed", note: null },
-  { id: "comprehensive_plan", name: "Comprehensive Plan Committee", defaultType: "appointed", note: "Formed as needed" },
-  { id: "broadband_committee", name: "Broadband Committee", defaultType: "appointed", note: "Increasingly common" },
+  {
+    id: "comprehensive_plan",
+    name: "Comprehensive Plan Committee",
+    defaultType: "appointed",
+    note: "Formed as needed",
+  },
+  {
+    id: "broadband_committee",
+    name: "Broadband Committee",
+    defaultType: "appointed",
+    note: "Increasingly common",
+  },
 ];
 
 function buildInitialBoards(): WizardBoardEntry[] {
@@ -80,8 +104,10 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
   const initialValues: WizardStage4Data =
     state.stage4.boards.length > 0 ? state.stage4 : { boards: buildInitialBoards() };
 
-  const { values, isValid, setValue, validate } =
-    useWizardForm<WizardStage4Data>(WizardStage4Schema, initialValues);
+  const { values, isValid, setValue, validate } = useWizardForm<WizardStage4Data>(
+    WizardStage4Schema,
+    initialValues,
+  );
 
   // Custom board input state
   const [customBoardName, setCustomBoardName] = useState("");
@@ -109,19 +135,17 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
 
   const updateBoard = useCallback(
     (index: number, updates: Partial<WizardBoardEntry>) => {
-      const newBoards = values.boards.map((b, i) =>
-        i === index ? { ...b, ...updates } : b
-      );
+      const newBoards = values.boards.map((b, i) => (i === index ? { ...b, ...updates } : b));
       setValue("boards", newBoards);
     },
-    [setValue, values.boards]
+    [setValue, values.boards],
   );
 
   const toggleBoard = useCallback(
     (index: number, checked: boolean) => {
       updateBoard(index, { checked });
     },
-    [updateBoard]
+    [updateBoard],
   );
 
   const addCustomBoard = useCallback(() => {
@@ -151,15 +175,14 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
     (index: number) => {
       setValue(
         "boards",
-        values.boards.filter((_, i) => i !== index)
+        values.boards.filter((_, i) => i !== index),
       );
     },
-    [setValue, values.boards]
+    [setValue, values.boards],
   );
 
   // Find note for standard boards
-  const getNoteForBoard = (id: string) =>
-    STANDARD_BOARDS.find((b) => b.id === id)?.note ?? null;
+  const getNoteForBoard = (id: string) => STANDARD_BOARDS.find((b) => b.id === id)?.note ?? null;
 
   return (
     <Card>
@@ -187,20 +210,14 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
                     <Checkbox
                       id={`board-${board.id}`}
                       checked={board.checked}
-                      onCheckedChange={(checked) =>
-                        toggleBoard(index, checked === true)
-                      }
+                      onCheckedChange={(checked) => toggleBoard(index, checked === true)}
                     />
                     <Label
                       htmlFor={`board-${board.id}`}
                       className="flex-1 cursor-pointer font-normal"
                     >
                       {board.name}
-                      {note && (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          ({note})
-                        </span>
-                      )}
+                      {note && <span className="ml-2 text-xs text-muted-foreground">({note})</span>}
                     </Label>
                     {board.isCustom && (
                       <Button
@@ -230,9 +247,7 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
                           <Input
                             id={`board-name-${board.id}`}
                             value={board.name}
-                            onChange={(e) =>
-                              updateBoard(index, { name: e.target.value })
-                            }
+                            onChange={(e) => updateBoard(index, { name: e.target.value })}
                           />
                         </div>
 
@@ -252,18 +267,14 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
                             onChange={(e) => {
                               const v = parseInt(e.target.value, 10);
                               updateBoard(index, {
-                                memberCount: isNaN(v)
-                                  ? 0
-                                  : Math.max(0, Math.min(25, v)),
+                                memberCount: isNaN(v) ? 0 : Math.max(0, Math.min(25, v)),
                               });
                             }}
                           />
                         </div>
 
                         <div className="space-y-1">
-                          <span className="text-xs text-muted-foreground">
-                            Type
-                          </span>
+                          <span className="text-xs text-muted-foreground">Type</span>
                           <RadioGroup
                             value={board.electedOrAppointed}
                             onValueChange={(val) =>
@@ -274,10 +285,7 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
                             className="flex gap-4 pt-1"
                           >
                             <div className="flex items-center gap-1.5">
-                              <RadioGroupItem
-                                value="elected"
-                                id={`board-elected-${board.id}`}
-                              />
+                              <RadioGroupItem value="elected" id={`board-elected-${board.id}`} />
                               <Label
                                 htmlFor={`board-elected-${board.id}`}
                                 className="text-sm font-normal cursor-pointer"
@@ -309,9 +317,7 @@ export function WizardStage4({ onValidityChange, onRegister }: WizardStage4Props
 
           {/* Add custom board */}
           <div className="rounded-lg border border-dashed p-3">
-            <Label className="text-sm font-medium">
-              Add another board or committee
-            </Label>
+            <Label className="text-sm font-medium">Add another board or committee</Label>
             <div className="mt-2 flex gap-2">
               <Input
                 placeholder="Board or committee name"

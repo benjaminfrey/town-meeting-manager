@@ -17,7 +17,10 @@ test.describe("smoke tests", () => {
 
     // At least one of these should be visible
     const hasLogin = await loginForm.isVisible().catch(() => false);
-    const hasHeading = await heading.first().isVisible().catch(() => false);
+    const hasHeading = await heading
+      .first()
+      .isVisible()
+      .catch(() => false);
 
     expect(hasLogin || hasHeading).toBe(true);
   });

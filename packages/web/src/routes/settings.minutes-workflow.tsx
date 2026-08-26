@@ -18,13 +18,7 @@ import {
   AUDIO_RETENTION_LABELS,
   AUDIO_RETENTION_DESCRIPTIONS,
 } from "@town-meeting/shared";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -59,7 +53,7 @@ export default function MinutesWorkflowSettingsPage() {
       const { data, error } = await supabase
         .from("town")
         .select(
-          "audio_retention_policy, auto_publish_on_approval, minutes_review_window_days, minutes_workflow_configured_at"
+          "audio_retention_policy, auto_publish_on_approval, minutes_review_window_days, minutes_workflow_configured_at",
         )
         .eq("id", townId!)
         .single();
@@ -76,13 +70,10 @@ export default function MinutesWorkflowSettingsPage() {
   // Derived values: local state overrides server data
   const effectiveRetention =
     retentionPolicy ?? settings?.audio_retention_policy ?? "retain_30_days";
-  const effectiveAutoPublish =
-    autoPublish ?? settings?.auto_publish_on_approval ?? false;
-  const effectiveReviewWindow =
-    reviewWindow ?? String(settings?.minutes_review_window_days ?? 7);
+  const effectiveAutoPublish = autoPublish ?? settings?.auto_publish_on_approval ?? false;
+  const effectiveReviewWindow = reviewWindow ?? String(settings?.minutes_review_window_days ?? 7);
 
-  const isDirty =
-    retentionPolicy !== null || autoPublish !== null || reviewWindow !== null;
+  const isDirty = retentionPolicy !== null || autoPublish !== null || reviewWindow !== null;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -98,10 +89,7 @@ export default function MinutesWorkflowSettingsPage() {
         updates.minutes_workflow_configured_at = new Date().toISOString();
       }
 
-      const { error } = await supabase
-        .from("town")
-        .update(updates)
-        .eq("id", townId!);
+      const { error } = await supabase.from("town").update(updates).eq("id", townId!);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -124,12 +112,10 @@ export default function MinutesWorkflowSettingsPage() {
           <ArrowLeft className="h-4 w-4" />
           Settings
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Minutes Approval Workflow
-        </h1>
+        <h1 className="text-2xl font-bold tracking-tight">Minutes Approval Workflow</h1>
         <p className="mt-1 text-muted-foreground">
-          Configure town-wide defaults for how meeting minutes are reviewed,
-          approved, and published. Individual boards can override these settings.
+          Configure town-wide defaults for how meeting minutes are reviewed, approved, and
+          published. Individual boards can override these settings.
         </p>
       </div>
 
@@ -140,12 +126,9 @@ export default function MinutesWorkflowSettingsPage() {
           {/* ─── Audio Retention ──────────────────────────────────── */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">
-                Recording & Audio Retention
-              </CardTitle>
+              <CardTitle className="text-lg">Recording & Audio Retention</CardTitle>
               <CardDescription>
-                Choose how long meeting audio recordings are kept after minutes
-                are approved.
+                Choose how long meeting audio recordings are kept after minutes are approved.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -164,9 +147,7 @@ export default function MinutesWorkflowSettingsPage() {
                       className="mt-1"
                     />
                     <div>
-                      <p className="text-sm font-medium">
-                        {AUDIO_RETENTION_LABELS[option]}
-                      </p>
+                      <p className="text-sm font-medium">{AUDIO_RETENTION_LABELS[option]}</p>
                       <p className="text-xs text-muted-foreground">
                         {AUDIO_RETENTION_DESCRIPTIONS[option]}
                       </p>
@@ -182,8 +163,7 @@ export default function MinutesWorkflowSettingsPage() {
             <CardHeader>
               <CardTitle className="text-lg">Portal Publishing</CardTitle>
               <CardDescription>
-                Control whether approved minutes are automatically published to
-                your public portal.
+                Control whether approved minutes are automatically published to your public portal.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -193,9 +173,9 @@ export default function MinutesWorkflowSettingsPage() {
                     Auto-publish on approval
                   </Label>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    When enabled, minutes are published to the public portal as
-                    soon as the approval motion passes. Otherwise, a staff member
-                    with the Publish permission (R5) must manually publish.
+                    When enabled, minutes are published to the public portal as soon as the approval
+                    motion passes. Otherwise, a staff member with the Publish permission (R5) must
+                    manually publish.
                   </p>
                 </div>
                 <Switch
@@ -212,8 +192,8 @@ export default function MinutesWorkflowSettingsPage() {
             <CardHeader>
               <CardTitle className="text-lg">Review Window</CardTitle>
               <CardDescription>
-                Set how many days before the next meeting draft minutes must be
-                distributed to board members for review.
+                Set how many days before the next meeting draft minutes must be distributed to board
+                members for review.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -232,8 +212,8 @@ export default function MinutesWorkflowSettingsPage() {
                 />
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Board members will be notified when draft minutes are available
-                for review within this window.
+                Board members will be notified when draft minutes are available for review within
+                this window.
               </p>
             </CardContent>
           </Card>
@@ -242,24 +222,22 @@ export default function MinutesWorkflowSettingsPage() {
           <div className="flex items-center gap-3">
             <Button
               onClick={() => saveMutation.mutate()}
-              disabled={!isDirty && !!settings?.minutes_workflow_configured_at || saveMutation.isPending}
+              disabled={
+                (!isDirty && !!settings?.minutes_workflow_configured_at) || saveMutation.isPending
+              }
             >
               {saveMutation.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Save className="mr-2 h-4 w-4" />
               )}
-              {settings?.minutes_workflow_configured_at
-                ? "Save Changes"
-                : "Save & Complete Setup"}
+              {settings?.minutes_workflow_configured_at ? "Save Changes" : "Save & Complete Setup"}
             </Button>
             {saveMutation.isSuccess && (
               <span className="text-sm text-green-600">Settings saved</span>
             )}
             {saveMutation.isError && (
-              <span className="text-sm text-red-600">
-                Error saving settings
-              </span>
+              <span className="text-sm text-red-600">Error saving settings</span>
             )}
           </div>
         </div>

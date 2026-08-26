@@ -7,8 +7,7 @@ export const AudioRetentionPolicy = {
   RETAIN_INDEFINITELY: "retain_indefinitely",
 } as const;
 
-export type AudioRetentionPolicy =
-  (typeof AudioRetentionPolicy)[keyof typeof AudioRetentionPolicy];
+export type AudioRetentionPolicy = (typeof AudioRetentionPolicy)[keyof typeof AudioRetentionPolicy];
 
 export const AUDIO_RETENTION_LABELS: Record<AudioRetentionPolicy, string> = {
   purge_on_approval: "Delete after approval",
@@ -18,14 +17,10 @@ export const AUDIO_RETENTION_LABELS: Record<AudioRetentionPolicy, string> = {
 };
 
 export const AUDIO_RETENTION_DESCRIPTIONS: Record<AudioRetentionPolicy, string> = {
-  purge_on_approval:
-    "Audio recordings are deleted immediately after minutes are approved",
-  retain_30_days:
-    "Audio recordings are kept for 30 days after minutes approval, then deleted",
-  retain_90_days:
-    "Audio recordings are kept for 90 days after minutes approval, then deleted",
-  retain_indefinitely:
-    "Audio recordings are kept permanently alongside approved minutes",
+  purge_on_approval: "Audio recordings are deleted immediately after minutes are approved",
+  retain_30_days: "Audio recordings are kept for 30 days after minutes approval, then deleted",
+  retain_90_days: "Audio recordings are kept for 90 days after minutes approval, then deleted",
+  retain_indefinitely: "Audio recordings are kept permanently alongside approved minutes",
 };
 
 // Note: AmendmentHistoryEntry is defined in ./minutes.ts

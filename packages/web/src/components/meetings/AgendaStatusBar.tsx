@@ -25,18 +25,14 @@ export function AgendaStatusBar({
         </span>
         <span className="text-border">|</span>
         <span>
-          {totalDuration > 0
-            ? `${totalDuration} min estimated`
-            : "No duration estimates"}
+          {totalDuration > 0 ? `${totalDuration} min estimated` : "No duration estimates"}
         </span>
         <span className="text-border">|</span>
         <span>
           {exhibitCount} exhibit{exhibitCount !== 1 ? "s" : ""}
         </span>
         <span className="text-border">|</span>
-        <span className="font-medium">
-          {AGENDA_STATUS_LABELS[agendaStatus] ?? agendaStatus}
-        </span>
+        <span className="font-medium">{AGENDA_STATUS_LABELS[agendaStatus] ?? agendaStatus}</span>
       </div>
     </div>
   );

@@ -8,14 +8,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Plus,
-  GripVertical,
-  Trash2,
-  ChevronDown,
-  ChevronUp,
-  Save,
-} from "lucide-react";
+import { Plus, GripVertical, Trash2, ChevronDown, ChevronUp, Save } from "lucide-react";
 import { useForm, Controller } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,7 +34,12 @@ function defaultConfig(type: NoticeBlockType): Record<string, unknown> {
     case "letterhead":
       return { logoPosition: "center", showSeal: true, fontSize: "md" } satisfies LetterheadConfig;
     case "meeting_details":
-      return { dateLabel: "Date", timeLabel: "Time", locationLabel: "Location", showVirtualLink: false } satisfies MeetingDetailsConfig;
+      return {
+        dateLabel: "Date",
+        timeLabel: "Time",
+        locationLabel: "Location",
+        showVirtualLink: false,
+      } satisfies MeetingDetailsConfig;
     case "agenda_summary":
       return { includeSubItems: true, maxItems: 0 } satisfies AgendaSummaryConfig;
     case "rich_text":
@@ -57,7 +55,13 @@ function defaultConfig(type: NoticeBlockType): Record<string, unknown> {
 
 // ─── Block config editors ───────────────────────────────────────────
 
-function LetterheadEditor({ config, onChange }: { config: LetterheadConfig; onChange: (c: LetterheadConfig) => void }) {
+function LetterheadEditor({
+  config,
+  onChange,
+}: {
+  config: LetterheadConfig;
+  onChange: (c: LetterheadConfig) => void;
+}) {
   return (
     <div className="space-y-3">
       <label className="block text-xs font-medium text-muted-foreground">
@@ -65,7 +69,12 @@ function LetterheadEditor({ config, onChange }: { config: LetterheadConfig; onCh
         <select
           className="mt-1 block w-full rounded-md border bg-background px-3 py-2 text-sm"
           value={config.logoPosition}
-          onChange={(e) => onChange({ ...config, logoPosition: e.target.value as LetterheadConfig["logoPosition"] })}
+          onChange={(e) =>
+            onChange({
+              ...config,
+              logoPosition: e.target.value as LetterheadConfig["logoPosition"],
+            })
+          }
         >
           <option value="left">Left</option>
           <option value="center">Center</option>
@@ -86,7 +95,9 @@ function LetterheadEditor({ config, onChange }: { config: LetterheadConfig; onCh
         <select
           className="mt-1 block w-full rounded-md border bg-background px-3 py-2 text-sm"
           value={config.fontSize}
-          onChange={(e) => onChange({ ...config, fontSize: e.target.value as LetterheadConfig["fontSize"] })}
+          onChange={(e) =>
+            onChange({ ...config, fontSize: e.target.value as LetterheadConfig["fontSize"] })
+          }
         >
           <option value="sm">Small</option>
           <option value="md">Medium</option>
@@ -97,7 +108,13 @@ function LetterheadEditor({ config, onChange }: { config: LetterheadConfig; onCh
   );
 }
 
-function MeetingDetailsEditor({ config, onChange }: { config: MeetingDetailsConfig; onChange: (c: MeetingDetailsConfig) => void }) {
+function MeetingDetailsEditor({
+  config,
+  onChange,
+}: {
+  config: MeetingDetailsConfig;
+  onChange: (c: MeetingDetailsConfig) => void;
+}) {
   return (
     <div className="space-y-3">
       {(["dateLabel", "timeLabel", "locationLabel"] as const).map((field) => (
@@ -124,7 +141,13 @@ function MeetingDetailsEditor({ config, onChange }: { config: MeetingDetailsConf
   );
 }
 
-function AgendaSummaryEditor({ config, onChange }: { config: AgendaSummaryConfig; onChange: (c: AgendaSummaryConfig) => void }) {
+function AgendaSummaryEditor({
+  config,
+  onChange,
+}: {
+  config: AgendaSummaryConfig;
+  onChange: (c: AgendaSummaryConfig) => void;
+}) {
   return (
     <div className="space-y-3">
       <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -150,7 +173,13 @@ function AgendaSummaryEditor({ config, onChange }: { config: AgendaSummaryConfig
   );
 }
 
-function RichTextEditor({ config, onChange }: { config: RichTextConfig; onChange: (c: RichTextConfig) => void }) {
+function RichTextEditor({
+  config,
+  onChange,
+}: {
+  config: RichTextConfig;
+  onChange: (c: RichTextConfig) => void;
+}) {
   const mergeFields = [
     "{{board_name}}",
     "{{town_name}}",
@@ -173,17 +202,13 @@ function RichTextEditor({ config, onChange }: { config: RichTextConfig; onChange
         />
       </label>
       <div>
-        <p className="text-xs font-medium text-muted-foreground mb-1">
-          Insert Merge Field
-        </p>
+        <p className="text-xs font-medium text-muted-foreground mb-1">Insert Merge Field</p>
         <div className="flex flex-wrap gap-1">
           {mergeFields.map((field) => (
             <button
               key={field}
               type="button"
-              onClick={() =>
-                onChange({ ...config, content: config.content + " " + field })
-              }
+              onClick={() => onChange({ ...config, content: config.content + " " + field })}
               className="rounded border px-2 py-0.5 text-xs hover:bg-accent transition-colors"
             >
               {field}
@@ -195,7 +220,13 @@ function RichTextEditor({ config, onChange }: { config: RichTextConfig; onChange
   );
 }
 
-function StatutoryFooterEditor({ config, onChange }: { config: StatutoryFooterConfig; onChange: (c: StatutoryFooterConfig) => void }) {
+function StatutoryFooterEditor({
+  config,
+  onChange,
+}: {
+  config: StatutoryFooterConfig;
+  onChange: (c: StatutoryFooterConfig) => void;
+}) {
   return (
     <label className="block text-xs font-medium text-muted-foreground">
       Statute Citation
@@ -210,7 +241,13 @@ function StatutoryFooterEditor({ config, onChange }: { config: StatutoryFooterCo
   );
 }
 
-function SignatureBlockEditor({ config, onChange }: { config: SignatureBlockConfig; onChange: (c: SignatureBlockConfig) => void }) {
+function SignatureBlockEditor({
+  config,
+  onChange,
+}: {
+  config: SignatureBlockConfig;
+  onChange: (c: SignatureBlockConfig) => void;
+}) {
   return (
     <label className="block text-xs font-medium text-muted-foreground">
       Name
@@ -225,7 +262,13 @@ function SignatureBlockEditor({ config, onChange }: { config: SignatureBlockConf
   );
 }
 
-function SpacerEditor({ config, onChange }: { config: SpacerConfig; onChange: (c: SpacerConfig) => void }) {
+function SpacerEditor({
+  config,
+  onChange,
+}: {
+  config: SpacerConfig;
+  onChange: (c: SpacerConfig) => void;
+}) {
   return (
     <label className="block text-xs font-medium text-muted-foreground">
       Height
@@ -253,19 +296,54 @@ function BlockConfigEditor({
 
   switch (block.type) {
     case "letterhead":
-      return <LetterheadEditor config={config as unknown as LetterheadConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <LetterheadEditor
+          config={config as unknown as LetterheadConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "meeting_details":
-      return <MeetingDetailsEditor config={config as unknown as MeetingDetailsConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <MeetingDetailsEditor
+          config={config as unknown as MeetingDetailsConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "agenda_summary":
-      return <AgendaSummaryEditor config={config as unknown as AgendaSummaryConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <AgendaSummaryEditor
+          config={config as unknown as AgendaSummaryConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "rich_text":
-      return <RichTextEditor config={config as unknown as RichTextConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <RichTextEditor
+          config={config as unknown as RichTextConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "statutory_footer":
-      return <StatutoryFooterEditor config={config as unknown as StatutoryFooterConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <StatutoryFooterEditor
+          config={config as unknown as StatutoryFooterConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "signature_block":
-      return <SignatureBlockEditor config={config as unknown as SignatureBlockConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <SignatureBlockEditor
+          config={config as unknown as SignatureBlockConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     case "spacer":
-      return <SpacerEditor config={config as unknown as SpacerConfig} onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)} />;
+      return (
+        <SpacerEditor
+          config={config as unknown as SpacerConfig}
+          onChange={(c) => onConfigChange(c as unknown as Record<string, unknown>)}
+        />
+      );
     default:
       return null;
   }
@@ -305,9 +383,7 @@ export function NoticeTemplateEditor({
   initialBlocks: NoticeTemplateBlock[] | null;
 }) {
   const queryClient = useQueryClient();
-  const [blocks, setBlocks] = useState<NoticeTemplateBlock[]>(
-    initialBlocks ?? []
-  );
+  const [blocks, setBlocks] = useState<NoticeTemplateBlock[]>(initialBlocks ?? []);
   const [expandedBlockId, setExpandedBlockId] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -319,22 +395,19 @@ export function NoticeTemplateEditor({
     dragIdx.current = idx;
   }, []);
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent, idx: number) => {
-      e.preventDefault();
-      if (dragIdx.current === null || dragIdx.current === idx) return;
-      setBlocks((prev) => {
-        const next = [...prev];
-        const removed = next.splice(dragIdx.current!, 1);
-        const dragged = removed[0]!;
-        next.splice(idx, 0, dragged);
-        dragIdx.current = idx;
-        return next.map((b, i) => ({ ...b, order: i }));
-      });
-      setDirty(true);
-    },
-    []
-  );
+  const handleDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    if (dragIdx.current === null || dragIdx.current === idx) return;
+    setBlocks((prev) => {
+      const next = [...prev];
+      const removed = next.splice(dragIdx.current!, 1);
+      const dragged = removed[0]!;
+      next.splice(idx, 0, dragged);
+      dragIdx.current = idx;
+      return next.map((b, i) => ({ ...b, order: i }));
+    });
+    setDirty(true);
+  }, []);
 
   const handleDragEnd = useCallback(() => {
     dragIdx.current = null;
@@ -355,23 +428,19 @@ export function NoticeTemplateEditor({
   };
 
   const removeBlock = (blockId: string) => {
-    setBlocks((prev) =>
-      prev.filter((b) => b.id !== blockId).map((b, i) => ({ ...b, order: i }))
-    );
+    setBlocks((prev) => prev.filter((b) => b.id !== blockId).map((b, i) => ({ ...b, order: i })));
     if (expandedBlockId === blockId) setExpandedBlockId(null);
     setDirty(true);
   };
 
   const updateBlockConfig = (blockId: string, config: Record<string, unknown>) => {
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, config } : b))
-    );
+    setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, config } : b)));
     setDirty(true);
   };
 
   // Available block types (respect singleton rules)
   const usedSingletonTypes = new Set(
-    blocks.filter((b) => SINGLETON_BLOCK_TYPES.includes(b.type)).map((b) => b.type)
+    blocks.filter((b) => SINGLETON_BLOCK_TYPES.includes(b.type)).map((b) => b.type),
   );
 
   const ALL_BLOCK_TYPES: NoticeBlockType[] = [
@@ -384,9 +453,7 @@ export function NoticeTemplateEditor({
     "spacer",
   ];
 
-  const availableTypes = ALL_BLOCK_TYPES.filter(
-    (t) => !usedSingletonTypes.has(t)
-  );
+  const availableTypes = ALL_BLOCK_TYPES.filter((t) => !usedSingletonTypes.has(t));
 
   // ─── Save ──────────────────────────────────────────────────────
   const saveMutation = useMutation({
@@ -481,18 +548,12 @@ export function NoticeTemplateEditor({
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">
-                      {NOTICE_BLOCK_LABELS[block.type]}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {blockSummary(block)}
-                    </p>
+                    <p className="text-sm font-medium">{NOTICE_BLOCK_LABELS[block.type]}</p>
+                    <p className="text-xs text-muted-foreground truncate">{blockSummary(block)}</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() =>
-                      setExpandedBlockId(isExpanded ? null : block.id)
-                    }
+                    onClick={() => setExpandedBlockId(isExpanded ? null : block.id)}
                     className="rounded p-1 hover:bg-accent transition-colors"
                   >
                     {isExpanded ? (
@@ -513,9 +574,7 @@ export function NoticeTemplateEditor({
                   <div className="border-t px-4 py-3">
                     <BlockConfigEditor
                       block={block}
-                      onConfigChange={(config) =>
-                        updateBlockConfig(block.id, config)
-                      }
+                      onConfigChange={(config) => updateBlockConfig(block.id, config)}
                     />
                   </div>
                 )}

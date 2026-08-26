@@ -30,7 +30,9 @@ export async function triggerMeetingScheduled(
   try {
     const { data: meeting } = await supabase
       .from("meeting")
-      .select("id, board_id, town_id, title, scheduled_date, scheduled_time, location, meeting_type")
+      .select(
+        "id, board_id, town_id, title, scheduled_date, scheduled_time, location, meeting_type",
+      )
       .eq("id", meetingId)
       .single();
 
@@ -75,7 +77,9 @@ export async function triggerMeetingCancelled(
   try {
     const { data: meeting } = await supabase
       .from("meeting")
-      .select("id, board_id, town_id, title, scheduled_date, scheduled_time, location, meeting_type")
+      .select(
+        "id, board_id, town_id, title, scheduled_date, scheduled_time, location, meeting_type",
+      )
       .eq("id", meetingId)
       .single();
 
@@ -144,9 +148,7 @@ export async function triggerAgendaPublished(
     if (!board || !town) return;
 
     const subdomain = (town.subdomain as string | null) ?? "";
-    const portalBase = subdomain
-      ? `https://${subdomain}.townmeetingmanager.com`
-      : APP_URL;
+    const portalBase = subdomain ? `https://${subdomain}.townmeetingmanager.com` : APP_URL;
 
     const service = new NotificationService(supabase);
     await service.createNotificationEvent("agenda_published", meeting.town_id as string, {
@@ -238,9 +240,7 @@ export async function triggerMinutesApproved(
     if (!board || !town) return;
 
     const subdomain = (town.subdomain as string | null) ?? "";
-    const portalBase = subdomain
-      ? `https://${subdomain}.townmeetingmanager.com`
-      : APP_URL;
+    const portalBase = subdomain ? `https://${subdomain}.townmeetingmanager.com` : APP_URL;
 
     const service = new NotificationService(supabase);
     await service.createNotificationEvent("minutes_approved", meeting.town_id as string, {

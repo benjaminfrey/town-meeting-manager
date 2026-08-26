@@ -11,10 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  WizardStage2Schema,
-  type WizardStage2Data,
-} from "@town-meeting/shared";
+import { WizardStage2Schema, type WizardStage2Data } from "@town-meeting/shared";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -24,13 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { useWizardForm } from "@/hooks/useWizardForm";
@@ -90,9 +81,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
   const { state } = useWizard();
 
   // Initialize with saved wizard state or defaults
-  const initialValues: WizardStage2Data = state.stage2.boardName
-    ? state.stage2
-    : DEFAULTS;
+  const initialValues: WizardStage2Data = state.stage2.boardName ? state.stage2 : DEFAULTS;
 
   const { values, errors, isValid, setValue, handleBlur, validate } =
     useWizardForm<WizardStage2Data>(WizardStage2Schema, initialValues);
@@ -144,9 +133,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
   // ─── Filtered suggestions ──────────────────────────────────────
 
   const filteredSuggestions = values.boardName
-    ? BOARD_NAME_SUGGESTIONS.filter((s) =>
-        s.toLowerCase().includes(values.boardName.toLowerCase())
-      )
+    ? BOARD_NAME_SUGGESTIONS.filter((s) => s.toLowerCase().includes(values.boardName.toLowerCase()))
     : BOARD_NAME_SUGGESTIONS;
 
   // ─── Election method change ────────────────────────────────────
@@ -157,7 +144,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
       if (method === "role_titled") {
         // Populate seat titles to match member count
         const titles = Array.from({ length: values.memberCount }, (_, i) =>
-          generateSeatTitle(i, values.boardName)
+          generateSeatTitle(i, values.boardName),
         );
         setValue("seatTitles", titles);
       } else {
@@ -166,7 +153,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
         setSeatTitleErrors({});
       }
     },
-    [setValue, values.memberCount, values.boardName]
+    [setValue, values.memberCount, values.boardName],
   );
 
   // ─── Member count change ──────────────────────────────────────
@@ -198,7 +185,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
         }
       }
     },
-    [setValue, values.electionMethod, values.seatTitles, values.boardName, seatTitleErrors]
+    [setValue, values.electionMethod, values.seatTitles, values.boardName, seatTitleErrors],
   );
 
   // ─── Seat title handlers ──────────────────────────────────────
@@ -217,7 +204,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
         });
       }
     },
-    [setValue, values.seatTitles, seatTitleErrors]
+    [setValue, values.seatTitles, seatTitleErrors],
   );
 
   const handleSeatTitleBlur = useCallback(
@@ -242,7 +229,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
         });
       }
     },
-    [values.seatTitles]
+    [values.seatTitles],
   );
 
   // ─── Board name suggestion selection ──────────────────────────
@@ -256,23 +243,19 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
         const newTitles = values.seatTitles.map((title, i) => {
           // Only update if the title matches a previously generated pattern
           const oldGenerated = generateSeatTitle(i, values.boardName);
-          return title === oldGenerated
-            ? generateSeatTitle(i, suggestion)
-            : title;
+          return title === oldGenerated ? generateSeatTitle(i, suggestion) : title;
         });
         setValue("seatTitles", newTitles);
       }
     },
-    [setValue, values.electionMethod, values.seatTitles, values.boardName]
+    [setValue, values.electionMethod, values.seatTitles, values.boardName],
   );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Your Governing Board</CardTitle>
-        <CardDescription>
-          Configure your town's primary governing board
-        </CardDescription>
+        <CardDescription>Configure your town's primary governing board</CardDescription>
       </CardHeader>
 
       <CardContent>
@@ -317,9 +300,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
                 </div>
               )}
             </div>
-            {errors.boardName && (
-              <p className="text-sm text-destructive">{errors.boardName}</p>
-            )}
+            {errors.boardName && <p className="text-sm text-destructive">{errors.boardName}</p>}
           </div>
 
           {/* Member count */}
@@ -335,12 +316,8 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
               onBlur={() => handleBlur("memberCount")}
               aria-invalid={!!errors.memberCount}
             />
-            <p className="text-sm text-muted-foreground">
-              How many seats does this board have?
-            </p>
-            {errors.memberCount && (
-              <p className="text-sm text-destructive">{errors.memberCount}</p>
-            )}
+            <p className="text-sm text-muted-foreground">How many seats does this board have?</p>
+            {errors.memberCount && <p className="text-sm text-destructive">{errors.memberCount}</p>}
           </div>
 
           {/* Zero-member notice */}
@@ -361,8 +338,8 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               <p className="text-sm text-amber-800 dark:text-amber-200">
-                You can add members later. Note: a board must have at least 3
-                members to hold a meeting.
+                You can add members later. Note: a board must have at least 3 members to hold a
+                meeting.
               </p>
             </div>
           )}
@@ -370,19 +347,14 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
           {/* Election method */}
           <div className="space-y-3">
             <Label>Election Method</Label>
-            <RadioGroup
-              value={values.electionMethod}
-              onValueChange={handleElectionMethodChange}
-            >
+            <RadioGroup value={values.electionMethod} onValueChange={handleElectionMethodChange}>
               <div className="flex items-start gap-3">
                 <RadioGroupItem value="at_large" id="at_large" className="mt-0.5" />
                 <div>
                   <Label htmlFor="at_large" className="font-normal cursor-pointer">
                     At-large
                   </Label>
-                  <p className="text-sm text-muted-foreground">
-                    All members hold equal seats
-                  </p>
+                  <p className="text-sm text-muted-foreground">All members hold equal seats</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -392,8 +364,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
                     Role-titled
                   </Label>
                   <p className="text-sm text-muted-foreground">
-                    Each seat has a specific title (e.g., 1st Selectman, 2nd
-                    Selectman)
+                    Each seat has a specific title (e.g., 1st Selectman, 2nd Selectman)
                   </p>
                 </div>
               </div>
@@ -404,54 +375,38 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
           {values.electionMethod === "role_titled" && values.memberCount > 0 && (
             <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
               <Label>Seat Titles</Label>
-              <p className="text-sm text-muted-foreground">
-                Name each seat on the board
-              </p>
+              <p className="text-sm text-muted-foreground">Name each seat on the board</p>
               <div className="space-y-3">
                 {values.seatTitles.map((title, index) => (
                   <div key={index} className="space-y-1">
-                    <Label
-                      htmlFor={`seatTitle-${index}`}
-                      className="text-xs text-muted-foreground"
-                    >
+                    <Label htmlFor={`seatTitle-${index}`} className="text-xs text-muted-foreground">
                       Seat {index + 1}
                     </Label>
                     <Input
                       id={`seatTitle-${index}`}
                       value={title}
-                      onChange={(e) =>
-                        handleSeatTitleChange(index, e.target.value)
-                      }
+                      onChange={(e) => handleSeatTitleChange(index, e.target.value)}
                       onBlur={() => handleSeatTitleBlur(index)}
                       aria-invalid={!!seatTitleErrors[index]}
                       placeholder={`Title for seat ${index + 1}`}
                     />
                     {seatTitleErrors[index] && (
-                      <p className="text-xs text-destructive">
-                        {seatTitleErrors[index]}
-                      </p>
+                      <p className="text-xs text-destructive">{seatTitleErrors[index]}</p>
                     )}
                   </div>
                 ))}
               </div>
-              {errors.seatTitles && (
-                <p className="text-sm text-destructive">{errors.seatTitles}</p>
-              )}
+              {errors.seatTitles && <p className="text-sm text-destructive">{errors.seatTitles}</p>}
             </div>
           )}
 
           {/* Officer election method */}
           <div className="space-y-2">
-            <Label htmlFor="officerElectionMethod">
-              How is the presiding officer chosen?
-            </Label>
+            <Label htmlFor="officerElectionMethod">How is the presiding officer chosen?</Label>
             <Select
               value={values.officerElectionMethod}
               onValueChange={(val) =>
-                setValue(
-                  "officerElectionMethod",
-                  val as WizardStage2Data["officerElectionMethod"]
-                )
+                setValue("officerElectionMethod", val as WizardStage2Data["officerElectionMethod"])
               }
             >
               <SelectTrigger id="officerElectionMethod" className="w-full">
@@ -479,9 +434,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
               <Switch
                 id="districtBased"
                 checked={values.districtBased}
-                onCheckedChange={(checked) =>
-                  setValue("districtBased", checked === true)
-                }
+                onCheckedChange={(checked) => setValue("districtBased", checked === true)}
               />
             </div>
 
@@ -495,9 +448,7 @@ export function WizardStage2({ onValidityChange, onRegister }: WizardStage2Props
               <Switch
                 id="staggeredTerms"
                 checked={values.staggeredTerms}
-                onCheckedChange={(checked) =>
-                  setValue("staggeredTerms", checked === true)
-                }
+                onCheckedChange={(checked) => setValue("staggeredTerms", checked === true)}
               />
             </div>
           </div>

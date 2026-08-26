@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  AttendanceStatus,
-  MotionStatus,
-  MotionType,
-  VoteType,
-} from "../constants/enums.js";
+import { AttendanceStatus, MotionStatus, MotionType, VoteType } from "../constants/enums.js";
 
 export const MotionSchema = z.object({
   id: z.string().uuid(),
@@ -48,13 +43,7 @@ export const VoteRecordSchema = z.object({
   meeting_id: z.string().uuid(),
   town_id: z.string().uuid(),
   board_member_id: z.string().uuid(),
-  vote: z.enum([
-    VoteType.YES,
-    VoteType.NO,
-    VoteType.ABSTAIN,
-    VoteType.RECUSAL,
-    VoteType.ABSENT,
-  ]),
+  vote: z.enum([VoteType.YES, VoteType.NO, VoteType.ABSTAIN, VoteType.RECUSAL, VoteType.ABSENT]),
   recusal_reason: z.string().max(500).nullable(),
   created_at: z.string().datetime(),
 });

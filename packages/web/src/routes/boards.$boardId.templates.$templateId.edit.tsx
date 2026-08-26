@@ -26,9 +26,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   return { boardId: params.boardId, templateId: params.templateId };
 }
 
-export default function AgendaTemplateEditorPage({
-  loaderData,
-}: Route.ComponentProps) {
+export default function AgendaTemplateEditorPage({ loaderData }: Route.ComponentProps) {
   const { boardId, templateId } = loaderData;
   const queryClient = useQueryClient();
 
@@ -73,9 +71,7 @@ export default function AgendaTemplateEditorPage({
   useEffect(() => {
     if (templateRow && !initialized) {
       const raw = templateRow.sections;
-      const parsed = parseSections(
-        typeof raw === "string" ? raw : JSON.stringify(raw),
-      );
+      const parsed = parseSections(typeof raw === "string" ? raw : JSON.stringify(raw));
       setSections(parsed);
       setTemplateName(String(templateRow.name ?? ""));
       setInitialized(true);
@@ -106,9 +102,7 @@ export default function AgendaTemplateEditorPage({
 
   const handleSectionChange = useCallback(
     (updated: AgendaTemplateSection) => {
-      setSections((prev) =>
-        prev.map((s, i) => (i === selectedIndex ? updated : s)),
-      );
+      setSections((prev) => prev.map((s, i) => (i === selectedIndex ? updated : s)));
       markDirty();
     },
     [selectedIndex, markDirty],
@@ -185,17 +179,11 @@ export default function AgendaTemplateEditorPage({
       <div className="flex items-center justify-between border-b px-4 py-2">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-          <Link
-            to="/boards"
-            className="hover:text-foreground transition-colors"
-          >
+          <Link to="/boards" className="hover:text-foreground transition-colors">
             Boards
           </Link>
           <ChevronRight className="h-3.5 w-3.5" />
-          <Link
-            to={`/boards/${boardId}`}
-            className="hover:text-foreground transition-colors"
-          >
+          <Link to={`/boards/${boardId}`} className="hover:text-foreground transition-colors">
             {boardName}
           </Link>
           <ChevronRight className="h-3.5 w-3.5" />
@@ -213,11 +201,7 @@ export default function AgendaTemplateEditorPage({
           />
         </nav>
 
-        <Button
-          size="sm"
-          onClick={() => void handleSave()}
-          disabled={!isDirty || isSaving}
-        >
+        <Button size="sm" onClick={() => void handleSave()} disabled={!isDirty || isSaving}>
           {isSaving ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
@@ -244,10 +228,7 @@ export default function AgendaTemplateEditorPage({
         {/* Right panel — section detail */}
         <div className="flex-1 overflow-hidden">
           {selectedSection ? (
-            <SectionDetailPanel
-              section={selectedSection}
-              onChange={handleSectionChange}
-            />
+            <SectionDetailPanel section={selectedSection} onChange={handleSectionChange} />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               Select a section to edit

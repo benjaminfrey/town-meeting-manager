@@ -39,14 +39,11 @@ interface StaffAccountFlowProps {
   onBack: () => void;
 }
 
-export function StaffAccountFlow({
-  townId,
-  onComplete,
-  onBack,
-}: StaffAccountFlowProps) {
+export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlowProps) {
   const [step, setStep] = useState(1);
-  const [selectedTemplate, setSelectedTemplate] =
-    useState<PermissionTemplateDefinition | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<PermissionTemplateDefinition | null>(
+    null,
+  );
   const [permissions, setPermissions] = useState<PermissionsMatrix>({
     global: {} as Record<PermissionAction, boolean>,
     board_overrides: [],
@@ -61,11 +58,11 @@ export function StaffAccountFlow({
     queryKey: queryKeys.boards.byTown(townId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board')
-        .select('id, name')
-        .eq('town_id', townId)
-        .is('archived_at', null)
-        .order('name');
+        .from("board")
+        .select("id, name")
+        .eq("town_id", townId)
+        .is("archived_at", null)
+        .order("name");
       if (error) throw error;
       return data;
     },
@@ -81,8 +78,7 @@ export function StaffAccountFlow({
   );
 
   const needsBoardSelection =
-    selectedTemplate?.scope === "designated_boards" &&
-    selectedBoardIds.length === 0;
+    selectedTemplate?.scope === "designated_boards" && selectedBoardIds.length === 0;
 
   // ─── Step 1: Template selection ─────────────────────────────────────
   const handleSelectTemplate = (template: PermissionTemplateDefinition) => {
@@ -133,19 +129,13 @@ export function StaffAccountFlow({
     <div className="space-y-4">
       {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className={step === 1 ? "font-medium text-foreground" : ""}>
-          1. Template
-        </span>
+        <span className={step === 1 ? "font-medium text-foreground" : ""}>1. Template</span>
         <ChevronRight className="h-3.5 w-3.5" />
-        <span className={step === 2 ? "font-medium text-foreground" : ""}>
-          2. Customize
-        </span>
+        <span className={step === 2 ? "font-medium text-foreground" : ""}>2. Customize</span>
         {selectedTemplate?.scope === "designated_boards" && (
           <>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className={step === 3 ? "font-medium text-foreground" : ""}>
-              3. Boards
-            </span>
+            <span className={step === 3 ? "font-medium text-foreground" : ""}>3. Boards</span>
           </>
         )}
       </div>
@@ -154,8 +144,8 @@ export function StaffAccountFlow({
       {step === 1 && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Select a permission template as a starting point. You can customize
-            individual permissions in the next step.
+            Select a permission template as a starting point. You can customize individual
+            permissions in the next step.
           </p>
 
           {/* Government title */}
@@ -186,14 +176,10 @@ export function StaffAccountFlow({
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-sm">{template.name}</span>
                   <Badge variant="outline" className="text-xs">
-                    {template.scope === "all_boards"
-                      ? "All boards"
-                      : "Designated boards"}
+                    {template.scope === "all_boards" ? "All boards" : "Designated boards"}
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {template.description}
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{template.description}</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {template.permissions.length} permission
                   {template.permissions.length !== 1 ? "s" : ""}
@@ -215,8 +201,8 @@ export function StaffAccountFlow({
       {step === 2 && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Customize permissions for this staff account. Click a permission to
-            cycle through: Allowed → Denied → Board-specific.
+            Customize permissions for this staff account. Click a permission to cycle through:
+            Allowed → Denied → Board-specific.
           </p>
 
           <div className="max-h-[400px] overflow-y-auto">
@@ -235,9 +221,7 @@ export function StaffAccountFlow({
               Back
             </Button>
             <Button size="sm" onClick={handleStep2Next}>
-              {selectedTemplate?.scope === "designated_boards"
-                ? "Select Boards"
-                : "Complete"}
+              {selectedTemplate?.scope === "designated_boards" ? "Select Boards" : "Complete"}
               <ChevronRight className="ml-1 h-3.5 w-3.5" />
             </Button>
           </div>
@@ -269,9 +253,7 @@ export function StaffAccountFlow({
                       if (e.target.checked) {
                         setSelectedBoardIds([...selectedBoardIds, board.id]);
                       } else {
-                        setSelectedBoardIds(
-                          selectedBoardIds.filter((id) => id !== board.id),
-                        );
+                        setSelectedBoardIds(selectedBoardIds.filter((id) => id !== board.id));
                       }
                     }}
                     className="rounded border-gray-300"

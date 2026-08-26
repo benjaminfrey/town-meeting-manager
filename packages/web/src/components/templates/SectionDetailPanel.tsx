@@ -36,12 +36,8 @@ interface SectionDetailPanelProps {
 
 // ─── Component ───────────────────────────────────────────────────────
 
-export function SectionDetailPanel({
-  section,
-  onChange,
-}: SectionDetailPanelProps) {
-  const isStandardFixed =
-    section.is_fixed && STANDARD_FIXED_TITLES.has(section.title);
+export function SectionDetailPanel({ section, onChange }: SectionDetailPanelProps) {
+  const isStandardFixed = section.is_fixed && STANDARD_FIXED_TITLES.has(section.title);
 
   function handleChange<K extends keyof AgendaTemplateSection>(
     field: K,
@@ -94,9 +90,7 @@ export function SectionDetailPanel({
           <Label>Section Type</Label>
           <Select
             value={section.section_type}
-            onValueChange={(v) =>
-              handleChange("section_type", v as AgendaItemSectionType)
-            }
+            onValueChange={(v) => handleChange("section_type", v as AgendaItemSectionType)}
             disabled={isStandardFixed}
           >
             <SelectTrigger>
@@ -117,9 +111,7 @@ export function SectionDetailPanel({
           <Label>Minutes Behavior</Label>
           <Select
             value={section.minutes_behavior}
-            onValueChange={(v) =>
-              handleChange("minutes_behavior", v as MinutesBehavior)
-            }
+            onValueChange={(v) => handleChange("minutes_behavior", v as MinutesBehavior)}
           >
             <SelectTrigger>
               <SelectValue />
@@ -139,9 +131,7 @@ export function SectionDetailPanel({
           <Checkbox
             id="show-commentary"
             checked={section.show_item_commentary}
-            onCheckedChange={(checked) =>
-              handleChange("show_item_commentary", checked === true)
-            }
+            onCheckedChange={(checked) => handleChange("show_item_commentary", checked === true)}
           />
           <Label htmlFor="show-commentary" className="text-sm">
             Show item commentary
@@ -154,9 +144,7 @@ export function SectionDetailPanel({
             <Checkbox
               id="is-fixed"
               checked={section.is_fixed}
-              onCheckedChange={(checked) =>
-                handleChange("is_fixed", checked === true)
-              }
+              onCheckedChange={(checked) => handleChange("is_fixed", checked === true)}
             />
             <Label htmlFor="is-fixed" className="text-sm">
               Fixed section (cannot be removed from meetings)
@@ -170,12 +158,7 @@ export function SectionDetailPanel({
           <Input
             id="section-description"
             value={section.description ?? ""}
-            onChange={(e) =>
-              handleChange(
-                "description",
-                e.target.value || null,
-              )
-            }
+            onChange={(e) => handleChange("description", e.target.value || null)}
             placeholder="Brief description of this section"
           />
         </div>
@@ -205,11 +188,7 @@ export function SectionDetailPanel({
               </div>
             ))}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleAddDefaultItem}
-          >
+          <Button variant="outline" size="sm" onClick={handleAddDefaultItem}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
             Add Item
           </Button>

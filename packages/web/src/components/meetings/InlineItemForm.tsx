@@ -73,21 +73,23 @@ export function InlineItemForm({
 
   const initial: ItemFormData = {
     title: isEditing ? String(existingItem.title ?? "") : "",
-    description: isEditing ? (existingItem.description as string) ?? null : null,
-    presenter: isEditing ? (existingItem.presenter as string) ?? null : null,
+    description: isEditing ? ((existingItem.description as string) ?? null) : null,
+    presenter: isEditing ? ((existingItem.presenter as string) ?? null) : null,
     estimated_duration: isEditing
       ? existingItem.estimated_duration != null
         ? Number(existingItem.estimated_duration)
         : null
       : null,
-    staff_resource: isEditing ? (existingItem.staff_resource as string) ?? null : null,
-    background: isEditing ? (existingItem.background as string) ?? null : null,
-    recommendation: isEditing ? (existingItem.recommendation as string) ?? null : null,
-    suggested_motion: isEditing ? (existingItem.suggested_motion as string) ?? null : null,
+    staff_resource: isEditing ? ((existingItem.staff_resource as string) ?? null) : null,
+    background: isEditing ? ((existingItem.background as string) ?? null) : null,
+    recommendation: isEditing ? ((existingItem.recommendation as string) ?? null) : null,
+    suggested_motion: isEditing ? ((existingItem.suggested_motion as string) ?? null) : null,
   };
 
-  const { values, errors, isValid, setValue, handleBlur, validate } =
-    useWizardForm(ItemFormSchema, initial);
+  const { values, errors, isValid, setValue, handleBlur, validate } = useWizardForm(
+    ItemFormSchema,
+    initial,
+  );
 
   const handleSave = useCallback(async () => {
     const data = validate();
@@ -99,7 +101,7 @@ export function InlineItemForm({
 
       if (isEditing) {
         const { error } = await supabase
-          .from('agenda_item')
+          .from("agenda_item")
           .update({
             title: data.title,
             description: data.description,
@@ -111,11 +113,11 @@ export function InlineItemForm({
             suggested_motion: data.suggested_motion,
             updated_at: now,
           })
-          .eq('id', String(existingItem.id));
+          .eq("id", String(existingItem.id));
         if (error) throw error;
       } else {
         const id = crypto.randomUUID();
-        const { error } = await supabase.from('agenda_item').insert({
+        const { error } = await supabase.from("agenda_item").insert({
           id,
           meeting_id: meetingId,
           town_id: townId,
@@ -126,7 +128,7 @@ export function InlineItemForm({
           presenter: data.presenter,
           estimated_duration: data.estimated_duration,
           parent_item_id: parentItemId,
-          status: 'pending',
+          status: "pending",
           staff_resource: data.staff_resource,
           background: data.background,
           recommendation: data.recommendation,
@@ -160,21 +162,18 @@ export function InlineItemForm({
     const itemId = String(existingItem.id);
     // Delete exhibits first
     const { error: exhibitError } = await supabase
-      .from('exhibit')
+      .from("exhibit")
       .delete()
-      .eq('agenda_item_id', itemId);
+      .eq("agenda_item_id", itemId);
     if (exhibitError) throw exhibitError;
     // Delete child items
     const { error: childError } = await supabase
-      .from('agenda_item')
+      .from("agenda_item")
       .delete()
-      .eq('parent_item_id', itemId);
+      .eq("parent_item_id", itemId);
     if (childError) throw childError;
     // Delete the item itself
-    const { error } = await supabase
-      .from('agenda_item')
-      .delete()
-      .eq('id', itemId);
+    const { error } = await supabase.from("agenda_item").delete().eq("id", itemId);
     if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
@@ -191,21 +190,14 @@ export function InlineItemForm({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Item</AlertDialogTitle>
               <AlertDialogDescription>
-                Delete "{values.title}"? This will also remove any sub-items and
-                exhibits.
+                Delete "{values.title}"? This will also remove any sub-items and exhibits.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setConfirmDelete(false)}
-              >
+              <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                 Keep
               </Button>
-              <Button
-                variant="destructive"
-                onClick={() => void handleDelete()}
-              >
+              <Button variant="destructive" onClick={() => void handleDelete()}>
                 Delete
               </Button>
             </AlertDialogFooter>
@@ -223,9 +215,7 @@ export function InlineItemForm({
           placeholder="Item title"
           autoFocus={!isEditing}
         />
-        {errors.title && (
-          <p className="text-xs text-destructive">{errors.title}</p>
-        )}
+        {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
       </div>
 
       {/* Description */}
@@ -234,9 +224,7 @@ export function InlineItemForm({
         <textarea
           className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
           value={values.description ?? ""}
-          onChange={(e) =>
-            setValue("description", e.target.value || null)
-          }
+          onChange={(e) => setValue("description", e.target.value || null)}
           placeholder="Optional description"
         />
       </div>
@@ -247,9 +235,7 @@ export function InlineItemForm({
           <Label className="text-xs">Presenter</Label>
           <Input
             value={values.presenter ?? ""}
-            onChange={(e) =>
-              setValue("presenter", e.target.value || null)
-            }
+            onChange={(e) => setValue("presenter", e.target.value || null)}
             placeholder="Optional"
           />
         </div>
@@ -261,10 +247,7 @@ export function InlineItemForm({
             max={480}
             value={values.estimated_duration ?? ""}
             onChange={(e) =>
-              setValue(
-                "estimated_duration",
-                e.target.value ? parseInt(e.target.value) : null,
-              )
+              setValue("estimated_duration", e.target.value ? parseInt(e.target.value) : null)
             }
           />
         </div>
@@ -280,9 +263,7 @@ export function InlineItemForm({
             <Label className="text-xs">Staff resource</Label>
             <Input
               value={values.staff_resource ?? ""}
-              onChange={(e) =>
-                setValue("staff_resource", e.target.value || null)
-              }
+              onChange={(e) => setValue("staff_resource", e.target.value || null)}
               placeholder="Staff person or department"
             />
           </div>
@@ -291,9 +272,7 @@ export function InlineItemForm({
             <textarea
               className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
               value={values.background ?? ""}
-              onChange={(e) =>
-                setValue("background", e.target.value || null)
-              }
+              onChange={(e) => setValue("background", e.target.value || null)}
               placeholder="Background information"
             />
           </div>
@@ -302,9 +281,7 @@ export function InlineItemForm({
             <textarea
               className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
               value={values.recommendation ?? ""}
-              onChange={(e) =>
-                setValue("recommendation", e.target.value || null)
-              }
+              onChange={(e) => setValue("recommendation", e.target.value || null)}
               placeholder="Staff recommendation"
             />
           </div>
@@ -313,9 +290,7 @@ export function InlineItemForm({
             <textarea
               className="w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
               value={values.suggested_motion ?? ""}
-              onChange={(e) =>
-                setValue("suggested_motion", e.target.value || null)
-              }
+              onChange={(e) => setValue("suggested_motion", e.target.value || null)}
               placeholder='e.g. "Move to approve ___ as presented."'
             />
             {values.suggested_motion &&
@@ -348,11 +323,7 @@ export function InlineItemForm({
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            onClick={() => void handleSave()}
-            disabled={!isValid || isSaving}
-          >
+          <Button size="sm" onClick={() => void handleSave()} disabled={!isValid || isSaving}>
             {isSaving && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
             {isEditing ? "Save" : "Add"}
           </Button>

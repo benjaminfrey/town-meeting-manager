@@ -67,12 +67,12 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
 
   // Check if board has meetings (disables name editing)
   const { data: meetingCount = 0 } = useQuery({
-    queryKey: [...queryKeys.meetings.byBoard(boardId), 'count'],
+    queryKey: [...queryKeys.meetings.byBoard(boardId), "count"],
     queryFn: async () => {
       const { count, error } = await supabase
-        .from('meeting')
-        .select('*', { count: 'exact', head: true })
-        .eq('board_id', boardId);
+        .from("meeting")
+        .select("*", { count: "exact", head: true })
+        .eq("board_id", boardId);
       if (error) throw error;
       return count ?? 0;
     },
@@ -90,42 +90,50 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
       minutes_style_override: String(board.minutes_style_override ?? ""),
       quorum_type: (board.quorum_type as EditBoardData["quorum_type"]) ?? "simple_majority",
       quorum_value: board.quorum_value != null ? Number(board.quorum_value) : null,
-      motion_display_format: (board.motion_display_format as EditBoardData["motion_display_format"]) ?? "inline_narrative",
+      motion_display_format:
+        (board.motion_display_format as EditBoardData["motion_display_format"]) ??
+        "inline_narrative",
     }),
-    [board]
+    [board],
   );
 
-  const { values, errors, isValid, setValue, handleBlur, validate } =
-    useWizardForm(EditBoardSchema, initial);
+  const { values, errors, isValid, setValue, handleBlur, validate } = useWizardForm(
+    EditBoardSchema,
+    initial,
+  );
 
   const townFormality = String(town?.meeting_formality ?? "informal");
   const townMinutesStyle = String(town?.minutes_style ?? "summary");
 
   const quorumRequired = useMemo(
-    () => calculateQuorum(
-      values.member_count,
-      values.quorum_type as "simple_majority" | "two_thirds" | "three_quarters" | "fixed_number",
-      values.quorum_value,
-    ),
-    [values.member_count, values.quorum_type, values.quorum_value]
+    () =>
+      calculateQuorum(
+        values.member_count,
+        values.quorum_type as "simple_majority" | "two_thirds" | "three_quarters" | "fixed_number",
+        values.quorum_value,
+      ),
+    [values.member_count, values.quorum_type, values.quorum_value],
   );
 
   const updateMutation = useMutation({
     mutationFn: async (data: EditBoardData) => {
       const formality = data.meeting_formality_override || null;
       const minutesStyle = data.minutes_style_override || null;
-      const { error } = await supabase.from('board').update({
-        name: data.name,
-        elected_or_appointed: data.elected_or_appointed,
-        member_count: data.member_count,
-        election_method: data.election_method,
-        meeting_formality_override: formality,
-        minutes_style_override: minutesStyle,
-        quorum_type: data.quorum_type,
-        quorum_value: data.quorum_value,
-        motion_display_format: data.motion_display_format,
-        updated_at: new Date().toISOString(),
-      }).eq('id', boardId);
+      const { error } = await supabase
+        .from("board")
+        .update({
+          name: data.name,
+          elected_or_appointed: data.elected_or_appointed,
+          member_count: data.member_count,
+          election_method: data.election_method,
+          meeting_formality_override: formality,
+          minutes_style_override: minutesStyle,
+          quorum_type: data.quorum_type,
+          quorum_value: data.quorum_value,
+          motion_display_format: data.motion_display_format,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", boardId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -175,7 +183,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
             <Label>Board type</Label>
             <RadioGroup
               value={values.elected_or_appointed}
-              onValueChange={(val) => setValue("elected_or_appointed", val as "elected" | "appointed")}
+              onValueChange={(val) =>
+                setValue("elected_or_appointed", val as "elected" | "appointed")
+              }
               className="flex gap-4"
             >
               <label className="flex items-center gap-2 cursor-pointer">
@@ -205,7 +215,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
                 You can add members later. A board must have at least 3 members to hold a meeting.
               </p>
             )}
-            {errors.member_count && <p className="text-xs text-destructive">{errors.member_count}</p>}
+            {errors.member_count && (
+              <p className="text-xs text-destructive">{errors.member_count}</p>
+            )}
           </div>
 
           {/* Election method */}
@@ -213,7 +225,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
             <Label>Election method</Label>
             <RadioGroup
               value={values.election_method}
-              onValueChange={(val) => setValue("election_method", val as "at_large" | "role_titled")}
+              onValueChange={(val) =>
+                setValue("election_method", val as "at_large" | "role_titled")
+              }
               className="flex gap-4"
             >
               <label className="flex items-center gap-2 cursor-pointer">
@@ -232,7 +246,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
             <Label>Meeting formality</Label>
             <Select
               value={values.meeting_formality_override || "__default__"}
-              onValueChange={(val) => setValue("meeting_formality_override", val === "__default__" ? "" : val)}
+              onValueChange={(val) =>
+                setValue("meeting_formality_override", val === "__default__" ? "" : val)
+              }
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select formality" />
@@ -253,7 +269,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
             <Label>Minutes style</Label>
             <Select
               value={values.minutes_style_override || "__default__"}
-              onValueChange={(val) => setValue("minutes_style_override", val === "__default__" ? "" : val)}
+              onValueChange={(val) =>
+                setValue("minutes_style_override", val === "__default__" ? "" : val)
+              }
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select minutes style" />
@@ -323,7 +341,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
             <Label>Motion display format</Label>
             <RadioGroup
               value={values.motion_display_format}
-              onValueChange={(val) => setValue("motion_display_format", val as EditBoardData["motion_display_format"])}
+              onValueChange={(val) =>
+                setValue("motion_display_format", val as EditBoardData["motion_display_format"])
+              }
               className="space-y-2"
             >
               <label className="flex items-start gap-2 rounded-md border p-3 cursor-pointer hover:bg-muted/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
@@ -331,7 +351,8 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
                 <div>
                   <div className="text-sm font-medium">Block format</div>
                   <div className="text-xs text-muted-foreground">
-                    Motions displayed as structured blocks with labeled fields (Motion, Moved by, Second, Vote, Result)
+                    Motions displayed as structured blocks with labeled fields (Motion, Moved by,
+                    Second, Vote, Result)
                   </div>
                 </div>
               </label>

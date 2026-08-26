@@ -18,6 +18,7 @@ Add URL-based tab routing so each tab is directly linkable. Introduce a shell Se
 ### Task 1 — Read and map existing board detail page content
 
 Read `packages/web/src/routes/boards.$boardId.tsx` and `packages/web/src/components/boards/MemberRoster.tsx` in full. Document:
+
 - What sections currently exist on the board detail page
 - What data is fetched and from which tables
 - What actions are available (edit board, add member, etc.)
@@ -26,13 +27,13 @@ Read `packages/web/src/routes/boards.$boardId.tsx` and `packages/web/src/compone
 
 Implement five tabs using URL hash or search params for active tab state (e.g., `?tab=members`). Default tab is `overview`.
 
-| Tab | Route Param | Content |
-|-----|-------------|---------|
-| Overview | `?tab=overview` | Board name, municipality type, formality, quorum rule, motion format, presiding officer, recording secretary, meeting count summary |
-| Members | `?tab=members` | Full MemberRoster component (currently on main page) |
-| Meetings | `?tab=meetings` | Link card to `/boards/:boardId/meetings` or inline recent meetings list |
-| Templates | `?tab=templates` | Link card to `/boards/:boardId/templates` or inline template list |
-| Settings | `?tab=settings` | Placeholder: "Board settings coming soon" — shell only |
+| Tab       | Route Param      | Content                                                                                                                             |
+| --------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Overview  | `?tab=overview`  | Board name, municipality type, formality, quorum rule, motion format, presiding officer, recording secretary, meeting count summary |
+| Members   | `?tab=members`   | Full MemberRoster component (currently on main page)                                                                                |
+| Meetings  | `?tab=meetings`  | Link card to `/boards/:boardId/meetings` or inline recent meetings list                                                             |
+| Templates | `?tab=templates` | Link card to `/boards/:boardId/templates` or inline template list                                                                   |
+| Settings  | `?tab=settings`  | Placeholder: "Board settings coming soon" — shell only                                                                              |
 
 ### Task 3 — Implement tab navigation component
 
@@ -57,6 +58,7 @@ Templates tab: show the list of agenda templates for this board with a "Manage t
 ### Task 7 — Settings tab shell
 
 Render a placeholder card in the Settings tab:
+
 ```
 Board Settings
 Configure notice templates and minutes workflow for this board.

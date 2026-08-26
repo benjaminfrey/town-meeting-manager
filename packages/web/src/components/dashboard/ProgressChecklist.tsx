@@ -14,13 +14,7 @@ import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { Check, Circle, ArrowRight, PartyPopper } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 // ─── Checklist item component ───────────────────────────────────────
@@ -66,7 +60,10 @@ function ChecklistItem({
             {label}
           </span>
           {required && !completed && (
-            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+            <Badge
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
+            >
               Required
             </Badge>
           )}
@@ -143,12 +140,12 @@ export function ProgressChecklist({
   const supabase = useSupabase();
 
   const { data: memberCount = 0 } = useQuery({
-    queryKey: [...queryKeys.members.all, 'count', townId],
+    queryKey: [...queryKeys.members.all, "count", townId],
     queryFn: async () => {
       const { count, error } = await supabase
-        .from('board_member')
-        .select('*', { count: 'exact', head: true })
-        .eq('town_id', townId);
+        .from("board_member")
+        .select("*", { count: "exact", head: true })
+        .eq("town_id", townId);
       if (error) throw error;
       return count ?? 0;
     },
@@ -156,12 +153,12 @@ export function ProgressChecklist({
   });
 
   const { data: totalSeats = 0 } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId), 'totalSeats'],
+    queryKey: [...queryKeys.boards.byTown(townId), "totalSeats"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board')
-        .select('member_count')
-        .eq('town_id', townId);
+        .from("board")
+        .select("member_count")
+        .eq("town_id", townId);
       if (error) throw error;
       return (data ?? []).reduce((sum, b) => sum + (b.member_count ?? 0), 0);
     },
@@ -178,9 +175,7 @@ export function ProgressChecklist({
         .eq("town_id", townId);
       if (error) throw error;
       const total = data?.length ?? 0;
-      const configured = (data ?? []).filter(
-        (b) => b.notice_template_blocks !== null
-      ).length;
+      const configured = (data ?? []).filter((b) => b.notice_template_blocks !== null).length;
       return { total, configured };
     },
     enabled: !!townId,
@@ -188,8 +183,7 @@ export function ProgressChecklist({
 
   const totalBoardCount = boardCounts?.total ?? 0;
   const configuredTemplateCount = boardCounts?.configured ?? 0;
-  const hasAllNoticeTemplates =
-    totalBoardCount > 0 && configuredTemplateCount === totalBoardCount;
+  const hasAllNoticeTemplates = totalBoardCount > 0 && configuredTemplateCount === totalBoardCount;
 
   const hasBoardMembers = memberCount > 0;
   const hasSeal = !!sealUrl;
@@ -236,7 +230,9 @@ export function ProgressChecklist({
     },
     {
       key: "portal-subdomain",
-      label: hasSubdomain ? `Public portal subdomain set (${subdomain})` : "Set public portal subdomain",
+      label: hasSubdomain
+        ? `Public portal subdomain set (${subdomain})`
+        : "Set public portal subdomain",
       description: "Choose your town's public URL",
       completed: hasSubdomain,
       linkTo: "/settings",

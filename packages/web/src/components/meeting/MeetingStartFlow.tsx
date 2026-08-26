@@ -100,8 +100,9 @@ export function MeetingStartFlow({
   const presentMembers = members.filter((m) => presentMemberIds.has(m.boardMemberId));
 
   // Auto-detect chair and vice chair by seat_title
-  const chair = members.find((m) =>
-    m.seatTitle?.toLowerCase().includes("chair") && !m.seatTitle?.toLowerCase().includes("vice"),
+  const chair = members.find(
+    (m) =>
+      m.seatTitle?.toLowerCase().includes("chair") && !m.seatTitle?.toLowerCase().includes("vice"),
   );
   const viceChair = members.find((m) => m.seatTitle?.toLowerCase().includes("vice"));
   const chairIsPresent = chair ? presentMemberIds.has(chair.boardMemberId) : false;
@@ -212,7 +213,9 @@ export function MeetingStartFlow({
       void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+      });
       toast.success("Meeting called to order");
     },
     onError: (err) => {
@@ -232,7 +235,9 @@ export function MeetingStartFlow({
         <div className="flex items-center border-b px-6 py-4">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center">
-              {i > 0 && <div className={cn("mx-2 h-px w-8", i <= stepIdx ? "bg-primary" : "bg-border")} />}
+              {i > 0 && (
+                <div className={cn("mx-2 h-px w-8", i <= stepIdx ? "bg-primary" : "bg-border")} />
+              )}
               <div
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium",
@@ -245,7 +250,12 @@ export function MeetingStartFlow({
               >
                 {i < stepIdx ? <Check className="h-3.5 w-3.5" /> : i + 1}
               </div>
-              <span className={cn("ml-2 hidden text-sm sm:inline", i === stepIdx ? "font-medium" : "text-muted-foreground")}>
+              <span
+                className={cn(
+                  "ml-2 hidden text-sm sm:inline",
+                  i === stepIdx ? "font-medium" : "text-muted-foreground",
+                )}
+              >
                 {STEP_LABELS[s]}
               </span>
             </div>
@@ -338,7 +348,8 @@ function AttendanceStep({
     <div>
       <h3 className="mb-1 text-lg font-semibold">Take Attendance</h3>
       <p className="mb-4 text-sm text-muted-foreground">
-        Mark each board member as present or absent. {presentCount} of {members.length} marked present.
+        Mark each board member as present or absent. {presentCount} of {members.length} marked
+        present.
       </p>
       <div className="space-y-1 max-h-[40vh] overflow-y-auto">
         {members.map((member) => {
@@ -399,15 +410,11 @@ function QuorumStep({
           <X className="h-10 w-10 text-red-600" />
         )}
       </div>
-      <h3 className="text-lg font-semibold">
-        {hasQuorum ? "Quorum Met" : "Quorum Not Met"}
-      </h3>
+      <h3 className="text-lg font-semibold">{hasQuorum ? "Quorum Met" : "Quorum Not Met"}</h3>
       <p className="mt-2 text-2xl font-bold">
         {quorumPresent} of {quorumTotal} members present
       </p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {quorumRequired} needed for quorum
-      </p>
+      <p className="mt-1 text-sm text-muted-foreground">{quorumRequired} needed for quorum</p>
       {!hasQuorum && (
         <div className="mt-4 flex items-center justify-center gap-2 text-amber-600">
           <AlertTriangle className="h-4 w-4" />
@@ -472,7 +479,9 @@ function PresidingStep({
             </div>
             <span className="font-medium">{member.name}</span>
             {member.seatTitle && (
-              <Badge variant="outline" className="text-xs">{member.seatTitle}</Badge>
+              <Badge variant="outline" className="text-xs">
+                {member.seatTitle}
+              </Badge>
             )}
           </button>
         ))}
@@ -520,7 +529,9 @@ function SecretaryStep({
             </div>
             <span className="font-medium">{member.name}</span>
             {member.seatTitle && (
-              <Badge variant="outline" className="text-xs">{member.seatTitle}</Badge>
+              <Badge variant="outline" className="text-xs">
+                {member.seatTitle}
+              </Badge>
             )}
           </button>
         ))}

@@ -16,8 +16,7 @@ function renderEditor(
   overrides: Partial<React.ComponentProps<typeof PermissionMatrixEditor>> = {},
 ) {
   const onChange = overrides.onChange ?? vi.fn();
-  const onSelectedBoardIdsChange =
-    overrides.onSelectedBoardIdsChange ?? vi.fn();
+  const onSelectedBoardIdsChange = overrides.onSelectedBoardIdsChange ?? vi.fn();
 
   return render(
     <PermissionMatrixEditor
@@ -85,9 +84,7 @@ describe("PermissionMatrixEditor", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     const newPerms = onChange.mock.calls[0]![0] as PermissionsMatrix;
     // At least one global permission should be set to true
-    const trueKeys = Object.entries(newPerms.global).filter(
-      ([, v]) => v === true,
-    );
+    const trueKeys = Object.entries(newPerms.global).filter(([, v]) => v === true);
     expect(trueKeys.length).toBeGreaterThan(0);
   });
 
@@ -98,17 +95,13 @@ describe("PermissionMatrixEditor", () => {
         { id: "b2", name: "ZBA" },
       ],
     });
-    expect(
-      screen.getByText("Boards for board-specific permissions"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Boards for board-specific permissions")).toBeInTheDocument();
     expect(screen.getByText("Planning Board")).toBeInTheDocument();
     expect(screen.getByText("ZBA")).toBeInTheDocument();
   });
 
   it("hides board selector when boards prop is empty", () => {
     renderEditor({ boards: [] });
-    expect(
-      screen.queryByText("Boards for board-specific permissions"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Boards for board-specific permissions")).not.toBeInTheDocument();
   });
 });

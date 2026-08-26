@@ -37,14 +37,14 @@ Every task's requirements implicitly include this section.
 
 Each stage ends at a review gate. A stage's detailed task plan is written at its boundary, when its inputs exist — writing Stage 1's exact tasks today would mean writing code blocks against `drizzle-kit pull` output that does not yet exist.
 
-| Stage | Scope | Gate | Detailed plan |
-|---|---|---|---|
-| **0 · Ground** | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation | CI green on a clean clone, **and a working database builds from the repository alone** | **In this document** |
-| **1 · Platform** | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** Feature parity on CI. | Written at Stage 1 start |
-| **2 · Repair** | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert | Written at Stage 2 start |
-| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion | An adopted minutes record cannot be altered by any application path, proven by test | Written at Stage 3 start |
-| **4 · Vision** | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile | All six blocks shipped on the new stack | One plan per block |
-| **5 · Scale** | Parcels · proximity · postal mail · consortiums · zoning | — | One plan per block |
+| Stage                    | Scope                                                                                                                                                                                                                                  | Gate                                                                                                                 | Detailed plan            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **0 · Ground**           | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation                                                                                               | CI green on a clean clone, **and a working database builds from the repository alone**                               | **In this document**     |
+| **1 · Platform**         | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** Feature parity on CI. | Written at Stage 1 start |
+| **2 · Repair**           | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests                                                                                                                  | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert             | Written at Stage 2 start |
+| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion                                                                                                                                         | An adopted minutes record cannot be altered by any application path, proven by test                                  | Written at Stage 3 start |
+| **4 · Vision**           | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile                                                                                                                                         | All six blocks shipped on the new stack                                                                              | One plan per block       |
+| **5 · Scale**            | Parcels · proximity · postal mail · consortiums · zoning                                                                                                                                                                               | —                                                                                                                    | One plan per block       |
 
 ### Stage 1 parallelization
 
@@ -54,11 +54,11 @@ Stage 1's vertical slice (authentication + login + boards, end to end) is delibe
 
 `has_permission()` is called 21 times inside RLS policies. Under the split authorization model these are **removed** from RLS, not rewritten — so each must reappear as a tRPC procedure guard, or the rule is silently lost. Stage 1 carries this as an explicit checklist:
 
-| Migration file | Codes enforced |
-|---|---|
-| `20260308000033_rls_agenda_motion_vote.sql` | A2, M2, M3 |
-| `20260308000034_rls_minutes_exhibit.sql` | R1, R4, A3 |
-| `20260308000035_rls_notification.sql` | C2 |
+| Migration file                              | Codes enforced |
+| ------------------------------------------- | -------------- |
+| `20260308000033_rls_agenda_motion_vote.sql` | A2, M2, M3     |
+| `20260308000034_rls_minutes_exhibit.sql`    | R1, R4, A3     |
+| `20260308000035_rls_notification.sql`       | C2             |
 
 Every one of the 21 gets a named replacement guard and a test. Note the live defect this replaces: RLS looks permissions up by action **code** (`R1`), while the application writes them by action **name** (`edit_agenda`). `supabase/seed.sql:92` seeds by code — standardize there.
 
@@ -77,6 +77,7 @@ The repository has `prettier@^3.8.1` installed with `format`/`format:check` scri
 Expect a large initial error count on ~68,800 LOC. The approach is deliberate: a conservative rule set, auto-fix what is mechanical, then let CI enforce errors while warnings are tolerated. Tightening happens later, on a green baseline.
 
 **Files:**
+
 - Create: `eslint.config.js`
 - Create: `.prettierrc.json`
 - Create: `.prettierignore`
@@ -84,6 +85,7 @@ Expect a large initial error count on ~68,800 LOC. The approach is deliberate: a
 - Modify: `packages/api/package.json`, `packages/shared/package.json`, `packages/web/package.json` (replace the `lint` echo stubs)
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `pnpm lint` exits non-zero on an ESLint **error** and zero otherwise. `pnpm format:check` exits non-zero on unformatted files. Task 2 (CI) invokes both by exactly these names.
 
@@ -246,9 +248,11 @@ Baseline after auto-fix: <N> errors, <M> warnings."
 There is no `.github/workflows` directory. This is why 415 passing tests coexisted with broken authorization, a portal that cannot be switched on, and a notification service querying a nonexistent column.
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Consumes: `pnpm lint` and `pnpm format:check` from Task 1.
 - Produces: a required status check on every push and pull request. All later stages depend on this being green before merge.
 
@@ -351,10 +355,12 @@ Minutes are assembled deterministically from database rows through Handlebars. N
 No data backfill is required — nothing is deployed, and the development database no longer exists.
 
 **Files:**
+
 - Modify: `packages/api/src/routes/minutes.ts:221` (insert) and `:394` (update)
 - Test: `packages/api/src/services/__tests__/minutes-generation.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `minutes_document.generated_by === "manual"` for all deterministically assembled documents. Stage 4's AI-minutes work changes this to `"hybrid"` when a Claude stage actually runs.
 
@@ -439,10 +445,12 @@ The clerk's contemporaneous notes are captured during a live meeting and reach t
 Render in all three styles. A clerk who typed notes expects to see them; silently discarding typed content is the defect being fixed.
 
 **Files:**
+
 - Modify: `packages/api/src/services/minutes-formatters.ts` — `formatActionMinutes` (line 305), `formatSummaryMinutes` (line 398), `formatNarrativeMinutes` (line 512)
 - Test: `packages/api/src/services/__tests__/minutes-generation.test.ts`
 
 **Interfaces:**
+
 - Consumes: `MinutesContentItem.operator_notes: string | null`, already populated by `minutes-assembler.ts:565`.
 - Produces: `formatted_text` containing `<p class="operator-notes">…</p>` when notes exist. Stage 4's AI-minutes work reads `operator_notes` as its narrative input.
 
@@ -466,9 +474,7 @@ describe("operator notes", () => {
         minutes_style: style,
       });
 
-      const allText = formatted.sections
-        .map((s) => s.formatted_text)
-        .join("\n");
+      const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
       expect(allText).toContain("culvert repair");
       expect(allText).toContain('class="operator-notes"');
     },
@@ -581,11 +587,13 @@ otherwise lacks: there is no transcript and no audio today."
 `README.md` and the spec still describe the application as offline-first, which stopped being true when PowerSync was removed and the app moved to TanStack Query plus Supabase Realtime. A `playwright-report/` directory appeared untracked during the audit, and `.DS_Store` is tracked and perpetually dirty.
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `.gitignore`
 - Delete from index: `.DS_Store`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: a clean `git status` on a fresh clone, so later stages can trust it as a signal.
 
@@ -645,11 +653,13 @@ Also ignores playwright-report/ and test-results/, and untracks .DS_Store."
 **Prerequisite — blocks this task.** Provide SSH access to the VM (hostname or IP, user, key) and confirm what else runs on it. The 4 GB budget is the binding constraint: Postgres wants roughly 1 GB, Node 200–500 MB, and Puppeteer 300–500 MB per Chromium instance. Dropping the eight Supabase containers is what makes that budget work; anything already resident on the box changes the sizing.
 
 **Files:**
+
 - Create: `infrastructure/provision/README.md`
 - Create: `infrastructure/provision/postgresql.conf.tuned`
 - Create: `infrastructure/provision/nginx-dev.conf`
 
 **Interfaces:**
+
 - Consumes: nothing in the repository.
 - Produces: a reachable Postgres instance and a documented connection string. Task 7 and all of Stage 1 depend on it.
 
@@ -723,6 +733,7 @@ every policy into a silent no-op."
 Two migration corpora exist. `supabase/migrations/` holds 56 files and `docker/migrations/` holds two (`011_notification_system.sql`, `012_invitation_email.sql`), and [`infrastructure/scripts/migrate.sh:23`](../../../infrastructure/scripts/migrate.sh) iterates `supabase/migrations/*.sql` **only** — so those two have never been applied by any deploy script. This is why the audit concluded the `invitation` table and the notification retry columns had no SQL source. They do. The schema is not lost; half of it is unreachable by tooling.
 
 **Files:**
+
 - Create: `supabase/migrations/20260826000001_merge_notification_system.sql`
 - Create: `supabase/migrations/20260826000002_merge_invitation_email.sql`
 - Create: `scripts/build-db-from-repo.sh`
@@ -730,6 +741,7 @@ Two migration corpora exist. `supabase/migrations/` holds 56 files and `docker/m
 - Delete: `docker/migrations/011_notification_system.sql`, `docker/migrations/012_invitation_email.sql`
 
 **Interfaces:**
+
 - Consumes: the Postgres instance from Task 6.
 - Produces: `scripts/build-db-from-repo.sh` builds a complete database from a clean clone. Stage 1's `drizzle-kit pull` runs against exactly this database.
 

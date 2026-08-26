@@ -24,13 +24,7 @@ const STAGE_LABELS = [
   "Meeting Style",
 ] as const;
 
-const STAGE_LABELS_SHORT = [
-  "Town",
-  "Board",
-  "Roles",
-  "Boards",
-  "Style",
-] as const;
+const STAGE_LABELS_SHORT = ["Town", "Board", "Roles", "Boards", "Style"] as const;
 
 // ─── Progress indicator ──────────────────────────────────────────────
 
@@ -65,11 +59,7 @@ function ProgressIndicator() {
                   `}
                   aria-current={isCurrent ? "step" : undefined}
                 >
-                  {isComplete ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    stageNum
-                  )}
+                  {isComplete ? <Check className="h-4 w-4" /> : stageNum}
                 </div>
                 {/* Full label on md+, short label on mobile */}
                 <span
@@ -153,9 +143,7 @@ export function WizardLayout({
               Civic software for New England town government
             </p>
           </div>
-          <span className="text-sm text-muted-foreground">
-            Step {currentStage} of 5
-          </span>
+          <span className="text-sm text-muted-foreground">Step {currentStage} of 5</span>
         </div>
       </header>
 
@@ -184,11 +172,7 @@ export function WizardLayout({
           <div className="flex items-center justify-between">
             <div>
               {!isFirstStage && (
-                <Button
-                  variant="outline"
-                  onClick={onBack ?? goBack}
-                  disabled={isSubmitting}
-                >
+                <Button variant="outline" onClick={onBack ?? goBack} disabled={isSubmitting}>
                   Back
                 </Button>
               )}
@@ -197,14 +181,9 @@ export function WizardLayout({
             <div>
               {isLastStage ? (
                 submitError && onRetry ? (
-                  <Button onClick={onRetry}>
-                    Retry
-                  </Button>
+                  <Button onClick={onRetry}>Retry</Button>
                 ) : (
-                  <Button
-                    onClick={onComplete ?? onNext}
-                    disabled={!isStageValid || isSubmitting}
-                  >
+                  <Button onClick={onComplete ?? onNext} disabled={!isStageValid || isSubmitting}>
                     {isSubmitting ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -216,10 +195,7 @@ export function WizardLayout({
                   </Button>
                 )
               ) : (
-                <Button
-                  onClick={onNext}
-                  disabled={!isStageValid}
-                >
+                <Button onClick={onNext} disabled={!isStageValid}>
                   Next
                 </Button>
               )}

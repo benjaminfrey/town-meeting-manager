@@ -63,7 +63,7 @@ export function CreateTemplateDialog({
     mutationFn: async (trimmed: string) => {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
-      const { error } = await supabase.from('agenda_template').insert({
+      const { error } = await supabase.from("agenda_template").insert({
         id,
         board_id: boardId,
         town_id: townId,
@@ -101,9 +101,7 @@ export function CreateTemplateDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create Template</DialogTitle>
-          <DialogDescription>
-            Enter a name for the new agenda template.
-          </DialogDescription>
+          <DialogDescription>Enter a name for the new agenda template.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-2">
@@ -120,17 +118,10 @@ export function CreateTemplateDialog({
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isPending}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancel
           </Button>
-          <Button
-            onClick={handleCreate}
-            disabled={name.trim().length < 2 || isPending}
-          >
+          <Button onClick={handleCreate} disabled={name.trim().length < 2 || isPending}>
             {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Create
           </Button>

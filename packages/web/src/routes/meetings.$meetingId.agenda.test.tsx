@@ -23,12 +23,25 @@ const { mockChain, mockFrom } = vi.hoisted(() => {
   const chain: Record<string, unknown> = {};
   chain["then"] = (resolve: any, reject?: any) =>
     Promise.resolve({ data: [], error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: [], error: null }).catch(reject as any);
+  chain["catch"] = (reject: any) => Promise.resolve({ data: [], error: null }).catch(reject as any);
   const methods = [
-    "select", "insert", "update", "delete", "upsert",
-    "eq", "neq", "in", "gte", "lte", "order", "limit",
-    "single", "maybeSingle", "throwOnError", "or", "filter",
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "eq",
+    "neq",
+    "in",
+    "gte",
+    "lte",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "throwOnError",
+    "or",
+    "filter",
   ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
@@ -44,7 +57,10 @@ vi.mock("@/lib/supabase", () => ({
 // ─── Mock queryClient singleton ────────────────────────────────────────
 
 vi.mock("@/lib/queryClient", () => ({
-  queryClient: { invalidateQueries: vi.fn(), ensureQueryData: vi.fn().mockResolvedValue(undefined) },
+  queryClient: {
+    invalidateQueries: vi.fn(),
+    ensureQueryData: vi.fn().mockResolvedValue(undefined),
+  },
   resetQueryCache: vi.fn(),
 }));
 
@@ -71,18 +87,12 @@ vi.mock("@/providers/AuthProvider", () => ({
 vi.mock("@/components/meetings/AgendaSection", () => ({
   AgendaSection: (props: any) => (
     <div data-testid={`agenda-section-${props.section.id}`}>
-      <span data-testid={`section-title-${props.section.id}`}>
-        {props.section.title}
-      </span>
-      <span data-testid={`section-type-${props.section.id}`}>
-        {props.section.section_type}
-      </span>
+      <span data-testid={`section-title-${props.section.id}`}>{props.section.title}</span>
+      <span data-testid={`section-type-${props.section.id}`}>{props.section.section_type}</span>
       <span data-testid={`item-count-${props.section.id}`}>
         {props.children_items?.length ?? 0}
       </span>
-      <span data-testid={`read-only-${props.section.id}`}>
-        {props.readOnly ? "true" : "false"}
-      </span>
+      <span data-testid={`read-only-${props.section.id}`}>{props.readOnly ? "true" : "false"}</span>
     </div>
   ),
 }));
@@ -240,13 +250,15 @@ function createMockItem(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setupQueryMocks(opts: {
-  meeting?: Record<string, unknown> | null;
-  board?: Record<string, unknown> | null;
-  town?: Record<string, unknown> | null;
-  items?: Record<string, unknown>[];
-  exhibits?: Record<string, unknown>[];
-} = {}) {
+function setupQueryMocks(
+  opts: {
+    meeting?: Record<string, unknown> | null;
+    board?: Record<string, unknown> | null;
+    town?: Record<string, unknown> | null;
+    items?: Record<string, unknown>[];
+    exhibits?: Record<string, unknown>[];
+  } = {},
+) {
   const {
     meeting = createMockMeeting(),
     board = createMockBoard(),
@@ -257,9 +269,12 @@ function setupQueryMocks(opts: {
 
   mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
     const key = queryKey[0] as string;
-    if (key === "meetings") return { data: meeting ?? undefined, isLoading: false, isFetching: false, error: undefined };
-    if (key === "boards") return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
-    if (key === "towns") return { data: town ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "meetings")
+      return { data: meeting ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "boards")
+      return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "towns")
+      return { data: town ?? undefined, isLoading: false, isFetching: false, error: undefined };
     if (key === "agendaItems") return mockQueryResult(items);
     if (key === "exhibits") return mockQueryResult(exhibits);
     return mockQueryResult([]);
@@ -274,20 +289,39 @@ describe("AgendaBuilderPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFrom.mockReturnValue(mockChain);
-    for (const m of ["select", "insert", "update", "delete", "eq", "neq", "order", "limit", "single", "throwOnError", "or", "filter", "upsert", "in", "maybeSingle"]) {
+    for (const m of [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "eq",
+      "neq",
+      "order",
+      "limit",
+      "single",
+      "throwOnError",
+      "or",
+      "filter",
+      "upsert",
+      "in",
+      "maybeSingle",
+    ]) {
       if (typeof mockChain[m]?.mockReturnValue === "function") {
         mockChain[m].mockReturnValue(mockChain);
       }
     }
-    mockUseQuery.mockReturnValue({ data: undefined, isLoading: false, isFetching: false, error: undefined });
+    mockUseQuery.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      error: undefined,
+    });
   });
 
   it("renders loading state when meeting not loaded", () => {
     setupQueryMocks({ meeting: null });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     expect(screen.getByText("Loading meeting...")).toBeInTheDocument();
   });
@@ -311,9 +345,7 @@ describe("AgendaBuilderPage", () => {
       items: [section1, section2],
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // Meeting title in header
     expect(screen.getByText("March Planning Meeting")).toBeInTheDocument();
@@ -321,12 +353,8 @@ describe("AgendaBuilderPage", () => {
     // Section components rendered via mocked AgendaSection
     expect(screen.getByTestId("agenda-section-sec-1")).toBeInTheDocument();
     expect(screen.getByTestId("agenda-section-sec-2")).toBeInTheDocument();
-    expect(screen.getByTestId("section-title-sec-1")).toHaveTextContent(
-      "Call to Order",
-    );
-    expect(screen.getByTestId("section-title-sec-2")).toHaveTextContent(
-      "Old Business",
-    );
+    expect(screen.getByTestId("section-title-sec-1")).toHaveTextContent("Call to Order");
+    expect(screen.getByTestId("section-title-sec-2")).toHaveTextContent("Old Business");
   });
 
   it("groups agenda items by parent section", () => {
@@ -351,9 +379,7 @@ describe("AgendaBuilderPage", () => {
 
     setupQueryMocks({ items: [section, child1, child2] });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // The mock AgendaSection receives children_items prop; its mock renders item-count
     expect(screen.getByTestId("item-count-sec-1")).toHaveTextContent("2");
@@ -362,9 +388,7 @@ describe("AgendaBuilderPage", () => {
   it("displays empty state when no agenda items exist", () => {
     setupQueryMocks({ items: [] });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // No section elements rendered
     expect(screen.queryByTestId(/^agenda-section-/)).not.toBeInTheDocument();
@@ -378,7 +402,7 @@ describe("AgendaBuilderPage", () => {
     setupQueryMocks({ items: [] });
 
     const { user } = renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     // Click "Add Section" button to open the form
@@ -419,17 +443,13 @@ describe("AgendaBuilderPage", () => {
       items: [section],
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // The mocked AgendaSection renders the readOnly prop
     expect(screen.getByTestId("read-only-sec-1")).toHaveTextContent("true");
 
     // Add Section button should not be present for cancelled meetings
-    expect(
-      screen.queryByRole("button", { name: /add section/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add section/i })).not.toBeInTheDocument();
   });
 
   it("no longer renders an inline breadcrumb (moved to the shared meeting header)", () => {
@@ -437,9 +457,7 @@ describe("AgendaBuilderPage", () => {
       board: createMockBoard({ id: "board-1", name: "Select Board" }),
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // Navigation context now lives in MeetingSubnavHeader (rendered by
     // MeetingLayout), so the page itself no longer renders the old breadcrumb.
@@ -470,19 +488,11 @@ describe("AgendaBuilderPage", () => {
       items: [proceduralSection, discussionSection, actionSection],
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
-    expect(screen.getByTestId("section-type-sec-proc")).toHaveTextContent(
-      "procedural",
-    );
-    expect(screen.getByTestId("section-type-sec-disc")).toHaveTextContent(
-      "discussion",
-    );
-    expect(screen.getByTestId("section-type-sec-act")).toHaveTextContent(
-      "action",
-    );
+    expect(screen.getByTestId("section-type-sec-proc")).toHaveTextContent("procedural");
+    expect(screen.getByTestId("section-type-sec-disc")).toHaveTextContent("discussion");
+    expect(screen.getByTestId("section-type-sec-act")).toHaveTextContent("action");
   });
 
   it("hides Publish Agenda button when agenda is already published", () => {
@@ -490,13 +500,9 @@ describe("AgendaBuilderPage", () => {
       meeting: createMockMeeting({ agenda_status: "published" }),
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
-    expect(
-      screen.queryByRole("button", { name: /publish agenda/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish agenda/i })).not.toBeInTheDocument();
   });
 
   it("computes status bar totals from agenda items", () => {
@@ -531,9 +537,7 @@ describe("AgendaBuilderPage", () => {
       exhibits: [exhibit1],
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     // 3 total items (1 section + 2 children)
     expect(screen.getByTestId("status-item-count")).toHaveTextContent("3");
@@ -541,9 +545,7 @@ describe("AgendaBuilderPage", () => {
     expect(screen.getByTestId("status-duration")).toHaveTextContent("45");
     // 1 exhibit (filtered to match meeting items)
     expect(screen.getByTestId("status-exhibit-count")).toHaveTextContent("1");
-    expect(screen.getByTestId("status-agenda-status")).toHaveTextContent(
-      "draft",
-    );
+    expect(screen.getByTestId("status-agenda-status")).toHaveTextContent("draft");
   });
 
   it("shows Run Meeting button when meeting status is noticed or open", () => {
@@ -551,12 +553,8 @@ describe("AgendaBuilderPage", () => {
       meeting: createMockMeeting({ status: "noticed" }),
     });
 
-    renderWithProviders(
-      <AgendaBuilderPage {...{loaderData: defaultLoaderData} as any} />,
-    );
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
-    expect(
-      screen.getByRole("button", { name: /run meeting/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run meeting/i })).toBeInTheDocument();
   });
 });

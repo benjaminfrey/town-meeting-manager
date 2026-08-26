@@ -147,7 +147,8 @@ export function MotionCaptureDialog({
   }, [open, mode]);
 
   // ─── Validation ──────────────────────────────────────────────
-  const isProceduralType = motionType === "adjourn" || motionType === "table" || motionType === "untable";
+  const isProceduralType =
+    motionType === "adjourn" || motionType === "table" || motionType === "untable";
   const textValid = text.trim().length >= 5;
   const movedByValid = !!movedBy;
   const secondedByValid = isProceduralType || !!secondedBy;
@@ -181,7 +182,8 @@ export function MotionCaptureDialog({
     },
   });
 
-  const canSubmit = textValid && movedByValid && secondedByValid && noSamePerson && !insertMotionMutation.isPending;
+  const canSubmit =
+    textValid && movedByValid && secondedByValid && noSamePerson && !insertMotionMutation.isPending;
 
   // ─── Submit ──────────────────────────────────────────────────
   const handleSubmit = () => {
@@ -218,8 +220,8 @@ export function MotionCaptureDialog({
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
               <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                This motion was pre-filled from the agenda packet. Verify the
-                language matches what was actually said before recording.
+                This motion was pre-filled from the agenda packet. Verify the language matches what
+                was actually said before recording.
               </div>
             </div>
           )}
@@ -322,9 +324,7 @@ export function MotionCaptureDialog({
             </div>
           </div>
 
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>

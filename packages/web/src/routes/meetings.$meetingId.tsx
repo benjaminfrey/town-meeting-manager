@@ -30,31 +30,17 @@ import {
 } from "@/components/meetings/meeting-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function InfoRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="min-w-[140px] text-sm text-muted-foreground">
-        {label}
-      </span>
+      <span className="min-w-[140px] text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{children}</span>
     </div>
   );
@@ -85,14 +71,10 @@ const MINUTES_STATUS_LABELS: Record<string, string> = {
 };
 
 const MINUTES_STATUS_COLORS: Record<string, string> = {
-  draft:
-    "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  review:
-    "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300",
-  approved:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300",
-  published:
-    "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+  draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  review: "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300",
+  approved: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300",
+  published: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
 };
 
 // ─── Route ───────────────────────────────────────────────────────────
@@ -234,10 +216,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
         {!meetingLoading ? (
           <div className="text-center">
             <p className="text-muted-foreground">Meeting not found.</p>
-            <Link
-              to="/boards"
-              className="mt-3 inline-block text-sm text-blue-600 hover:underline"
-            >
+            <Link to="/boards" className="mt-3 inline-block text-sm text-blue-600 hover:underline">
               Back to Boards
             </Link>
           </div>
@@ -270,9 +249,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
   const canRunLive = status === "noticed" || status === "open";
   // Can view review?
   const canViewReview =
-    status === "adjourned" ||
-    status === "minutes_draft" ||
-    status === "approved";
+    status === "adjourned" || status === "minutes_draft" || status === "approved";
 
   return (
     <div className="p-6">
@@ -295,10 +272,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
               {boardName}
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
-            <Link
-              to={`/boards/${boardId}/meetings`}
-              className="hover:text-foreground"
-            >
+            <Link to={`/boards/${boardId}/meetings`} className="hover:text-foreground">
               Meetings
             </Link>
           </>
@@ -348,9 +322,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                 {MEETING_STATUS_LABELS[status] ?? status}
               </span>
             </InfoRow>
-            <InfoRow label="Type">
-              {MEETING_TYPE_LABELS[meetingType] ?? meetingType}
-            </InfoRow>
+            <InfoRow label="Type">{MEETING_TYPE_LABELS[meetingType] ?? meetingType}</InfoRow>
             <InfoRow label="Date">
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
@@ -373,12 +345,8 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                 </span>
               </InfoRow>
             )}
-            {presidingName && (
-              <InfoRow label="Presiding Officer">{presidingName}</InfoRow>
-            )}
-            {secretaryName && (
-              <InfoRow label="Recording Secretary">{secretaryName}</InfoRow>
-            )}
+            {presidingName && <InfoRow label="Presiding Officer">{presidingName}</InfoRow>}
+            {secretaryName && <InfoRow label="Recording Secretary">{secretaryName}</InfoRow>}
             {meeting.started_at && (
               <InfoRow label="Started">
                 {new Date(meeting.started_at as string).toLocaleString()}
@@ -421,9 +389,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                 </div>
               </div>
               <Button variant="outline" size="sm" asChild>
-                <Link to={`/meetings/${meetingId}/agenda`}>
-                  Edit Agenda
-                </Link>
+                <Link to={`/meetings/${meetingId}/agenda`}>Edit Agenda</Link>
               </Button>
             </div>
 
@@ -442,17 +408,13 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                       {MINUTES_STATUS_LABELS[minutesStatus] ?? minutesStatus}
                     </span>
                   ) : (
-                    <span className="text-xs text-muted-foreground">
-                      Not yet generated
-                    </span>
+                    <span className="text-xs text-muted-foreground">Not yet generated</span>
                   )}
                 </div>
               </div>
               {minutesStatus && (
                 <Button variant="outline" size="sm" asChild>
-                  <Link to={`/meetings/${meetingId}/minutes`}>
-                    View Minutes
-                  </Link>
+                  <Link to={`/meetings/${meetingId}/minutes`}>View Minutes</Link>
                 </Button>
               )}
             </div>
@@ -494,8 +456,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                 <div>
                   <p className="text-sm font-medium">Attendance</p>
                   <span className="text-xs text-muted-foreground">
-                    {attendanceCount} member{attendanceCount !== 1 ? "s" : ""}{" "}
-                    recorded
+                    {attendanceCount} member{attendanceCount !== 1 ? "s" : ""} recorded
                   </span>
                 </div>
               </div>
@@ -516,9 +477,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                   </div>
                 </div>
                 <Button variant="outline" size="sm" asChild>
-                  <Link to={`/meetings/${meetingId}/review`}>
-                    Review
-                  </Link>
+                  <Link to={`/meetings/${meetingId}/review`}>Review</Link>
                 </Button>
               </div>
             )}

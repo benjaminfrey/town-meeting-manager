@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { renderWithProviders, screen } from "@/test/render";
-import {
-  createAdminUser,
-  createStaffUser,
-  createBoardMemberUser,
-} from "@/test/mocks/auth-mock";
+import { createAdminUser, createStaffUser, createBoardMemberUser } from "@/test/mocks/auth-mock";
 
 // ─── Tests ──────────────────────────────────────────────────────────
 
@@ -17,9 +13,7 @@ describe("test setup verification", () => {
   });
 
   it("RTL matchers work (toBeInTheDocument, toHaveTextContent)", () => {
-    renderWithProviders(
-      <p data-testid="greeting">Welcome to Town Meeting Manager</p>,
-    );
+    renderWithProviders(<p data-testid="greeting">Welcome to Town Meeting Manager</p>);
     const el = screen.getByTestId("greeting");
     expect(el).toBeInTheDocument();
     expect(el).toHaveTextContent("Welcome to Town Meeting Manager");

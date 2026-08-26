@@ -9,14 +9,7 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  GripVertical,
-  Plus,
-  User,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, GripVertical, Plus, User } from "lucide-react";
 import { InlineItemForm } from "./InlineItemForm";
 import { ExhibitUploader } from "./ExhibitUploader";
 import { Button } from "@/components/ui/button";
@@ -50,18 +43,12 @@ export function AgendaItemRow({
   const itemId = String(item.id);
   const title = String(item.title ?? "");
   const presenter = (item.presenter as string) || null;
-  const duration = item.estimated_duration
-    ? Number(item.estimated_duration)
-    : null;
+  const duration = item.estimated_duration ? Number(item.estimated_duration) : null;
 
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: itemId, disabled: readOnly || !!isSubItem });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: itemId,
+    disabled: readOnly || !!isSubItem,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -90,14 +77,12 @@ export function AgendaItemRow({
           </div>
         )}
         <button className="text-muted-foreground hover:text-foreground shrink-0">
-          {isExpanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
         <span className="text-xs font-mono text-muted-foreground w-6">
-          {isSubItem ? `${String.fromCharCode(105 + itemIndex)}.` : `${String.fromCharCode(65 + itemIndex)}.`}
+          {isSubItem
+            ? `${String.fromCharCode(105 + itemIndex)}.`
+            : `${String.fromCharCode(65 + itemIndex)}.`}
         </span>
         <span className="flex-1 text-sm font-medium truncate">{title}</span>
         {presenter && (
@@ -125,32 +110,24 @@ export function AgendaItemRow({
           {readOnly ? (
             <div className="space-y-2 text-sm">
               {item.description ? (
-                <p className="text-muted-foreground">
-                  {String(item.description)}
-                </p>
+                <p className="text-muted-foreground">{String(item.description)}</p>
               ) : null}
               {item.background ? (
                 <div>
                   <span className="font-medium">Background: </span>
-                  <span className="text-muted-foreground">
-                    {String(item.background)}
-                  </span>
+                  <span className="text-muted-foreground">{String(item.background)}</span>
                 </div>
               ) : null}
               {item.recommendation ? (
                 <div>
                   <span className="font-medium">Recommendation: </span>
-                  <span className="text-muted-foreground">
-                    {String(item.recommendation)}
-                  </span>
+                  <span className="text-muted-foreground">{String(item.recommendation)}</span>
                 </div>
               ) : null}
               {item.suggested_motion ? (
                 <div>
                   <span className="font-medium">Suggested motion: </span>
-                  <span className="text-muted-foreground">
-                    {String(item.suggested_motion)}
-                  </span>
+                  <span className="text-muted-foreground">{String(item.suggested_motion)}</span>
                 </div>
               ) : null}
             </div>

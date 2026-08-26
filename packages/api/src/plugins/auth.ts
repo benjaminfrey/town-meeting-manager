@@ -27,10 +27,7 @@ declare module "fastify" {
     user?: RequestUser;
   }
   interface FastifyInstance {
-    verifyAuth: (
-      request: FastifyRequest,
-      reply: FastifyReply,
-    ) => Promise<void>;
+    verifyAuth: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -71,63 +68,57 @@ function decodeJwtPayload(token: string): JwtPayload | null {
 // ─── Plugin ──────────────────────────────────────────────────────────
 
 export const authPlugin = fp(async (fastify) => {
-  fastify.decorate(
-    "verifyAuth",
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const header = request.headers.authorization;
-      if (!header?.startsWith("Bearer ")) {
-        return reply.unauthorized("Missing or invalid Authorization header");
-      }
+  fastify.decorate("verifyAuth", async (request: FastifyRequest, reply: FastifyReply) => {
+    const header = request.headers.authorization;
+    if (!header?.startsWith("Bearer ")) {
+      return reply.unauthorized("Missing or invalid Authorization header");
+    }
 
-      const token = header.slice(7);
+    const token = header.slice(7);
 
-      // Verify the token against Supabase auth
-      const {
-        data: { user },
-        error,
-      } = await fastify.supabase.auth.getUser(token);
+    // Verify the token against Supabase auth
+    const {
+      data: { user },
+      error,
+    } = await fastify.supabase.auth.getUser(token);
 
-      if (error || !user) {
-        return reply.unauthorized("Invalid or expired token");
-      }
+    if (error || !user) {
+      return reply.unauthorized("Invalid or expired token");
+    }
 
-      // Decode custom claims from JWT payload
-      const payload = decodeJwtPayload(token);
+    // Decode custom claims from JWT payload
+    const payload = decodeJwtPayload(token);
 
-      const townId =
-        payload?.town_id ??
-        payload?.app_metadata?.town_id ??
-        payload?.user_metadata?.town_id ??
-        null;
+    const townId =
+      payload?.town_id ?? payload?.app_metadata?.town_id ?? payload?.user_metadata?.town_id ?? null;
 
-      const role =
-        (payload?.role as UserRole) ??
-        (payload?.app_metadata?.role as UserRole) ??
-        (payload?.user_metadata?.role as UserRole) ??
-        "admin";
+    const role =
+      (payload?.role as UserRole) ??
+      (payload?.app_metadata?.role as UserRole) ??
+      (payload?.user_metadata?.role as UserRole) ??
+      "admin";
 
-      const personId =
-        payload?.person_id ??
-        payload?.app_metadata?.person_id ??
-        payload?.user_metadata?.person_id ??
-        null;
+    const personId =
+      payload?.person_id ??
+      payload?.app_metadata?.person_id ??
+      payload?.user_metadata?.person_id ??
+      null;
 
-      const permissions =
-        payload?.permissions ??
-        payload?.app_metadata?.permissions ??
-        payload?.user_metadata?.permissions ??
-        {};
+    const permissions =
+      payload?.permissions ??
+      payload?.app_metadata?.permissions ??
+      payload?.user_metadata?.permissions ??
+      {};
 
-      request.user = {
-        id: user.id,
-        personId,
-        email: user.email ?? "",
-        townId,
-        role,
-        permissions: typeof permissions === "object" ? permissions : {},
-      };
-    },
-  );
+    request.user = {
+      id: user.id,
+      personId,
+      email: user.email ?? "",
+      townId,
+      role,
+      permissions: typeof permissions === "object" ? permissions : {},
+    };
+  });
 });
 
 // ─── Permission check helper ─────────────────────────────────────────

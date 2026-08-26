@@ -60,7 +60,10 @@ function staffWithTemplate(templateName: string): CurrentUser {
 }
 
 function staffWithGlobal(allowedActions: string[]): CurrentUser {
-  const global = Object.fromEntries(allowedActions.map((a) => [a, true])) as Record<string, boolean>;
+  const global = Object.fromEntries(allowedActions.map((a) => [a, true])) as Record<
+    string,
+    boolean
+  >;
   return createMockUser({
     role: "staff",
     permissions: {
@@ -76,7 +79,10 @@ function staffWithBoardOverride(
   globalActions: string[] = [],
 ): CurrentUser {
   const global = Object.fromEntries(globalActions.map((a) => [a, true])) as Record<string, boolean>;
-  const boardGlobal = Object.fromEntries(boardActions.map((a) => [a, true])) as Record<string, boolean>;
+  const boardGlobal = Object.fromEntries(boardActions.map((a) => [a, true])) as Record<
+    string,
+    boolean
+  >;
   return createMockUser({
     role: "staff",
     permissions: {
@@ -471,7 +477,11 @@ describe("PermissionGate", () => {
       const staff = staffWithBoardOverride("board-456", ["edit_agenda"], []);
       renderGate(
         staff,
-        <PermissionGate action="A2" boardId="board-123" fallback={<span data-testid="denied">Denied</span>}>
+        <PermissionGate
+          action="A2"
+          boardId="board-123"
+          fallback={<span data-testid="denied">Denied</span>}
+        >
           <span data-testid="board-content">Board Content</span>
         </PermissionGate>,
       );

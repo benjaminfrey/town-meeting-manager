@@ -14,14 +14,8 @@ import { Link, useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import {
-  MEETING_STATUS_LABELS,
-  MEETING_STATUS_COLORS,
-} from "@/components/meetings/meeting-labels";
-import {
-  LIFECYCLE_STAGES,
-  lifecycleStageForStatus,
-} from "@/components/MeetingLifecycle";
+import { MEETING_STATUS_LABELS, MEETING_STATUS_COLORS } from "@/components/meetings/meeting-labels";
+import { LIFECYCLE_STAGES, lifecycleStageForStatus } from "@/components/MeetingLifecycle";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -84,13 +78,9 @@ export function MeetingSubnavHeader({ meetingId }: { meetingId: string }) {
             Meetings
           </Link>
           <span className="text-muted-foreground/40">/</span>
-          <span className="font-medium">
-            {meeting?.board?.name ?? "Meeting"}
-          </span>
+          <span className="font-medium">{meeting?.board?.name ?? "Meeting"}</span>
           {meeting?.title && (
-            <span className="truncate text-muted-foreground">
-              {meeting.title}
-            </span>
+            <span className="truncate text-muted-foreground">{meeting.title}</span>
           )}
           {status && (
             <span

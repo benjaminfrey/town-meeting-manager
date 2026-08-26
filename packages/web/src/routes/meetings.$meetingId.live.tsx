@@ -46,7 +46,10 @@ import { ExecutiveSessionDialog } from "@/components/meeting/ExecutiveSessionDia
 import { ExecSessionBanner } from "@/components/meeting/ExecSessionBanner";
 import { ExitExecutiveSessionDialog } from "@/components/meeting/ExitExecutiveSessionDialog";
 import { AdjournmentControls } from "@/components/meeting/AdjournmentControls";
-import { MotionCaptureDialog, type MotionDialogMode } from "@/components/meeting/MotionCaptureDialog";
+import {
+  MotionCaptureDialog,
+  type MotionDialogMode,
+} from "@/components/meeting/MotionCaptureDialog";
 import { hasPermission } from "@town-meeting/shared";
 import { cn } from "@/lib/utils";
 
@@ -69,7 +72,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
     },
   });
 
-  const boardId = (meetingData as Record<string, unknown>)?.board_id as string ?? "";
+  const boardId = ((meetingData as Record<string, unknown>)?.board_id as string) ?? "";
 
   // Prefetch secondary data in parallel
   await Promise.all([
@@ -165,12 +168,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Permission check ─────────────────────────────────────────
   const canRunMeeting = currentUser
-    ? hasPermission(
-        currentUser.permissions,
-        "start_run_meeting",
-        undefined,
-        currentUser.role,
-      )
+    ? hasPermission(currentUser.permissions, "start_run_meeting", undefined, currentUser.role)
     : false;
 
   // ─── Reactive queries ─────────────────────────────────────────
@@ -191,7 +189,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   });
 
   const meeting = meetingData as Record<string, unknown> | undefined;
-  const board = (meetingData as Record<string, unknown> | undefined)?.board as Record<string, unknown> | undefined;
+  const board = (meetingData as Record<string, unknown> | undefined)?.board as
+    | Record<string, unknown>
+    | undefined;
   const boardId = (meeting?.board_id as string) ?? "";
   const townId = (meeting?.town_id as string) ?? "";
   const status = (meeting?.status as string) ?? "";
@@ -317,14 +317,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Realtime subscriptions ────────────────────────────────────
 
-  useRealtimeSubscription(
-    `live-${meetingId}-meeting`,
-    "meeting",
-    `id=eq.${meetingId}`,
-    () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
-    },
-  );
+  useRealtimeSubscription(`live-${meetingId}-meeting`, "meeting", `id=eq.${meetingId}`, () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+  });
 
   useRealtimeSubscription(
     `live-${meetingId}-attendance`,
@@ -367,7 +362,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     "guest_speaker",
     `meeting_id=eq.${meetingId}`,
     () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.guestSpeakers.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
+      });
     },
   );
 
@@ -376,7 +373,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     "agenda_item_transition",
     `meeting_id=eq.${meetingId}`,
     () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+      });
     },
   );
 
@@ -385,7 +384,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     "executive_session",
     `meeting_id=eq.${meetingId}`,
     () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.executiveSessions.byMeeting(meetingId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+      });
     },
   );
 
@@ -456,10 +457,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   }, [speakerRows]);
 
   // Build sections → items tree
-  const allItems = useMemo(
-    () => itemRows as Array<Record<string, unknown>>,
-    [itemRows],
-  );
+  const allItems = useMemo(() => itemRows as Array<Record<string, unknown>>, [itemRows]);
 
   const sections = useMemo(() => {
     const parents = allItems.filter((item) => !item.parent_item_id);
@@ -584,10 +582,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       id: currentItemId,
       title: (raw.title as string) ?? "",
       sectionTitle: (section?.title as string) ?? "",
-      sectionType:
-        (section?.section_type as string) ??
-        (raw.section_type as string) ??
-        "other",
+      sectionType: (section?.section_type as string) ?? (raw.section_type as string) ?? "other",
       sectionRef,
       description: (raw.description as string) ?? null,
       presenter: (raw.presenter as string) ?? null,
@@ -603,14 +598,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       speakers: itemSpeakers,
       motions: itemMotions,
     };
-  }, [
-    currentItemId,
-    allItems,
-    flatItems,
-    motionsByItem,
-    exhibitsByItem,
-    speakersByItem,
-  ]);
+  }, [currentItemId, allItems, flatItems, motionsByItem, exhibitsByItem, speakersByItem]);
 
   // Present members for motion forms
   const presentMembers = useMemo(
@@ -619,9 +607,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         (attendanceRows as Array<Record<string, unknown>>).some(
           (a) =>
             a.board_member_id === m.boardMemberId &&
-            (a.status === "present" ||
-              a.status === "remote" ||
-              a.status === "late_arrival"),
+            (a.status === "present" || a.status === "remote" || a.status === "late_arrival"),
         ),
       ),
     [members, attendanceRows],
@@ -638,9 +624,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   const pendingExecSession = useMemo(() => {
     const rows = execSessionRows as Array<Record<string, unknown>>;
-    return (
-      rows.find((es) => es.entry_motion_id && !es.entered_at && !es.exited_at) ?? null
-    );
+    return rows.find((es) => es.entry_motion_id && !es.entered_at && !es.exited_at) ?? null;
   }, [execSessionRows]);
 
   // Reactive: when entry motion for exec session passes → set entered_at
@@ -662,10 +646,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       processedMotionIds.current.add(entryMotionId);
       const now = new Date().toISOString();
       void (async () => {
-        await supabase
-          .from("executive_session")
-          .update({ entered_at: now })
-          .eq("id", esId);
+        await supabase.from("executive_session").update({ entered_at: now }).eq("id", esId);
         void queryClient.invalidateQueries({
           queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
         });
@@ -692,7 +673,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     if (processedMotionIds.current.has(`adjourn_${motionId}`)) return;
     processedMotionIds.current.add(`adjourn_${motionId}`);
     void handleMeetingEnd("motion", motionId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [motionRows, status]);
 
   // Reactive: when a minutes-approval motion passes → auto-approve minutes
@@ -718,8 +699,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         const now = new Date().toISOString();
         const motionText = String(motion.motion_text ?? "").toLowerCase();
         const asAmended =
-          motionText.includes("as amended") ||
-          motionText.includes("with corrections");
+          motionText.includes("as amended") || motionText.includes("with corrections");
 
         void (async () => {
           // Update minutes_document status to approved
@@ -757,19 +737,15 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             const { data: sessionData } = await supabase.auth.getSession();
             const accessToken = sessionData?.session?.access_token;
             if (accessToken) {
-              const apiBase =
-                import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-              await fetch(
-                `${apiBase}/api/meetings/${meetingId}/minutes/render`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${accessToken}`,
-                  },
-                  body: JSON.stringify({ is_draft: false }),
+              const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+              await fetch(`${apiBase}/api/meetings/${meetingId}/minutes/render`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${accessToken}`,
                 },
-              );
+                body: JSON.stringify({ is_draft: false }),
+              });
             }
           } catch {
             // Fire-and-forget — PDF regeneration failure is non-critical
@@ -789,9 +765,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     if (!execSession) return;
 
     // post_session_action_motion_ids is JSONB (native array) in Supabase
-    const existingIds: string[] = Array.isArray(
-      execSession.post_session_action_motion_ids,
-    )
+    const existingIds: string[] = Array.isArray(execSession.post_session_action_motion_ids)
       ? (execSession.post_session_action_motion_ids as string[])
       : [];
 
@@ -799,9 +773,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     if (!exitedAt) return;
 
     const postMotions = (motionRows as Array<Record<string, unknown>>).filter(
-      (m) =>
-        (m.created_at as string) > exitedAt &&
-        !existingIds.includes(m.id as string),
+      (m) => (m.created_at as string) > exitedAt && !existingIds.includes(m.id as string),
     );
 
     if (postMotions.length > 0) {
@@ -918,10 +890,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     if (!pendingExecCitation || !currentItemId) return;
 
     const itemMotions = motionsByItem.get(currentItemId) ?? [];
-    const entryMotion = [...itemMotions].reverse().find(
-      (m: Record<string, unknown>) =>
+    const entryMotion = [...itemMotions]
+      .reverse()
+      .find((m: Record<string, unknown>) =>
         (m.motion_text as string)?.includes("Executive Session"),
-    );
+      );
 
     if (!entryMotion) return;
 
@@ -945,15 +918,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     });
 
     setPendingExecCitation(null);
-  }, [
-    pendingExecCitation,
-    currentItemId,
-    motionsByItem,
-    meetingId,
-    townId,
-    supabase,
-    queryClient,
-  ]);
+  }, [pendingExecCitation, currentItemId, motionsByItem, meetingId, townId, supabase, queryClient]);
 
   const handleExecMotionDialogClose = useCallback(
     (open: boolean) => {
@@ -1035,8 +1000,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         if (!item.parent_item_id) return false;
         const itemMotions = motionsByItem.get(item.id as string) ?? [];
         return itemMotions.some(
-          (m: Record<string, unknown>) =>
-            m.motion_type === "table" && m.status === "passed",
+          (m: Record<string, unknown>) => m.motion_type === "table" && m.status === "passed",
         );
       });
 
@@ -1148,11 +1112,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     return null;
   }
 
-  if (
-    status === "adjourned" ||
-    status === "minutes_draft" ||
-    status === "approved"
-  ) {
+  if (status === "adjourned" || status === "minutes_draft" || status === "approved") {
     void navigate(`/meetings/${meetingId}/review`, { replace: true });
     return null;
   }
@@ -1164,8 +1124,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
           <h2 className="text-lg font-semibold">Permission Required</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            You need the "Start/Run Meeting" permission to access the live
-            meeting interface.
+            You need the "Start/Run Meeting" permission to access the live meeting interface.
           </p>
         </div>
       </div>
@@ -1184,9 +1143,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         townId={townId}
         boardId={boardId}
         members={members}
-        attendance={
-          (attendanceRows as ComponentProps<typeof MeetingStartFlow>["attendance"]) ?? []
-        }
+        attendance={(attendanceRows as ComponentProps<typeof MeetingStartFlow>["attendance"]) ?? []}
         quorumRequired={quorum?.required ?? 0}
         quorumPresent={quorum?.present ?? 0}
         quorumTotal={quorum?.total ?? 0}
@@ -1211,11 +1168,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold">{meeting.title as string}</h1>
           <Badge variant="default">In Progress</Badge>
-          {board && (
-            <span className="text-sm text-muted-foreground">
-              {board.name as string}
-            </span>
-          )}
+          {board && <span className="text-sm text-muted-foreground">{board.name as string}</span>}
         </div>
         <div className="flex items-center gap-4">
           {meetingStartedAt && (
@@ -1234,10 +1187,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             </Badge>
           )}
           {isPostExecSession && (
-            <Badge
-              variant="outline"
-              className="border-amber-300 text-amber-700 text-xs"
-            >
+            <Badge variant="outline" className="border-amber-300 text-amber-700 text-xs">
               Post-Session Actions
             </Badge>
           )}
@@ -1264,8 +1214,8 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       {isPostExecSession && !isInExecSession && (
         <div className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-6 py-2 dark:border-amber-900 dark:bg-amber-950/30">
           <p className="text-sm text-amber-700 dark:text-amber-400">
-            Recording post-executive-session actions. File any motions resulting
-            from executive session discussion.
+            Recording post-executive-session actions. File any motions resulting from executive
+            session discussion.
           </p>
           <Button
             size="sm"
@@ -1301,7 +1251,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             presentMembers={presentMembers}
             memberNameMap={memberNameMap}
             attendanceRecords={
-              (attendanceRows as ComponentProps<typeof AgendaItemDetailPanel>["attendanceRecords"]) ?? []
+              (attendanceRows as ComponentProps<
+                typeof AgendaItemDetailPanel
+              >["attendanceRecords"]) ?? []
             }
             votesByMotion={
               votesByMotion as unknown as Map<
@@ -1315,9 +1267,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
                 }>
               >
             }
-            motionDisplayFormat={
-              (board?.motion_display_format as string) ?? null
-            }
+            motionDisplayFormat={(board?.motion_display_format as string) ?? null}
             boardQuorumConfig={{
               quorumType: (board?.quorum_type as string) ?? null,
               quorumValue: (board?.quorum_value as number) ?? null,
@@ -1343,24 +1293,17 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             attendance={
               (attendanceRows as ComponentProps<typeof AttendancePanel>["attendance"]) ?? []
             }
-            presidingOfficerId={
-              (meeting.presiding_officer_id as string) ?? null
-            }
-            recordingSecretaryId={
-              (meeting.recording_secretary_id as string) ?? null
-            }
+            presidingOfficerId={(meeting.presiding_officer_id as string) ?? null}
+            recordingSecretaryId={(meeting.recording_secretary_id as string) ?? null}
             quorumRequired={quorum?.required ?? 0}
             quorumPresent={quorum?.present ?? 0}
             quorumTotal={quorum?.total ?? 0}
             hasQuorum={quorum?.hasQuorum ?? false}
             meetingStartedAt={meetingStartedAt}
             currentItemStartedAt={
-              (currentTransition as Record<string, unknown> | null)
-                ?.started_at as string ?? null
+              ((currentTransition as Record<string, unknown> | null)?.started_at as string) ?? null
             }
-            currentItemEstimatedDuration={
-              currentItemDetail?.estimatedDuration ?? null
-            }
+            currentItemEstimatedDuration={currentItemDetail?.estimatedDuration ?? null}
             readOnly={readOnly}
             onRecuse={(member) => setRecusalMemberFromAttendance(member)}
           />

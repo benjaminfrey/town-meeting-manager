@@ -9,10 +9,7 @@ import React, { createContext, useContext, type ReactNode } from "react";
 import { vi } from "vitest";
 import type { CurrentUser } from "@/hooks/useCurrentUser";
 import type { UserRole, PermissionsMatrix } from "@town-meeting/shared";
-import {
-  buildPermissionsFromTemplate,
-  DEFAULT_PERMISSION_TEMPLATES,
-} from "@town-meeting/shared";
+import { buildPermissionsFromTemplate, DEFAULT_PERMISSION_TEMPLATES } from "@town-meeting/shared";
 
 // ─── Mock user factories ────────────────────────────────────────────
 

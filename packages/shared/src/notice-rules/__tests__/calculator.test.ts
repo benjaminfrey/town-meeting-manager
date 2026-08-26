@@ -156,9 +156,7 @@ describe("forecastEarliestMeetingDate", () => {
     expect(result.rule?.id).toBe("ME_SPECIAL_TOWN_MEETING");
     expect(result.earliestMeetingDate).toBeTruthy();
     const expected = new Date(2026, 2, 26); // March 26, 2026 local time
-    expect(result.earliestMeetingDate!.toDateString()).toBe(
-      expected.toDateString()
-    );
+    expect(result.earliestMeetingDate!.toDateString()).toBe(expected.toDateString());
     expect(result.explanation).toMatch(/14 calendar days/i);
     expect(result.explanation).toMatch(/March 26/i);
   });
@@ -173,9 +171,7 @@ describe("forecastEarliestMeetingDate", () => {
     });
     expect(result.rule?.id).toBe("ME_ZONING_ORDINANCE_HEARING");
     const expected = new Date(2026, 2, 26); // March 26, 2026 local time
-    expect(result.earliestMeetingDate!.toDateString()).toBe(
-      expected.toDateString()
-    );
+    expect(result.earliestMeetingDate!.toDateString()).toBe(expected.toDateString());
     expect(result.explanation).toMatch(/30-A M.R.S.A. §4352/);
   });
 
@@ -189,9 +185,7 @@ describe("forecastEarliestMeetingDate", () => {
     expect(result.rule?.id).toBe("ME_OPEN_MEETINGS_BOARD");
     // 24 hours = ceiling 1 day
     const expected = new Date(2026, 2, 13); // March 13, 2026 local time
-    expect(result.earliestMeetingDate!.toDateString()).toBe(
-      expected.toDateString()
-    );
+    expect(result.earliestMeetingDate!.toDateString()).toBe(expected.toDateString());
   });
 
   it("returns null for unsupported state", () => {

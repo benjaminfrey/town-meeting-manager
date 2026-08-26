@@ -6,10 +6,7 @@
  * Format a government title for display.
  * Returns the gov_title if provided, otherwise the role label.
  */
-export function formatGovernmentTitle(
-  govTitle: string | null,
-  roleLabel: string,
-): string {
+export function formatGovernmentTitle(govTitle: string | null, roleLabel: string): string {
   return govTitle?.trim() || roleLabel;
 }
 
@@ -17,10 +14,7 @@ export function formatGovernmentTitle(
  * Format a board member's display name with their seat title.
  * e.g., "Jane Smith (Chair)" or "Jane Smith"
  */
-export function formatBoardMemberDisplay(
-  name: string,
-  seatTitle: string | null,
-): string {
+export function formatBoardMemberDisplay(name: string, seatTitle: string | null): string {
   if (seatTitle?.trim()) {
     return `${name} (${seatTitle.trim()})`;
   }
@@ -36,9 +30,7 @@ export function formatMeetingTitle(
   meetingType: string,
   scheduledDate: string,
 ): string {
-  const meetingTypeLabel = meetingType
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const meetingTypeLabel = meetingType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   const date = new Date(scheduledDate + "T00:00:00");
   const dateStr = date.toLocaleDateString("en-US", {

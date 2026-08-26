@@ -1,9 +1,4 @@
-import type {
-  AttendanceStatus,
-  MotionStatus,
-  MotionType,
-  VoteType,
-} from "../constants/enums.js";
+import type { AttendanceStatus, MotionStatus, MotionType, VoteType } from "../constants/enums.js";
 
 export interface Motion {
   id: string;

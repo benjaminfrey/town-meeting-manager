@@ -12,9 +12,21 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProgressChecklist } from "@/components/dashboard/ProgressChecklist";
 import { SettingsSection, SettingRow } from "@/components/dashboard/SettingsSection";
-import { TownSettingsEditor, POPULATION_LABELS, MUNICIPALITY_LABELS } from "@/components/dashboard/TownSettingsEditor";
-import { MeetingDefaultsEditor, FORMALITY_OPTIONS, MINUTES_STYLE_OPTIONS } from "@/components/dashboard/MeetingDefaultsEditor";
-import { MeetingRolesEditor, PRESIDING_OFFICER_OPTIONS, MINUTES_RECORDER_OPTIONS } from "@/components/dashboard/MeetingRolesEditor";
+import {
+  TownSettingsEditor,
+  POPULATION_LABELS,
+  MUNICIPALITY_LABELS,
+} from "@/components/dashboard/TownSettingsEditor";
+import {
+  MeetingDefaultsEditor,
+  FORMALITY_OPTIONS,
+  MINUTES_STYLE_OPTIONS,
+} from "@/components/dashboard/MeetingDefaultsEditor";
+import {
+  MeetingRolesEditor,
+  PRESIDING_OFFICER_OPTIONS,
+  MINUTES_RECORDER_OPTIONS,
+} from "@/components/dashboard/MeetingRolesEditor";
 import { TownSealUpload } from "@/components/dashboard/TownSealUpload";
 import { RetentionPolicyModal } from "@/components/dashboard/RetentionPolicyModal";
 import { Accordion } from "@/components/ui/accordion";
@@ -107,14 +119,9 @@ export default function SettingsTownPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-12">
         <p className="text-sm text-muted-foreground">
-          Town data not found. This can happen if the initial sync
-          hasn&apos;t completed yet.
+          Town data not found. This can happen if the initial sync hasn&apos;t completed yet.
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.location.reload()}
-        >
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Reload
         </Button>
@@ -166,9 +173,7 @@ export default function SettingsTownPage() {
         <h1 className="text-2xl font-bold tracking-tight">
           {MUNICIPALITY_LABELS[t.municipality_type] ?? "Town"} of {t.name}
         </h1>
-        <p className="mt-1 text-muted-foreground">
-          Town profile and settings
-        </p>
+        <p className="mt-1 text-muted-foreground">Town profile and settings</p>
       </div>
 
       {/* Progress checklist */}
@@ -187,9 +192,7 @@ export default function SettingsTownPage() {
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
         <div className="px-6 pt-5 pb-2">
           <h2 className="text-lg font-semibold">Town Settings</h2>
-          <p className="text-sm text-muted-foreground">
-            Review and edit your town configuration
-          </p>
+          <p className="text-sm text-muted-foreground">Review and edit your town configuration</p>
         </div>
         <div className="px-6 pb-4">
           <Accordion type="single" collapsible>
@@ -221,7 +224,12 @@ export default function SettingsTownPage() {
                     name: t.name,
                     state: t.state as "ME" | "NH" | "VT" | "MA" | "CT" | "RI",
                     municipality_type: t.municipality_type as "town" | "city" | "plantation",
-                    population_range: t.population_range as "under_1000" | "1000_to_2500" | "2500_to_5000" | "5000_to_10000" | "over_10000",
+                    population_range: t.population_range as
+                      | "under_1000"
+                      | "1000_to_2500"
+                      | "2500_to_5000"
+                      | "5000_to_10000"
+                      | "over_10000",
                     contact_name: t.contact_name,
                     contact_role: t.contact_role,
                   }}
@@ -233,7 +241,7 @@ export default function SettingsTownPage() {
             {/* ─── Governing Board ────────────────────────────── */}
             {(() => {
               const govBoard = boards.find(
-                (b: Record<string, unknown>) => b.is_governing_board === true
+                (b: Record<string, unknown>) => b.is_governing_board === true,
               ) as Record<string, unknown> | undefined;
               if (!govBoard) return null;
               return (
@@ -246,7 +254,9 @@ export default function SettingsTownPage() {
                       <SettingRow label="Members" value={String(govBoard.member_count ?? 0)} />
                       <SettingRow
                         label="Election method"
-                        value={govBoard.election_method === "role_titled" ? "Role-titled" : "At-large"}
+                        value={
+                          govBoard.election_method === "role_titled" ? "Role-titled" : "At-large"
+                        }
                       />
                       <SettingRow
                         label="Officer election"

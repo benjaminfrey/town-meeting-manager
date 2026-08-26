@@ -6,14 +6,28 @@ import { ExitExecutiveSessionDialog } from "./ExitExecutiveSessionDialog";
 
 const { mockChain, mockFrom } = vi.hoisted(() => {
   const chain: Record<string, unknown> = {};
-  chain['then'] = (resolve: any, reject?: any) =>
+  chain["then"] = (resolve: any, reject?: any) =>
     Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain['catch'] = (reject: any) =>
+  chain["catch"] = (reject: any) =>
     Promise.resolve({ data: null, error: null }).catch(reject as any);
   const methods = [
-    'select', 'insert', 'update', 'delete', 'upsert',
-    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
-    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "eq",
+    "neq",
+    "in",
+    "gte",
+    "lte",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "throwOnError",
+    "or",
+    "filter",
   ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
@@ -40,11 +54,7 @@ describe("ExecutiveSessionDialog", () => {
 
   function renderDialog() {
     return renderWithProviders(
-      <ExecutiveSessionDialog
-        open={true}
-        onOpenChange={onOpenChange}
-        onProceed={onProceed}
-      />,
+      <ExecutiveSessionDialog open={true} onOpenChange={onOpenChange} onProceed={onProceed} />,
     );
   }
 
@@ -72,7 +82,9 @@ describe("ExecutiveSessionDialog", () => {
 
     expect(screen.getByText(/1 M\.R\.S\.A\. §405\(6\)\(E\):/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Consultations with a municipal attorney concerning pending or contemplated litigation/),
+      screen.getByText(
+        /Consultations with a municipal attorney concerning pending or contemplated litigation/,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -123,8 +135,22 @@ describe("ExitExecutiveSessionDialog", () => {
     onReturnNoActions = vi.fn();
     // Restore chainable mock after clearAllMocks
     mockFrom.mockReturnValue(mockChain);
-    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'order', 'limit', 'single', 'throwOnError', 'or', 'filter', 'maybeSingle']) {
-      if (typeof mockChain[m] === 'function' && 'mockReturnValue' in (mockChain[m] as object)) {
+    for (const m of [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "eq",
+      "neq",
+      "order",
+      "limit",
+      "single",
+      "throwOnError",
+      "or",
+      "filter",
+      "maybeSingle",
+    ]) {
+      if (typeof mockChain[m] === "function" && "mockReturnValue" in (mockChain[m] as object)) {
         (mockChain[m] as ReturnType<typeof vi.fn>).mockReturnValue(mockChain);
       }
     }

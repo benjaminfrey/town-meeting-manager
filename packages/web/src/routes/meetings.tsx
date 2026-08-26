@@ -33,12 +33,7 @@ import {
 } from "lucide-react";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CreateMeetingDialog } from "@/components/meetings/CreateMeetingDialog";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
@@ -72,7 +67,12 @@ type ColumnId = (typeof KANBAN_COLUMNS)[number]["id"];
 
 // Adjacent column transitions allowed via drag
 const VALID_TRANSITIONS: Record<string, { target: string; message: string }[]> = {
-  draft: [{ target: "noticed", message: "Mark as noticed? This confirms the meeting notice has been published." }],
+  draft: [
+    {
+      target: "noticed",
+      message: "Mark as noticed? This confirms the meeting notice has been published.",
+    },
+  ],
   noticed: [{ target: "active", message: "Open this meeting for attendance?" }],
   // active → done requires the live meeting flow
   // done transitions require the full approval workflow
@@ -151,9 +151,7 @@ export default function MeetingsPage() {
   const [boardPickerOpen, setBoardPickerOpen] = useState(() => searchParams.get("new") === "1");
   const [selectedBoard, setSelectedBoard] = useState<{ id: string; name: string } | null>(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   // Fetch all meetings for this town
   const { data: meetingRows = [], isLoading } = useQuery({
@@ -161,7 +159,9 @@ export default function MeetingsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("meeting")
-        .select("id, title, status, meeting_type, scheduled_date, scheduled_time, board:board_id(id, name)")
+        .select(
+          "id, title, status, meeting_type, scheduled_date, scheduled_time, board:board_id(id, name)",
+        )
         .eq("town_id", townId)
         .neq("status", "cancelled")
         .order("scheduled_date", { ascending: true })
@@ -213,9 +213,7 @@ export default function MeetingsPage() {
       done: [],
     };
     for (const m of meetingRows) {
-      const col = KANBAN_COLUMNS.find((c) =>
-        (c.statuses as readonly string[]).includes(m.status),
-      );
+      const col = KANBAN_COLUMNS.find((c) => (c.statuses as readonly string[]).includes(m.status));
       if (col) {
         groups[col.id].push(m);
       }
@@ -278,9 +276,7 @@ export default function MeetingsPage() {
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-4 text-sm text-muted-foreground">
-              No meetings yet
-            </p>
+            <p className="mt-4 text-sm text-muted-foreground">No meetings yet</p>
             {canCreateMeeting && (
               <button
                 onClick={() => setBoardPickerOpen(true)}
@@ -311,9 +307,7 @@ export default function MeetingsPage() {
           </div>
 
           <DragOverlay>
-            {draggedMeeting && (
-              <KanbanCardContent meeting={draggedMeeting} isDragging />
-            )}
+            {draggedMeeting && <KanbanCardContent meeting={draggedMeeting} isDragging />}
           </DragOverlay>
         </DndContext>
       )}
@@ -323,23 +317,18 @@ export default function MeetingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/10 backdrop-blur-[2px]">
           <div className="mx-4 max-w-md rounded-xl border border-border/60 bg-card p-6 shadow-2xl shadow-foreground/5">
             <h3 className="text-base font-medium">Confirm Status Change</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {confirmDialog.message}
-            </p>
+            <p className="mt-2 text-sm text-muted-foreground">{confirmDialog.message}</p>
             <p className="mt-3 text-sm">
               <span className="font-medium">{confirmDialog.meeting.title}</span>
               {confirmDialog.meeting.board && (
                 <span className="text-muted-foreground">
-                  {" "}&mdash; {confirmDialog.meeting.board.name}
+                  {" "}
+                  &mdash; {confirmDialog.meeting.board.name}
                 </span>
               )}
             </p>
             <div className="mt-6 flex justify-end gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmDialog(null)}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDialog(null)}>
                 Cancel
               </Button>
               <Button
@@ -427,35 +416,24 @@ function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        "flex flex-col transition-colors rounded-lg",
-        isOver && "bg-muted/40",
-      )}
+      className={cn("flex flex-col transition-colors rounded-lg", isOver && "bg-muted/40")}
     >
       {/* Column header — uppercase small caps */}
       <div className="flex items-baseline gap-2 px-1 pb-3">
         <h3 className="text-[0.65rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
           {label}
         </h3>
-        <span className="text-[0.6rem] text-muted-foreground/50">
-          {meetings.length}
-        </span>
+        <span className="text-[0.6rem] text-muted-foreground/50">{meetings.length}</span>
       </div>
       <div className="h-px bg-border/40 mb-3" />
 
       {/* Cards */}
       <div className="flex-1 space-y-2 overflow-y-auto">
         {meetings.length === 0 ? (
-          <p className="py-12 text-center text-xs text-muted-foreground/40">
-            &mdash;
-          </p>
+          <p className="py-12 text-center text-xs text-muted-foreground/40">&mdash;</p>
         ) : (
           meetings.map((meeting) => (
-            <KanbanCard
-              key={meeting.id}
-              meeting={meeting}
-              onNavigate={onNavigate}
-            />
+            <KanbanCard key={meeting.id} meeting={meeting} onNavigate={onNavigate} />
           ))
         )}
 
@@ -483,14 +461,7 @@ function KanbanCard({
   meeting: MeetingRecord;
   onNavigate: (path: string) => void;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: meeting.id,
     data: { type: "card", meeting },
   });
@@ -503,11 +474,7 @@ function KanbanCard({
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <KanbanCardContent
-        meeting={meeting}
-        onNavigate={onNavigate}
-        dragListeners={listeners}
-      />
+      <KanbanCardContent meeting={meeting} onNavigate={onNavigate} dragListeners={listeners} />
     </div>
   );
 }
@@ -553,7 +520,9 @@ function KanbanCardContent({
           <p className="text-sm font-medium truncate">{meeting.title}</p>
           {/* Date + Board */}
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("inline-block h-1.5 w-1.5 rounded-full", getStatusDot(meeting.status))} />
+            <span
+              className={cn("inline-block h-1.5 w-1.5 rounded-full", getStatusDot(meeting.status))}
+            />
             {meeting.scheduled_date ? formatDate(meeting.scheduled_date) : "\u2014"}
             {meeting.board && (
               <>

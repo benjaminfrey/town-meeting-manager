@@ -12,8 +12,7 @@ export const BoardMemberStatus = {
   ACTIVE: "active",
   ARCHIVED: "archived",
 } as const;
-export type BoardMemberStatus =
-  (typeof BoardMemberStatus)[keyof typeof BoardMemberStatus];
+export type BoardMemberStatus = (typeof BoardMemberStatus)[keyof typeof BoardMemberStatus];
 
 // ─── Town & Board ──────────────────────────────────────────────────
 
@@ -22,8 +21,7 @@ export const MunicipalityType = {
   CITY: "city",
   PLANTATION: "plantation",
 } as const;
-export type MunicipalityType =
-  (typeof MunicipalityType)[keyof typeof MunicipalityType];
+export type MunicipalityType = (typeof MunicipalityType)[keyof typeof MunicipalityType];
 
 export const PopulationRange = {
   UNDER_1000: "under_1000",
@@ -32,8 +30,7 @@ export const PopulationRange = {
   FROM_5000_TO_10000: "5000_to_10000",
   OVER_10000: "over_10000",
 } as const;
-export type PopulationRange =
-  (typeof PopulationRange)[keyof typeof PopulationRange];
+export type PopulationRange = (typeof PopulationRange)[keyof typeof PopulationRange];
 
 export const BoardType = {
   SELECT_BOARD: "select_board",
@@ -56,8 +53,7 @@ export const ElectionMethod = {
   AT_LARGE: "at_large",
   ROLE_TITLED: "role_titled",
 } as const;
-export type ElectionMethod =
-  (typeof ElectionMethod)[keyof typeof ElectionMethod];
+export type ElectionMethod = (typeof ElectionMethod)[keyof typeof ElectionMethod];
 
 export const OfficerElectionMethod = {
   VOTE_OF_BOARD: "vote_of_board",
@@ -75,8 +71,7 @@ export const MeetingFormality = {
   SEMI_FORMAL: "semi_formal",
   FORMAL: "formal",
 } as const;
-export type MeetingFormality =
-  (typeof MeetingFormality)[keyof typeof MeetingFormality];
+export type MeetingFormality = (typeof MeetingFormality)[keyof typeof MeetingFormality];
 
 export const MeetingStatus = {
   DRAFT: "draft",
@@ -87,8 +82,7 @@ export const MeetingStatus = {
   APPROVED: "approved",
   CANCELLED: "cancelled",
 } as const;
-export type MeetingStatus =
-  (typeof MeetingStatus)[keyof typeof MeetingStatus];
+export type MeetingStatus = (typeof MeetingStatus)[keyof typeof MeetingStatus];
 
 export const MeetingType = {
   REGULAR: "regular",
@@ -110,8 +104,7 @@ export const MinutesBehavior = {
   SUMMARIZE: "summarize",
   FULL_RECORD: "full_record",
 } as const;
-export type MinutesBehavior =
-  (typeof MinutesBehavior)[keyof typeof MinutesBehavior];
+export type MinutesBehavior = (typeof MinutesBehavior)[keyof typeof MinutesBehavior];
 
 export const AgendaItemSectionType = {
   CEREMONIAL: "ceremonial",
@@ -136,8 +129,7 @@ export const AgendaItemStatus = {
   TABLED: "tabled",
   DEFERRED: "deferred",
 } as const;
-export type AgendaItemStatus =
-  (typeof AgendaItemStatus)[keyof typeof AgendaItemStatus];
+export type AgendaItemStatus = (typeof AgendaItemStatus)[keyof typeof AgendaItemStatus];
 
 // ─── Motion & Vote ─────────────────────────────────────────────────
 
@@ -162,8 +154,7 @@ export const MotionStatus = {
   TABLED: "tabled",
   WITHDRAWN: "withdrawn",
 } as const;
-export type MotionStatus =
-  (typeof MotionStatus)[keyof typeof MotionStatus];
+export type MotionStatus = (typeof MotionStatus)[keyof typeof MotionStatus];
 
 export const VoteType = {
   YES: "yes",
@@ -184,8 +175,7 @@ export const AttendanceStatus = {
   LATE_ARRIVAL: "late_arrival",
   EARLY_DEPARTURE: "early_departure",
 } as const;
-export type AttendanceStatus =
-  (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
+export type AttendanceStatus = (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
 
 // ─── Minutes ───────────────────────────────────────────────────────
 
@@ -194,8 +184,7 @@ export const MinutesStyle = {
   SUMMARY: "summary",
   NARRATIVE: "narrative",
 } as const;
-export type MinutesStyle =
-  (typeof MinutesStyle)[keyof typeof MinutesStyle];
+export type MinutesStyle = (typeof MinutesStyle)[keyof typeof MinutesStyle];
 
 export const MinutesDocumentStatus = {
   DRAFT: "draft",
@@ -211,8 +200,7 @@ export const MinutesGeneratedBy = {
   AI: "ai",
   HYBRID: "hybrid",
 } as const;
-export type MinutesGeneratedBy =
-  (typeof MinutesGeneratedBy)[keyof typeof MinutesGeneratedBy];
+export type MinutesGeneratedBy = (typeof MinutesGeneratedBy)[keyof typeof MinutesGeneratedBy];
 
 export const MinutesSectionType = {
   HEADER: "header",
@@ -224,8 +212,7 @@ export const MinutesSectionType = {
   ADJOURNMENT: "adjournment",
   OTHER: "other",
 } as const;
-export type MinutesSectionType =
-  (typeof MinutesSectionType)[keyof typeof MinutesSectionType];
+export type MinutesSectionType = (typeof MinutesSectionType)[keyof typeof MinutesSectionType];
 
 // ─── Quorum ───────────────────────────────────────────────────────
 
@@ -243,8 +230,7 @@ export const MotionDisplayFormat = {
   BLOCK_FORMAT: "block_format",
   INLINE_NARRATIVE: "inline_narrative",
 } as const;
-export type MotionDisplayFormat =
-  (typeof MotionDisplayFormat)[keyof typeof MotionDisplayFormat];
+export type MotionDisplayFormat = (typeof MotionDisplayFormat)[keyof typeof MotionDisplayFormat];
 
 // ─── Certification Format ────────────────────────────────────────
 
@@ -253,8 +239,7 @@ export const CertificationFormat = {
   ALL_MEMBER_CERTIFICATION: "all_member_certification",
   BOTH: "both",
 } as const;
-export type CertificationFormat =
-  (typeof CertificationFormat)[keyof typeof CertificationFormat];
+export type CertificationFormat = (typeof CertificationFormat)[keyof typeof CertificationFormat];
 
 // ─── Member Reference Style ─────────────────────────────────────
 
@@ -263,8 +248,7 @@ export const MemberReferenceStyle = {
   TITLE_AND_LAST_NAME: "title_and_last_name",
   FULL_NAME_FIRST_THEN_LAST: "full_name_first_then_last",
 } as const;
-export type MemberReferenceStyle =
-  (typeof MemberReferenceStyle)[keyof typeof MemberReferenceStyle];
+export type MemberReferenceStyle = (typeof MemberReferenceStyle)[keyof typeof MemberReferenceStyle];
 
 // ─── Agenda Status ────────────────────────────────────────────────
 
@@ -292,8 +276,7 @@ export const ExhibitVisibility = {
   BOARD_ONLY: "board_only",
   ADMIN_ONLY: "admin_only",
 } as const;
-export type ExhibitVisibility =
-  (typeof ExhibitVisibility)[keyof typeof ExhibitVisibility];
+export type ExhibitVisibility = (typeof ExhibitVisibility)[keyof typeof ExhibitVisibility];
 
 // ─── Notification ──────────────────────────────────────────────────
 
@@ -301,8 +284,7 @@ export const NotificationChannel = {
   EMAIL: "email",
   SMS: "sms",
 } as const;
-export type NotificationChannel =
-  (typeof NotificationChannel)[keyof typeof NotificationChannel];
+export type NotificationChannel = (typeof NotificationChannel)[keyof typeof NotificationChannel];
 
 export const NotificationEventType = {
   MEETING_SCHEDULED: "meeting_scheduled",

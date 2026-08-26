@@ -9,14 +9,8 @@
  */
 
 import type { UserRole } from "../constants/enums.js";
-import type {
-  PermissionAction,
-  PermissionsMatrix,
-} from "../constants/permissions.js";
-import {
-  ADMIN_ONLY_ACTIONS,
-  BOARD_MEMBER_ALWAYS_ACTIONS,
-} from "../constants/permissions.js";
+import type { PermissionAction, PermissionsMatrix } from "../constants/permissions.js";
+import { ADMIN_ONLY_ACTIONS, BOARD_MEMBER_ALWAYS_ACTIONS } from "../constants/permissions.js";
 import { areRolesMutuallyExclusive, ROLE_LABELS } from "../constants/roles.js";
 
 // ─── hasPermission ────────────────────────────────────────────────────
@@ -51,9 +45,7 @@ export function hasPermission(
 
   // Check board-specific override first
   if (boardId && permissions.board_overrides) {
-    const override = permissions.board_overrides.find(
-      (o) => o.board_id === boardId,
-    );
+    const override = permissions.board_overrides.find((o) => o.board_id === boardId);
     if (override && action in override.permissions) {
       return override.permissions[action] ?? false;
     }

@@ -90,7 +90,7 @@ export function ExhibitUploader({
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
 
-        const { error } = await supabase.from('exhibit').insert({
+        const { error } = await supabase.from("exhibit").insert({
           id,
           agenda_item_id: agendaItemId,
           town_id: townId,
@@ -100,7 +100,7 @@ export function ExhibitUploader({
           file_size: file.size,
           file_name: file.name,
           exhibit_type: exhibitType,
-          visibility: 'public',
+          visibility: "public",
           sort_order: exhibits.length,
           created_at: now,
         });
@@ -111,7 +111,18 @@ export function ExhibitUploader({
         // Error handled by useExhibitUpload
       }
     },
-    [upload, supabase, queryClient, townId, meetingId, agendaItemId, title, exhibitType, exhibits.length, resetForm],
+    [
+      upload,
+      supabase,
+      queryClient,
+      townId,
+      meetingId,
+      agendaItemId,
+      title,
+      exhibitType,
+      exhibits.length,
+      resetForm,
+    ],
   );
 
   const handleAddUrl = useCallback(async () => {
@@ -120,24 +131,34 @@ export function ExhibitUploader({
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
 
-    const { error } = await supabase.from('exhibit').insert({
+    const { error } = await supabase.from("exhibit").insert({
       id,
       agenda_item_id: agendaItemId,
       town_id: townId,
       title: title.trim(),
       file_storage_path: url.trim(),
-      file_type: 'url',
+      file_type: "url",
       file_size: 0,
       file_name: null,
       exhibit_type: exhibitType,
-      visibility: 'public',
+      visibility: "public",
       sort_order: exhibits.length,
       created_at: now,
     });
     if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
     resetForm();
-  }, [title, url, exhibitType, agendaItemId, townId, exhibits.length, supabase, queryClient, resetForm]);
+  }, [
+    title,
+    url,
+    exhibitType,
+    agendaItemId,
+    townId,
+    exhibits.length,
+    supabase,
+    queryClient,
+    resetForm,
+  ]);
 
   if (readOnly && exhibits.length === 0) return null;
 
@@ -151,12 +172,7 @@ export function ExhibitUploader({
       {exhibits.length > 0 && (
         <div className="space-y-0.5 mb-2">
           {exhibits.map((exhibit, i) => (
-            <ExhibitRow
-              key={String(exhibit.id)}
-              exhibit={exhibit}
-              index={i}
-              readOnly={readOnly}
-            />
+            <ExhibitRow key={String(exhibit.id)} exhibit={exhibit} index={i} readOnly={readOnly} />
           ))}
         </div>
       )}
@@ -210,9 +226,7 @@ export function ExhibitUploader({
                     onChange={(e) => void handleFileSelect(e)}
                     className="text-sm"
                   />
-                  {fileError && (
-                    <p className="text-xs text-destructive">{fileError}</p>
-                  )}
+                  {fileError && <p className="text-xs text-destructive">{fileError}</p>}
                 </div>
               )}
 

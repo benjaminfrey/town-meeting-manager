@@ -4,7 +4,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "turbo run lint --continue",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "test:e2e": "playwright test",
@@ -28,10 +28,15 @@
   },
   "packageManager": "pnpm@9.15.4",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.11.0",
     "prettier": "^3.8.1",
     "turbo": "^2.8.14",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^4.0.18"
   }
 }

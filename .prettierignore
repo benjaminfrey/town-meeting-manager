@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+coverage
+.turbo
+.react-router
+pnpm-lock.yaml
+docker/volumes
+playwright-report
+supabase/migrations
+docker/migrations
+
+# supabase gen types typescript output: formatted by the Supabase CLI's own
+# generator, not prettier. Reformatting it here just churns ~4,700 lines on
+# every run and reverts the moment the types are regenerated.
+packages/shared/src/types/database.ts

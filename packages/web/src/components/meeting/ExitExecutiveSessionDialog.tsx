@@ -9,8 +9,12 @@ import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -45,7 +49,9 @@ export function ExitExecutiveSessionDialog({
       if (error) throw error;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.executiveSessions.detail(execSessionId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.executiveSessions.detail(execSessionId),
+      });
       toast.success("Returned to open session");
       setStep("post_actions");
     },
@@ -82,7 +88,10 @@ export function ExitExecutiveSessionDialog({
               <Button variant="ghost" onClick={handleClose}>
                 Cancel
               </Button>
-              <Button onClick={() => handleConfirmReturn()} disabled={exitSessionMutation.isPending}>
+              <Button
+                onClick={() => handleConfirmReturn()}
+                disabled={exitSessionMutation.isPending}
+              >
                 {exitSessionMutation.isPending ? "Recording..." : "Confirm Return"}
               </Button>
             </DialogFooter>
@@ -92,9 +101,8 @@ export function ExitExecutiveSessionDialog({
             <DialogHeader>
               <DialogTitle>Post-Session Actions</DialogTitle>
               <DialogDescription>
-                Were any actions taken in public session following the
-                executive session? (e.g., motions or votes based on
-                executive session discussion)
+                Were any actions taken in public session following the executive session? (e.g.,
+                motions or votes based on executive session discussion)
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="flex-col gap-2 sm:flex-row">

@@ -60,11 +60,7 @@ export function initConnectionErrorHandler(
             });
           }
         }
-      } else if (
-        status === "CHANNEL_ERROR" ||
-        status === "TIMED_OUT" ||
-        status === "CLOSED"
-      ) {
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
         currentState = "disconnected";
 
         const closeEvent = err as RealtimeCloseEvent | undefined;
@@ -72,10 +68,10 @@ export function initConnectionErrorHandler(
 
         // 4001 / 4004 = auth failure (JWT expired and could not refresh)
         if (code === 4001 || code === 4004) {
-          toast.error(
-            "Session expired. Please refresh the page to sign back in.",
-            { id: "realtime-auth-error", duration: Infinity },
-          );
+          toast.error("Session expired. Please refresh the page to sign back in.", {
+            id: "realtime-auth-error",
+            duration: Infinity,
+          });
         }
         // 1000 / 1001 = normal close (e.g. user navigated away) — don't toast
       } else {
@@ -94,10 +90,10 @@ export function initConnectionErrorHandler(
  * a "try again" toast (retriable) or a specific denial message (permanent).
  */
 export type MutationErrorKind =
-  | "network"      // Offline or timeout — user can retry
-  | "permission"   // RLS denied or 403 — user action required
-  | "validation"   // 400 / constraint violation — fix the data
-  | "conflict"     // 409 — concurrent edit
+  | "network" // Offline or timeout — user can retry
+  | "permission" // RLS denied or 403 — user action required
+  | "validation" // 400 / constraint violation — fix the data
+  | "conflict" // 409 — concurrent edit
   | "unknown";
 
 export function categorizeMutationError(error: unknown): MutationErrorKind {
@@ -107,10 +103,7 @@ export function categorizeMutationError(error: unknown): MutationErrorKind {
   const pgError = error as { code?: string; message?: string; status?: number };
 
   // Network error (fetch failed, no response)
-  if (
-    error instanceof TypeError &&
-    error.message.toLowerCase().includes("fetch")
-  ) {
+  if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
     return "network";
   }
 

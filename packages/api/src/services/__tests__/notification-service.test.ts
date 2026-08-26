@@ -22,7 +22,9 @@ const mockEmailSenderInstance = { sendEmail: mockSendEmail };
 
 vi.mock("../email-sender.js", () => ({
   // Must use `function` (not arrow) so `new EmailSenderService()` works
-  EmailSenderService: vi.fn(function () { return mockEmailSenderInstance; }),
+  EmailSenderService: vi.fn(function () {
+    return mockEmailSenderInstance;
+  }),
   getMessageStream: vi.fn().mockReturnValue("outbound"),
   isBroadcastEvent: vi.fn().mockReturnValue(false),
   renderEmailTemplate: vi.fn().mockReturnValue({
@@ -71,9 +73,27 @@ const mockBoardMembers = [
 ];
 
 const mockUsers = [
-  { id: USER_ALICE, email: "alice@testville.gov", display_name: "Alice Johnson", email_bounced: false, email_complained: false },
-  { id: USER_BOB, email: "bob@testville.gov", display_name: "Bob Smith", email_bounced: false, email_complained: false },
-  { id: USER_CAROL, email: "carol@testville.gov", display_name: "Carol Davis", email_bounced: false, email_complained: false },
+  {
+    id: USER_ALICE,
+    email: "alice@testville.gov",
+    display_name: "Alice Johnson",
+    email_bounced: false,
+    email_complained: false,
+  },
+  {
+    id: USER_BOB,
+    email: "bob@testville.gov",
+    display_name: "Bob Smith",
+    email_bounced: false,
+    email_complained: false,
+  },
+  {
+    id: USER_CAROL,
+    email: "carol@testville.gov",
+    display_name: "Carol Davis",
+    email_bounced: false,
+    email_complained: false,
+  },
 ];
 
 const mockTownConfig = {
@@ -89,15 +109,17 @@ const mockDelivery = { id: "delivery-1" };
  * Builds a mock Supabase for processNotificationEvent tests.
  * Uses per-table call counting to return the right data on each invocation.
  */
-function buildProcessSupabase(opts: {
-  event?: object | null;
-  boardMembers?: object[];
-  users?: object[];
-  townConfig?: object | null;
-  town?: object;
-  disabledPrefs?: object[];
-  delivery?: object;
-} = {}) {
+function buildProcessSupabase(
+  opts: {
+    event?: object | null;
+    boardMembers?: object[];
+    users?: object[];
+    townConfig?: object | null;
+    town?: object;
+    disabledPrefs?: object[];
+    delivery?: object;
+  } = {},
+) {
   const {
     event = mockEvent,
     boardMembers = mockBoardMembers,
@@ -144,17 +166,23 @@ function buildProcessSupabase(opts: {
         return Promise.resolve({ data, error: null });
       };
 
-      builder["then"] = (
-        resolve: (v: unknown) => unknown,
-        reject?: (v: unknown) => unknown,
-      ) => {
-        let arr: unknown[] = [];
+      builder["then"] = (resolve: (v: unknown) => unknown, reject?: (v: unknown) => unknown) => {
+        let arr: unknown[];
         switch (table) {
-          case "board_member": arr = boardMembers; break;
-          case "user_account": arr = users; break;
-          case "subscriber_notification_preference": arr = disabledPrefs; break;
-          case "town": arr = town ? [town] : []; break;
-          default: arr = [];
+          case "board_member":
+            arr = boardMembers;
+            break;
+          case "user_account":
+            arr = users;
+            break;
+          case "subscriber_notification_preference":
+            arr = disabledPrefs;
+            break;
+          case "town":
+            arr = town ? [town] : [];
+            break;
+          default:
+            arr = [];
         }
         return Promise.resolve({ data: arr, error: null }).then(resolve, reject);
       };
@@ -186,11 +214,10 @@ describe("NotificationService", () => {
       } as unknown as SupabaseClient;
 
       const service = new NotificationService(supabase);
-      const id = await service.createNotificationEvent(
-        "agenda_published",
-        TOWN_ID,
-        { board_id: BOARD_ID, boardName: "Select Board" },
-      );
+      const id = await service.createNotificationEvent("agenda_published", TOWN_ID, {
+        board_id: BOARD_ID,
+        boardName: "Select Board",
+      });
 
       expect(id).toBe(EVENT_ID);
     });
@@ -255,9 +282,7 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const recipients = mockSendEmail.mock.calls.map(
-        (c) => (c[0] as { to: string }).to,
-      );
+      const recipients = mockSendEmail.mock.calls.map((c) => (c[0] as { to: string }).to);
       expect(recipients).toContain("alice@testville.gov");
       expect(recipients).toContain("bob@testville.gov");
       expect(recipients).toContain("carol@testville.gov");
@@ -294,9 +319,7 @@ describe("NotificationService", () => {
 
       // Only Alice + Carol get emails
       expect(mockSendEmail).toHaveBeenCalledTimes(2);
-      const recipients = mockSendEmail.mock.calls.map(
-        (c) => (c[0] as { to: string }).to,
-      );
+      const recipients = mockSendEmail.mock.calls.map((c) => (c[0] as { to: string }).to);
       expect(recipients).not.toContain("bob@testville.gov");
     });
 
@@ -332,7 +355,10 @@ describe("NotificationService", () => {
 
       expect(mockDispatchPushToTown).toHaveBeenCalledOnce();
       const [, townId, eventType, payload] = mockDispatchPushToTown.mock.calls[0] as [
-        unknown, string, string, { title: string },
+        unknown,
+        string,
+        string,
+        { title: string },
       ];
       expect(townId).toBe(TOWN_ID);
       expect(eventType).toBe("agenda_published");
@@ -379,9 +405,7 @@ describe("NotificationService", () => {
       const service = new NotificationService(noDataSupabase);
 
       // Should resolve (not throw) — error is caught internally
-      await expect(
-        service.processNotificationEvent("missing-id"),
-      ).resolves.toBeUndefined();
+      await expect(service.processNotificationEvent("missing-id")).resolves.toBeUndefined();
 
       expect(mockSendEmail).not.toHaveBeenCalled();
     });
@@ -417,7 +441,11 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const meta = (mockSendEmail.mock.calls as unknown as [[{ metadata: { town_id: string; event_id: string; delivery_id: string } }]])[0][0].metadata;
+      const meta = (
+        mockSendEmail.mock.calls as unknown as [
+          [{ metadata: { town_id: string; event_id: string; delivery_id: string } }],
+        ]
+      )[0][0].metadata;
       expect(meta.town_id).toBe(TOWN_ID);
       expect(meta.event_id).toBe(EVENT_ID);
       expect(meta.delivery_id).toBeTruthy();
@@ -430,7 +458,11 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { preferencesUrl: string }]])[0][1];
+      const vars = (
+        vi.mocked(renderEmailTemplate).mock.calls as unknown as [
+          [unknown, { preferencesUrl: string }],
+        ]
+      )[0][1];
       expect(vars.preferencesUrl).toContain("/settings/notifications");
     });
 
@@ -441,7 +473,11 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { recipientName: string }]])[0][1];
+      const vars = (
+        vi.mocked(renderEmailTemplate).mock.calls as unknown as [
+          [unknown, { recipientName: string }],
+        ]
+      )[0][1];
       expect(vars.recipientName).toBe("Alice Johnson");
     });
 
@@ -453,7 +489,11 @@ describe("NotificationService", () => {
 
       await service.processNotificationEvent(EVENT_ID);
 
-      const vars = (vi.mocked(renderEmailTemplate).mock.calls as unknown as [[unknown, { recipientName: string }]])[0][1];
+      const vars = (
+        vi.mocked(renderEmailTemplate).mock.calls as unknown as [
+          [unknown, { recipientName: string }],
+        ]
+      )[0][1];
       expect(vars.recipientName).toBe("alice@testville.gov");
     });
   });

@@ -25,14 +25,8 @@ export function PortalApp({ subdomain }: { subdomain: string }) {
             <Route index element={<PortalHome />} />
             <Route path="meetings" element={<MeetingsList />} />
             <Route path="meetings/:meetingId" element={<MeetingDetail />} />
-            <Route
-              path="meetings/:meetingId/agenda"
-              element={<AgendaView />}
-            />
-            <Route
-              path="meetings/:meetingId/minutes"
-              element={<MinutesView />}
-            />
+            <Route path="meetings/:meetingId/agenda" element={<AgendaView />} />
+            <Route path="meetings/:meetingId/minutes" element={<MinutesView />} />
             <Route path="boards" element={<BoardDirectory />} />
             <Route path="boards/:boardId" element={<BoardDetail />} />
             <Route path="calendar" element={<MeetingCalendar />} />

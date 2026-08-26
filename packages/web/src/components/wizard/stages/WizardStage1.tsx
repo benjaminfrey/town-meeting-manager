@@ -25,13 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { useWizard } from "@/providers/WizardProvider";
 
@@ -68,18 +62,14 @@ interface WizardStage1Props {
   /** Called when form validity changes (drives the Next button state) */
   onValidityChange: (isValid: boolean) => void;
   /** Ref-like callback to expose validate + getData to the parent */
-  onRegister: (handlers: {
-    validate: () => WizardStage1Data | null;
-  }) => void;
+  onRegister: (handlers: { validate: () => WizardStage1Data | null }) => void;
 }
 
 export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props) {
   const { state } = useWizard();
 
   // Initialize form with saved wizard state or defaults
-  const initialValues: WizardStage1Data = state.stage1.townName
-    ? state.stage1
-    : DEFAULTS;
+  const initialValues: WizardStage1Data = state.stage1.townName ? state.stage1 : DEFAULTS;
 
   const { values, errors, isValid, setValue, handleBlur, validate } =
     useWizardForm<WizardStage1Data>(WizardStage1Schema, initialValues);
@@ -107,9 +97,7 @@ export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props
     <Card>
       <CardHeader>
         <CardTitle>Your Town</CardTitle>
-        <CardDescription>
-          Tell us about your municipality
-        </CardDescription>
+        <CardDescription>Tell us about your municipality</CardDescription>
       </CardHeader>
 
       <CardContent>
@@ -125,9 +113,7 @@ export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props
               onBlur={() => handleBlur("townName")}
               aria-invalid={!!errors.townName}
             />
-            {errors.townName && (
-              <p className="text-sm text-destructive">{errors.townName}</p>
-            )}
+            {errors.townName && <p className="text-sm text-destructive">{errors.townName}</p>}
           </div>
 
           {/* State + Municipality type — side by side on desktop */}
@@ -136,9 +122,7 @@ export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props
               <Label htmlFor="state">State</Label>
               <Select
                 value={values.state}
-                onValueChange={(val) =>
-                  setValue("state", val as WizardStage1Data["state"])
-                }
+                onValueChange={(val) => setValue("state", val as WizardStage1Data["state"])}
               >
                 <SelectTrigger id="state" className="w-full">
                   <SelectValue />
@@ -158,10 +142,7 @@ export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props
               <Select
                 value={values.municipalityType}
                 onValueChange={(val) =>
-                  setValue(
-                    "municipalityType",
-                    val as WizardStage1Data["municipalityType"]
-                  )
+                  setValue("municipalityType", val as WizardStage1Data["municipalityType"])
                 }
               >
                 <SelectTrigger id="municipalityType" className="w-full">
@@ -184,10 +165,7 @@ export function WizardStage1({ onValidityChange, onRegister }: WizardStage1Props
             <Select
               value={values.populationRange}
               onValueChange={(val) =>
-                setValue(
-                  "populationRange",
-                  val as WizardStage1Data["populationRange"]
-                )
+                setValue("populationRange", val as WizardStage1Data["populationRange"])
               }
             >
               <SelectTrigger id="populationRange" className="w-full">

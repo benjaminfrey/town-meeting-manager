@@ -8,20 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ChevronRight,
-  Copy,
-  Eye,
-  FileText,
-  Pencil,
-  Plus,
-  Star,
-  Trash2,
-} from "lucide-react";
-import {
-  getDefaultTemplateName,
-  getDefaultTemplateSections,
-} from "@town-meeting/shared";
+import { ChevronRight, Copy, Eye, FileText, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { getDefaultTemplateName, getDefaultTemplateSections } from "@town-meeting/shared";
 import type { Route } from "./+types/boards.$boardId.templates";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { CreateTemplateDialog } from "@/components/templates/CreateTemplateDialog";
@@ -40,9 +28,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   return { boardId: params.boardId };
 }
 
-export default function AgendaTemplateListPage({
-  loaderData,
-}: Route.ComponentProps) {
+export default function AgendaTemplateListPage({ loaderData }: Route.ComponentProps) {
   const { boardId } = loaderData;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -99,13 +85,7 @@ export default function AgendaTemplateListPage({
   const autoCreatedRef = useRef(false);
 
   useEffect(() => {
-    if (
-      !templatesLoading &&
-      templates.length === 0 &&
-      !autoCreatedRef.current &&
-      townId &&
-      board
-    ) {
+    if (!templatesLoading && templates.length === 0 && !autoCreatedRef.current && townId && board) {
       autoCreatedRef.current = true;
       void createDefaultTemplate(boardId, townId, boardType).then(() => {
         queryClient.invalidateQueries({
@@ -200,10 +180,7 @@ export default function AgendaTemplateListPage({
 
       {/* Breadcrumb */}
       <nav className="mb-4 flex items-center gap-1 text-sm text-muted-foreground">
-        <Link
-          to="/dashboard"
-          className="hover:text-foreground transition-colors"
-        >
+        <Link to="/dashboard" className="hover:text-foreground transition-colors">
           Dashboard
         </Link>
         <ChevronRight className="h-3.5 w-3.5" />
@@ -211,10 +188,7 @@ export default function AgendaTemplateListPage({
           Boards
         </Link>
         <ChevronRight className="h-3.5 w-3.5" />
-        <Link
-          to={`/boards/${boardId}`}
-          className="hover:text-foreground transition-colors"
-        >
+        <Link to={`/boards/${boardId}`} className="hover:text-foreground transition-colors">
           {boardName}
         </Link>
         <ChevronRight className="h-3.5 w-3.5" />
@@ -224,12 +198,8 @@ export default function AgendaTemplateListPage({
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Agenda Templates
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Manage agenda templates for {boardName}
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">Agenda Templates</h1>
+          <p className="mt-1 text-muted-foreground">Manage agenda templates for {boardName}</p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
@@ -241,27 +211,17 @@ export default function AgendaTemplateListPage({
       {templates.length === 0 ? (
         <div className="rounded-lg border bg-card p-12 text-center text-card-foreground shadow-sm">
           <FileText className="mx-auto h-10 w-10 text-muted-foreground" />
-          <p className="mt-3 text-muted-foreground">
-            Creating default template...
-          </p>
+          <p className="mt-3 text-muted-foreground">Creating default template...</p>
         </div>
       ) : (
         <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  Name
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  Sections
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                  Actions
-                </th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Sections</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -270,9 +230,7 @@ export default function AgendaTemplateListPage({
                 const name = String(t.name ?? "");
                 const isDefault = !!t.is_default;
                 const sections = parseSections(
-                  typeof t.sections === "string"
-                    ? t.sections
-                    : JSON.stringify(t.sections),
+                  typeof t.sections === "string" ? t.sections : JSON.stringify(t.sections),
                 );
                 const sectionCount = sections.length;
 
@@ -305,11 +263,7 @@ export default function AgendaTemplateListPage({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() =>
-                            void navigate(
-                              `/boards/${boardId}/templates/${id}/edit`,
-                            )
-                          }
+                          onClick={() => void navigate(`/boards/${boardId}/templates/${id}/edit`)}
                           title="Edit"
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -342,9 +296,7 @@ export default function AgendaTemplateListPage({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() =>
-                              void handleSetDefault(id)
-                            }
+                            onClick={() => void handleSetDefault(id)}
                             title="Set as default"
                           >
                             <Star className="h-3.5 w-3.5" />
@@ -381,11 +333,7 @@ export default function AgendaTemplateListPage({
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-async function createDefaultTemplate(
-  boardId: string,
-  townId: string,
-  boardType: string,
-) {
+async function createDefaultTemplate(boardId: string, townId: string, boardType: string) {
   const sections = getDefaultTemplateSections(boardType);
   const name = getDefaultTemplateName(boardType);
   const id = crypto.randomUUID();

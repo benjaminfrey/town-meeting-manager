@@ -55,15 +55,13 @@ interface MeetingRolesEditorProps {
   onDone: () => void;
 }
 
-export function MeetingRolesEditor({
-  townId,
-  initial,
-  onDone,
-}: MeetingRolesEditorProps) {
+export function MeetingRolesEditor({ townId, initial, onDone }: MeetingRolesEditorProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
-  const { values, isValid, setValue, validate } =
-    useWizardForm<MeetingRolesData>(MeetingRolesSchema, initial);
+  const { values, isValid, setValue, validate } = useWizardForm<MeetingRolesData>(
+    MeetingRolesSchema,
+    initial,
+  );
 
   const mutation = useMutation({
     mutationFn: async (data: MeetingRolesData) => {

@@ -8,14 +8,28 @@ import type { MotionDialogMode } from "./MotionCaptureDialog";
 
 const { mockChain, mockFrom } = vi.hoisted(() => {
   const chain: Record<string, unknown> = {};
-  chain['then'] = (resolve: any, reject?: any) =>
+  chain["then"] = (resolve: any, reject?: any) =>
     Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain['catch'] = (reject: any) =>
+  chain["catch"] = (reject: any) =>
     Promise.resolve({ data: null, error: null }).catch(reject as any);
   const methods = [
-    'select', 'insert', 'update', 'delete', 'upsert',
-    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
-    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "eq",
+    "neq",
+    "in",
+    "gte",
+    "lte",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "throwOnError",
+    "or",
+    "filter",
   ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
@@ -52,8 +66,24 @@ describe("MotionCaptureDialog", () => {
     vi.clearAllMocks();
     // Restore chainable mock after clear
     mockFrom.mockReturnValue(mockChain);
-    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'order', 'limit', 'single', 'throwOnError', 'or', 'filter', 'upsert', 'in', 'maybeSingle']) {
-      if (typeof mockChain[m]?.mockReturnValue === 'function') {
+    for (const m of [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "eq",
+      "neq",
+      "order",
+      "limit",
+      "single",
+      "throwOnError",
+      "or",
+      "filter",
+      "upsert",
+      "in",
+      "maybeSingle",
+    ]) {
+      if (typeof mockChain[m]?.mockReturnValue === "function") {
         mockChain[m].mockReturnValue(mockChain);
       }
     }

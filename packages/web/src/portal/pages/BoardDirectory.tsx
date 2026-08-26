@@ -101,17 +101,14 @@ export default function BoardDirectory() {
                 </span>
                 {board.elected_or_appointed && (
                   <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                    {board.elected_or_appointed === "elected"
-                      ? "Elected"
-                      : "Appointed"}
+                    {board.elected_or_appointed === "elected" ? "Elected" : "Appointed"}
                   </span>
                 )}
               </div>
 
               <p className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <Users className="h-4 w-4" aria-hidden="true" />
-                {board.member_count}{" "}
-                {board.member_count === 1 ? "Member" : "Members"}
+                {board.member_count} {board.member_count === 1 ? "Member" : "Members"}
               </p>
             </a>
           ))}

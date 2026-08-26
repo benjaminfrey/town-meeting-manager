@@ -28,15 +28,8 @@ export function ButtonWithLoading({
   ...props
 }: ButtonWithLoadingProps) {
   return (
-    <Button
-      disabled={loading || disabled}
-      className={cn(className)}
-      aria-busy={loading}
-      {...props}
-    >
-      {loading && (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-      )}
+    <Button disabled={loading || disabled} className={cn(className)} aria-busy={loading} {...props}>
+      {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
       {loading && loadingText ? loadingText : children}
     </Button>
   );

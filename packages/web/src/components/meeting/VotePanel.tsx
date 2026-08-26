@@ -107,9 +107,7 @@ export function VotePanel({
       .map((m) => {
         const attendance = attendanceMap.get(m.boardMemberId) ?? "absent";
         const isPresent =
-          attendance === "present" ||
-          attendance === "remote" ||
-          attendance === "late_arrival";
+          attendance === "present" || attendance === "remote" || attendance === "late_arrival";
         const isRecused = recusalMap.has(m.boardMemberId);
 
         return {
@@ -169,9 +167,7 @@ export function VotePanel({
 
   // Check if all eligible members have voted
   const eligibleCount = memberVoteStatus.filter((m) => m.canVote).length;
-  const votedCount = memberVoteStatus.filter(
-    (m) => m.canVote && votes.has(m.boardMemberId),
-  ).length;
+  const votedCount = memberVoteStatus.filter((m) => m.canVote && votes.has(m.boardMemberId)).length;
   const allVoted = votedCount === eligibleCount && eligibleCount > 0;
 
   // ─── Record Vote ──────────────────────────────────────────────
@@ -180,8 +176,7 @@ export function VotePanel({
     mutationFn: async () => {
       // Build final vote entries
       const finalEntries: VoteEntry[] = memberVoteStatus.map((m) => {
-        if (!m.isPresent)
-          return { boardMemberId: m.boardMemberId, vote: "absent" };
+        if (!m.isPresent) return { boardMemberId: m.boardMemberId, vote: "absent" };
         if (m.isRecused)
           return {
             boardMemberId: m.boardMemberId,
@@ -278,9 +273,7 @@ export function VotePanel({
             <div className="min-w-0 flex-1">
               <span className="text-sm font-medium">{m.name}</span>
               {m.seatTitle && (
-                <span className="ml-1.5 text-xs text-muted-foreground">
-                  ({m.seatTitle})
-                </span>
+                <span className="ml-1.5 text-xs text-muted-foreground">({m.seatTitle})</span>
               )}
             </div>
 
@@ -290,11 +283,7 @@ export function VotePanel({
                   Absent
                 </Badge>
               ) : m.isRecused ? (
-                <Badge
-                  variant="secondary"
-                  className="text-xs"
-                  title={m.recusalReason ?? "Recused"}
-                >
+                <Badge variant="secondary" className="text-xs" title={m.recusalReason ?? "Recused"}>
                   Recused
                 </Badge>
               ) : (
@@ -326,19 +315,13 @@ export function VotePanel({
 
       {/* Tally */}
       <div className="flex flex-wrap gap-3 border-t pt-3 text-xs">
-        <span className="font-medium text-green-600 dark:text-green-400">
-          Yea: {tally.yeas}
-        </span>
-        <span className="font-medium text-red-600 dark:text-red-400">
-          Nay: {tally.nays}
-        </span>
+        <span className="font-medium text-green-600 dark:text-green-400">Yea: {tally.yeas}</span>
+        <span className="font-medium text-red-600 dark:text-red-400">Nay: {tally.nays}</span>
         <span className="text-muted-foreground">Abstain: {tally.abstentions}</span>
         {tally.recusals > 0 && (
           <span className="text-muted-foreground">Recused: {tally.recusals}</span>
         )}
-        {tally.absent > 0 && (
-          <span className="text-muted-foreground">Absent: {tally.absent}</span>
-        )}
+        {tally.absent > 0 && <span className="text-muted-foreground">Absent: {tally.absent}</span>}
       </div>
 
       {/* Result preview + Record button */}

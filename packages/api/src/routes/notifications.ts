@@ -153,8 +153,10 @@ export async function notificationRoutes(app: FastifyInstance) {
             break;
         }
       } catch (err) {
-        app.log.error({ err, deliveryId, recordType: body.RecordType },
-          "Postmark webhook processing error");
+        app.log.error(
+          { err, deliveryId, recordType: body.RecordType },
+          "Postmark webhook processing error",
+        );
       }
     },
   );
@@ -220,11 +222,13 @@ export async function notificationRoutes(app: FastifyInstance) {
 
       const { data } = await supabase
         .from("notification_delivery")
-        .select(`
+        .select(
+          `
           id, status, postmark_message_id, sent_at, delivered_at, opened_at,
           error_message, retry_count, created_at,
           user_account:subscriber_id (id, email, display_name)
-        `)
+        `,
+        )
         .eq("event_id", eventId)
         .order("created_at", { ascending: true });
 
@@ -237,7 +241,9 @@ export async function notificationRoutes(app: FastifyInstance) {
   app.get("/admin/notifications/bounces", async (_request, reply) => {
     const { data } = await supabase
       .from("user_account")
-      .select("id, email, display_name, email_bounced, email_bounced_at, email_complained, email_complained_at")
+      .select(
+        "id, email, display_name, email_bounced, email_bounced_at, email_complained, email_complained_at",
+      )
       .or("email_bounced.eq.true,email_complained.eq.true")
       .order("email_bounced_at", { ascending: false });
 
@@ -288,19 +294,17 @@ export async function notificationRoutes(app: FastifyInstance) {
 
     const { endpoint, keys, userAgent } = parsed.data;
 
-    const { error } = await supabase
-      .from("push_subscription")
-      .upsert(
-        {
-          user_account_id: request.user.id,
-          endpoint,
-          p256dh: keys.p256dh,
-          auth: keys.auth,
-          user_agent: userAgent ?? null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_account_id,endpoint" },
-      );
+    const { error } = await supabase.from("push_subscription").upsert(
+      {
+        user_account_id: request.user.id,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        user_agent: userAgent ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_account_id,endpoint" },
+    );
 
     if (error) {
       app.log.error({ error }, "Failed to save push subscription");

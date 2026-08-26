@@ -46,9 +46,7 @@ export function LogoutDialog({ trigger }: LogoutDialogProps) {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Sign out?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to sign out?
-          </AlertDialogDescription>
+          <AlertDialogDescription>Are you sure you want to sign out?</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isSigningOut}>Cancel</AlertDialogCancel>

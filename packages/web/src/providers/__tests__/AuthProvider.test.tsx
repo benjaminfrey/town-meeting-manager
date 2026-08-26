@@ -8,17 +8,13 @@ import { render, screen, act, waitFor } from "@testing-library/react";
 type AuthCallback = (event: string, session: any) => void;
 let authCallback: AuthCallback | null = null;
 
-const {
-  mockUnsubscribe,
-  mockSignInWithPassword,
-  mockSignOut,
-  mockResetPasswordForEmail,
-} = vi.hoisted(() => ({
-  mockUnsubscribe: vi.fn(),
-  mockSignInWithPassword: vi.fn(),
-  mockSignOut: vi.fn(),
-  mockResetPasswordForEmail: vi.fn(),
-}));
+const { mockUnsubscribe, mockSignInWithPassword, mockSignOut, mockResetPasswordForEmail } =
+  vi.hoisted(() => ({
+    mockUnsubscribe: vi.fn(),
+    mockSignInWithPassword: vi.fn(),
+    mockSignOut: vi.fn(),
+    mockResetPasswordForEmail: vi.fn(),
+  }));
 
 vi.mock("@/lib/supabase", () => ({
   supabase: {
@@ -49,9 +45,7 @@ function AuthConsumer() {
       <span data-testid="loading">{String(auth.isLoading)}</span>
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
       <span data-testid="user-id">{auth.user?.id ?? "none"}</span>
-      <button onClick={() => void auth.signIn("test@test.com", "pass123")}>
-        sign-in
-      </button>
+      <button onClick={() => void auth.signIn("test@test.com", "pass123")}>sign-in</button>
       <button onClick={() => void auth.signOut()}>sign-out</button>
     </div>
   );

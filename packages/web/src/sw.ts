@@ -2,11 +2,7 @@
 
 import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
 import { registerRoute, NavigationRoute } from "workbox-routing";
-import {
-  CacheFirst,
-  NetworkFirst,
-  StaleWhileRevalidate,
-} from "workbox-strategies";
+import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -27,8 +23,7 @@ self.addEventListener("activate", (event) => {
 
 // Static assets (content-hashed) — CacheFirst
 registerRoute(
-  ({ request }) =>
-    ["style", "script", "worker"].includes(request.destination),
+  ({ request }) => ["style", "script", "worker"].includes(request.destination),
   new CacheFirst({
     cacheName: "static-assets",
     plugins: [
@@ -45,9 +40,7 @@ registerRoute(
   new NavigationRoute(
     new NetworkFirst({
       cacheName: "html-pages",
-      plugins: [
-        new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: 24 * 60 * 60 }),
-      ],
+      plugins: [new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: 24 * 60 * 60 })],
     }),
     { denylist: [/^\/api\//] },
   ),
@@ -59,17 +52,13 @@ registerRoute(
   new NetworkFirst({
     cacheName: "api-responses",
     networkTimeoutSeconds: 3,
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 }),
-    ],
+    plugins: [new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 })],
   }),
 );
 
 // Supabase REST and Auth APIs — NetworkFirst (React Query handles in-memory caching)
 registerRoute(
-  ({ url }) =>
-    url.pathname.startsWith("/rest/v1/") ||
-    url.pathname.startsWith("/auth/v1/"),
+  ({ url }) => url.pathname.startsWith("/rest/v1/") || url.pathname.startsWith("/auth/v1/"),
   new NetworkFirst({ networkTimeoutSeconds: 5 }),
 );
 
@@ -122,19 +111,15 @@ self.addEventListener("notificationclick", (event) => {
   const url = (event.notification.data?.url as string) ?? "/dashboard";
 
   event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clients) => {
-        // If the app is already open, focus it and navigate
-        for (const client of clients) {
-          if ("focus" in client && "navigate" in client) {
-            return (client as WindowClient)
-              .focus()
-              .then((c) => c.navigate(url));
-          }
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      // If the app is already open, focus it and navigate
+      for (const client of clients) {
+        if ("focus" in client && "navigate" in client) {
+          return (client as WindowClient).focus().then((c) => c.navigate(url));
         }
-        // Otherwise, open a new window
-        return self.clients.openWindow(url);
-      }),
+      }
+      // Otherwise, open a new window
+      return self.clients.openWindow(url);
+    }),
   );
 });

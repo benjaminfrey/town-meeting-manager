@@ -14,7 +14,9 @@ vi.mock("@tanstack/react-query", async () => {
     ...(actual as object),
     useQuery: (...args: unknown[]) => mockUseQuery(...args),
     useQueryClient: vi.fn().mockReturnValue({ invalidateQueries: vi.fn() }),
-    useMutation: vi.fn().mockReturnValue({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+    useMutation: vi
+      .fn()
+      .mockReturnValue({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   };
 });
 
@@ -124,7 +126,12 @@ const defaultProps = {
 describe("MemberRoster", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined });
+    mockUseQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      error: undefined,
+    });
   });
 
   it("renders member names from mock data", () => {
@@ -177,9 +184,7 @@ describe("MemberRoster", () => {
     makeMockData([]);
     render(<MemberRoster {...defaultProps} boardName="Planning Board" />);
     expect(
-      screen.getByText(
-        "No members added yet. Add your Planning Board members to get started.",
-      ),
+      screen.getByText("No members added yet. Add your Planning Board members to get started."),
     ).toBeInTheDocument();
   });
 

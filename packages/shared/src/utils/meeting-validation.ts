@@ -30,16 +30,14 @@ export function validateMeetingCreation(
 
   if (activeMemberCount < 3) {
     errors.push({
-      message:
-        "This board needs at least 3 members before scheduling a meeting.",
+      message: "This board needs at least 3 members before scheduling a meeting.",
       link: `/boards/${boardId}`,
     });
   }
 
   if (!retentionPolicyAcknowledgedAt) {
     errors.push({
-      message:
-        "The retention policy must be acknowledged before creating meetings.",
+      message: "The retention policy must be acknowledged before creating meetings.",
       link: "/dashboard",
     });
   }

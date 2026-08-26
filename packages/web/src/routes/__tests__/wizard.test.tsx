@@ -32,7 +32,10 @@ vi.mock("@/hooks/useCurrentUser", () => ({
 vi.mock("@/lib/supabase", () => ({
   supabase: {
     auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1", email: "admin@test.com" } }, error: null }),
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: "user-1", email: "admin@test.com" } },
+        error: null,
+      }),
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       refreshSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
     },

@@ -43,6 +43,7 @@ Export everything from `packages/shared/src/index.ts` under the `noticeRules` na
 ### Task 2 — Define types
 
 In `types.ts`, implement the full type definitions from Advisory 3.4 §4.2:
+
 - `NoticeRule` interface
 - `ComplianceResult` interface (includes `warningLevel: 'ok' | 'warning' | 'danger' | 'overdue'`)
 - `ForecastResult` interface
@@ -53,6 +54,7 @@ In `types.ts`, implement the full type definitions from Advisory 3.4 §4.2:
 In `rules/maine.ts`, implement the Maine rules from Advisory 3.4 §4.3. Include the legal review disclaimer as a code comment.
 
 Rules to implement:
+
 - `ME_OPEN_MEETINGS_BOARD` — 24 hours, all board meetings, 1 M.R.S.A. §403
 - `ME_TOWN_MEETING_WARRANT` — 14 calendar days, annual_town_meeting, 30-A M.R.S.A. §2521
 - `ME_SPECIAL_TOWN_MEETING` — 14 calendar days, special_town_meeting, 30-A M.R.S.A. §2521
@@ -75,10 +77,11 @@ function getNoticeDeadline(params: {
   state: string;
   meetingType: MeetingType;
   actionTypes?: string[];
-}): ComplianceResult
+}): ComplianceResult;
 ```
 
 Logic:
+
 1. Get applicable rules via `getRulesForState` filtered by `meetingType` and `actionTypes`
 2. Find the rule with the largest notice requirement (most restrictive)
 3. Calculate deadline: `meetingDate - minimumNoticeDays` (calendar days) or `meetingDateTime - minimumNoticeHours`
@@ -99,10 +102,11 @@ function forecastEarliestMeetingDate(params: {
   state: string;
   meetingType: MeetingType;
   actionTypes?: string[];
-}): ForecastResult
+}): ForecastResult;
 ```
 
 Logic:
+
 1. Get applicable rules
 2. Find most restrictive rule
 3. `earliestMeetingDate = fromDate + minimumNoticeDays` (calendar days)
@@ -111,14 +115,16 @@ Logic:
 ### Task 7 — Formatter
 
 In `formatter.ts`, implement helpers:
+
 - `formatAdvisoryMessage(result: ComplianceResult): string` — e.g., "Notice must be posted by March 14 (2 days from now) per 1 M.R.S.A. §403"
 - `formatForecastExplanation(result: ForecastResult): string` — e.g., "A special town meeting regarding a land use ordinance requires 14 days notice per 30-A M.R.S.A. §4352. If notice is posted today (March 12), the earliest meeting date is March 26."
 
 ### Task 8 — Export from shared package
 
 Add to `packages/shared/src/index.ts`:
+
 ```typescript
-export * from './notice-rules/index.js';
+export * from "./notice-rules/index.js";
 ```
 
 Run `npx turbo run build --filter=@town-meeting/shared` to verify the build passes.
@@ -128,6 +134,7 @@ Run `npx turbo run build --filter=@town-meeting/shared` to verify the build pass
 Write unit tests in `packages/shared/src/notice-rules/__tests__/calculator.test.ts`:
 
 Test cases:
+
 - Regular board meeting: 24-hour rule, various urgency levels
 - Special town meeting: 14-day rule
 - Zoning ordinance hearing with actionType

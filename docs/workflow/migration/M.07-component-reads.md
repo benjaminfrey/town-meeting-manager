@@ -15,6 +15,7 @@ Component write operations (calls to `powerSync.execute()` or `usePowerSync()`) 
 ## Files
 
 **Dashboard components (5):**
+
 - `packages/web/src/components/dashboard/ProgressChecklist.tsx`
 - `packages/web/src/components/dashboard/RetentionPolicyModal.tsx`
 - `packages/web/src/components/dashboard/TownSealUpload.tsx`
@@ -23,12 +24,14 @@ Component write operations (calls to `powerSync.execute()` or `usePowerSync()`) 
 - `packages/web/src/components/dashboard/TownSettingsEditor.tsx`
 
 **Board components (4):**
+
 - `packages/web/src/components/boards/MemberRoster.tsx`
 - `packages/web/src/components/boards/ArchiveBoardDialog.tsx`
 - `packages/web/src/components/boards/EditBoardDialog.tsx`
 - `packages/web/src/components/boards/AddBoardDialog.tsx`
 
 **Member components (6):**
+
 - `packages/web/src/components/members/AddMemberDialog.tsx`
 - `packages/web/src/components/members/MemberTransitionDialog.tsx`
 - `packages/web/src/components/members/PermissionOverrideView.tsx`
@@ -38,6 +41,7 @@ Component write operations (calls to `powerSync.execute()` or `usePowerSync()`) 
 - `packages/web/src/components/members/RoleConflictDialog.tsx`
 
 **Meeting management components (5):**
+
 - `packages/web/src/components/meetings/CreateMeetingDialog.tsx`
 - `packages/web/src/components/meetings/CancelMeetingDialog.tsx`
 - `packages/web/src/components/meetings/PublishAgendaDialog.tsx`
@@ -47,14 +51,17 @@ Component write operations (calls to `powerSync.execute()` or `usePowerSync()`) 
 - `packages/web/src/components/meetings/InlineItemForm.tsx`
 
 **Template components (2):**
+
 - `packages/web/src/components/templates/CreateTemplateDialog.tsx`
 - `packages/web/src/components/templates/DeleteTemplateDialog.tsx`
 
 **Misc components (2):**
+
 - `packages/web/src/components/LogoutDialog.tsx`
 - `packages/web/src/components/SyncStatusBar.tsx` (the old component — replace with the new ConnectionStatusBar redirect)
 
 **Minutes components (1):**
+
 - `packages/web/src/components/minutes/SourceDataPanel.tsx`
 
 ## Tasks
@@ -70,7 +77,7 @@ Component write operations (calls to `powerSync.execute()` or `usePowerSync()`) 
 
 ## Prompt
 
-```
+````
 You are migrating all component-level data reads in the Town Meeting Manager from PowerSync (useQuery from @powersync/react) to TanStack Query (useQuery from @tanstack/react-query). This is a large session — approximately 30 component files need updating.
 
 PROJECT CONTEXT:
@@ -93,13 +100,14 @@ const { data: boards } = useQuery(
   'SELECT * FROM board WHERE town_id = ? AND archived = 0 ORDER BY name',
   [townId]
 );
-```
+````
 
 New (TanStack Query + Supabase):
+
 ```typescript
-import { useQuery } from '@tanstack/react-query';
-import { useSupabase } from '@/hooks/useSupabase';
-import { queryKeys } from '@/lib/queryKeys';
+import { useQuery } from "@tanstack/react-query";
+import { useSupabase } from "@/hooks/useSupabase";
+import { queryKeys } from "@/lib/queryKeys";
 
 const supabase = useSupabase();
 
@@ -107,11 +115,11 @@ const { data: boards = [] } = useQuery({
   queryKey: queryKeys.boards.byTown(townId),
   queryFn: async () => {
     const { data, error } = await supabase
-      .from('board')
-      .select('*')
-      .eq('town_id', townId)
-      .eq('archived', false)
-      .order('name');
+      .from("board")
+      .select("*")
+      .eq("town_id", townId)
+      .eq("archived", false)
+      .order("name");
     if (error) throw error;
     return data;
   },
@@ -120,6 +128,7 @@ const { data: boards = [] } = useQuery({
 ```
 
 KEY DIFFERENCES:
+
 1. PowerSync returned SQL row arrays with snake_case column names — Supabase also returns snake_case. The data shape is the same.
 2. PowerSync had boolean workarounds: `archived = 0` (integer). With Supabase, use native boolean: `.eq('archived', false)`
 3. PowerSync's JSONB was stored as TEXT. Supabase returns native JSONB as objects. If any code does `JSON.parse(row.json_field)`, remove the parse — the value is already an object.
@@ -131,6 +140,7 @@ APPROACH: Process files systematically by directory:
 DIRECTORY: packages/web/src/components/dashboard/
 
 For each dashboard component:
+
 1. Read the file
 2. Find all `useQuery` calls
 3. Map each SQL query to a Supabase equivalent
@@ -186,23 +196,27 @@ DIRECTORY: packages/web/src/components/ (root)
 
 LogoutDialog.tsx — likely has no queries (just a confirm dialog) — verify
 SyncStatusBar.tsx — this component was already replaced by ConnectionStatusBar in M.02. Overwrite it with a re-export shim:
+
 ```typescript
 // Replaced by ConnectionStatusBar in M.02. This file is kept as a shim for import compatibility.
 // Will be deleted in M.11.
-export { ConnectionStatusBar as SyncStatusBar } from './ConnectionStatusBar';
+export { ConnectionStatusBar as SyncStatusBar } from "./ConnectionStatusBar";
 ```
 
 JSONB MIGRATION NOTES:
+
 - If any component does `JSON.parse(row.some_field)` where `some_field` is a JSONB column in Postgres, remove the parse call. Supabase returns JSONB as native JS objects.
 - Common JSONB fields: `meeting.agenda_settings`, `board.meeting_defaults`, `town.settings`, etc.
 - Check the generated database.ts (packages/shared/src/types/database.ts) to confirm column types.
 
 BOOLEAN MIGRATION NOTES:
+
 - PowerSync stored booleans as 0/1 integers. SQLite queries used `WHERE column = 1` or `WHERE column = 0`.
 - Supabase returns native booleans. Use `.eq('column', true)` or `.eq('column', false)`.
 - If UI code checks `if (row.archived === 1)`, update to `if (row.archived)`.
 
 IMPORTANT: DO NOT MIGRATE WRITE CALLS IN THIS SESSION
+
 - Leave all `powerSync.execute('INSERT...')`, `powerSync.execute('UPDATE...')`, `powerSync.execute('DELETE...')` calls unchanged.
 - Leave all `usePowerSync()` hook calls that are used for writes.
 - These will be migrated in M.08.
@@ -210,8 +224,9 @@ IMPORTANT: DO NOT MIGRATE WRITE CALLS IN THIS SESSION
 
 HANDLING useQueryClient() for INVALIDATION:
 Some components may need to invalidate queries when a mutation completes. In those cases:
+
 ```typescript
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 const queryClient = useQueryClient();
 // After mutation:
 queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
@@ -220,6 +235,7 @@ queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
 But DO NOT add this for components where the mutation hasn't been migrated yet — add it only where reads and writes are both being migrated together.
 
 VERIFICATION CHECKLIST:
+
 1. No component file imports useQuery from @powersync/react
 2. All useQuery calls use the object form: useQuery({ queryKey: [...], queryFn: async () => ... })
 3. All useQuery calls have a queryKey using the queryKeys factory
@@ -227,10 +243,15 @@ VERIFICATION CHECKLIST:
 5. JSONB fields are accessed directly without JSON.parse()
 6. All write calls (powersync.execute) are left unchanged for M.08
 7. TypeScript: `pnpm --filter @town-meeting/web tsc --noEmit --skipLibCheck 2>&1 | grep "components/"` — zero errors in component files
+
 ```
 
 ## Commit Message
 
 ```
+
 M.07: Migrate all component reads from @powersync/react useQuery to TanStack Query + Supabase
+
+```
+
 ```

@@ -6,12 +6,7 @@ import {
   formatMeetingTitle,
   formatMeetingTime,
 } from "../government.js";
-import {
-  calculateQuorum,
-  hasQuorum,
-  quorumAfterRecusal,
-  formatQuorumStatus,
-} from "../quorum.js";
+import { calculateQuorum, hasQuorum, quorumAfterRecusal, formatQuorumStatus } from "../quorum.js";
 import { getEffectiveBoardSettings } from "../board-settings.js";
 
 // ─── generateId / isValidUuid ───────────────────────────────────────
@@ -19,9 +14,7 @@ import { getEffectiveBoardSettings } from "../board-settings.js";
 describe("generateId", () => {
   it("returns a UUID-format string", () => {
     const id = generateId();
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 
   it("generates unique values", () => {
@@ -91,9 +84,7 @@ describe("formatGovernmentTitle", () => {
 
 describe("formatBoardMemberDisplay", () => {
   it("formats name with seat title", () => {
-    expect(formatBoardMemberDisplay("Jane Smith", "Chair")).toBe(
-      "Jane Smith (Chair)",
-    );
+    expect(formatBoardMemberDisplay("Jane Smith", "Chair")).toBe("Jane Smith (Chair)");
   });
 
   it("returns just name when seat title is null", () => {

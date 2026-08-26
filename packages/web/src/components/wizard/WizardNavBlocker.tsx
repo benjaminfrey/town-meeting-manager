@@ -36,8 +36,7 @@ export function WizardNavBlocker() {
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
     // Only block when leaving /setup, not when navigating within it
     return (
-      currentLocation.pathname.startsWith("/setup") &&
-      !nextLocation.pathname.startsWith("/setup")
+      currentLocation.pathname.startsWith("/setup") && !nextLocation.pathname.startsWith("/setup")
     );
   });
 
@@ -58,10 +57,7 @@ export function WizardNavBlocker() {
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => blocker.state === "blocked" && blocker.reset()}
-          >
+          <Button variant="outline" onClick={() => blocker.state === "blocked" && blocker.reset()}>
             Stay
           </Button>
           <Button

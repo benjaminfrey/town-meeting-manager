@@ -29,13 +29,7 @@ import type { Route } from "./+types/meetings.$meetingId.minutes";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,9 +107,7 @@ const TIMELINE_STEPS = [
 
 // ─── Component ────────────────────────────────────────────────────
 
-export default function MinutesReviewPage({
-  loaderData,
-}: Route.ComponentProps) {
+export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const queryClient = useQueryClient();
   const user = useCurrentUser();
@@ -361,16 +353,13 @@ export default function MinutesReviewPage({
         const { data: sessionData } = await supabase.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (token) {
-          await fetch(
-            `${API_BASE}/api/meetings/${meetingId}/minutes/submit`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
+          await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/submit`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
             },
-          );
+          });
         }
       } catch {
         // Non-critical — Supabase update already succeeded
@@ -389,16 +378,13 @@ export default function MinutesReviewPage({
       const token = sessionData?.session?.access_token;
       if (!token) throw new Error("Not authenticated");
 
-      const res = await fetch(
-        `${API_BASE}/api/meetings/${meetingId}/minutes/approve`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+      const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/approve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+      });
 
       if (!res.ok) {
         const errData = (await res.json().catch(() => ({}))) as { message?: string };
@@ -546,34 +532,23 @@ export default function MinutesReviewPage({
         return;
       }
 
-      const res = await fetch(
-        `${API_BASE}/api/meetings/${meetingId}/minutes/regenerate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+      const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/regenerate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+      });
 
       if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as Record<
-          string,
-          unknown
-        >;
-        throw new Error(
-          (errData.message as string) ??
-            `Regeneration failed (${res.status})`,
-        );
+        const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        throw new Error((errData.message as string) ?? `Regeneration failed (${res.status})`);
       }
 
       toast.success("Minutes regeneration started");
       invalidateMinutes();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to regenerate minutes",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to regenerate minutes");
     } finally {
       setRegenerating(false);
     }
@@ -584,9 +559,7 @@ export default function MinutesReviewPage({
   if (!meeting) {
     return (
       <div className="flex items-center justify-center p-12">
-        <p className="text-sm text-muted-foreground">
-          Loading meeting data...
-        </p>
+        <p className="text-sm text-muted-foreground">Loading meeting data...</p>
       </div>
     );
   }
@@ -601,8 +574,8 @@ export default function MinutesReviewPage({
             <Lock className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
             <CardTitle>Access Denied</CardTitle>
             <CardDescription>
-              You do not have permission to view draft minutes for this
-              meeting. Contact your board administrator for access.
+              You do not have permission to view draft minutes for this meeting. Contact your board
+              administrator for access.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -620,15 +593,13 @@ export default function MinutesReviewPage({
             <FileText className="mx-auto mb-2 h-12 w-12 text-muted-foreground" />
             <CardTitle>No Minutes Generated Yet</CardTitle>
             <CardDescription>
-              Minutes have not been generated for this meeting. Go to the
-              post-meeting review page to generate minutes.
+              Minutes have not been generated for this meeting. Go to the post-meeting review page
+              to generate minutes.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild>
-              <Link to={`/meetings/${meetingId}/review`}>
-                Go to Meeting Review
-              </Link>
+              <Link to={`/meetings/${meetingId}/review`}>Go to Meeting Review</Link>
             </Button>
           </CardContent>
         </Card>
@@ -644,7 +615,6 @@ export default function MinutesReviewPage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-
       {/* Header section */}
       <div className="flex items-start justify-between">
         <div>
@@ -695,10 +665,7 @@ export default function MinutesReviewPage({
           </Button>
         )}
         {status === "draft" && canSubmitForReview && (
-          <Button
-            size="sm"
-            onClick={() => setSubmitDialogOpen(true)}
-          >
+          <Button size="sm" onClick={() => setSubmitDialogOpen(true)}>
             <Send className="mr-1.5 h-4 w-4" />
             Submit for Review
           </Button>
@@ -710,28 +677,18 @@ export default function MinutesReviewPage({
             disabled={regenerating}
             onClick={() => void handleRegenerate()}
           >
-            <RefreshCw
-              className={`mr-1.5 h-4 w-4 ${regenerating ? "animate-spin" : ""}`}
-            />
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
             Regenerate
           </Button>
         )}
         {status === "review" && isAdmin && (
-          <Button
-            size="sm"
-            onClick={() => handleApprove()}
-            disabled={approveMutation.isPending}
-          >
+          <Button size="sm" onClick={() => handleApprove()} disabled={approveMutation.isPending}>
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
             Approve Minutes
           </Button>
         )}
         {status === "review" && isAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setReturnDialogOpen(true)}
-          >
+          <Button variant="outline" size="sm" onClick={() => setReturnDialogOpen(true)}>
             <Undo2 className="mr-1.5 h-4 w-4" />
             Return for Amendments
           </Button>
@@ -743,21 +700,13 @@ export default function MinutesReviewPage({
           </Button>
         )}
         {status === "published" && isAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleUnpublish()}
-          >
+          <Button variant="outline" size="sm" onClick={() => handleUnpublish()}>
             Unpublish
           </Button>
         )}
         {canExport && minutesDoc.pdf_url && (
           <Button variant="outline" size="sm" asChild>
-            <a
-              href={minutesDoc.pdf_url as string}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
+            <a href={minutesDoc.pdf_url as string} target="_blank" rel="noopener noreferrer">
               <Download className="mr-1.5 h-4 w-4" />
               Download PDF
             </a>
@@ -768,11 +717,7 @@ export default function MinutesReviewPage({
       {/* Tracked Changes Toggle */}
       {!isEditing && originalContentJson && contentJson && (
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowChanges(!showChanges)}
-          >
+          <Button variant="outline" size="sm" onClick={() => setShowChanges(!showChanges)}>
             {showChanges ? "Hide Changes" : "Show Changes"}
           </Button>
         </div>
@@ -821,38 +766,27 @@ export default function MinutesReviewPage({
             <div className="border-t px-4 py-3">
               <div className="space-y-3">
                 {amendmentsHistory.map((entry) => (
-                  <div
-                    key={entry.round}
-                    className="rounded-md border px-4 py-3 text-sm"
-                  >
+                  <div key={entry.round} className="rounded-md border px-4 py-3 text-sm">
                     <div className="flex items-center justify-between">
                       <span className="font-medium">Round {entry.round}</span>
                       <span className="text-xs text-muted-foreground">
                         Returned{" "}
-                        {new Date(entry.returned_at).toLocaleDateString(
-                          "en-US",
-                          {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          },
-                        )}
+                        {new Date(entry.returned_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
                       </span>
                     </div>
-                    <p className="mt-1 text-muted-foreground">
-                      {entry.reason}
-                    </p>
+                    <p className="mt-1 text-muted-foreground">{entry.reason}</p>
                     {entry.resubmitted_at && (
                       <p className="mt-1 text-xs text-green-600">
                         Resubmitted{" "}
-                        {new Date(entry.resubmitted_at).toLocaleDateString(
-                          "en-US",
-                          {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          },
-                        )}
+                        {new Date(entry.resubmitted_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
                       </p>
                     )}
                   </div>
@@ -871,16 +805,13 @@ export default function MinutesReviewPage({
           <AlertDialogHeader>
             <AlertDialogTitle>Submit for Board Review</AlertDialogTitle>
             <AlertDialogDescription>
-              Submit these minutes to board members for review before the next
-              meeting? Board members with viewing permission will be able to
-              view the draft.
+              Submit these minutes to board members for review before the next meeting? Board
+              members with viewing permission will be able to view the draft.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => handleSubmitForReview()}
-            >
+            <AlertDialogAction onClick={() => handleSubmitForReview()}>
               Submit for Review
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -893,15 +824,12 @@ export default function MinutesReviewPage({
           <AlertDialogHeader>
             <AlertDialogTitle>Publish to Portal</AlertDialogTitle>
             <AlertDialogDescription>
-              Publish these approved minutes to the public portal? They will be
-              publicly accessible.
+              Publish these approved minutes to the public portal? They will be publicly accessible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handlePublish()}>
-              Publish
-            </AlertDialogAction>
+            <AlertDialogAction onClick={() => handlePublish()}>Publish</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -912,15 +840,12 @@ export default function MinutesReviewPage({
           <DialogHeader>
             <DialogTitle>Return for Amendments</DialogTitle>
             <DialogDescription>
-              Return these minutes to draft for amendments? They will need to
-              be re-submitted for review.
+              Return these minutes to draft for amendments? They will need to be re-submitted for
+              review.
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
-            <label
-              htmlFor="return-reason"
-              className="mb-1.5 block text-sm font-medium"
-            >
+            <label htmlFor="return-reason" className="mb-1.5 block text-sm font-medium">
               Describe the requested changes
             </label>
             <textarea
@@ -941,10 +866,7 @@ export default function MinutesReviewPage({
             >
               Cancel
             </Button>
-            <Button
-              disabled={!returnReason.trim()}
-              onClick={() => handleReturnForAmendments()}
-            >
+            <Button disabled={!returnReason.trim()} onClick={() => handleReturnForAmendments()}>
               Return for Amendments
             </Button>
           </DialogFooter>
@@ -963,12 +885,7 @@ function StatusTimeline({
   status: MinutesStatus;
   minutesDoc: Record<string, unknown>;
 }) {
-  const statusOrder: MinutesStatus[] = [
-    "draft",
-    "review",
-    "approved",
-    "published",
-  ];
+  const statusOrder: MinutesStatus[] = ["draft", "review", "approved", "published"];
   const currentIdx = statusOrder.indexOf(status);
 
   return (
@@ -994,11 +911,7 @@ function StatusTimeline({
                     : "border-border bg-background text-muted-foreground"
                 }`}
               >
-                {isPast ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Clock className="h-3.5 w-3.5" />
-                )}
+                {isPast ? <Check className="h-4 w-4" /> : <Clock className="h-3.5 w-3.5" />}
               </div>
               <span
                 className={`text-xs font-medium ${

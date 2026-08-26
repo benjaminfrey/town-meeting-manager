@@ -13,10 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef } from "react";
-import {
-  WizardStage3Schema,
-  type WizardStage3Data,
-} from "@town-meeting/shared";
+import { WizardStage3Schema, type WizardStage3Data } from "@town-meeting/shared";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -25,13 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { useWizard } from "@/providers/WizardProvider";
@@ -82,12 +73,12 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
 
   // Stage 3 always has defaults, so always initialize with saved state
   // (which itself defaults from WizardProvider)
-  const initialValues: WizardStage3Data = state.stage3.presidingOfficer
-    ? state.stage3
-    : DEFAULTS;
+  const initialValues: WizardStage3Data = state.stage3.presidingOfficer ? state.stage3 : DEFAULTS;
 
-  const { values, errors, isValid, setValue, validate } =
-    useWizardForm<WizardStage3Data>(WizardStage3Schema, initialValues);
+  const { values, errors, isValid, setValue, validate } = useWizardForm<WizardStage3Data>(
+    WizardStage3Schema,
+    initialValues,
+  );
 
   // Notify parent of validity changes
   const prevValid = useRef(isValid);
@@ -124,34 +115,33 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
         setValue("staffRolesPresent", [...without_none, role]);
       } else {
         // Removing a non-"none" role
-        setValue("staffRolesPresent", current.filter((r) => r !== role));
+        setValue(
+          "staffRolesPresent",
+          current.filter((r) => r !== role),
+        );
       }
     },
-    [setValue, values.staffRolesPresent]
+    [setValue, values.staffRolesPresent],
   );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Who Runs Your Meetings</CardTitle>
-        <CardDescription>
-          Identify the default roles for meeting operations
-        </CardDescription>
+        <CardDescription>Identify the default roles for meeting operations</CardDescription>
       </CardHeader>
 
       <CardContent>
         <div className="space-y-6">
           {/* Helper note */}
           <p className="text-sm text-muted-foreground">
-            This does not create user accounts — it tells the system what your
-            town's structure looks like.
+            This does not create user accounts — it tells the system what your town's structure
+            looks like.
           </p>
 
           {/* Presiding officer */}
           <div className="space-y-2">
-            <Label htmlFor="presidingOfficer">
-              Who presides over meetings?
-            </Label>
+            <Label htmlFor="presidingOfficer">Who presides over meetings?</Label>
             <Select
               value={values.presidingOfficer}
               onValueChange={(val) => setValue("presidingOfficer", val)}
@@ -168,17 +158,13 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
               </SelectContent>
             </Select>
             {errors.presidingOfficer && (
-              <p className="text-sm text-destructive">
-                {errors.presidingOfficer}
-              </p>
+              <p className="text-sm text-destructive">{errors.presidingOfficer}</p>
             )}
           </div>
 
           {/* Minutes recorder */}
           <div className="space-y-2">
-            <Label htmlFor="minutesRecorder">
-              Who records meeting minutes?
-            </Label>
+            <Label htmlFor="minutesRecorder">Who records meeting minutes?</Label>
             <Select
               value={values.minutesRecorder}
               onValueChange={(val) => setValue("minutesRecorder", val)}
@@ -195,9 +181,7 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
               </SelectContent>
             </Select>
             {errors.minutesRecorder && (
-              <p className="text-sm text-destructive">
-                {errors.minutesRecorder}
-              </p>
+              <p className="text-sm text-destructive">{errors.minutesRecorder}</p>
             )}
           </div>
 
@@ -218,10 +202,7 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
                       handleStaffRoleToggle(opt.value, checked === true)
                     }
                   />
-                  <Label
-                    htmlFor={`staff-${opt.value}`}
-                    className="font-normal cursor-pointer"
-                  >
+                  <Label htmlFor={`staff-${opt.value}`} className="font-normal cursor-pointer">
                     {opt.label}
                   </Label>
                 </div>
@@ -233,9 +214,7 @@ export function WizardStage3({ onValidityChange, onRegister }: WizardStage3Props
                   <Checkbox
                     id="staff-none"
                     checked={values.staffRolesPresent.includes("none")}
-                    onCheckedChange={(checked) =>
-                      handleStaffRoleToggle("none", checked === true)
-                    }
+                    onCheckedChange={(checked) => handleStaffRoleToggle("none", checked === true)}
                   />
                   <Label
                     htmlFor="staff-none"

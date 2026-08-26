@@ -59,9 +59,7 @@ describe("Home (role-aware)", () => {
     renderWithProviders(<Home />, { route: "/" });
 
     // Still renders a useful landing
-    expect(
-      await screen.findByText("Upcoming (next 30 days)"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Upcoming (next 30 days)")).toBeInTheDocument();
     expect(screen.queryByText("Your meeting pipeline")).not.toBeInTheDocument();
     expect(screen.queryByText(/schedule meeting/i)).not.toBeInTheDocument();
   });

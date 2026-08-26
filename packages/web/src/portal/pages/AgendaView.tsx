@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
-import {
-  FileText,
-  Download,
-  Printer,
-  ChevronRight,
-  AlertCircle,
-} from "lucide-react";
+import { FileText, Download, Printer, ChevronRight, AlertCircle } from "lucide-react";
 import type { PortalAgenda, PortalAgendaItem } from "@town-meeting/shared";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
@@ -65,27 +59,18 @@ function formatTime(time: string): string {
   return `${hour12}:${m} ${ampm}`;
 }
 
-function AgendaItemDetails({
-  item,
-  label,
-}: {
-  item: PortalAgendaItem;
-  label: string;
-}) {
+function AgendaItemDetails({ item, label }: { item: PortalAgendaItem; label: string }) {
   return (
     <div className="mb-4">
       <p className="font-semibold text-foreground">
         {label}. {item.title}
       </p>
 
-      {item.description && (
-        <p className="mt-1 text-foreground">{item.description}</p>
-      )}
+      {item.description && <p className="mt-1 text-foreground">{item.description}</p>}
 
       {item.background && (
         <div className="mt-2 rounded-md bg-muted px-4 py-3 text-sm text-foreground">
-          <span className="font-medium text-muted-foreground">Background:</span>{" "}
-          {item.background}
+          <span className="font-medium text-muted-foreground">Background:</span> {item.background}
         </div>
       )}
 
@@ -97,15 +82,13 @@ function AgendaItemDetails({
 
       {item.staff_resource && (
         <p className="mt-1 text-sm text-muted-foreground">
-          <span className="font-medium">Staff Resource:</span>{" "}
-          {item.staff_resource}
+          <span className="font-medium">Staff Resource:</span> {item.staff_resource}
         </p>
       )}
 
       {item.recommendation && (
         <p className="mt-1 text-sm text-muted-foreground">
-          <span className="font-medium">Recommendation:</span>{" "}
-          {item.recommendation}
+          <span className="font-medium">Recommendation:</span> {item.recommendation}
         </p>
       )}
 
@@ -143,11 +126,7 @@ function AgendaItemDetails({
       {item.children.length > 0 && (
         <div className="ml-6 mt-3 space-y-3 border-l-2 border-border pl-4">
           {item.children.map((child, childIdx) => (
-            <AgendaItemDetails
-              key={child.id}
-              item={child}
-              label={toLetter(childIdx + 1)}
-            />
+            <AgendaItemDetails key={child.id} item={child} label={toLetter(childIdx + 1)} />
           ))}
         </div>
       )}
@@ -162,12 +141,16 @@ export default function AgendaView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<"not_found" | "error" | null>(null);
 
-  usePortalMeta(agenda ? {
-    title: `${agenda.meeting.board_name} Agenda - ${formatDate(agenda.meeting.scheduled_date)} - ${townName}`,
-    description: `Published agenda for ${agenda.meeting.board_name} meeting on ${formatDate(agenda.meeting.scheduled_date)}.`,
-    siteName: townName ?? undefined,
-    ogImage: sealUrl,
-  } : null);
+  usePortalMeta(
+    agenda
+      ? {
+          title: `${agenda.meeting.board_name} Agenda - ${formatDate(agenda.meeting.scheduled_date)} - ${townName}`,
+          description: `Published agenda for ${agenda.meeting.board_name} meeting on ${formatDate(agenda.meeting.scheduled_date)}.`,
+          siteName: townName ?? undefined,
+          ogImage: sealUrl,
+        }
+      : null,
+  );
 
   useEffect(() => {
     if (!meetingId) return;
@@ -210,13 +193,8 @@ export default function AgendaView() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
-          <AlertCircle
-            className="mx-auto h-12 w-12 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <h1 className="mt-4 text-xl font-bold text-foreground">
-            Agenda Not Available
-          </h1>
+          <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground" aria-hidden="true" />
+          <h1 className="mt-4 text-xl font-bold text-foreground">Agenda Not Available</h1>
           <p className="mt-2 text-muted-foreground">
             The agenda for this meeting has not been published yet.
           </p>
@@ -235,16 +213,10 @@ export default function AgendaView() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
         <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
-          <AlertCircle
-            className="mx-auto h-12 w-12 text-red-400"
-            aria-hidden="true"
-          />
-          <h1 className="mt-4 text-xl font-bold text-foreground">
-            Error Loading Agenda
-          </h1>
+          <AlertCircle className="mx-auto h-12 w-12 text-red-400" aria-hidden="true" />
+          <h1 className="mt-4 text-xl font-bold text-foreground">Error Loading Agenda</h1>
           <p className="mt-2 text-muted-foreground">
-            An unexpected error occurred while loading the agenda. Please try
-            again later.
+            An unexpected error occurred while loading the agenda. Please try again later.
           </p>
         </div>
       </div>
@@ -269,10 +241,7 @@ export default function AgendaView() {
 
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
-        <nav
-          className="no-print mb-6 text-sm text-muted-foreground"
-          aria-label="Breadcrumb"
-        >
+        <nav className="no-print mb-6 text-sm text-muted-foreground" aria-label="Breadcrumb">
           <ol className="flex items-center gap-1">
             <li>
               <Link to="/meetings" className="hover:text-foreground">
@@ -289,10 +258,7 @@ export default function AgendaView() {
               <ChevronRight className="h-3 w-3" aria-hidden="true" />
             </li>
             <li>
-              <Link
-                to={`/meetings/${meeting.id}`}
-                className="hover:text-foreground"
-              >
+              <Link to={`/meetings/${meeting.id}`} className="hover:text-foreground">
                 {formatDate(meeting.scheduled_date)}
               </Link>
             </li>
@@ -312,15 +278,10 @@ export default function AgendaView() {
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
                   Meeting Agenda
                 </h1>
-                <p className="mt-1 text-lg text-foreground">
-                  {meeting.board_name}
-                </p>
+                <p className="mt-1 text-lg text-foreground">{meeting.board_name}</p>
+                <p className="mt-1 text-muted-foreground">{meeting.meeting_type} Meeting</p>
                 <p className="mt-1 text-muted-foreground">
-                  {meeting.meeting_type} Meeting
-                </p>
-                <p className="mt-1 text-muted-foreground">
-                  {formatDate(meeting.scheduled_date)} at{" "}
-                  {formatTime(meeting.scheduled_time)}
+                  {formatDate(meeting.scheduled_date)} at {formatTime(meeting.scheduled_time)}
                 </p>
                 <p className="text-muted-foreground">{meeting.location}</p>
               </div>
@@ -371,9 +332,7 @@ export default function AgendaView() {
 
                 {section.exhibits.length > 0 && (
                   <div className="mb-3">
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Exhibits:
-                    </p>
+                    <p className="text-sm font-medium text-muted-foreground">Exhibits:</p>
                     <ul className="mt-1 space-y-1">
                       {section.exhibits.map((exhibit) => (
                         <li key={exhibit.id}>
@@ -383,13 +342,9 @@ export default function AgendaView() {
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 text-sm text-blue-700 hover:text-blue-900 hover:underline"
                           >
-                            <FileText
-                              className="h-4 w-4 shrink-0"
-                              aria-hidden="true"
-                            />
+                            <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
                             <span>
-                              {exhibit.title} (
-                              {exhibit.file_type.toUpperCase()},{" "}
+                              {exhibit.title} ({exhibit.file_type.toUpperCase()},{" "}
                               {formatFileSize(exhibit.file_size)})
                             </span>
                           </a>
@@ -403,11 +358,7 @@ export default function AgendaView() {
                 {section.children.length > 0 && (
                   <div className="ml-6 space-y-3">
                     {section.children.map((item, itemIdx) => (
-                      <AgendaItemDetails
-                        key={item.id}
-                        item={item}
-                        label={toLetter(itemIdx + 1)}
-                      />
+                      <AgendaItemDetails key={item.id} item={item} label={toLetter(itemIdx + 1)} />
                     ))}
                   </div>
                 )}

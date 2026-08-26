@@ -41,16 +41,16 @@ export function RoleConflictDialog({
   const supabase = useSupabase();
 
   const existingLabel = conflict.existingRole
-    ? ROLE_LABELS[conflict.existingRole]?.toLowerCase() ?? conflict.existingRole
+    ? (ROLE_LABELS[conflict.existingRole]?.toLowerCase() ?? conflict.existingRole)
     : "current";
 
   const { mutate: archiveAccount, isPending: isArchiving } = useMutation({
     mutationFn: async () => {
       const now = new Date().toISOString();
       const { error } = await supabase
-        .from('user_account')
+        .from("user_account")
         .update({ archived_at: now })
-        .eq('id', userAccountId);
+        .eq("id", userAccountId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -70,32 +70,22 @@ export function RoleConflictDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-3">
               <p>
-                <strong>{personName}</strong> currently has a {existingLabel}{" "}
-                account. Under Maine conflict-of-interest law (30-A M.R.S.A.
-                §2605), a person cannot simultaneously serve as staff and a
-                board member.
+                <strong>{personName}</strong> currently has a {existingLabel} account. Under Maine
+                conflict-of-interest law (30-A M.R.S.A. §2605), a person cannot simultaneously serve
+                as staff and a board member.
               </p>
               <p>
-                To proceed, their {existingLabel} account must be archived
-                first. This will disable their current access but preserve all
-                historical records.
+                To proceed, their {existingLabel} account must be archived first. This will disable
+                their current access but preserve all historical records.
               </p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isArchiving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isArchiving}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => archiveAccount()}
-            disabled={isArchiving}
-          >
+          <Button variant="destructive" onClick={() => archiveAccount()} disabled={isArchiving}>
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Archive {existingLabel} Account & Continue
           </Button>

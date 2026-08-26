@@ -45,12 +45,10 @@ export default function MeetingNoticesSettingsPage() {
           <ArrowLeft className="h-4 w-4" />
           Settings
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Meeting Notice Templates
-        </h1>
+        <h1 className="text-2xl font-bold tracking-tight">Meeting Notice Templates</h1>
         <p className="mt-1 text-muted-foreground">
-          Each board needs a notice template configured. Templates define the
-          structure and content of meeting notices.
+          Each board needs a notice template configured. Templates define the structure and content
+          of meeting notices.
         </p>
       </div>
 
@@ -63,11 +61,7 @@ export default function MeetingNoticesSettingsPage() {
       ) : (
         <div className="space-y-3">
           {boards.map((board) => (
-            <BoardTemplateCard
-              key={board.id}
-              board={board}
-              configuredBoards={configuredBoards}
-            />
+            <BoardTemplateCard key={board.id} board={board} configuredBoards={configuredBoards} />
           ))}
 
           <div className="mt-4 text-sm text-muted-foreground">
@@ -97,7 +91,12 @@ function BoardTemplateCard({
       if (!sourceBoard?.notice_template_blocks) throw new Error("Source board has no template");
       const { error } = await supabase
         .from("board")
-        .update({ notice_template_blocks: sourceBoard.notice_template_blocks as unknown as Record<string, unknown>[] })
+        .update({
+          notice_template_blocks: sourceBoard.notice_template_blocks as unknown as Record<
+            string,
+            unknown
+          >[],
+        })
         .eq("id", board.id);
       if (error) throw error;
     },

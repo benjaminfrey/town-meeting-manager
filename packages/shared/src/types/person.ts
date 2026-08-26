@@ -1,7 +1,4 @@
-import type {
-  BoardMemberStatus,
-  UserRole,
-} from "../constants/enums.js";
+import type { BoardMemberStatus, UserRole } from "../constants/enums.js";
 import type { PermissionsMatrix } from "../constants/permissions.js";
 
 /** PERSON — the identity anchor entity */

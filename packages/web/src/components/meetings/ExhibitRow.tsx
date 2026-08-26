@@ -35,12 +35,9 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
   const isUrl = fileType === "url";
 
   const handleDelete = useCallback(async () => {
-    const { error } = await supabase
-      .from('exhibit')
-      .delete()
-      .eq('id', String(exhibit.id));
+    const { error } = await supabase.from("exhibit").delete().eq("id", String(exhibit.id));
     if (error) throw error;
-    const agendaItemId = String(exhibit.agenda_item_id ?? '');
+    const agendaItemId = String(exhibit.agenda_item_id ?? "");
     if (agendaItemId) {
       await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
     }
@@ -59,16 +56,10 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setConfirmDelete(false)}
-              >
+              <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                 Keep
               </Button>
-              <Button
-                variant="destructive"
-                onClick={() => void handleDelete()}
-              >
+              <Button variant="destructive" onClick={() => void handleDelete()}>
                 Delete
               </Button>
             </AlertDialogFooter>
@@ -81,9 +72,7 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
       ) : (
         <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
       )}
-      <span className="font-mono text-xs text-muted-foreground w-6">
-        {index + 1}.
-      </span>
+      <span className="font-mono text-xs text-muted-foreground w-6">{index + 1}.</span>
       <span className="flex-1 truncate">{title}</span>
       <span className="text-xs text-muted-foreground">
         {EXHIBIT_TYPE_LABELS[exhibitType] ?? exhibitType}

@@ -8,14 +8,7 @@
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md
  */
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type {
   WizardStage1Data,
   WizardStage2Data,
@@ -92,7 +85,7 @@ interface WizardContextValue {
   /** Merge partial data into a stage's state */
   updateStage: <S extends 1 | 2 | 3 | 4 | 5>(
     stage: S,
-    data: Partial<WizardState[`stage${S}`]>
+    data: Partial<WizardState[`stage${S}`]>,
   ) => void;
   /** Navigate to a specific stage */
   goToStage: (stage: number) => void;
@@ -116,16 +109,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WizardState>(createInitialState);
 
   const updateStage = useCallback(
-    <S extends 1 | 2 | 3 | 4 | 5>(
-      stage: S,
-      data: Partial<WizardState[`stage${S}`]>
-    ) => {
+    <S extends 1 | 2 | 3 | 4 | 5>(stage: S, data: Partial<WizardState[`stage${S}`]>) => {
       setState((prev) => ({
         ...prev,
         [`stage${stage}`]: { ...prev[`stage${stage}`], ...data },
       }));
     },
-    []
+    [],
   );
 
   const goToStage = useCallback((stage: number) => {
@@ -180,12 +170,10 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       getWizardData,
       resetWizard,
     }),
-    [state, updateStage, goToStage, goNext, goBack, markStageComplete, getWizardData, resetWizard]
+    [state, updateStage, goToStage, goNext, goBack, markStageComplete, getWizardData, resetWizard],
   );
 
-  return (
-    <WizardContext.Provider value={value}>{children}</WizardContext.Provider>
-  );
+  return <WizardContext.Provider value={value}>{children}</WizardContext.Provider>;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────

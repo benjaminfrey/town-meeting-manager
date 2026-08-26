@@ -9,12 +9,7 @@
  */
 
 import { useCallback, useState } from "react";
-import {
-  LayoutDashboard,
-  CheckSquare,
-  List,
-  Globe,
-} from "lucide-react";
+import { LayoutDashboard, CheckSquare, List, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // ─── Tour steps ─────────────────────────────────────────────────────
@@ -29,20 +24,17 @@ const TOUR_STEPS: TourStep[] = [
   {
     icon: LayoutDashboard,
     title: "Your Navigation",
-    message:
-      "The sidebar has everything you need: your dashboard, boards, meetings, and settings.",
+    message: "The sidebar has everything you need: your dashboard, boards, meetings, and settings.",
   },
   {
     icon: CheckSquare,
     title: "Progress Checklist",
-    message:
-      "This checklist shows what's left to set up. Start with adding your board members.",
+    message: "This checklist shows what's left to set up. Start with adding your board members.",
   },
   {
     icon: List,
     title: "Your Boards",
-    message:
-      "Each board has its own area for meetings, agendas, and minutes.",
+    message: "Each board has its own area for meetings, agendas, and minutes.",
   },
   {
     icon: Globe,
@@ -121,9 +113,7 @@ export function QuickTour({ onComplete }: QuickTourProps) {
           </div>
 
           <h2 className="mb-2 text-lg font-semibold">{step.title}</h2>
-          <p className="mb-6 text-sm text-muted-foreground leading-relaxed">
-            {step.message}
-          </p>
+          <p className="mb-6 text-sm text-muted-foreground leading-relaxed">{step.message}</p>
         </div>
 
         {/* Navigation */}

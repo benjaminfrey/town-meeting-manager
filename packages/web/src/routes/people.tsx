@@ -136,8 +136,8 @@ export default function PeoplePage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">People</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Everyone in your town — board members, staff, and admins. Assign
-            people to boards from each board's Members tab.
+            Everyone in your town — board members, staff, and admins. Assign people to boards from
+            each board's Members tab.
           </p>
         </div>
         {canManage && (
@@ -155,9 +155,7 @@ export default function PeoplePage() {
           <Users className="mx-auto h-8 w-8 text-muted-foreground" />
           <p className="mt-3 font-medium">No people yet</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {canManage
-              ? "Add your first person to get started."
-              : "An admin can add people here."}
+            {canManage ? "Add your first person to get started." : "An admin can add people here."}
           </p>
           {canManage && (
             <Button onClick={() => setAddOpen(true)} className="mt-4" size="sm">
@@ -171,15 +169,11 @@ export default function PeoplePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                  Name
-                </th>
+                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Name</th>
                 <th className="hidden px-4 py-2.5 text-left font-medium text-muted-foreground sm:table-cell">
                   Role
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                  Boards
-                </th>
+                <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Boards</th>
                 {canManage && <th className="w-10 px-4 py-2.5" />}
               </tr>
             </thead>
@@ -197,11 +191,7 @@ export default function PeoplePage() {
                     </div>
                   </td>
                   <td className="hidden px-4 py-3 sm:table-cell">
-                    <span
-                      className={
-                        r.hasRole ? "text-foreground" : "text-muted-foreground"
-                      }
-                    >
+                    <span className={r.hasRole ? "text-foreground" : "text-muted-foreground"}>
                       {r.role}
                     </span>
                   </td>
@@ -224,9 +214,7 @@ export default function PeoplePage() {
                   {canManage && (
                     <td className="px-4 py-3 text-right">
                       <button
-                        onClick={() =>
-                          setEditing({ id: r.id, name: r.name, email: r.email })
-                        }
+                        onClick={() => setEditing({ id: r.id, name: r.name, email: r.email })}
                         className="text-muted-foreground transition-colors hover:text-foreground"
                         aria-label={`Edit ${r.name}`}
                       >
@@ -241,13 +229,7 @@ export default function PeoplePage() {
         </div>
       )}
 
-      {canManage && (
-        <AddPersonDialog
-          townId={townId}
-          open={addOpen}
-          onOpenChange={setAddOpen}
-        />
-      )}
+      {canManage && <AddPersonDialog townId={townId} open={addOpen} onOpenChange={setAddOpen} />}
       {canManage && editing && (
         <EditPersonDialog
           key={editing.id}

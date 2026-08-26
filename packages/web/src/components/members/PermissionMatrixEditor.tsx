@@ -117,13 +117,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     label: "Civic Engagement",
     codes: ["C1", "C2", "C3", "C4", "C5"],
-    actions: [
-      PERMISSIONS.C1,
-      PERMISSIONS.C2,
-      PERMISSIONS.C3,
-      PERMISSIONS.C4,
-      PERMISSIONS.C5,
-    ],
+    actions: [PERMISSIONS.C1, PERMISSIONS.C2, PERMISSIONS.C3, PERMISSIONS.C4, PERMISSIONS.C5],
   },
   {
     label: "View & Download",
@@ -159,9 +153,7 @@ export function PermissionMatrixEditor({
   const getState = useCallback(
     (action: PermissionAction): PermState => {
       // Check if any board override has this action
-      const hasOverride = permissions.board_overrides?.some(
-        (o) => action in o.permissions,
-      );
+      const hasOverride = permissions.board_overrides?.some((o) => action in o.permissions);
       if (hasOverride && !permissions.global?.[action]) return "board_specific";
       if (permissions.global?.[action]) return "Y";
       return "N";
@@ -211,9 +203,7 @@ export function PermissionMatrixEditor({
       }
 
       // Clean up empty overrides
-      newOverrides = newOverrides.filter(
-        (o) => Object.keys(o.permissions).length > 0,
-      );
+      newOverrides = newOverrides.filter((o) => Object.keys(o.permissions).length > 0);
 
       onChange({
         global: newGlobal,
@@ -257,9 +247,7 @@ export function PermissionMatrixEditor({
                     locked || bmOnly ? "opacity-60" : ""
                   }`}
                 >
-                  <span className="w-8 text-xs font-mono text-muted-foreground">
-                    {code}
-                  </span>
+                  <span className="w-8 text-xs font-mono text-muted-foreground">{code}</span>
                   <span className="flex-1 text-sm">{label}</span>
 
                   {locked === "admin" ? (
@@ -314,32 +302,22 @@ export function PermissionMatrixEditor({
       {/* Board selector for board-specific permissions */}
       {boards.length > 0 && (
         <div className="rounded-lg border p-3 space-y-2">
-          <h4 className="text-sm font-medium">
-            Boards for board-specific permissions
-          </h4>
+          <h4 className="text-sm font-medium">Boards for board-specific permissions</h4>
           <p className="text-xs text-muted-foreground">
-            When a permission is set to "Board-specific", it applies only to the
-            boards selected here.
+            When a permission is set to "Board-specific", it applies only to the boards selected
+            here.
           </p>
           <div className="space-y-1.5">
             {boards.map((board) => (
-              <label
-                key={board.id}
-                className="flex items-center gap-2 cursor-pointer"
-              >
+              <label key={board.id} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={selectedBoardIds.includes(board.id)}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      onSelectedBoardIdsChange([
-                        ...selectedBoardIds,
-                        board.id,
-                      ]);
+                      onSelectedBoardIdsChange([...selectedBoardIds, board.id]);
                     } else {
-                      onSelectedBoardIdsChange(
-                        selectedBoardIds.filter((id) => id !== board.id),
-                      );
+                      onSelectedBoardIdsChange(selectedBoardIds.filter((id) => id !== board.id));
                     }
                   }}
                   className="rounded border-gray-300"

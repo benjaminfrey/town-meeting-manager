@@ -30,10 +30,7 @@ export const BoardSchema = z.object({
   ]),
   elected_or_appointed: z.enum(["elected", "appointed"]).nullable(),
   member_count: z.number().int().min(0).max(25),
-  election_method: z.enum([
-    ElectionMethod.AT_LARGE,
-    ElectionMethod.ROLE_TITLED,
-  ]),
+  election_method: z.enum([ElectionMethod.AT_LARGE, ElectionMethod.ROLE_TITLED]),
   officer_election_method: z.enum([
     OfficerElectionMethod.VOTE_OF_BOARD,
     OfficerElectionMethod.HIGHEST_VOTE_GETTER,
@@ -44,11 +41,7 @@ export const BoardSchema = z.object({
   staggered_terms: z.boolean(),
   is_governing_board: z.boolean(),
   meeting_formality_override: z
-    .enum([
-      MeetingFormality.INFORMAL,
-      MeetingFormality.SEMI_FORMAL,
-      MeetingFormality.FORMAL,
-    ])
+    .enum([MeetingFormality.INFORMAL, MeetingFormality.SEMI_FORMAL, MeetingFormality.FORMAL])
     .nullable(),
   minutes_style_override: z
     .enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE])

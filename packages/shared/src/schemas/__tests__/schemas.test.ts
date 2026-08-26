@@ -106,7 +106,9 @@ describe("UserAccountSchema", () => {
   });
 
   it("accepts gov_title string", () => {
-    expect(UserAccountSchema.safeParse({ ...validAccount, gov_title: "Town Clerk" }).success).toBe(true);
+    expect(UserAccountSchema.safeParse({ ...validAccount, gov_title: "Town Clerk" }).success).toBe(
+      true,
+    );
   });
 });
 
@@ -160,10 +162,19 @@ describe("BoardSchema", () => {
 
   it("accepts all valid board types", () => {
     const types = [
-      "select_board", "planning_board", "zoning_board", "budget_committee",
-      "conservation_commission", "parks_recreation", "harbor_committee",
-      "shellfish_commission", "cemetery_committee", "road_committee",
-      "comp_plan_committee", "broadband_committee", "other",
+      "select_board",
+      "planning_board",
+      "zoning_board",
+      "budget_committee",
+      "conservation_commission",
+      "parks_recreation",
+      "harbor_committee",
+      "shellfish_commission",
+      "cemetery_committee",
+      "road_committee",
+      "comp_plan_committee",
+      "broadband_committee",
+      "other",
     ];
     for (const board_type of types) {
       expect(BoardSchema.safeParse({ ...validBoard, board_type }).success).toBe(true);
@@ -171,7 +182,9 @@ describe("BoardSchema", () => {
   });
 
   it("accepts nullable formality override", () => {
-    expect(BoardSchema.safeParse({ ...validBoard, meeting_formality_override: "formal" }).success).toBe(true);
+    expect(
+      BoardSchema.safeParse({ ...validBoard, meeting_formality_override: "formal" }).success,
+    ).toBe(true);
   });
 });
 
@@ -212,7 +225,9 @@ describe("MeetingSchema", () => {
   });
 
   it("accepts valid HH:MM time format", () => {
-    expect(MeetingSchema.safeParse({ ...validMeeting, scheduled_time: "09:00" }).success).toBe(true);
+    expect(MeetingSchema.safeParse({ ...validMeeting, scheduled_time: "09:00" }).success).toBe(
+      true,
+    );
   });
 
   it("rejects invalid meeting_type", () => {
@@ -294,7 +309,16 @@ describe("MotionSchema", () => {
   });
 
   it("accepts all valid motion types", () => {
-    const types = ["main", "amendment", "substitute", "table", "untable", "postpone", "reconsider", "adjourn"];
+    const types = [
+      "main",
+      "amendment",
+      "substitute",
+      "table",
+      "untable",
+      "postpone",
+      "reconsider",
+      "adjourn",
+    ];
     for (const motion_type of types) {
       expect(MotionSchema.safeParse({ ...validMotion, motion_type }).success).toBe(true);
     }

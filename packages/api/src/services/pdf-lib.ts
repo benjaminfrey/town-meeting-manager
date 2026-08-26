@@ -20,9 +20,7 @@ export interface MeetingNoticeData {
 /**
  * Generate a one-page meeting notice PDF.
  */
-export async function generateMeetingNotice(
-  data: MeetingNoticeData,
-): Promise<Buffer> {
+export async function generateMeetingNotice(data: MeetingNoticeData): Promise<Buffer> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]); // Letter size in points
 
@@ -69,16 +67,17 @@ export async function generateMeetingNotice(
   y -= 40;
 
   // ─── Body Text ──────────────────────────────────────────────────
-  const meetingTypeLabel =
-    data.meetingType === "regular" ? "regular" : data.meetingType;
+  const meetingTypeLabel = data.meetingType === "regular" ? "regular" : data.meetingType;
 
   // Format the date nicely
   let formattedDate = data.meetingDate;
   try {
-    formattedDate = new Date(data.meetingDate + "T00:00:00").toLocaleDateString(
-      "en-US",
-      { weekday: "long", month: "long", day: "numeric", year: "numeric" },
-    );
+    formattedDate = new Date(data.meetingDate + "T00:00:00").toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
   } catch {
     // keep raw date
   }

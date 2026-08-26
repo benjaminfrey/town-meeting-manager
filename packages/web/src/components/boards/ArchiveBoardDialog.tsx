@@ -46,17 +46,21 @@ export function ArchiveBoardDialog({ board, open, onOpenChange }: ArchiveBoardDi
       const now = new Date().toISOString();
 
       // Archive the board
-      const { error: boardError } = await supabase.from('board').update({
-        archived_at: now,
-        updated_at: now,
-      }).eq('id', boardId);
+      const { error: boardError } = await supabase
+        .from("board")
+        .update({
+          archived_at: now,
+          updated_at: now,
+        })
+        .eq("id", boardId);
       if (boardError) throw boardError;
 
       // Archive all active board members
-      const { error: membersError } = await supabase.from('board_member')
-        .update({ status: 'archived' })
-        .eq('board_id', boardId)
-        .eq('status', 'active');
+      const { error: membersError } = await supabase
+        .from("board_member")
+        .update({ status: "archived" })
+        .eq("board_id", boardId)
+        .eq("status", "active");
       if (membersError) throw membersError;
     },
     onSuccess: () => {
@@ -77,16 +81,17 @@ export function ArchiveBoardDialog({ board, open, onOpenChange }: ArchiveBoardDi
   }, [isConfirmed, archiveMutation]);
 
   return (
-    <AlertDialog open={open} onOpenChange={(val) => {
-      if (!val) setConfirmation("");
-      onOpenChange(val);
-    }}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(val) => {
+        if (!val) setConfirmation("");
+        onOpenChange(val);
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Archive {boardName}</AlertDialogTitle>
-          <AlertDialogDescription>
-            This action cannot be undone from the UI.
-          </AlertDialogDescription>
+          <AlertDialogDescription>This action cannot be undone from the UI.</AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-4 py-2 text-sm">

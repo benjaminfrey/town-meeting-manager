@@ -79,11 +79,7 @@ export function renderWithProviders(
         React.createElement(
           MemoryRouter,
           { initialEntries: [route] },
-          React.createElement(
-            MockAuthProvider,
-            { mockUser },
-            children,
-          ),
+          React.createElement(MockAuthProvider, { mockUser }, children),
         ),
       ),
   });

@@ -9,17 +9,8 @@
  */
 
 import { useCallback, useEffect, useRef } from "react";
-import {
-  WizardStage5Schema,
-  type WizardStage5Data,
-} from "@town-meeting/shared";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { WizardStage5Schema, type WizardStage5Data } from "@town-meeting/shared";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { useWizard } from "@/providers/WizardProvider";
@@ -96,9 +87,7 @@ function CardRadioOption({
       role="radio"
       aria-checked={selected}
       className={`w-full rounded-lg border-2 p-4 text-left transition-colors ${
-        selected
-          ? "border-primary bg-primary/5"
-          : "border-border hover:border-muted-foreground/50"
+        selected ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"
       }`}
       onClick={() => onSelect(value)}
     >
@@ -129,12 +118,12 @@ interface WizardStage5Props {
 export function WizardStage5({ onValidityChange, onRegister }: WizardStage5Props) {
   const { state } = useWizard();
 
-  const initialValues: WizardStage5Data = state.stage5.meetingFormality
-    ? state.stage5
-    : DEFAULTS;
+  const initialValues: WizardStage5Data = state.stage5.meetingFormality ? state.stage5 : DEFAULTS;
 
-  const { values, isValid, setValue, validate } =
-    useWizardForm<WizardStage5Data>(WizardStage5Schema, initialValues);
+  const { values, isValid, setValue, validate } = useWizardForm<WizardStage5Data>(
+    WizardStage5Schema,
+    initialValues,
+  );
 
   // Notify parent of validity
   const prevValid = useRef(isValid);
@@ -158,16 +147,13 @@ export function WizardStage5({ onValidityChange, onRegister }: WizardStage5Props
     <Card>
       <CardHeader>
         <CardTitle>Meeting Style &amp; Minutes</CardTitle>
-        <CardDescription>
-          Set the town-level defaults for how meetings run
-        </CardDescription>
+        <CardDescription>Set the town-level defaults for how meetings run</CardDescription>
       </CardHeader>
 
       <CardContent>
         <div className="space-y-8">
           <p className="text-sm text-muted-foreground">
-            These apply to all boards as defaults and can be overridden per board
-            later.
+            These apply to all boards as defaults and can be overridden per board later.
           </p>
 
           {/* Meeting formality */}
@@ -182,10 +168,7 @@ export function WizardStage5({ onValidityChange, onRegister }: WizardStage5Props
                   description={opt.description}
                   selected={values.meetingFormality === opt.value}
                   onSelect={(v) =>
-                    setValue(
-                      "meetingFormality",
-                      v as WizardStage5Data["meetingFormality"]
-                    )
+                    setValue("meetingFormality", v as WizardStage5Data["meetingFormality"])
                   }
                   name="meetingFormality"
                 />
@@ -204,12 +187,7 @@ export function WizardStage5({ onValidityChange, onRegister }: WizardStage5Props
                   label={opt.label}
                   description={opt.description}
                   selected={values.minutesStyle === opt.value}
-                  onSelect={(v) =>
-                    setValue(
-                      "minutesStyle",
-                      v as WizardStage5Data["minutesStyle"]
-                    )
-                  }
+                  onSelect={(v) => setValue("minutesStyle", v as WizardStage5Data["minutesStyle"])}
                   name="minutesStyle"
                 />
               ))}

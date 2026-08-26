@@ -32,13 +32,10 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  signIn: (
-    email: string,
-    password: string
-  ) => Promise<{ error: string | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (
     email: string,
-    password: string
+    password: string,
   ) => Promise<{ error: string | null; confirmEmail: boolean }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
@@ -138,10 +135,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ─── Sign in ─────────────────────────────────────────────────────
 
   const signIn = useCallback(
-    async (
-      email: string,
-      password: string
-    ): Promise<{ error: string | null }> => {
+    async (email: string, password: string): Promise<{ error: string | null }> => {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -163,8 +157,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error.message.includes("Failed to fetch")
         ) {
           return {
-            error:
-              "Unable to connect. Please check your internet connection.",
+            error: "Unable to connect. Please check your internet connection.",
           };
         }
         return { error: error.message };
@@ -173,7 +166,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Success — the onAuthStateChange handler will update state
       return { error: null };
     },
-    []
+    [],
   );
 
   // ─── Sign up ─────────────────────────────────────────────────────
@@ -181,7 +174,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signUp = useCallback(
     async (
       email: string,
-      password: string
+      password: string,
     ): Promise<{ error: string | null; confirmEmail: boolean }> => {
       const { data, error } = await supabase.auth.signUp({ email, password });
 
@@ -198,8 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           error.message.includes("Failed to fetch")
         ) {
           return {
-            error:
-              "Unable to connect. Please check your internet connection.",
+            error: "Unable to connect. Please check your internet connection.",
             confirmEmail: false,
           };
         }
@@ -208,12 +200,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Supabase returns the user but with no identities when email
       // confirmation is required (user exists but unconfirmed).
-      const needsConfirmation =
-        data.user?.identities?.length === 0 || !data.user?.confirmed_at;
+      const needsConfirmation = data.user?.identities?.length === 0 || !data.user?.confirmed_at;
 
       return { error: null, confirmEmail: needsConfirmation };
     },
-    []
+    [],
   );
 
   // ─── Sign out ────────────────────────────────────────────────────
@@ -224,29 +215,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ─── Reset password ──────────────────────────────────────────────
 
-  const resetPassword = useCallback(
-    async (email: string): Promise<{ error: string | null }> => {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
+  const resetPassword = useCallback(async (email: string): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
 
-      if (error) {
-        if (
-          error.message.includes("fetch") ||
-          error.message.includes("network")
-        ) {
-          return {
-            error:
-              "Unable to connect. Please check your internet connection.",
-          };
-        }
-        return { error: error.message };
+    if (error) {
+      if (error.message.includes("fetch") || error.message.includes("network")) {
+        return {
+          error: "Unable to connect. Please check your internet connection.",
+        };
       }
+      return { error: error.message };
+    }
 
-      return { error: null };
-    },
-    []
-  );
+    return { error: null };
+  }, []);
 
   // ─── Context value ───────────────────────────────────────────────
 

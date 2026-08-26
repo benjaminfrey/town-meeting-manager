@@ -30,9 +30,7 @@ export function InstallBanner() {
 
   useEffect(() => {
     // Already installed as standalone?
-    const standalone = window.matchMedia(
-      "(display-mode: standalone)",
-    ).matches;
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
     setIsStandalone(standalone);
     if (standalone) return;
 
@@ -106,23 +104,16 @@ export function InstallBanner() {
       <div className="flex items-start gap-3">
         {/* Icon */}
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#1e3a5f] text-white">
-          {isIOS ? (
-            <Share className="h-5 w-5" />
-          ) : (
-            <Download className="h-5 w-5" />
-          )}
+          {isIOS ? <Share className="h-5 w-5" /> : <Download className="h-5 w-5" />}
         </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium">
-            Install Town Meeting Manager
-          </p>
+          <p className="text-sm font-medium">Install Town Meeting Manager</p>
           {isIOS ? (
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Tap the{" "}
-              <Share className="inline h-3 w-3 -mt-0.5" /> Share button, then
-              &ldquo;Add to Home Screen&rdquo;
+              Tap the <Share className="inline h-3 w-3 -mt-0.5" /> Share button, then &ldquo;Add to
+              Home Screen&rdquo;
             </p>
           ) : (
             <p className="mt-0.5 text-xs text-muted-foreground">

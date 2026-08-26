@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'No linter configured yet'",
+    "lint": "eslint src --config ../../eslint.config.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

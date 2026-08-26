@@ -1,19 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  MapPin,
-  X,
-} from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin, X } from "lucide-react";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchBoards, fetchCalendarEvents } from "@/lib/portal-api";
-import type {
-  PortalBoardSummary,
-  PortalCalendarEvent,
-} from "@town-meeting/shared";
+import type { PortalBoardSummary, PortalCalendarEvent } from "@town-meeting/shared";
 
 const BOARD_COLORS = [
   "bg-blue-500",
@@ -180,14 +170,11 @@ export default function MeetingCalendar() {
   const rows = Math.ceil(totalCells / 7);
 
   const today = new Date();
-  const isCurrentMonth =
-    today.getFullYear() === year && today.getMonth() === month;
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
   const todayDate = today.getDate();
 
   // Meetings for selected day
-  const selectedDayMeetings = selectedDay
-    ? meetingsByDay.get(selectedDay) || []
-    : [];
+  const selectedDayMeetings = selectedDay ? meetingsByDay.get(selectedDay) || [] : [];
 
   return (
     <div>
@@ -277,9 +264,7 @@ export default function MeetingCalendar() {
                     const day = cellIndex - firstDayOfWeek + 1;
                     const isValidDay = day >= 1 && day <= daysInMonth;
                     const isToday = isCurrentMonth && day === todayDate;
-                    const dayMeetings = isValidDay
-                      ? meetingsByDay.get(day) || []
-                      : [];
+                    const dayMeetings = isValidDay ? meetingsByDay.get(day) || [] : [];
                     const isSelected = selectedDay === day;
 
                     return (
@@ -289,16 +274,10 @@ export default function MeetingCalendar() {
                           isValidDay ? "cursor-pointer" : ""
                         } ${!isValidDay ? "bg-muted" : ""} ${
                           isToday ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : ""
-                        } ${
-                          isSelected && !isToday
-                            ? "bg-muted ring-2 ring-inset ring-ring"
-                            : ""
-                        }`}
+                        } ${isSelected && !isToday ? "bg-muted ring-2 ring-inset ring-ring" : ""}`}
                         onClick={() => {
                           if (isValidDay) {
-                            setSelectedDay(
-                              selectedDay === day ? null : day,
-                            );
+                            setSelectedDay(selectedDay === day ? null : day);
                           }
                         }}
                         role={isValidDay ? "button" : undefined}
@@ -319,19 +298,14 @@ export default function MeetingCalendar() {
                           <>
                             <span
                               className={`inline-block text-sm ${
-                                isToday
-                                  ? "font-bold text-blue-700"
-                                  : "text-foreground"
+                                isToday ? "font-bold text-blue-700" : "text-foreground"
                               }`}
                             >
                               {day}
                             </span>
                             <div className="mt-0.5 space-y-0.5">
                               {dayMeetings.slice(0, 3).map((m) => (
-                                <div
-                                  key={m.id}
-                                  className="flex items-center gap-1"
-                                >
+                                <div key={m.id} className="flex items-center gap-1">
                                   <span
                                     className={`inline-block h-2 w-2 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                                     aria-hidden="true"
@@ -381,23 +355,15 @@ export default function MeetingCalendar() {
                               className={`inline-block h-2.5 w-2.5 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                               aria-hidden="true"
                             />
-                            <span className="font-medium text-foreground">
-                              {m.board_name}
-                            </span>
+                            <span className="font-medium text-foreground">{m.board_name}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
-                              <Clock
-                                className="h-3.5 w-3.5"
-                                aria-hidden="true"
-                              />
+                              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                               {formatTime(m.scheduled_time)}
                             </span>
                             <span className="flex items-center gap-1">
-                              <MapPin
-                                className="h-3.5 w-3.5"
-                                aria-hidden="true"
-                              />
+                              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
                               {m.location}
                             </span>
                           </div>
@@ -407,10 +373,7 @@ export default function MeetingCalendar() {
                           className="shrink-0 text-sm font-medium text-blue-700 underline hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                         >
                           View Details
-                          <ChevronRight
-                            className="ml-0.5 inline h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
+                          <ChevronRight className="ml-0.5 inline h-3.5 w-3.5" aria-hidden="true" />
                         </a>
                       </div>
                     </li>
@@ -450,9 +413,10 @@ export default function MeetingCalendar() {
               <div className="rounded-lg border border-border bg-card shadow-sm">
                 <ul className="divide-y divide-border">
                   {filteredMeetings
-                    .sort((a, b) =>
-                      a.scheduled_date.localeCompare(b.scheduled_date) ||
-                      a.scheduled_time.localeCompare(b.scheduled_time),
+                    .sort(
+                      (a, b) =>
+                        a.scheduled_date.localeCompare(b.scheduled_date) ||
+                        a.scheduled_time.localeCompare(b.scheduled_time),
                     )
                     .map((m) => (
                       <li key={m.id}>
@@ -467,35 +431,25 @@ export default function MeetingCalendar() {
                                   className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${boardColorMap.get(m.board_id) || "bg-muted-foreground"}`}
                                   aria-hidden="true"
                                 />
-                                <span className="font-medium text-foreground">
-                                  {m.board_name}
-                                </span>
+                                <span className="font-medium text-foreground">{m.board_name}</span>
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                                 <span className="flex items-center gap-1">
-                                  <Calendar
-                                    className="h-3.5 w-3.5"
-                                    aria-hidden="true"
-                                  />
-                                  {new Date(
-                                    m.scheduled_date + "T00:00:00",
-                                  ).toLocaleDateString("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                  })}
+                                  <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+                                  {new Date(m.scheduled_date + "T00:00:00").toLocaleDateString(
+                                    "en-US",
+                                    {
+                                      month: "short",
+                                      day: "numeric",
+                                    },
+                                  )}
                                 </span>
                                 <span className="flex items-center gap-1">
-                                  <Clock
-                                    className="h-3.5 w-3.5"
-                                    aria-hidden="true"
-                                  />
+                                  <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                                   {formatTime(m.scheduled_time)}
                                 </span>
                                 <span className="flex items-center gap-1">
-                                  <MapPin
-                                    className="h-3.5 w-3.5"
-                                    aria-hidden="true"
-                                  />
+                                  <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
                                   {m.location}
                                 </span>
                               </div>

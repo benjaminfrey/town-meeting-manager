@@ -166,10 +166,7 @@ vi.mock("@/components/meeting/AdjournmentControls", () => ({
       <button data-testid="adjourn-motion" onClick={props.onAdjournMotion}>
         Motion
       </button>
-      <button
-        data-testid="adjourn-wo"
-        onClick={props.onAdjournWithoutObjection}
-      >
+      <button data-testid="adjourn-wo" onClick={props.onAdjournWithoutObjection}>
         WO
       </button>
     </div>
@@ -185,14 +182,11 @@ vi.mock("@/components/meeting/ExecSessionBanner", () => ({
 }));
 
 vi.mock("@/components/meeting/MotionCaptureDialog", () => ({
-  MotionCaptureDialog: (props: any) =>
-    props.open ? <div data-testid="motion-dialog" /> : null,
+  MotionCaptureDialog: (props: any) => (props.open ? <div data-testid="motion-dialog" /> : null),
 }));
 
 vi.mock("@/components/meeting/MeetingTimer", () => ({
-  MeetingTimer: (props: any) => (
-    <span data-testid="meeting-timer">{props.startedAt}</span>
-  ),
+  MeetingTimer: (props: any) => <span data-testid="meeting-timer">{props.startedAt}</span>,
 }));
 
 vi.mock("@/components/RouteErrorBoundary", () => ({
@@ -377,7 +371,9 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ meeting: noticedMeeting });
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByTestId("meeting-start-flow")).toBeInTheDocument();
     expect(screen.getByTestId("start-flow-meeting-id")).toHaveTextContent("meeting-1");
@@ -387,7 +383,9 @@ describe("LiveMeetingPage", () => {
   it("renders three-panel layout for in-progress meeting", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
@@ -398,7 +396,9 @@ describe("LiveMeetingPage", () => {
   it("displays meeting header with board name and status", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByText("Regular Meeting")).toBeInTheDocument();
     expect(screen.getByText("Planning Board")).toBeInTheDocument();
@@ -408,7 +408,9 @@ describe("LiveMeetingPage", () => {
   it("shows attendance panel with member count", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     const memberCount = screen.getByTestId("member-count");
     expect(memberCount).toHaveTextContent("3");
@@ -417,7 +419,9 @@ describe("LiveMeetingPage", () => {
   it("renders agenda navigation with correct sections", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     // mockAgendaItems has 1 section (section-1) with 1 child item
     const sectionCount = screen.getByTestId("nav-section-count");
@@ -427,7 +431,9 @@ describe("LiveMeetingPage", () => {
   it("renders detail panel for current agenda item", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     const detailTitle = screen.getByTestId("detail-title");
     expect(detailTitle).toHaveTextContent("Site Plan Review");
@@ -441,7 +447,9 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ meeting: adjournedMeeting });
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", {
       replace: true,
@@ -463,19 +471,21 @@ describe("LiveMeetingPage", () => {
     };
     setupLiveMeetingQueries({ execSessions: [activeExecSession] });
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByTestId("exec-banner")).toBeInTheDocument();
-    expect(screen.getByTestId("exec-citation")).toHaveTextContent(
-      "1 M.R.S.A. 405(6)(A)",
-    );
+    expect(screen.getByTestId("exec-citation")).toHaveTextContent("1 M.R.S.A. 405(6)(A)");
     expect(screen.queryByTestId("adjournment-controls")).not.toBeInTheDocument();
   });
 
   it("renders adjournment controls", () => {
     setupLiveMeetingQueries();
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByTestId("adjournment-controls")).toBeInTheDocument();
     expect(screen.getByTestId("adjourn-motion")).toBeInTheDocument();
@@ -492,7 +502,9 @@ describe("LiveMeetingPage", () => {
       agendaItems: [],
     });
 
-    renderWithProviders(<LiveMeetingPage {...{loaderData: { meetingId: "meeting-1" }} as any} />);
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
 
     expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();

@@ -11,27 +11,13 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import {
-  Plus,
-  Star,
-  Archive,
-  ArrowRightLeft,
-  Pencil,
-  Mail,
-  RotateCcw,
-} from "lucide-react";
+import { Plus, Star, Archive, ArrowRightLeft, Pencil, Mail, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddMemberDialog } from "@/components/members/AddMemberDialog";
 import { MemberArchiveDialog } from "@/components/members/MemberArchiveDialog";
 import { MemberTransitionDialog } from "@/components/members/MemberTransitionDialog";
@@ -99,9 +85,7 @@ export function MemberRoster({
   const [showArchived, setShowArchived] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [archiveMember, setArchiveMember] = useState<MemberRow | null>(null);
-  const [transitionMember, setTransitionMember] = useState<MemberRow | null>(
-    null,
-  );
+  const [transitionMember, setTransitionMember] = useState<MemberRow | null>(null);
   const [editGovTitle, setEditGovTitle] = useState<MemberRow | null>(null);
 
   // ─── Reactive queries ───────────────────────────────────────────────
@@ -109,9 +93,9 @@ export function MemberRoster({
     queryKey: queryKeys.members.byBoard(boardId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board_member')
-        .select('*, person(*)')
-        .eq('board_id', boardId);
+        .from("board_member")
+        .select("*, person(*)")
+        .eq("board_id", boardId);
       if (error) throw error;
       return data;
     },
@@ -121,10 +105,7 @@ export function MemberRoster({
   const { data: uaRows = [] } = useQuery({
     queryKey: queryKeys.userAccounts.byTown(townId),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('user_account')
-        .select('*')
-        .eq('town_id', townId);
+      const { data, error } = await supabase.from("user_account").select("*").eq("town_id", townId);
       if (error) throw error;
       return data;
     },
@@ -136,10 +117,10 @@ export function MemberRoster({
     queryKey: queryKeys.invitations.byTown(townId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('invitation')
-        .select('id, person_id, token, status, sent_at, expires_at, accepted_at')
-        .eq('town_id', townId)
-        .order('created_at', { ascending: false });
+        .from("invitation")
+        .select("id, person_id, token, status, sent_at, expires_at, accepted_at")
+        .eq("town_id", townId)
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -300,10 +281,7 @@ export function MemberRoster({
               checked={showArchived}
               onCheckedChange={setShowArchived}
             />
-            <Label
-              htmlFor="show-archived-members"
-              className="text-sm text-muted-foreground"
-            >
+            <Label htmlFor="show-archived-members" className="text-sm text-muted-foreground">
               Show archived ({archivedCount})
             </Label>
           </div>
@@ -316,11 +294,7 @@ export function MemberRoster({
               No members added yet. Add your {boardName} members to get started.
             </p>
             {!isArchived && (
-              <Button
-                className="mt-4"
-                size="sm"
-                onClick={() => setAddDialogOpen(true)}
-              >
+              <Button className="mt-4" size="sm" onClick={() => setAddDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Member
               </Button>
@@ -331,23 +305,13 @@ export function MemberRoster({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Name
+                    {electionMethod === "role_titled" ? "Seat Title" : "Position"}
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    {electionMethod === "role_titled"
-                      ? "Seat Title"
-                      : "Position"}
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Term
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Role
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    Status
-                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Term</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                     Actions
                   </th>
@@ -374,9 +338,7 @@ export function MemberRoster({
                               </span>
                             )}
                           </span>
-                          <div className="text-xs text-muted-foreground">
-                            {member.email}
-                          </div>
+                          <div className="text-xs text-muted-foreground">{member.email}</div>
                         </div>
                       </div>
                     </td>
@@ -478,9 +440,7 @@ export function MemberRoster({
                               size="sm"
                               title="Send invitation email"
                               disabled={isMutating}
-                              onClick={() =>
-                                sendInviteMutation.mutate(member.invitation_id!)
-                              }
+                              onClick={() => sendInviteMutation.mutate(member.invitation_id!)}
                             >
                               <Mail className="h-3.5 w-3.5" />
                             </Button>
@@ -498,9 +458,7 @@ export function MemberRoster({
                               size="sm"
                               title="Resend invitation"
                               disabled={isMutating}
-                              onClick={() =>
-                                resendInviteMutation.mutate(member.invitation_id!)
-                              }
+                              onClick={() => resendInviteMutation.mutate(member.invitation_id!)}
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
                             </Button>

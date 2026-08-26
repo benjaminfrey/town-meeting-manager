@@ -17,17 +17,14 @@ import {
   isBroadcastEvent,
   renderEmailTemplate,
 } from "./email-sender.js";
-import {
-  dispatchPushToTown,
-  type PushEventType,
-} from "../lib/push.js";
+import { dispatchPushToTown, type PushEventType } from "../lib/push.js";
 
 // ─── Retry backoff schedule (seconds after failure) ──────────────────
 
 const RETRY_DELAYS_SECONDS = [
-  0,           // attempt 1: immediate (first try)
-  5 * 60,      // attempt 2: 5 minutes
-  30 * 60,     // attempt 3: 30 minutes
+  0, // attempt 1: immediate (first try)
+  5 * 60, // attempt 2: 5 minutes
+  30 * 60, // attempt 3: 30 minutes
 ];
 const MAX_RETRIES = 3;
 
@@ -49,9 +46,7 @@ async function getBoardSubscribers(
     .eq("board_id", boardId)
     .eq("status", "active");
 
-  const memberIds = (members ?? []).map(
-    (m: { user_account_id: string }) => m.user_account_id,
-  );
+  const memberIds = (members ?? []).map((m: { user_account_id: string }) => m.user_account_id);
 
   if (memberIds.length === 0) return [];
 
@@ -235,11 +230,7 @@ export class NotificationService {
       const payload = event.payload as Record<string, unknown>;
 
       // 1. Find subscribers
-      const subscribers = await this.getSubscribersForEvent(
-        eventType,
-        townId,
-        payload,
-      );
+      const subscribers = await this.getSubscribersForEvent(eventType, townId, payload);
 
       // 2. Filter disabled prefs
       const disabledIds = await getDisabledSubscriberIds(
@@ -293,25 +284,21 @@ export class NotificationService {
         const { html, text, subject } = renderEmailTemplate(templateName, variables);
         const from = `${senderConfig.senderName} <${senderConfig.senderEmail}>`;
 
-        await this.dispatchEmail(
-          deliveryId,
-          emailSender,
-          {
-            to: subscriber.email,
-            from,
-            replyTo: senderConfig.replyTo ?? undefined,
-            subject,
-            htmlBody: html,
-            textBody: text,
-            tag: eventType,
-            messageStream,
-            metadata: {
-              town_id: townId,
-              event_id: eventId,
-              delivery_id: deliveryId,
-            },
+        await this.dispatchEmail(deliveryId, emailSender, {
+          to: subscriber.email,
+          from,
+          replyTo: senderConfig.replyTo ?? undefined,
+          subject,
+          htmlBody: html,
+          textBody: text,
+          tag: eventType,
+          messageStream,
+          metadata: {
+            town_id: townId,
+            event_id: eventId,
+            delivery_id: deliveryId,
           },
-        );
+        });
       }
 
       // 7. Dispatch push notifications (if event type maps to a push event)
@@ -322,13 +309,9 @@ export class NotificationService {
         .from("notification_event")
         .update({ status: "completed", processed_at: new Date().toISOString() })
         .eq("id", eventId);
-
     } catch (err) {
       console.error(`[notification] Event ${eventId} processing failed:`, err);
-      await this.supabase
-        .from("notification_event")
-        .update({ status: "failed" })
-        .eq("id", eventId);
+      await this.supabase.from("notification_event").update({ status: "failed" }).eq("id", eventId);
     }
   }
 
@@ -350,10 +333,8 @@ export class NotificationService {
           sent_at: new Date().toISOString(),
         })
         .eq("id", deliveryId);
-
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : String(err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[notification] Dispatch failed for delivery ${deliveryId}:`, errorMessage);
 
       await this.supabase
@@ -429,13 +410,12 @@ export class NotificationService {
     };
   }
 
-  async getSubscriberDeliveryHistory(
-    userId: string,
-    limit = 20,
-  ): Promise<DeliveryHistoryRow[]> {
+  async getSubscriberDeliveryHistory(userId: string, limit = 20): Promise<DeliveryHistoryRow[]> {
     const { data } = await this.supabase
       .from("notification_delivery")
-      .select("id, event_id, status, sent_at, delivered_at, created_at, notification_event(event_type, payload)")
+      .select(
+        "id, event_id, status, sent_at, delivered_at, created_at, notification_event(event_type, payload)",
+      )
       .eq("subscriber_id", userId)
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -500,7 +480,8 @@ export class NotificationService {
 
       const variables = {
         ...payload,
-        recipientName: (subscriber as SubscriberRow).display_name ?? (subscriber as SubscriberRow).email,
+        recipientName:
+          (subscriber as SubscriberRow).display_name ?? (subscriber as SubscriberRow).email,
         isBroadcast,
         preferencesUrl: `${process.env.APP_URL ?? "https://app.townmeetingmanager.com"}/settings/notifications`,
       };
@@ -534,10 +515,12 @@ export class NotificationService {
           error_message: null,
         })
         .eq("id", delivery.id);
-
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(`[notification] Retry ${newRetryCount} failed for delivery ${delivery.id}:`, errorMessage);
+      console.error(
+        `[notification] Retry ${newRetryCount} failed for delivery ${delivery.id}:`,
+        errorMessage,
+      );
 
       const isPermanentFailure = newRetryCount >= MAX_RETRIES;
 
@@ -575,7 +558,10 @@ export class NotificationService {
     const pushEventType = PUSH_EVENT_MAP[eventType];
     if (!pushEventType) return;
 
-    const PUSH_PAYLOAD_MAP: Record<string, (p: Record<string, unknown>) => { title: string; body: string; tag: string; url: string }> = {
+    const PUSH_PAYLOAD_MAP: Record<
+      string,
+      (p: Record<string, unknown>) => { title: string; body: string; tag: string; url: string }
+    > = {
       agenda_published: (p) => ({
         title: "Agenda Published",
         body: `The agenda for ${(p.meeting_title as string) ?? "a meeting"} has been published.`,

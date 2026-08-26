@@ -83,7 +83,13 @@ export function AgendaNavigationPanel({
     return (
       <div className="flex h-full w-10 flex-col border-r bg-card">
         <div className="flex items-center justify-center border-b py-3">
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} title="Expand agenda">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={onToggleCollapse}
+            title="Expand agenda"
+          >
             <PanelLeftOpen className="h-4 w-4" />
           </Button>
         </div>
@@ -100,9 +106,7 @@ export function AgendaNavigationPanel({
                   title={item.title}
                   className={cn(
                     "flex w-full items-center justify-center py-1.5 transition-colors",
-                    isCurrent
-                      ? "border-l-2 border-primary bg-primary/10"
-                      : "hover:bg-muted",
+                    isCurrent ? "border-l-2 border-primary bg-primary/10" : "hover:bg-muted",
                     readOnly && !isCurrent && "cursor-default",
                   )}
                 >
@@ -121,7 +125,13 @@ export function AgendaNavigationPanel({
     <div className="flex h-full w-64 flex-col border-r bg-card">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">Agenda</h2>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggleCollapse} title="Collapse agenda">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={onToggleCollapse}
+          title="Collapse agenda"
+        >
           <PanelLeftClose className="h-4 w-4" />
         </Button>
       </div>

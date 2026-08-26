@@ -17,10 +17,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
-import {
-  checkRoleMutualExclusivity,
-  ALL_PERMISSION_ACTIONS,
-} from "@town-meeting/shared";
+import { checkRoleMutualExclusivity, ALL_PERMISSION_ACTIONS } from "@town-meeting/shared";
 import type { PermissionAction, PermissionsMatrix, UserRole } from "@town-meeting/shared";
 import {
   Dialog,
@@ -36,10 +33,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { useWizardForm } from "@/hooks/useWizardForm";
-import {
-  BoardMemberConfigForm,
-  type BoardMemberFormData,
-} from "./BoardMemberConfigForm";
+import { BoardMemberConfigForm, type BoardMemberFormData } from "./BoardMemberConfigForm";
 import { StaffAccountFlow, type StaffAccountResult } from "./StaffAccountFlow";
 import { RoleConflictDialog } from "./RoleConflictDialog";
 
@@ -89,12 +83,8 @@ export function AddMemberDialog({
   const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [selectedPerson, setSelectedPerson] = useState<SelectedPerson | null>(
-    null,
-  );
-  const [selectedRole, setSelectedRole] = useState<
-    "board_member" | "staff" | null
-  >(null);
+  const [selectedPerson, setSelectedPerson] = useState<SelectedPerson | null>(null);
+  const [selectedRole, setSelectedRole] = useState<"board_member" | "staff" | null>(null);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
 
   // Board member config
@@ -113,14 +103,14 @@ export function AddMemberDialog({
   const searchTerm = searchQuery.trim().length >= 2 ? `%${searchQuery.trim()}%` : "";
 
   const { data: personRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), 'search', searchTerm],
+    queryKey: [...queryKeys.persons.byTown(townId), "search", searchTerm],
     queryFn: async () => {
       const term = searchQuery.trim();
       const { data, error } = await supabase
-        .from('person')
-        .select('*')
-        .eq('town_id', townId)
-        .is('archived_at', null)
+        .from("person")
+        .select("*")
+        .eq("town_id", townId)
+        .is("archived_at", null)
         .or(`name.ilike.%${term}%,email.ilike.%${term}%`);
       if (error) throw error;
       return data;
@@ -132,10 +122,10 @@ export function AddMemberDialog({
     queryKey: queryKeys.userAccounts.byTown(townId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('user_account')
-        .select('*')
-        .eq('town_id', townId)
-        .is('archived_at', null);
+        .from("user_account")
+        .select("*")
+        .eq("town_id", townId)
+        .is("archived_at", null);
       if (error) throw error;
       return data;
     },
@@ -143,13 +133,13 @@ export function AddMemberDialog({
   });
 
   const { data: bmRows = [] } = useQuery({
-    queryKey: [...queryKeys.members.all, 'activeCounts', townId],
+    queryKey: [...queryKeys.members.all, "activeCounts", townId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board_member')
-        .select('person_id')
-        .eq('town_id', townId)
-        .eq('status', 'active');
+        .from("board_member")
+        .select("person_id")
+        .eq("town_id", townId)
+        .eq("status", "active");
       if (error) throw error;
       return data;
     },
@@ -158,13 +148,13 @@ export function AddMemberDialog({
 
   // Check existing membership on this board
   const { data: existingMemberRows = [] } = useQuery({
-    queryKey: [...queryKeys.members.byBoard(boardId), 'personIds'],
+    queryKey: [...queryKeys.members.byBoard(boardId), "personIds"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board_member')
-        .select('person_id')
-        .eq('board_id', boardId)
-        .eq('status', 'active');
+        .from("board_member")
+        .select("person_id")
+        .eq("board_id", boardId)
+        .eq("status", "active");
       if (error) throw error;
       return data;
     },
@@ -172,19 +162,13 @@ export function AddMemberDialog({
   });
 
   const existingMemberPersonIds = useMemo(
-    () =>
-      new Set(
-        existingMemberRows.map((r) => String(r.person_id)),
-      ),
+    () => new Set(existingMemberRows.map((r) => String(r.person_id))),
     [existingMemberRows],
   );
 
   // Build user account lookup
   const uaMap = useMemo(() => {
-    const map = new Map<
-      string,
-      { id: string; role: string; archived_at: string | null }
-    >();
+    const map = new Map<string, { id: string; role: string; archived_at: string | null }>();
     for (const ua of uaRows) {
       map.set(String(ua.person_id), {
         id: String(ua.id),
@@ -226,18 +210,18 @@ export function AddMemberDialog({
   // Check email uniqueness
   const emailToCheck = personForm.values.email.toLowerCase().trim();
   const { data: emailCheckRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), 'emailCheck', emailToCheck],
+    queryKey: [...queryKeys.persons.byTown(townId), "emailCheck", emailToCheck],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('person')
-        .select('id')
-        .eq('town_id', townId)
-        .eq('email', emailToCheck)
+        .from("person")
+        .select("id")
+        .eq("town_id", townId)
+        .eq("email", emailToCheck)
         .limit(1);
       if (error) throw error;
       return data;
     },
-    enabled: !!emailToCheck && emailToCheck.includes('@'),
+    enabled: !!emailToCheck && emailToCheck.includes("@"),
   });
   const emailExists = emailCheckRows.length > 0;
 
@@ -304,7 +288,7 @@ export function AddMemberDialog({
       // Create new person if needed
       if (!personId) {
         personId = crypto.randomUUID();
-        const { error } = await supabase.from('person').insert({
+        const { error } = await supabase.from("person").insert({
           id: personId,
           town_id: townId,
           name: selectedPerson.name,
@@ -327,7 +311,7 @@ export function AddMemberDialog({
           emptyPerms.global[action] = false;
         }
 
-        const { error } = await supabase.from('user_account').insert({
+        const { error } = await supabase.from("user_account").insert({
           id: userAccountId,
           person_id: personId,
           town_id: townId,
@@ -341,25 +325,25 @@ export function AddMemberDialog({
       } else if (bmConfig.gov_title.trim()) {
         // Update gov_title on existing account
         const { error } = await supabase
-          .from('user_account')
+          .from("user_account")
           .update({ gov_title: bmConfig.gov_title.trim() })
-          .eq('id', userAccountId);
+          .eq("id", userAccountId);
         if (error) throw error;
       }
 
       // Unset previous default rec sec if needed
       if (bmConfig.is_default_rec_sec) {
         const { error } = await supabase
-          .from('board_member')
+          .from("board_member")
           .update({ is_default_rec_sec: false })
-          .eq('board_id', boardId)
-          .eq('is_default_rec_sec', true);
+          .eq("board_id", boardId)
+          .eq("is_default_rec_sec", true);
         if (error) throw error;
       }
 
       // Create board_members entry
       const bmId = crypto.randomUUID();
-      const { error: bmError } = await supabase.from('board_member').insert({
+      const { error: bmError } = await supabase.from("board_member").insert({
         id: bmId,
         person_id: personId,
         board_id: boardId,
@@ -377,7 +361,7 @@ export function AddMemberDialog({
       const invId = crypto.randomUUID();
       const token = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { error: invError } = await supabase.from('invitation').insert({
+      const { error: invError } = await supabase.from("invitation").insert({
         id: invId,
         person_id: personId,
         user_account_id: userAccountId,
@@ -425,7 +409,7 @@ export function AddMemberDialog({
       // Create new person if needed
       if (!personId) {
         personId = crypto.randomUUID();
-        const { error } = await supabase.from('person').insert({
+        const { error } = await supabase.from("person").insert({
           id: personId,
           town_id: townId,
           name: selectedPerson.name,
@@ -437,7 +421,7 @@ export function AddMemberDialog({
 
       // Create user_account as staff
       const userAccountId = crypto.randomUUID();
-      const { error: uaError } = await supabase.from('user_account').insert({
+      const { error: uaError } = await supabase.from("user_account").insert({
         id: userAccountId,
         person_id: personId,
         town_id: townId,
@@ -453,7 +437,7 @@ export function AddMemberDialog({
       const invId = crypto.randomUUID();
       const token = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { error: invError } = await supabase.from('invitation').insert({
+      const { error: invError } = await supabase.from("invitation").insert({
         id: invId,
         person_id: personId,
         user_account_id: userAccountId,
@@ -537,9 +521,7 @@ export function AddMemberDialog({
       >
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {step === 1 ? "Add Member" : "Configure Account"}
-            </DialogTitle>
+            <DialogTitle>{step === 1 ? "Add Member" : "Configure Account"}</DialogTitle>
             <DialogDescription>
               {step === 1
                 ? `Search for an existing person or create a new one for ${boardName}.`
@@ -584,12 +566,8 @@ export function AddMemberDialog({
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <div className="text-sm font-medium">
-                              {person.name}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {person.email}
-                            </div>
+                            <div className="text-sm font-medium">{person.name}</div>
+                            <div className="text-xs text-muted-foreground">{person.email}</div>
                           </div>
                           <div className="flex items-center gap-1.5">
                             {person.role && (
@@ -618,9 +596,7 @@ export function AddMemberDialog({
               {/* No results + create option */}
               {searchTerm && searchResults.length === 0 && !showCreateForm && (
                 <div className="text-center py-4">
-                  <p className="text-sm text-muted-foreground mb-2">
-                    No matching people found.
-                  </p>
+                  <p className="text-sm text-muted-foreground mb-2">No matching people found.</p>
                   <Button
                     variant="outline"
                     size="sm"
@@ -661,16 +637,12 @@ export function AddMemberDialog({
                     <Label>Name</Label>
                     <Input
                       value={personForm.values.name}
-                      onChange={(e) =>
-                        personForm.setValue("name", e.target.value)
-                      }
+                      onChange={(e) => personForm.setValue("name", e.target.value)}
                       onBlur={() => personForm.handleBlur("name")}
                       placeholder="Full name"
                     />
                     {personForm.errors.name && (
-                      <p className="text-xs text-destructive">
-                        {personForm.errors.name}
-                      </p>
+                      <p className="text-xs text-destructive">{personForm.errors.name}</p>
                     )}
                   </div>
                   <div className="space-y-1.5">
@@ -678,16 +650,12 @@ export function AddMemberDialog({
                     <Input
                       type="email"
                       value={personForm.values.email}
-                      onChange={(e) =>
-                        personForm.setValue("email", e.target.value)
-                      }
+                      onChange={(e) => personForm.setValue("email", e.target.value)}
                       onBlur={() => personForm.handleBlur("email")}
                       placeholder="email@example.com"
                     />
                     {personForm.errors.email && (
-                      <p className="text-xs text-destructive">
-                        {personForm.errors.email}
-                      </p>
+                      <p className="text-xs text-destructive">{personForm.errors.email}</p>
                     )}
                     {emailExists && (
                       <p className="text-xs text-destructive">
@@ -713,9 +681,7 @@ export function AddMemberDialog({
               {/* Person info */}
               <div className="rounded-lg border bg-muted/30 p-3">
                 <div className="text-sm font-medium">{selectedPerson.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {selectedPerson.email}
-                </div>
+                <div className="text-xs text-muted-foreground">{selectedPerson.email}</div>
               </div>
 
               {/* Role selection */}
@@ -723,9 +689,7 @@ export function AddMemberDialog({
                 <Label>Role</Label>
                 <RadioGroup
                   value={selectedRole ?? ""}
-                  onValueChange={(val) =>
-                    handleRoleChange(val as "board_member" | "staff")
-                  }
+                  onValueChange={(val) => handleRoleChange(val as "board_member" | "staff")}
                   className="flex gap-4"
                 >
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -759,13 +723,8 @@ export function AddMemberDialog({
                       <ChevronLeft className="mr-1 h-3.5 w-3.5" />
                       Back
                     </Button>
-                    <Button
-                      onClick={handleSaveBoardMember}
-                      disabled={isSaving}
-                    >
-                      {isSaving && (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      )}
+                    <Button onClick={handleSaveBoardMember} disabled={isSaving}>
+                      {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Add Board Member
                     </Button>
                   </DialogFooter>
@@ -805,18 +764,16 @@ export function AddMemberDialog({
       </Dialog>
 
       {/* Role conflict dialog */}
-      {showConflictDialog &&
-        selectedPerson?.user_account_id &&
-        conflict.conflict && (
-          <RoleConflictDialog
-            personName={selectedPerson.name}
-            conflict={conflict}
-            userAccountId={selectedPerson.user_account_id}
-            open={showConflictDialog}
-            onOpenChange={setShowConflictDialog}
-            onResolved={handleConflictResolved}
-          />
-        )}
+      {showConflictDialog && selectedPerson?.user_account_id && conflict.conflict && (
+        <RoleConflictDialog
+          personName={selectedPerson.name}
+          conflict={conflict}
+          userAccountId={selectedPerson.user_account_id}
+          open={showConflictDialog}
+          onOpenChange={setShowConflictDialog}
+          onResolved={handleConflictResolved}
+        />
+      )}
     </>
   );
 }

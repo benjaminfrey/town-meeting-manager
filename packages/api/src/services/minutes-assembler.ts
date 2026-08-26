@@ -173,11 +173,7 @@ export async function assembleMinutesJson(
 ): Promise<MinutesContentJson> {
   // ── 1. Fetch the meeting record ───────────────────────────────────
   const meeting = unwrap<MeetingRow>(
-    await supabase
-      .from("meeting")
-      .select("*")
-      .eq("id", meetingId)
-      .single(),
+    await supabase.from("meeting").select("*").eq("id", meetingId).single(),
     "meeting",
   );
 
@@ -195,19 +191,12 @@ export async function assembleMinutesJson(
   ] = await Promise.all([
     supabase.from("board").select("*").eq("id", meeting.board_id).single(),
     supabase.from("town").select("*").eq("id", meeting.town_id).single(),
-    supabase
-      .from("agenda_item")
-      .select("*")
-      .eq("meeting_id", meetingId)
-      .order("sort_order"),
+    supabase.from("agenda_item").select("*").eq("meeting_id", meetingId).order("sort_order"),
     supabase.from("meeting_attendance").select("*").eq("meeting_id", meetingId),
     supabase.from("motion").select("*").eq("meeting_id", meetingId),
     supabase.from("vote_record").select("*").eq("meeting_id", meetingId),
     supabase.from("executive_session").select("*").eq("meeting_id", meetingId),
-    supabase
-      .from("agenda_item_transition")
-      .select("*")
-      .eq("meeting_id", meetingId),
+    supabase.from("agenda_item_transition").select("*").eq("meeting_id", meetingId),
     supabase.from("guest_speaker").select("*").eq("meeting_id", meetingId),
   ]);
 
@@ -365,8 +354,7 @@ export async function assembleMinutesJson(
     const name = personName(bm.person_id) ?? "Unknown Member";
     const isPresidingOfficer = meeting.presiding_officer_id === bm.id;
     const isRecSec =
-      att?.is_recording_secretary === true ||
-      (meeting.recording_secretary_id === bm.id);
+      att?.is_recording_secretary === true || meeting.recording_secretary_id === bm.id;
 
     const member: MinutesAttendanceMember = {
       name,
@@ -423,55 +411,52 @@ export async function assembleMinutesJson(
     childrenByParent.set(child.parent_item_id!, list);
   }
 
-  const contentSections: MinutesContentSection[] = sectionItems.map(
-    (section) => {
-      const tmpl = templateByType.get(section.section_type);
-      const isFixed = tmpl?.is_fixed ?? false;
-      const minutesBehavior = tmpl?.minutes_behavior ?? "summarize";
-      const children = childrenByParent.get(section.id) ?? [];
+  const contentSections: MinutesContentSection[] = sectionItems.map((section) => {
+    const tmpl = templateByType.get(section.section_type);
+    const isFixed = tmpl?.is_fixed ?? false;
+    const minutesBehavior = tmpl?.minutes_behavior ?? "summarize";
+    const children = childrenByParent.get(section.id) ?? [];
 
-      // Build content items from child agenda items
-      const items: MinutesContentItem[] = children.map((child) =>
-        buildContentItem(child, tmpl, isFixed, minutesBehavior),
-      );
+    // Build content items from child agenda items
+    const items: MinutesContentItem[] = children.map((child) =>
+      buildContentItem(child, tmpl, isFixed, minutesBehavior),
+    );
 
-      // Executive session data for this section
-      const execSession = execSessionByItem.get(section.id);
-      let executiveSession: MinutesExecutiveSession | null = null;
-      if (execSession) {
-        executiveSession = buildExecutiveSession(execSession);
-      }
+    // Executive session data for this section
+    const execSession = execSessionByItem.get(section.id);
+    let executiveSession: MinutesExecutiveSession | null = null;
+    if (execSession) {
+      executiveSession = buildExecutiveSession(execSession);
+    }
 
-      // Check if section is marked as "none" — no children and section itself
-      // has status "completed" with no motions or speakers
-      const sectionMotions = motionsByItem.get(section.id) ?? [];
-      const sectionSpeakers = speakersByItem.get(section.id) ?? [];
-      const markedNone =
-        items.length === 0 &&
-        sectionMotions.length === 0 &&
-        sectionSpeakers.length === 0 &&
-        section.status === "completed";
+    // Check if section is marked as "none" — no children and section itself
+    // has status "completed" with no motions or speakers
+    const sectionMotions = motionsByItem.get(section.id) ?? [];
+    const sectionSpeakers = speakersByItem.get(section.id) ?? [];
+    const markedNone =
+      items.length === 0 &&
+      sectionMotions.length === 0 &&
+      sectionSpeakers.length === 0 &&
+      section.status === "completed";
 
-      return {
-        title: section.title,
-        sort_order: section.sort_order,
-        section_type: section.section_type,
-        minutes_behavior: minutesBehavior,
-        is_fixed: isFixed,
-        items,
-        executive_session: executiveSession,
-        marked_none: markedNone,
-      };
-    },
-  );
+    return {
+      title: section.title,
+      sort_order: section.sort_order,
+      section_type: section.section_type,
+      minutes_behavior: minutesBehavior,
+      is_fixed: isFixed,
+      items,
+      executive_session: executiveSession,
+      marked_none: markedNone,
+    };
+  });
 
   // ── 10. Build adjournment ─────────────────────────────────────────
   const adjournment = buildAdjournment(meeting.adjournment);
 
   // ── 11. Build certification ───────────────────────────────────────
   const certFormat =
-    (board.certification_format as MinutesCertification["format"]) ??
-    "prepared_by";
+    (board.certification_format as MinutesCertification["format"]) ?? "prepared_by";
 
   let recSecCert: MinutesCertification["recording_secretary"] = null;
   if (recordingSecretaryName) {
@@ -479,9 +464,7 @@ export async function assembleMinutesJson(
     const recSecBm = boardMembers.find(
       (bm) =>
         meeting.recording_secretary_id === bm.id ||
-        attendance.some(
-          (a) => a.board_member_id === bm.id && a.is_recording_secretary,
-        ),
+        attendance.some((a) => a.board_member_id === bm.id && a.is_recording_secretary),
     );
     recSecCert = {
       name: recordingSecretaryName,
@@ -535,9 +518,7 @@ export async function assembleMinutesJson(
     );
 
     // Build recusals from vote records
-    const allItemVotes = itemMotions.flatMap(
-      (m) => votesByMotion.get(m.id) ?? [],
-    );
+    const allItemVotes = itemMotions.flatMap((m) => votesByMotion.get(m.id) ?? []);
     const recusals: MinutesRecusal[] = allItemVotes
       .filter((v) => v.vote === "recusal")
       .map((v) => ({
@@ -572,10 +553,7 @@ export async function assembleMinutesJson(
     };
   }
 
-  function buildMotion(
-    m: MotionRow,
-    allAmendments: MotionRow[],
-  ): MinutesMotion {
+  function buildMotion(m: MotionRow, allAmendments: MotionRow[]): MinutesMotion {
     const vote = buildVote(m.id);
     const amendments: MinutesAmendment[] = allAmendments
       .filter((a) => a.parent_motion_id === m.id)
@@ -602,12 +580,8 @@ export async function assembleMinutesJson(
     const votes = votesByMotion.get(motionId);
     if (!votes || votes.length === 0) return null;
 
-    const yeas = votes.filter(
-      (v) => v.vote === "yea" || v.vote === "yes",
-    ).length;
-    const nays = votes.filter(
-      (v) => v.vote === "nay" || v.vote === "no",
-    ).length;
+    const yeas = votes.filter((v) => v.vote === "yea" || v.vote === "yes").length;
+    const nays = votes.filter((v) => v.vote === "nay" || v.vote === "no").length;
     const abstentions = votes.filter((v) => v.vote === "abstain").length;
     const absentCount = votes.filter((v) => v.vote === "absent").length;
 
@@ -634,9 +608,7 @@ export async function assembleMinutesJson(
     };
   }
 
-  function buildExecutiveSession(
-    es: ExecSessionRow,
-  ): MinutesExecutiveSession {
+  function buildExecutiveSession(es: ExecSessionRow): MinutesExecutiveSession {
     // Parse post-session action motion IDs
     let postMotionIds: string[] = [];
     if (es.post_session_action_motion_ids) {
@@ -670,16 +642,11 @@ export async function assembleMinutesJson(
     };
   }
 
-  function buildAdjournment(
-    adjData: Record<string, unknown> | null,
-  ): MinutesAdjournment | null {
+  function buildAdjournment(adjData: Record<string, unknown> | null): MinutesAdjournment | null {
     if (!adjData) return null;
 
-    const method =
-      (adjData.method as MinutesAdjournment["method"]) ?? "without_objection";
-    const adjournedBy = adjData.adjourned_by
-      ? memberName(adjData.adjourned_by as string)
-      : null;
+    const method = (adjData.method as MinutesAdjournment["method"]) ?? "without_objection";
+    const adjournedBy = adjData.adjourned_by ? memberName(adjData.adjourned_by as string) : null;
     const timestamp = (adjData.timestamp as string) ?? null;
 
     let adjMotion: MinutesMotion | null = null;

@@ -49,11 +49,7 @@ interface MemberTransitionDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type TransitionType =
-  | "archive"
-  | "move_board"
-  | "to_staff"
-  | "to_board_member";
+type TransitionType = "archive" | "move_board" | "to_staff" | "to_board_member";
 
 export function MemberTransitionDialog({
   member,
@@ -68,21 +64,20 @@ export function MemberTransitionDialog({
   const [transition, setTransition] = useState<TransitionType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const [pendingTransition, setPendingTransition] =
-    useState<TransitionType | null>(null);
+  const [pendingTransition, setPendingTransition] = useState<TransitionType | null>(null);
   const [targetBoardId, setTargetBoardId] = useState<string>("");
 
   // Active boards for "move to different board"
   const { data: boardRows = [] } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId), 'otherBoards', boardId],
+    queryKey: [...queryKeys.boards.byTown(townId), "otherBoards", boardId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board')
-        .select('id, name, election_method')
-        .eq('town_id', townId)
-        .is('archived_at', null)
-        .neq('id', boardId)
-        .order('name');
+        .from("board")
+        .select("id, name, election_method")
+        .eq("town_id", townId)
+        .is("archived_at", null)
+        .neq("id", boardId)
+        .order("name");
       if (error) throw error;
       return data;
     },
@@ -100,14 +95,14 @@ export function MemberTransitionDialog({
 
   // Check for other active board memberships
   const { data: otherActiveMemberships = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byPerson(member.person_id), 'otherActive', boardId],
+    queryKey: [...queryKeys.members.byPerson(member.person_id), "otherActive", boardId],
     queryFn: async () => {
       const { count, error } = await supabase
-        .from('board_member')
-        .select('*', { count: 'exact', head: true })
-        .eq('person_id', member.person_id)
-        .neq('board_id', boardId)
-        .eq('status', 'active');
+        .from("board_member")
+        .select("*", { count: "exact", head: true })
+        .eq("person_id", member.person_id)
+        .neq("board_id", boardId)
+        .eq("status", "active");
       if (error) throw error;
       return count ?? 0;
     },
@@ -117,16 +112,10 @@ export function MemberTransitionDialog({
   // Mutual exclusivity check
   const conflict = useMemo(() => {
     if (transition === "to_staff") {
-      return checkRoleMutualExclusivity(
-        member.role as "board_member" | null,
-        "staff",
-      );
+      return checkRoleMutualExclusivity(member.role as "board_member" | null, "staff");
     }
     if (transition === "to_board_member") {
-      return checkRoleMutualExclusivity(
-        member.role as "staff" | null,
-        "board_member",
-      );
+      return checkRoleMutualExclusivity(member.role as "staff" | null, "board_member");
     }
     return { conflict: false };
   }, [transition, member.role]);
@@ -137,7 +126,7 @@ export function MemberTransitionDialog({
     // Check mutual exclusivity for role changes
     if (value === "to_staff" || value === "to_board_member") {
       const check = checkRoleMutualExclusivity(
-        (member.role as string | null) as UserRole | null,
+        member.role as string | null as UserRole | null,
         value === "to_staff" ? "staff" : "board_member",
       );
       if (check.conflict && member.user_account_id) {
@@ -160,9 +149,9 @@ export function MemberTransitionDialog({
     mutationFn: async () => {
       const today = new Date().toISOString().split("T")[0];
       const { error } = await supabase
-        .from('board_member')
-        .update({ status: 'archived', term_end: today })
-        .eq('id', member.id);
+        .from("board_member")
+        .update({ status: "archived", term_end: today })
+        .eq("id", member.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -177,7 +166,7 @@ export function MemberTransitionDialog({
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       const today = now.split("T")[0];
-      const { error } = await supabase.from('board_member').insert({
+      const { error } = await supabase.from("board_member").insert({
         id,
         person_id: member.person_id,
         board_id: targetBoardId,
@@ -205,28 +194,28 @@ export function MemberTransitionDialog({
 
       // Archive all active board memberships
       const { error: archiveError } = await supabase
-        .from('board_member')
-        .update({ status: 'archived', term_end: today })
-        .eq('person_id', member.person_id)
-        .eq('status', 'active');
+        .from("board_member")
+        .update({ status: "archived", term_end: today })
+        .eq("person_id", member.person_id)
+        .eq("status", "active");
       if (archiveError) throw archiveError;
 
       if (member.user_account_id) {
         // Update existing user_account to staff role
         const { error } = await supabase
-          .from('user_account')
+          .from("user_account")
           .update({
-            role: 'staff',
+            role: "staff",
             permissions: staffResult.permissions,
             gov_title: staffResult.gov_title || null,
             archived_at: null,
           })
-          .eq('id', member.user_account_id);
+          .eq("id", member.user_account_id);
         if (error) throw error;
       } else {
         // Create new staff user_account
         const uaId = crypto.randomUUID();
-        const { error } = await supabase.from('user_account').insert({
+        const { error } = await supabase.from("user_account").insert({
           id: uaId,
           person_id: member.person_id,
           town_id: townId,
@@ -270,8 +259,7 @@ export function MemberTransitionDialog({
           <DialogHeader>
             <DialogTitle>Transition Member</DialogTitle>
             <DialogDescription>
-              Choose a transition for{" "}
-              <strong>{member.name}</strong> on {boardName}.
+              Choose a transition for <strong>{member.name}</strong> on {boardName}.
             </DialogDescription>
           </DialogHeader>
 
@@ -279,20 +267,15 @@ export function MemberTransitionDialog({
             <div className="space-y-4">
               <RadioGroup
                 value=""
-                onValueChange={(val) =>
-                  handleTransitionSelect(val as TransitionType)
-                }
+                onValueChange={(val) => handleTransitionSelect(val as TransitionType)}
                 className="space-y-2"
               >
                 <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50">
                   <RadioGroupItem value="archive" className="mt-0.5" />
                   <div>
-                    <div className="text-sm font-medium">
-                      Archive board membership
-                    </div>
+                    <div className="text-sm font-medium">Archive board membership</div>
                     <div className="text-xs text-muted-foreground">
-                      Archive this membership. Term end set to today. Historical
-                      records preserved.
+                      Archive this membership. Term end set to today. Historical records preserved.
                     </div>
                   </div>
                 </label>
@@ -301,12 +284,10 @@ export function MemberTransitionDialog({
                   <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50">
                     <RadioGroupItem value="move_board" className="mt-0.5" />
                     <div>
-                      <div className="text-sm font-medium">
-                        Add to different board
-                      </div>
+                      <div className="text-sm font-medium">Add to different board</div>
                       <div className="text-xs text-muted-foreground">
-                        Add a new board membership (multi-board is allowed).
-                        Current membership remains active.
+                        Add a new board membership (multi-board is allowed). Current membership
+                        remains active.
                       </div>
                     </div>
                   </label>
@@ -316,12 +297,10 @@ export function MemberTransitionDialog({
                   <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/50">
                     <RadioGroupItem value="to_staff" className="mt-0.5" />
                     <div>
-                      <div className="text-sm font-medium">
-                        Convert to staff
-                      </div>
+                      <div className="text-sm font-medium">Convert to staff</div>
                       <div className="text-xs text-muted-foreground">
-                        Archive all board memberships and change role to staff.
-                        Requires mutual exclusivity check.
+                        Archive all board memberships and change role to staff. Requires mutual
+                        exclusivity check.
                       </div>
                     </div>
                   </label>
@@ -339,9 +318,7 @@ export function MemberTransitionDialog({
               <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
                 <li>Term end set to today, status changed to archived</li>
                 <li>Historical records preserved</li>
-                {otherActiveMemberships === 0 && (
-                  <li>No other active board memberships</li>
-                )}
+                {otherActiveMemberships === 0 && <li>No other active board memberships</li>}
               </ul>
               <DialogFooter>
                 <Button
@@ -351,14 +328,8 @@ export function MemberTransitionDialog({
                 >
                   Back
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleArchive}
-                  disabled={isPendingAny}
-                >
-                  {isArchivingPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
+                <Button variant="destructive" onClick={handleArchive} disabled={isPendingAny}>
+                  {isArchivingPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Archive Membership
                 </Button>
               </DialogFooter>
@@ -391,13 +362,8 @@ export function MemberTransitionDialog({
                 >
                   Back
                 </Button>
-                <Button
-                  onClick={handleMoveBoard}
-                  disabled={!targetBoardId || isPendingAny}
-                >
-                  {isMovingPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
+                <Button onClick={handleMoveBoard} disabled={!targetBoardId || isPendingAny}>
+                  {isMovingPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Add to Board
                 </Button>
               </DialogFooter>

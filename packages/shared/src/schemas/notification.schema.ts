@@ -70,10 +70,7 @@ export const NotificationDeliverySchema = z.object({
   id: z.string().uuid(),
   event_id: z.string().uuid(),
   subscriber_id: z.string().uuid(),
-  channel: z.enum([
-    NotificationChannel.EMAIL,
-    NotificationChannel.SMS,
-  ]),
+  channel: z.enum([NotificationChannel.EMAIL, NotificationChannel.SMS]),
   status: z.enum([
     NotificationDeliveryStatus.PENDING,
     NotificationDeliveryStatus.SENT,

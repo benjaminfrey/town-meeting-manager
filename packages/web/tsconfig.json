@@ -12,12 +12,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": [
-    "src/**/*",
-    ".react-router/types/**/*",
-    "vite.config.ts",
-    "react-router.config.ts"
-  ],
+  "include": ["src/**/*", ".react-router/types/**/*", "vite.config.ts", "react-router.config.ts"],
   "exclude": ["build", "node_modules"],
   "references": [{ "path": "../shared" }]
 }

@@ -1,18 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import {
-  Calendar,
-  Clock,
-  MapPin,
-  FileText,
-  ChevronRight,
-} from "lucide-react";
+import { Calendar, Clock, MapPin, FileText, ChevronRight } from "lucide-react";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
 import { fetchMeetings, fetchBoards } from "@/lib/portal-api";
-import type {
-  PortalMeetingSummary,
-  PortalBoardSummary,
-} from "@town-meeting/shared";
+import type { PortalMeetingSummary, PortalBoardSummary } from "@town-meeting/shared";
 
 function formatDate(date: string): string {
   return new Date(date + "T00:00:00").toLocaleDateString("en-US", {
@@ -203,10 +194,7 @@ export default function MeetingsList() {
 
         {/* Board Filter */}
         <div className="flex items-center gap-2">
-          <label
-            htmlFor="board-filter"
-            className="text-sm font-medium text-foreground"
-          >
+          <label htmlFor="board-filter" className="text-sm font-medium text-foreground">
             Board:
           </label>
           <select
@@ -251,11 +239,7 @@ export default function MeetingsList() {
               </h3>
               <ul className="space-y-3">
                 {upcomingMeetings.map((meeting) => (
-                  <MeetingRow
-                    key={meeting.id}
-                    meeting={meeting}
-                    boards={boards}
-                  />
+                  <MeetingRow key={meeting.id} meeting={meeting} boards={boards} />
                 ))}
               </ul>
             </section>
@@ -273,11 +257,7 @@ export default function MeetingsList() {
               </h3>
               <ul className="space-y-3">
                 {pastMeetings.map((meeting) => (
-                  <MeetingRow
-                    key={meeting.id}
-                    meeting={meeting}
-                    boards={boards}
-                  />
+                  <MeetingRow key={meeting.id} meeting={meeting} boards={boards} />
                 ))}
               </ul>
             </section>

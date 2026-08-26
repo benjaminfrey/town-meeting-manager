@@ -29,9 +29,12 @@ export function UpdateNotification() {
           onRegistered(registration) {
             if (registration) {
               // Check for updates every 60 minutes
-              setInterval(() => {
-                void registration.update();
-              }, 60 * 60 * 1000);
+              setInterval(
+                () => {
+                  void registration.update();
+                },
+                60 * 60 * 1000,
+              );
             }
           },
           onRegisterError(error) {

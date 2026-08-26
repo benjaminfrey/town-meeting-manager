@@ -40,9 +40,7 @@ export async function getPostmarkClient(
     .eq("town_id", townId)
     .single();
 
-  const token =
-    (data?.postmark_server_token as string | null) ??
-    process.env.POSTMARK_SERVER_TOKEN;
+  const token = (data?.postmark_server_token as string | null) ?? process.env.POSTMARK_SERVER_TOKEN;
 
   if (!token) {
     throw new Error(

@@ -144,9 +144,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!fieldErrors.email}
             />
-            {fieldErrors.email && (
-              <p className="text-sm text-destructive">{fieldErrors.email}</p>
-            )}
+            {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}
           </div>
 
           {/* Password field */}
@@ -161,18 +159,12 @@ export default function LoginPage() {
               aria-invalid={!!fieldErrors.password}
             />
             {fieldErrors.password && (
-              <p className="text-sm text-destructive">
-                {fieldErrors.password}
-              </p>
+              <p className="text-sm text-destructive">{fieldErrors.password}</p>
             )}
           </div>
 
           {/* Submit button */}
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isSubmitting}
-          >
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -194,10 +186,7 @@ export default function LoginPage() {
         </Link>
         <p className="text-sm text-muted-foreground">
           Don't have an account?{" "}
-          <Link
-            to="/signup"
-            className="text-primary underline-offset-4 hover:underline"
-          >
+          <Link to="/signup" className="text-primary underline-offset-4 hover:underline">
             Create one
           </Link>
         </p>

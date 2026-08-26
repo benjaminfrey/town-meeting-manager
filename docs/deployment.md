@@ -6,18 +6,19 @@ Security. Per [advisory 3.2](advisory-resolutions/3.2-supabase-hosting.md).
 
 All configuration lives in [`infrastructure/`](../infrastructure):
 
-| File | Purpose |
-|------|---------|
-| `docker-compose.production.yml` | Full stack: Supabase services + Fastify API + Nginx |
-| `nginx/nginx.conf` | Reverse proxy (app, api, supabase, studio, portal) |
-| `scripts/ssl-setup.sh` | Wildcard TLS via Let's Encrypt (DNS-01) |
-| `scripts/deploy.sh` · `rollback.sh` · `migrate.sh` | Release automation |
-| `scripts/backup.sh` · `restore.sh` | Database backup / restore |
-| `scripts/health-check.sh` | Monitoring (containers, API, disk, backups) |
-| `../.env.production.example` | Every required secret, documented |
+| File                                               | Purpose                                             |
+| -------------------------------------------------- | --------------------------------------------------- |
+| `docker-compose.production.yml`                    | Full stack: Supabase services + Fastify API + Nginx |
+| `nginx/nginx.conf`                                 | Reverse proxy (app, api, supabase, studio, portal)  |
+| `scripts/ssl-setup.sh`                             | Wildcard TLS via Let's Encrypt (DNS-01)             |
+| `scripts/deploy.sh` · `rollback.sh` · `migrate.sh` | Release automation                                  |
+| `scripts/backup.sh` · `restore.sh`                 | Database backup / restore                           |
+| `scripts/health-check.sh`                          | Monitoring (containers, API, disk, backups)         |
+| `../.env.production.example`                       | Every required secret, documented                   |
 
 > **How this differs from a generic Supabase deploy** (intentional, grounded in
 > the code):
+>
 > - **Database name is `postgres`**, not `town_meeting_manager`. The
 >   `supabase/postgres` image initializes its roles and schemas in `postgres`,
 >   and every file in `supabase/migrations/` assumes it.
@@ -27,7 +28,7 @@ All configuration lives in [`infrastructure/`](../infrastructure):
 >   `NODE_OPTIONS=--max-old-space-size=512`.
 > - **`supabase.townmeetingmanager.com` is a public API host** (Kong) — it is
 >   what the browser's `supabase-js` talks to (`VITE_SUPABASE_URL`), protected
->   by JWT + RLS. **Studio** is a *separate*, IP-restricted host.
+>   by JWT + RLS. **Studio** is a _separate_, IP-restricted host.
 
 ---
 
@@ -61,14 +62,14 @@ cd /opt/town-meeting-manager
 
 Point all of these at the server's IP:
 
-| Record | Type | Host |
-|--------|------|------|
-| `townmeetingmanager.com` | A | server IP |
-| `app` | A | server IP — admin / board UI |
-| `api` | A | server IP — Fastify API |
-| `supabase` | A | server IP — **public** Supabase API (Kong) |
-| `studio` | A | server IP — admin DB UI (IP-restricted at Nginx) |
-| `*` | A | server IP — per-town public portals |
+| Record                   | Type | Host                                             |
+| ------------------------ | ---- | ------------------------------------------------ |
+| `townmeetingmanager.com` | A    | server IP                                        |
+| `app`                    | A    | server IP — admin / board UI                     |
+| `api`                    | A    | server IP — Fastify API                          |
+| `supabase`               | A    | server IP — **public** Supabase API (Kong)       |
+| `studio`                 | A    | server IP — admin DB UI (IP-restricted at Nginx) |
+| `*`                      | A    | server IP — per-town public portals              |
 
 ## 5. Secrets & environment
 
@@ -187,15 +188,15 @@ dumps **and** plain-SQL fallbacks. `backup.sh` verifies each new dump with
 
 ## Troubleshooting
 
-| Symptom | Check |
-|---------|-------|
-| A service won't start | `docker compose -f infrastructure/docker-compose.production.yml logs <svc>` |
-| Browser can't reach Supabase | DNS for `supabase.*`; that `VITE_SUPABASE_URL` matches it; cert covers it |
-| Realtime not updating | WebSocket upgrade on the `supabase.*` Nginx block; `wal_level=logical` |
-| Auth emails missing | `SMTP_*` values; Postmark activity log |
-| PDF generation fails | API container memory; `docker compose logs api` for Chromium errors |
-| TLS renew failed | `CLOUDFLARE_API_TOKEN`; `sudo certbot renew --dry-run` |
-| Studio 403 | add your IP to the `allow` lines in `nginx/nginx.conf`, reload Nginx |
+| Symptom                      | Check                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| A service won't start        | `docker compose -f infrastructure/docker-compose.production.yml logs <svc>` |
+| Browser can't reach Supabase | DNS for `supabase.*`; that `VITE_SUPABASE_URL` matches it; cert covers it   |
+| Realtime not updating        | WebSocket upgrade on the `supabase.*` Nginx block; `wal_level=logical`      |
+| Auth emails missing          | `SMTP_*` values; Postmark activity log                                      |
+| PDF generation fails         | API container memory; `docker compose logs api` for Chromium errors         |
+| TLS renew failed             | `CLOUDFLARE_API_TOKEN`; `sudo certbot renew --dry-run`                      |
+| Studio 403                   | add your IP to the `allow` lines in `nginx/nginx.conf`, reload Nginx        |
 
 View logs: `docker compose -f infrastructure/docker-compose.production.yml logs -f <service>`
 Direct DB access: `docker exec -it tmm-db psql -U postgres`

@@ -49,9 +49,9 @@ export function EditGovTitleDialog({
       if (!member.user_account_id) return;
       const now = new Date().toISOString();
       const { error } = await supabase
-        .from('user_account')
+        .from("user_account")
         .update({ gov_title: title.trim() || null, updated_at: now })
-        .eq('id', member.user_account_id);
+        .eq("id", member.user_account_id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -59,7 +59,9 @@ export function EditGovTitleDialog({
         void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       }
       if (member.person_id) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byPerson(member.person_id) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.userAccounts.byPerson(member.person_id),
+        });
       }
       onOpenChange(false);
     },
@@ -86,18 +88,13 @@ export function EditGovTitleDialog({
           <div className="flex items-start gap-2 rounded-md bg-muted/50 p-2.5">
             <Info className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Government title is for display purposes only. Permissions are
-              controlled separately.
+              Government title is for display purposes only. Permissions are controlled separately.
             </p>
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSaving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
           <Button onClick={() => saveTitle()} disabled={isSaving || !member.user_account_id}>
