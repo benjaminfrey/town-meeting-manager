@@ -15,14 +15,25 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
   {
+    // This is a bare `ignores`-only block, which ESLint treats as *global*
+    // ignores. Empirically verified (see task-1-report.md) that these
+    // patterns are STILL resolved relative to cwd, same as `files` above —
+    // a plain "docker/volumes/**" matched an unrelated decoy file created
+    // at packages/api/docker/volumes/ when eslint ran with cwd=packages/api.
+    // All entries use a "**/" prefix so they match regardless of invoking
+    // cwd, consistent with the dist/build/coverage/turbo/react-router
+    // entries already written that way. (.superpowers is the SDD scratch
+    // workspace, gitignored; added here for defense-in-depth even though
+    // "eslint src" per package never reaches repo-root paths in practice.)
     ignores: [
       "**/dist/**",
       "**/build/**",
       "**/coverage/**",
       "**/.turbo/**",
       "**/.react-router/**",
-      "docker/volumes/**",
-      "playwright-report/**",
+      "**/docker/volumes/**",
+      "**/playwright-report/**",
+      "**/.superpowers/**",
     ],
   },
   js.configs.recommended,

@@ -10,6 +10,11 @@ playwright-report
 supabase/migrations
 docker/migrations
 
+# SDD scratch workspace: git-ignored working files (task briefs, reports,
+# progress notes), not part of the deliverable. Prettier's broad **/*.md
+# glob would otherwise reach in and reformat/rewrite them.
+.superpowers
+
 # supabase gen types typescript output: formatted by the Supabase CLI's own
 # generator, not prettier. Reformatting it here just churns ~4,700 lines on
 # every run and reverts the moment the types are regenerated.
