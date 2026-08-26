@@ -7,11 +7,33 @@
  * and the formatted HTML output for rendering / PDF export.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assembleMinutesJson } from "../minutes-assembler.js";
 import { formatMinutes } from "../minutes-formatters.js";
 import type { MinutesContentJson, MinutesRenderOptions } from "@town-meeting/shared";
+
+// packages/api is ESM ("type": "module"), so bare __dirname does not exist.
+// This is the idiom already used in services/templates.ts:13 and
+// services/email-sender.ts:17.
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const MINUTES_ROUTE = path.join(testDir, "..", "..", "routes", "minutes.ts");
+
+describe("generated_by labelling", () => {
+  it("never labels deterministically assembled minutes as ai-generated", () => {
+    const source = readFileSync(MINUTES_ROUTE, "utf8");
+    expect(source).not.toContain('generated_by: "ai"');
+  });
+
+  it("labels assembled minutes as manual at both write sites", () => {
+    const source = readFileSync(MINUTES_ROUTE, "utf8");
+    const matches = source.match(/generated_by: "manual"/g) ?? [];
+    expect(matches).toHaveLength(2);
+  });
+});
 
 // ─── Mock Supabase builder ────────────────────────────────────────────
 

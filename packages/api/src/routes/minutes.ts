@@ -221,7 +221,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
-            generated_by: "ai",
+            generated_by: "manual",
             created_by: user.id,
             created_at: now,
             updated_at: now,
@@ -398,7 +398,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
-            generated_by: "ai",
+            generated_by: "manual",
             updated_at: now,
           })
           .eq("id", existingMinutes.id)
