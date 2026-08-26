@@ -90,8 +90,8 @@ services:
     container_name: town-meeting-inbucket
     image: inbucket/inbucket:latest
     ports:
-      - "${INBUCKET_PORT:-9000}:9000"   # Web UI for viewing emails
-      - "2500:2500"                     # SMTP
+      - "${INBUCKET_PORT:-9000}:9000" # Web UI for viewing emails
+      - "2500:2500" # SMTP
     restart: unless-stopped
 
   # ─── GoTrue (Auth) ─────────────────────────────────────────────────
@@ -100,15 +100,7 @@ services:
     image: supabase/gotrue:v2.186.0
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://127.0.0.1:9999/health",
-        ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:9999/health"]
       timeout: 5s
       interval: 5s
       retries: 3
@@ -215,15 +207,7 @@ services:
     image: supabase/storage-api:v1.37.8
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://127.0.0.1:5000/status",
-        ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
       timeout: 5s
       interval: 5s
       retries: 5

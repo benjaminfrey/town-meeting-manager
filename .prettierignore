@@ -19,3 +19,13 @@ docker/migrations
 # generator, not prettier. Reformatting it here just churns ~4,700 lines on
 # every run and reverts the moment the types are regenerated.
 packages/shared/src/types/database.ts
+
+# Handlebars templates: prettier's Glimmer-based .hbs parser rejects valid
+# Handlebars syntax already in use here (`{{itemLabel @../index @index}}` in
+# agenda-packet.hbs errors with "Mixing '.' and '/' in paths is not
+# supported in Glimmer"). Glimmer and Handlebars are different template
+# languages with overlapping-but-not-identical syntax; prettier's plugin
+# targets Glimmer/Ember, not vanilla Handlebars. Excluded rather than
+# reformatted — these are also whitespace-sensitive email/PDF templates
+# where a mechanical reformat carries real rendering risk.
+*.hbs
