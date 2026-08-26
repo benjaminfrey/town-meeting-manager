@@ -10,8 +10,8 @@
     "test:e2e": "playwright test",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rm -rf node_modules",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css,yml,yaml}\"",
     "supabase:up": "cd docker && docker compose up -d",
     "supabase:down": "cd docker && docker compose down",
     "supabase:reset": "cd docker && docker compose down -v && docker compose up -d",
@@ -23,7 +23,7 @@
     "db:reset": "pnpm supabase:reset && sleep 5 && pnpm db:migrate && pnpm db:seed"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=20.19.0",
     "pnpm": ">=9.0.0"
   },
   "packageManager": "pnpm@9.15.4",
