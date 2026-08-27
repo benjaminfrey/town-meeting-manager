@@ -662,7 +662,30 @@ Also ignores playwright-report/ and test-results/, and untracks .DS_Store."
 
 ### Task 6: Provision the VM
 
-**Prerequisite — blocks this task.** Provide SSH access to the VM (hostname or IP, user, key) and confirm what else runs on it. The 4 GB budget is the binding constraint: Postgres wants roughly 1 GB, Node 200–500 MB, and Puppeteer 300–500 MB per Chromium instance. Dropping the eight Supabase containers is what makes that budget work; anything already resident on the box changes the sizing.
+**Target, surveyed 2026-08-26 — this supersedes the plan's earlier assumptions.**
+
+|                   |                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| Host              | `192.168.1.162`, hostname `tmm`, user `ben`, SSH key auth working, **passwordless sudo** |
+| OS                | **Debian 13 (trixie)**, kernel 6.12.95-cloud-amd64 — _not_ Ubuntu 24.04 as first assumed |
+| Resources         | 2 vCPU · 3.8 GB RAM · 32 GB disk (29 GB free)                                            |
+| Already installed | Docker 29.6.2, running but **completely empty** — zero containers, volumes, images       |
+| Not installed     | Postgres, Node, nginx, Supabase (nothing to remove)                                      |
+
+The 4 GB budget is the binding constraint: Postgres wants roughly 1 GB, Node 200–500 MB, and
+Puppeteer 300–500 MB per Chromium instance. Dropping the eight Supabase containers is what makes
+that budget work. Note the disk is 32 GB, not the "plenty" first assumed — adequate now, but
+backups and generated PDFs accumulate, so Stage 2's backup work must not assume unlimited space.
+
+Debian 13 ships everything needed natively, so **no third-party APT repositories are required** —
+no PGDG, no NodeSource:
+
+| Package                   | Debian 13 candidate                               |
+| ------------------------- | ------------------------------------------------- |
+| `postgresql-17`           | 17.11-0+deb13u1                                   |
+| `postgresql-17-postgis-3` | 3.5.2 (Stage 5 parcels)                           |
+| `nodejs`                  | 20.19.2 — satisfies the `>=20.19.0` floor exactly |
+| `nginx`                   | 1.26.3                                            |
 
 **Files:**
 
@@ -681,7 +704,9 @@ Write `infrastructure/provision/README.md` capturing hostname, OS and version, v
 
 - [ ] **Step 2: Install Postgres, Node and nginx**
 
-Install PostgreSQL 16 (the dev volume was PG 15, but nothing is being restored from it, so take the newer major), Node 20 matching `.nvmrc`, and nginx. Record the exact commands used in the README as they are run — this file is the reproduction recipe, and a command that was run but not recorded is a step that will be forgotten.
+Install **PostgreSQL 17** (Debian 13's native version — the abandoned dev volume was PG 15, but nothing is being restored from it, so there is no compatibility reason to hold back, and using the distro's own package avoids adding the PGDG repository), plus `postgresql-17-postgis-3` so Stage 5 does not require a later reinstall, `nodejs` (20.19.2, satisfying the `>=20.19.0` floor), and `nginx`.
+
+Record the exact commands used in the README **as they are run** — this file is the reproduction recipe, and a command that was run but not recorded is a step that will be forgotten. Do not paraphrase them afterwards from memory.
 
 - [ ] **Step 3: Tune Postgres for 4 GB**
 
