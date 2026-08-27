@@ -1,3 +1,8 @@
+-- Ported from docker/migrations/011_notification_system.sql on 2026-08-26.
+-- That directory was never read by infrastructure/scripts/migrate.sh, which
+-- iterates supabase/migrations/*.sql only, so this migration had never been
+-- applied by any deploy script.
+
 -- ============================================================
 -- Migration 011: Notification System
 -- Session 11.01 — Postmark Integration & Notification Event System

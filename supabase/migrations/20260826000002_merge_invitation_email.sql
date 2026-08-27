@@ -1,3 +1,8 @@
+-- Ported from docker/migrations/012_invitation_email.sql on 2026-08-26.
+-- That directory was never read by infrastructure/scripts/migrate.sh, which
+-- iterates supabase/migrations/*.sql only, so this migration had never been
+-- applied by any deploy script.
+
 -- ============================================================
 -- Migration 012: Invitation Table + Email Fields
 -- Session 11.02 — Email Preference Management & Invitation Flow
