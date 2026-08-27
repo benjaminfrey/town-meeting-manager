@@ -3,8 +3,22 @@
 # Installed as /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf on the VM
 # (Debian's postgresql-common package wires `include_dir = 'conf.d'` into
 # postgresql.conf by default, so a drop-in file here is picked up without
-# touching the package-managed postgresql.conf itself — the file is applied
-# with `sudo -u postgres cp` + `systemctl reload postgresql`).
+# touching the package-managed postgresql.conf itself). Apply it exactly as
+# README.md's "Step 3" documents — as root, not by `sudo -u postgres cp`:
+#
+#   cat infrastructure/provision/postgresql.conf.tuned | \
+#     ssh ben@192.168.1.162 'sudo -n tee /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf > /dev/null'
+#   ssh ben@192.168.1.162 'sudo -n chown postgres:postgres /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf \
+#     && sudo -n chmod 644 /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf'
+#   ssh ben@192.168.1.162 'sudo -n systemctl restart postgresql'
+#
+# The restart is REQUIRED, not optional, and a `reload`/`pg_ctl reload`/
+# `SIGHUP` is not enough: `shared_buffers` and `max_connections` are both
+# postmaster-context settings that Postgres only re-reads at process start.
+# A reload after changing this file exits 0 and logs nothing wrong, but
+# silently leaves the old `shared_buffers`/`max_connections` running — the
+# next `SHOW shared_buffers;` would still show the pre-change value with no
+# error anywhere to indicate why.
 #
 # Box: 2 vCPU / 3.8 GB RAM total (~3.5 GB available after boot, before
 # Postgres/Node/nginx start). See Task 6 brief for the source figures.

@@ -77,10 +77,11 @@ Close the tunnel with `pkill -f 'ssh -f -N -L 15432:127.0.0.1:5432 ben@192.168.1
 working end-to-end in Step 5 below, then closed — no tunnel is left running
 after this task.
 
-`nginx`'s distro-default site does listen on `0.0.0.0:80`/`[::1]:80` (the
-Debian package default, unchanged) — see `nginx-dev.conf` in this directory
-for why that's left as-is for now (it serves nothing but the stock "Welcome
-to nginx" page) and what should change when Stage 1 wires up a real proxy.
+`nginx`'s distro-default site listened on `0.0.0.0:80`/`[::]:80` (the
+Debian package default) until the fix described in "Step 4a" below — it now
+listens on `127.0.0.1:80`/`[::1]:80` only, matching Postgres's loopback-only
+posture. See `nginx-dev.conf` in this directory for the corrected exact
+commands and what should change when Stage 1 wires up a real proxy.
 
 ## Step 2: Install Postgres, Node, nginx
 
@@ -204,24 +205,89 @@ $ sudo -u postgres psql -c "SHOW shared_buffers;" -c "SHOW effective_cache_size;
  max_connections | 50
 ```
 
+### Correction: fixed a wrong apply-procedure comment in the tuned-file header
+
+`postgresql.conf.tuned`'s own header comment originally said to apply it
+with `sudo -u postgres cp` + `systemctl reload postgresql` — inconsistent
+with this section, which correctly requires `tee` as root (the login user
+can't write into `/etc/postgresql/` directly) plus a **restart**, not a
+reload (`shared_buffers`/`max_connections` are postmaster-context and don't
+take effect on reload — see the comment above). A stale copy of that wrong
+comment was also live in `/etc/postgresql/17/main/conf.d/99-tmm-tuning.conf`
+on the VM. Fixed the header comment in the repo file, then pushed the
+corrected file to the VM **without restarting Postgres** — a comment-only
+change doesn't need one:
+
+```bash
+cat infrastructure/provision/postgresql.conf.tuned | \
+  ssh ben@192.168.1.162 'sudo -n tee /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf > /dev/null && \
+    sudo -n chown postgres:postgres /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf && \
+    sudo -n chmod 644 /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf'
+```
+
+Verified the live file now matches the repo file byte-for-byte
+(`diff` between the two showed no output), and that Postgres's
+`ActiveEnterTimestamp` (`systemctl show postgresql -p ActiveEnterTimestamp`)
+is unchanged from the Step 3 restart above — confirming no restart happened
+— while `SHOW shared_buffers;`/`SHOW max_connections;` still correctly
+report `1GB`/`50` (those values were already live from the original
+restart; only the comment text needed to reach the box).
+
 ## Step 4: Roles
 
-Two roles, created with `CREATE ROLE ... LOGIN PASSWORD '<generated>'`
-wrapped in an idempotent `DO $$ ... IF NOT EXISTS ... $$` block (safe to
-re-run this provisioning step without erroring on a second pass), followed
-by `CREATE DATABASE town_meeting_manager OWNER tmm_owner;`:
+Two roles, created with an idempotent `DO $$ ... IF NOT EXISTS ... $$`
+block (safe to re-run this provisioning step without erroring on a second
+pass), followed by `CREATE DATABASE town_meeting_manager OWNER tmm_owner;`,
+and the root-owned credentials file written in the same script. Full
+command, run on the VM exactly as follows (password values shown as
+`${OWNER_PW}`/`${APP_PW}` shell-variable placeholders here — the real
+32-character values were never echoed or committed, see below):
 
-```sql
-CREATE ROLE tmm_owner LOGIN PASSWORD '<generated>';   -- owns the schema, runs migrations
-CREATE ROLE tmm_app   LOGIN PASSWORD '<generated>';   -- application login, NOT a table owner
-CREATE DATABASE town_meeting_manager OWNER tmm_owner;
+```bash
+OWNER_PW=$(openssl rand -base64 30 | tr -d '/+=' | head -c 32)
+APP_PW=$(openssl rand -base64 30 | tr -d '/+=' | head -c 32)
+
+sudo -n -u postgres psql -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tmm_owner') THEN
+    CREATE ROLE tmm_owner LOGIN PASSWORD '${OWNER_PW}';
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tmm_app') THEN
+    CREATE ROLE tmm_app LOGIN PASSWORD '${APP_PW}';
+  END IF;
+END
+\$\$;
+SQL
+
+sudo -n -u postgres psql -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_database WHERE datname='town_meeting_manager'" | grep -q 1 || \
+  sudo -n -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE town_meeting_manager OWNER tmm_owner;"
+
+sudo -n install -d -m 0700 -o root -g root /etc/tmm
+sudo -n bash -c "cat > /etc/tmm/db-credentials.env" <<CRED
+# Town Meeting Manager - Postgres role credentials for the tmm dev/staging VM
+# Generated $(date -u +%Y-%m-%dT%H:%M:%SZ). Root-owned, mode 0600. Do NOT commit.
+TMM_OWNER_PASSWORD=${OWNER_PW}
+TMM_APP_PASSWORD=${APP_PW}
+CRED
+sudo -n chmod 0600 /etc/tmm/db-credentials.env
+sudo -n chown root:root /etc/tmm/db-credentials.env
 ```
+
+`tmm_owner` gets the `IF NOT EXISTS` guard because a re-run of this script
+(e.g. after a mistake, or provisioning a second similar box) should not
+error out on `CREATE ROLE` colliding with an existing role — it should
+just leave the existing role and its password alone. `CREATE DATABASE`
+doesn't support `IF NOT EXISTS` in the same way, so it's guarded with an
+explicit existence check instead (`CREATE DATABASE ... IF NOT EXISTS` isn't
+valid Postgres SQL).
 
 Passwords: 32-character random strings from
 `openssl rand -base64 30 | tr -d '/+=' | head -c 32`, one per role,
 generated on the VM and never typed or displayed — they went straight from
 `openssl` into the `CREATE ROLE` statement and into the credentials file
-below in the same script.
+below in the same script, and were never printed to a terminal or committed
+anywhere in cleartext.
 
 **Why the two-role split matters**: PostgreSQL table owners bypass row-level
 security unconditionally. Under the old Supabase stack this never surfaced
@@ -273,6 +339,69 @@ with SSH access to `ben@192.168.1.162` and passwordless sudo can read this
 file; that's the same trust boundary the SSH key itself already grants, so
 it adds no new exposure.
 
+## Step 4a: Bind nginx's default site to loopback
+
+Not one of the brief's original six steps, but closes the one LAN-reachable
+gap left after Step 2: Debian's default `/etc/nginx/sites-enabled/default`
+binds port 80 on **all** interfaces (`listen 80 default_server;` /
+`listen [::]:80 default_server;`), which is reachable from the LAN even
+though it serves nothing but the stock "Welcome to nginx" page. There is no
+firewall on the box (`ufw` not installed), so this was closed at the nginx
+config layer instead, matching Postgres's own loopback-only posture:
+
+```bash
+ssh ben@192.168.1.162 'sudo -n cp /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.bak-pre-loopback'
+ssh ben@192.168.1.162 'sudo -n sed -i \
+  -e "s/^\tlisten 80 default_server;/\tlisten 127.0.0.1:80 default_server;/" \
+  -e "s/^\tlisten \[::\]:80 default_server;/\tlisten [::1]:80 default_server;/" \
+  /etc/nginx/sites-enabled/default'
+ssh ben@192.168.1.162 'sudo -n nginx -t && sudo -n systemctl reload nginx'
+```
+
+**Mistake made and caught during this step**: the backup copy
+(`default.bak-pre-loopback`) was placed inside `/etc/nginx/sites-enabled/`
+itself. Debian's `nginx.conf` does `include /etc/nginx/sites-enabled/*;`
+with no filename filter, so the backup was loaded as a second, still-`0.0.0.0`-bound
+server block — `ss -tlnp` after the `reload` above still showed `0.0.0.0:80`
+and `[::]:80`, from the backup file, not the edited one. Fixed by removing
+the backup from `sites-enabled/` (moving a rollback copy into an
+actively-included config directory is the wrong move regardless of which
+directive it contains):
+
+```bash
+ssh ben@192.168.1.162 'sudo -n rm -f /etc/nginx/sites-enabled/default.bak-pre-loopback'
+```
+
+**Second surprise**: even after removing the stray backup, a `systemctl
+reload nginx` (SIGHUP) left the old `0.0.0.0:80`/`[::]:80` listening
+sockets open under the reloaded master/workers — the new `listen
+127.0.0.1:80` directive didn't take effect until a full restart:
+
+```bash
+ssh ben@192.168.1.162 'sudo -n systemctl restart nginx'
+```
+
+Verified with `ss -tlnp` before/after each attempt; final state:
+
+```
+$ sudo ss -tlnp | grep ':80'
+LISTEN 0 511 127.0.0.1:80 0.0.0.0:* users:(("nginx",...))
+LISTEN 0 511    [::1]:80    [::]:* users:(("nginx",...))
+```
+
+and functionally:
+
+```bash
+$ ssh ben@192.168.1.162 'curl -s -o /dev/null -w "loopback: %{http_code}\n" http://127.0.0.1:80/'
+loopback: 200
+$ ssh ben@192.168.1.162 'curl -s -o /dev/null -w "LAN-ip: %{http_code}\n" --max-time 3 http://192.168.1.162:80/'
+LAN-ip: 000   # connection refused/timeout, from the VM's own LAN address
+```
+
+`sites-enabled/` now contains only the one, corrected `default` file — no
+stray backups. `nginx-dev.conf` in this directory records the same change
+for anyone reading the Stage 1 placeholder file directly.
+
 ## Step 5: Connectivity verification
 
 From the Mac, with the tunnel from the "How the development Mac reaches
@@ -319,13 +448,14 @@ is listening or forwarded now.
   `libboost-serialization`). That's normal for PostGIS on Debian and not a
   sign anything went wrong; disk usage after install is 2.5 GB/32 GB, still
   well within budget.
-- `nginx`'s stock default site listens on `0.0.0.0:80` (Debian's package
-  default). This is not a Postgres exposure issue and the brief's "never
-  expose to the open internet" language is specifically about Postgres, but
-  it's noted here for the record: the box does have one LAN-reachable HTTP
-  port serving nothing but the stock nginx welcome page. `nginx-dev.conf`
-  in this directory documents that Stage 1's real config should bind nginx
-  to loopback too, matching the Postgres posture, rather than the LAN.
+- `nginx`'s stock default site originally listened on `0.0.0.0:80`
+  (Debian's package default) — a LAN-reachable HTTP port serving nothing
+  but the stock nginx welcome page. Initially left as-is under a strict
+  reading of the brief's Postgres-scoped "never expose to the open
+  internet" language, then closed anyway in Step 4a once flagged: no
+  firewall exists on the box, the fix is two lines and zero risk, and it
+  matches the Postgres posture this whole task is built around. `ss -tlnp`
+  now shows nginx bound to `127.0.0.1:80`/`[::1]:80` only.
 - `max_connections = 50` was applied via `systemctl restart` (required for
   both `shared_buffers` and `max_connections` — a reload is not sufficient
   for either), confirmed active with `SHOW max_connections;` returning `50`
@@ -335,3 +465,16 @@ head -c 32` rather than a memorable/invented string, written straight to
   a root-owned `0600` file, and never appeared in this session's tool
   output — the verification step captured them into local shell variables
   and `unset` them right after use.
+- `postgresql.conf.tuned`'s header comment initially described the wrong
+  apply procedure (`sudo -u postgres cp` + `reload`, contradicting Step 3's
+  correct `tee`-as-root + `restart`). Caught in review, fixed in the repo
+  file, and re-pushed to the VM's `conf.d/` — verified byte-identical via
+  `diff` and confirmed no Postgres restart occurred (`ActiveEnterTimestamp`
+  unchanged) since only comment text changed.
+- The nginx loopback-binding fix (Step 4a) surfaced two real mistakes
+  during execution, not just at review time: a backup file left inside
+  `sites-enabled/` got loaded as a second, still-public server block, and a
+  plain `reload` didn't actually rebind the listening socket (only a full
+  `restart` did). Both are recorded in Step 4a with the commands and `ss
+-tlnp` output that caught and fixed each one, rather than only reporting
+  the final clean state.
