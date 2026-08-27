@@ -48,6 +48,11 @@ Established facts. Do not re-derive them; do verify anything you depend on.
 
 ## Task order and why
 
+> **Numbering note.** Headings carry both forms — `Task 1 (A1)` — because the
+> subagent-driven-development tooling (`scripts/task-brief`) matches numeric task
+> ids only, while the phase letters are what make the dependency structure
+> readable. Prose below refers to the letters. Pass the **number** to the scripts.
+
 ```
 A1 SSE spike ──────────┐                       (transport decision gates F1)
 A2 Test harness ───────┼──> B1 pull ──> B2 baseline ──> B3 ISOLATION GATE
@@ -85,7 +90,7 @@ Nothing in Phase A depends on `drizzle-kit pull` output. All three tasks are ful
 
 ---
 
-### Task A1: Spike tRPC SSE on the Fastify adapter
+### Task 1 (A1): Spike tRPC SSE on the Fastify adapter
 
 **Files:**
 
@@ -165,7 +170,7 @@ unverified assumptions belong in a spike, not in a foundation."
 
 ---
 
-### Task A2: Postgres-backed integration test harness
+### Task 2 (A2): Postgres-backed integration test harness
 
 Stage 1's gate is unprovable without this. Every existing web test mocks the Supabase client — `.eq()` is an identity function — so the current suite would pass against a completely wrong query. That is the audit's governing finding, and this task is where it stops being true.
 
@@ -253,7 +258,7 @@ Re-staged from Stage 2: the gate needs it now."
 
 ---
 
-### Task A3: Canonicalize the notification schema
+### Task 3 (A3): Canonicalize the notification schema
 
 **DECIDED 2026-08-27 - subscribers are `person`.** See "Owner decisions" at the end of this plan for the evidence. Consequences for this task, none of them optional:
 
@@ -305,7 +310,7 @@ Include `DROP POLICY IF EXISTS` guards ahead of the 8 bare `CREATE POLICY` state
 
 ---
 
-### Task B1: Introspect the schema with Drizzle
+### Task 4 (B1): Introspect the schema with Drizzle
 
 **Files:**
 
@@ -346,7 +351,7 @@ Use `drizzle-zod` so Zod derives from the single source, structurally ending the
 
 ---
 
-### Task B2: The baseline migration
+### Task 5 (B2): The baseline migration
 
 This is the most important task in Stage 1. Everything about tenancy isolation depends on it.
 
@@ -419,7 +424,7 @@ Expected: **exit 0**, seed applied, ≥26 tables. This is the criterion moved he
 
 ---
 
-### Task B3: The isolation gate
+### Task 6 (B3): The isolation gate
 
 **This is Stage 1's gate.** Without this test there is no evidence RLS works at all.
 
