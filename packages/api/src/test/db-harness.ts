@@ -109,6 +109,30 @@ function generateTestDbName(): string {
 }
 
 /**
+ * Turn a failure to create the very first database into an actionable
+ * error instead of a bare driver error like `role "postgres" does not
+ * exist`. That message is accurate but tells a developer nothing about
+ * what to do about it — and a fresh clone going red for an unexplained
+ * environment reason is exactly how developers learn to ignore red. The
+ * underlying error is preserved via `cause`, never hidden.
+ */
+function explainConnectionFailure(err: unknown): Error {
+  const cause = err instanceof Error ? err : new Error(String(err));
+  const explicitlySet = process.env.DATABASE_URL !== undefined;
+  const reason = explicitlySet
+    ? "DATABASE_URL is set, but the harness could not use it to create a database"
+    : "DATABASE_URL is not set and the default connection failed";
+
+  return new Error(
+    `db-harness: ${reason}. Set DATABASE_URL to a reachable Postgres, e.g. ` +
+      "DATABASE_URL=postgres://$USER@localhost:5432/postgres for a Homebrew " +
+      "install. CI uses a postgres:17 service container (see " +
+      `.github/workflows/ci.yml). Underlying error: ${cause.message}`,
+    { cause },
+  );
+}
+
+/**
  * Provision an isolated Postgres database, apply the migration corpus to
  * it, run `fn` against a live client, and drop the database afterward —
  * even if `fn` throws.
@@ -123,10 +147,16 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
   const admin = postgres(databaseUrl, { max: 1, onnotice: () => {} });
 
   try {
-    // CREATE DATABASE cannot run inside a transaction block; a bare
-    // postgres.js query outside `sql.begin()` is not wrapped in one, so
-    // this is safe as a single statement.
-    await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+    try {
+      // CREATE DATABASE cannot run inside a transaction block; a bare
+      // postgres.js query outside `sql.begin()` is not wrapped in one, so
+      // this is safe as a single statement. This is also the first thing
+      // that actually uses the connection, so any failure here is
+      // reinterpreted with setup guidance — see explainConnectionFailure.
+      await admin.unsafe(`CREATE DATABASE "${dbName}"`);
+    } catch (err) {
+      throw explainConnectionFailure(err);
+    }
 
     let sql: postgres.Sql | undefined;
     try {
@@ -154,7 +184,23 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
     // WITH (FORCE) drops connections to the target database first, so a
     // leaked client from `fn` throwing before `sql.end()` above still
     // cannot block teardown. Postgres has supported this since v13.
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
+    //
+    // Guarded in its own try/catch: if CREATE DATABASE above never
+    // succeeded (e.g. the connection-guidance error just above), this
+    // DROP is a harmless no-op — but on the SAME broken connection it can
+    // throw the same raw driver error again, and a throw from a `finally`
+    // silently replaces whatever was already being thrown from the `try`.
+    // That would erase the actionable error this function just went out
+    // of its way to produce. A teardown failure is logged, never allowed
+    // to mask the real failure.
+    try {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
+    } catch (cleanupErr) {
+      console.warn(
+        `[db-harness] failed to drop test database "${dbName}" during cleanup:`,
+        cleanupErr,
+      );
+    }
     await admin.end();
   }
 }

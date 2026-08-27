@@ -47,6 +47,24 @@ export async function teardown(): Promise<void> {
     // themselves never own anything — so a plain DROP ROLE is tolerant of
     // that "owns nothing" case too, with nothing extra to clean up first.
     await admin.unsafe(`DROP ROLE IF EXISTS ${SHIM_ROLES.join(", ")}`);
+  } catch (err) {
+    // Deliberately swallowed, not rethrown: this is cleanup for state that
+    // db-harness.ts's own withTestDb() only ever creates AFTER a
+    // successful connection. If DATABASE_URL is unset/unreachable, no
+    // withTestDb() call could have gotten far enough to create these
+    // roles in the first place, so there is nothing to clean up — and
+    // this connection failure is the identical one withTestDb() already
+    // reported with actionable guidance. Letting it throw here would
+    // print a second, unguided, uncaught driver error underneath that
+    // clear message and undermine the whole point of adding it. A real,
+    // unexpected DROP ROLE failure (connection worked, something else
+    // went wrong) is still visible — just as a warning, not a crash —
+    // since global teardown failing outright would be a confusing way to
+    // report a problem that isn't about the tests that just ran.
+    console.warn(
+      `[db-harness] global teardown could not drop shim roles (${SHIM_ROLES.join(", ")}):`,
+      err,
+    );
   } finally {
     await admin.end();
   }
