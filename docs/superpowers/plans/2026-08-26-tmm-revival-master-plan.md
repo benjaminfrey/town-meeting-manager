@@ -753,9 +753,10 @@ Expected: the version string, and `tmm_app` with `rolsuper = f`. If `rolsuper` i
 git add infrastructure/provision/
 git commit -m "Add VM provisioning record
 
-Postgres 16, Node 20, nginx on the 2 vCPU / 4 GB dev-staging VM. Postgres
-tuned for the memory budget; max_connections lowered to 50 because Puppeteer
-needs the headroom more than the connection slots.
+PostgreSQL 17.11, PostGIS 3.5.2, Node 20.19.2 and nginx 1.26.3 — all Debian 13
+native packages, no third-party repositories — on the 2 vCPU / 3.8 GB dev-staging
+VM. Postgres tuned for the memory budget; max_connections lowered to 50 because
+Puppeteer needs the headroom more than the connection slots.
 
 Two roles: tmm_owner owns the schema and runs migrations, tmm_app is the
 application's non-owner login. That separation is what makes RLS function —
