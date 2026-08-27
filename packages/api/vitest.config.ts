@@ -11,6 +11,12 @@ export default defineConfig({
     // over the CI service container's TCP connection, so the default 5s
     // vitest timeout is raised for this package specifically.
     testTimeout: 30_000,
+    // Drops the four cluster-scoped auth-shim roles (anon, authenticated,
+    // service_role, supabase_auth_admin) once, after the whole run — see
+    // packages/api/src/test/global-teardown.ts. Roles outlive the
+    // per-test databases withTestDb() drops, so without this they leak
+    // onto whatever Postgres cluster the tests ran against.
+    globalSetup: ["./src/test/global-teardown.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
