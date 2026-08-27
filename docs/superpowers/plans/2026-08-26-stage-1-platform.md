@@ -255,7 +255,13 @@ Re-staged from Stage 2: the gate needs it now."
 
 ### Task A3: Canonicalize the notification schema
 
-**Blocked on a product decision.** See "Decisions required from the owner" at the end of this plan. Do not start until the subscriber-identity question is answered — guessing it wrong means redoing Task B2's baseline.
+**DECIDED 2026-08-27 - subscribers are `person`.** See "Owner decisions" at the end of this plan for the evidence. Consequences for this task, none of them optional:
+
+- `subscriber_notification_preference` keys on `person_id`, and `notification_delivery.subscriber_id` references `person(id)`. Both match the official corpus and the dev database, so **no data migration is required**.
+- **About 8 call sites are on the wrong side of this and must change**: `packages/api/src/routes/invitations.ts:455, 461, 490, 511, 517` and `packages/api/src/routes/notifications.ts:84, 95, 128`, plus the `onConflict: "subscriber_id,event_type,channel"` upserts, which become the `person_id` unique constraint. Zero notification call sites use `person_id` today - the code was written entirely against the ported shape.
+- **This also answers `board_member.user_account_id`** (audit finding, previously deferred to Stage 2): board membership links to a **person**, not an account. Fold it into this migration rather than leaving it for Stage 2.
+
+The reasoning, so nobody re-litigates it: `user_account.person_id` is `NOT NULL UNIQUE`, so a person may exist with no account - and the product deliberately supports that. `AddPersonDialog` offers an explicit "Directory-only / Staff-account" choice, and `people.test.tsx` tests a board member holding a seat with no account. Keying notifications to `user_account` would silently drop seated board members from statutory FOAA notices, and those are the people least likely to notice.
 
 **Files:**
 
@@ -490,11 +496,11 @@ Each phase's plan is written when its inputs exist.
 
 ---
 
-## Decisions required from the owner
+## Owner decisions
 
-**A3 is blocked on the first of these.** The others can be answered as their tasks approach.
+**A3 is unblocked.** The remaining four can be answered as their tasks approach.
 
-1. **Are notification subscribers `person` or `user_account`?** The official corpus says `person`, the ported corpus says `user_account`, the dev database says `person`. This is the same open question as `board_member.user_account_id`, so **one answer resolves both**. It determines A3's migration and part of B2's baseline. _Consideration: a `person` may exist without ever having an account — the People directory explicitly supports account-less directory-only people — so keying notifications to `user_account` silently excludes them._
+1. ~~Are notification subscribers `person` or `user_account`?~~ **ANSWERED 2026-08-27: `person`.** What decided it: `user_account.person_id` is `NOT NULL UNIQUE` (a person can exist with no account); `AddPersonDialog` offers a "Directory-only / Staff-account" choice; `people.test.tsx` tests a board member with a seat and no account; and all ~8 notification call sites assume `user_account` while none use `person_id`. Keying to `user_account` would silently drop seated board members from FOAA notices. **This also resolves `board_member.user_account_id` - it links to a person.**
 
 2. **Does `town_id` stay on `notification_delivery`?** Denormalized tenant key (simpler RLS, one predicate) versus joining through `notification_event` (normalized, but every policy needs a join).
 
