@@ -19,6 +19,7 @@
     "@fastify/sensible": "^6.0.4",
     "@supabase/supabase-js": "^2.99.0",
     "@town-meeting/shared": "workspace:*",
+    "@trpc/server": "11.18.0",
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",
     "handlebars": "^4.7.8",
