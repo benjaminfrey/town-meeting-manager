@@ -1,0 +1,45 @@
+# Town Meeting Manager — Postgres 17 tuning for the tmm dev/staging VM
+#
+# Installed as /etc/postgresql/17/main/conf.d/99-tmm-tuning.conf on the VM
+# (Debian's postgresql-common package wires `include_dir = 'conf.d'` into
+# postgresql.conf by default, so a drop-in file here is picked up without
+# touching the package-managed postgresql.conf itself — the file is applied
+# with `sudo -u postgres cp` + `systemctl reload postgresql`).
+#
+# Box: 2 vCPU / 3.8 GB RAM total (~3.5 GB available after boot, before
+# Postgres/Node/nginx start). See Task 6 brief for the source figures.
+#
+# These are the values the brief specified for a "4 GB" box. Checked against
+# the VM's real 3.8 GB and kept unchanged — see infrastructure/provision/README.md
+# ("Step 3: tuning rationale") for the arithmetic that justifies keeping them
+# rather than scaling down.
+
+# 1 GB is ~26% of 3.8 GB total RAM — within the standard "~25% of RAM"
+# starting point for shared_buffers, and matches the brief's own stated
+# Postgres budget ("Postgres wants roughly 1 GB").
+shared_buffers = 1GB
+
+# Planner hint only (estimated size of OS + Postgres page cache), not a
+# real memory reservation. 2GB is ~53% of total RAM, inside the usual
+# 50-75% guideline.
+effective_cache_size = 2GB
+
+# Per sort/hash operation, not per connection. With max_connections capped
+# at 50 (see below) and a single Fastify process holding a modest pg.Pool
+# (expected far under 10 concurrent connections in practice), realistic
+# concurrent work_mem usage stays well under 200MB even though the
+# theoretical ceiling (50 x 16MB = 800MB) is higher.
+work_mem = 16MB
+
+# Used by one VACUUM/CREATE INDEX/autovacuum worker at a time in normal
+# operation, not continuously. autovacuum_max_workers stays at its default
+# (3), so a pathological worst case is ~768MB, but that overlaps with idle
+# query traffic, not peak work_mem usage.
+maintenance_work_mem = 256MB
+
+# Deliberately below Postgres's default of 100. A single Fastify process
+# with a small pg.Pool plus one dedicated postgres.js LISTEN/NOTIFY
+# connection needs nowhere near 100 slots, and each idle connection still
+# costs ~1-10MB of backend memory that Puppeteer's Chromium instances need
+# more than unused connection slots do.
+max_connections = 50
