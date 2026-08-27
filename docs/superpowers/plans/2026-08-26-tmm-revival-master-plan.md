@@ -37,14 +37,14 @@ Every task's requirements implicitly include this section.
 
 Each stage ends at a review gate. A stage's detailed task plan is written at its boundary, when its inputs exist — writing Stage 1's exact tasks today would mean writing code blocks against `drizzle-kit pull` output that does not yet exist.
 
-| Stage                    | Scope                                                                                                                                                                                                                                  | Gate                                                                                                                 | Detailed plan            |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| **0 · Ground**           | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation                                                                                               | CI green on a clean clone, **and a working database builds from the repository alone**                               | **In this document**     |
-| **1 · Platform**         | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** Feature parity on CI. | Written at Stage 1 start |
-| **2 · Repair**           | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests                                                                                                                  | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert             | Written at Stage 2 start |
-| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion                                                                                                                                         | An adopted minutes record cannot be altered by any application path, proven by test                                  | Written at Stage 3 start |
-| **4 · Vision**           | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile                                                                                                                                         | All six blocks shipped on the new stack                                                                              | One plan per block       |
-| **5 · Scale**            | Parcels · proximity · postal mail · consortiums · zoning                                                                                                                                                                               | —                                                                                                                    | One plan per block       |
+| Stage                    | Scope                                                                                                                                                                                                                                  | Gate                                                                                                                                                                                                                              | Detailed plan            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **0 · Ground**           | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation                                                                                               | CI green on a clean clone · one authoritative migration corpus · a build gate that **fails loudly** · a verified inventory of what blocks a full build (see the correction under Stage 0 exit criteria)                           | **In this document**     |
+| **1 · Platform**         | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** `./scripts/build-db-from-repo.sh` exits 0 (moved here from Stage 0 — it cannot pass until `auth.*` is gone). Feature parity on CI. | Written at Stage 1 start |
+| **2 · Repair**           | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests                                                                                                                  | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert                                                                                                                          | Written at Stage 2 start |
+| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion                                                                                                                                         | An adopted minutes record cannot be altered by any application path, proven by test                                                                                                                                               | Written at Stage 3 start |
+| **4 · Vision**           | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile                                                                                                                                         | All six blocks shipped on the new stack                                                                                                                                                                                           | One plan per block       |
+| **5 · Scale**            | Parcels · proximity · postal mail · consortiums · zoning                                                                                                                                                                               | —                                                                                                                                                                                                                                 | One plan per block       |
 
 ### Stage 1 parallelization
 
@@ -911,8 +911,49 @@ where it needs a decision on how a board member resolves to a user account."
 - [ ] No `generated_by: "ai"` remains in the codebase
 - [ ] Operator notes render in all three minutes styles, HTML-escaped
 - [ ] One migration corpus; `docker/migrations/` is gone
-- [ ] `./scripts/build-db-from-repo.sh` builds a complete database from a clean clone
+- [ ] `./scripts/build-db-from-repo.sh` exists and **fails loudly** rather than exiting 0 on a partial build
+- [ ] A complete, verified inventory of what blocks a full build, and of schema-vs-code drift
 - [ ] `tmm_app` exists, is not superuser, and does not own tables
+
+### Correction — the original criterion was unachievable
+
+This section first read _"`./scripts/build-db-from-repo.sh` builds a complete database from a clean
+clone."_ That was **impossible for Stage 0 to satisfy, and I should have seen it when writing the
+plan.** `supabase/migrations/20260308000004_create_user_account.sql:26` declares
+`auth_user_id REFERENCES auth.users(id)`. The `auth` schema belongs to Supabase's GoTrue and does
+not exist on plain PostgreSQL. That FK sits at file 4 of 58, so it blocks the corpus almost
+immediately — and removing the `auth.*` dependency is **Stage 1's** job, by design.
+
+Stage 0's honest deliverable is therefore a single authoritative corpus, a gate that refuses to lie,
+and an accurate inventory. Task 7 confirmed the corpus is **structurally sound**: with a throwaway
+`auth`/`storage` shim, **56 of 58 migrations apply and produce 27 tables**. Exactly two things
+remain behind that wall — the notification-table collision (below) and one `storage.foldername`
+dependency.
+
+**Moved to Stage 1's gate:** `./scripts/build-db-from-repo.sh` exits 0 and builds a complete
+database from a clean clone.
+
+### Carried into Stage 1 from Task 7
+
+The notification tables are defined **three** incompatible ways: the "official" corpus
+(`20260308000018`–`000021`), the ported docker corpus, and a **hybrid that is what actually exists
+in the dev database**. The ported file uses `CREATE TABLE IF NOT EXISTS`, so on a fresh build the
+official definition wins and the ported one silently no-ops — yielding a schema the application
+cannot use. Parts of the feature are already broken in dev, not merely on a fresh build.
+
+Stage 1 must decide, before `drizzle-kit pull` runs:
+
+1. Which of the three shapes is canonical.
+2. Whether `town_id` stays on `notification_delivery` as a denormalized tenant key for RLS, or is dropped in favour of joining through `notification_event`.
+3. **Whether subscribers are `person` or `user_account`.** This is the same open question as `board_member.user_account_id` — answering it once resolves both.
+4. Whether the TCPA `consent_*` columns survive; only the official shape carries them.
+5. Whether `external_id` and `postmark_message_id` merge into one column.
+6. Whether any dev data must migrate.
+
+Also carried: the two ported migrations contain 8 bare `CREATE POLICY` statements and PostgreSQL has
+no `CREATE POLICY IF NOT EXISTS`, so their first application against a database that already has
+those policies will abort `migrate.sh`. Stage 1 needs `DROP POLICY IF EXISTS` guards or a
+`schema_migrations` backfill.
 
 When these hold, write the Stage 1 detailed plan. Its first task is the SSE spike, because tRPC SSE on the Fastify adapter is unproven in public and the fallback decision must be made before anything depends on the transport.
 
