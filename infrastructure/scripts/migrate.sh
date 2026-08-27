@@ -4,6 +4,14 @@
 # Idempotent: tracks applied files in a schema_migrations table and skips
 # anything already applied, so it is safe to re-run on every deploy.
 #
+# Targets the legacy Docker Compose deploy (infrastructure/
+# docker-compose.production.yml) — it cannot run against the Task 6 VM,
+# which has no Docker (removed in this branch) and whose database is
+# town_meeting_manager owned by tmm_owner, not postgres/postgres. On the
+# VM, scripts/build-db-from-repo.sh is what applies this same
+# supabase/migrations/*.sql corpus. Superseded entirely once Stage 1's
+# Drizzle migrations take over; not rewritten here.
+#
 # Run from the repository root.
 set -euo pipefail
 

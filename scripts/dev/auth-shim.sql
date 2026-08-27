@@ -22,13 +22,47 @@
 -- how much of the corpus is proven, which defeats the point of running
 -- this at all.
 --
+-- DANGER, not just inconvenience: auth.uid()/auth.jwt() below use
+-- CREATE OR REPLACE with signatures matching GoTrue's real functions.
+-- Run this against a live Supabase database — where the connecting
+-- role is commonly superuser `postgres` — and it does not error. It
+-- SUCCEEDS, silently replacing the real auth.uid()/auth.jwt() with
+-- NULL-returning stubs, which makes every RLS policy that depends on
+-- them evaluate false. The guard block immediately below is the only
+-- thing standing between this file and that outcome — it is not
+-- optional and must run first, before any other statement.
+--
 -- Usage: apply this ONCE against a scratch/throwaway database, before
--- looping supabase/migrations/*.sql, then discard the database:
+-- looping supabase/migrations/*.sql, then discard the database AND
+-- the four roles it creates (roles are cluster-scoped, not
+-- database-scoped — dropping the scratch database does NOT remove
+-- them, and leaving them on a shared cluster masks any migration
+-- statement that grants to them, e.g. the corpus's
+-- `GRANT ... TO authenticated` / `TO supabase_auth_admin` lines, which
+-- would otherwise fail on a clean box):
+--   createdb scratch_db
 --   psql "$SCRATCH_DB_URL" -v ON_ERROR_STOP=1 -f scripts/dev/auth-shim.sql
+--   ... apply supabase/migrations/*.sql ...
+--   dropdb scratch_db
+--   dropuser anon authenticated service_role supabase_auth_admin
 --
 -- Run as a superuser (needs CREATE ROLE), never as tmm_owner or
 -- tmm_app, and never against town_meeting_manager itself.
 -- ============================================================
+
+-- ─── Fail-closed guards — must run first ──────────────────────
+-- Refuse to run anywhere auth.uid() already exists (a real Supabase
+-- database) or anywhere public already has tables (not an empty
+-- scratch database). Either condition aborts the whole script.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'auth' AND p.proname = 'uid') THEN
+    RAISE EXCEPTION 'auth.uid() already exists — refusing to run the shim against a real Supabase database';
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public') THEN
+    RAISE EXCEPTION 'public schema is not empty — scratch databases only';
+  END IF;
+END $$;
 
 CREATE SCHEMA IF NOT EXISTS auth;
 

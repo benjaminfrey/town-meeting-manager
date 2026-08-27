@@ -2,7 +2,7 @@
 -- That directory was never read by infrastructure/scripts/migrate.sh, which
 -- iterates supabase/migrations/*.sql only, so this migration had never been
 -- applied by any deploy script.
-
+-- The "Apply with" block below is historical: docker/migrations/ is deleted and port 54322 no longer applies. Content below is preserved byte-for-byte from the original file.
 -- ============================================================
 -- Migration 012: Invitation Table + Email Fields
 -- Session 11.02 — Email Preference Management & Invitation Flow

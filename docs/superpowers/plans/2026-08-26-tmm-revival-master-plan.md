@@ -122,7 +122,6 @@ pnpm-lock.yaml
 docker/volumes
 playwright-report
 supabase/migrations
-docker/migrations
 ```
 
 SQL migrations are excluded deliberately: they are an append-only historical record and reformatting them would create noise while changing nothing.
@@ -781,7 +780,7 @@ Two migration corpora exist. `supabase/migrations/` holds 56 files and `docker/m
 **Interfaces:**
 
 - Consumes: the Postgres instance from Task 6.
-- Produces: `scripts/build-db-from-repo.sh` builds a complete database from a clean clone. Stage 1's `drizzle-kit pull` runs against exactly this database.
+- Produces: `scripts/build-db-from-repo.sh`, a gate that fails loudly rather than exiting 0 on a partial build (it cannot build a complete database from a clean clone in Stage 0 — see the correction under "Stage 0 exit criteria" — that's moved to Stage 1's gate, once the `auth.*` baseline lands). Stage 1's `drizzle-kit pull` runs against exactly this script's output.
 
 - [ ] **Step 1: Establish the true starting state**
 
@@ -875,7 +874,7 @@ Note for Stage 1: this script's `schema_migrations` table is superseded by Drizz
 ./scripts/build-db-from-repo.sh "postgresql://tmm_owner@<host>/town_meeting_manager"
 ```
 
-Expected: every migration applies, the seed applies, and the table count is at least 26. Any failure not attributable to a missing `auth.*` schema is a genuine gap that must be closed before Stage 1 — `drizzle-kit pull` can only introspect what actually exists.
+Expected: the script fails loudly at the first `auth.*`-caused error (see the correction under "Stage 0 exit criteria" below) — this is known and not a genuine gap. Record the table count wherever the script actually halts, and separately verify the corpus itself is sound with a throwaway `auth`/`storage` shim (diagnostic only, never applied to a real database — see `scripts/dev/auth-shim.sql`): 56 of 58 migrations apply and 27 tables result. Any failure under the shim not attributable to `auth.*`, `storage.foldername`, or the known notification-table collision is a genuine gap that must be closed before Stage 1 — `drizzle-kit pull` can only introspect what actually exists.
 
 - [ ] **Step 8: Commit**
 
@@ -912,7 +911,7 @@ where it needs a decision on how a board member resolves to a user account."
 - [ ] Operator notes render in all three minutes styles, HTML-escaped
 - [ ] One migration corpus; `docker/migrations/` is gone
 - [ ] `./scripts/build-db-from-repo.sh` exists and **fails loudly** rather than exiting 0 on a partial build
-- [ ] A complete, verified inventory of what blocks a full build, and of schema-vs-code drift
+- [ ] A column-level diff of the corpus-built database (via the `auth`/`storage` shim) against the generated types in `packages/shared/src/types/database.ts`, recorded, with every difference classified (dev-only vs. corpus-only vs. name/type mismatch) and a root cause given for each class
 - [ ] `tmm_app` exists, is not superuser, and does not own tables
 
 ### Correction — the original criterion was unachievable
@@ -938,8 +937,14 @@ database from a clean clone.
 The notification tables are defined **three** incompatible ways: the "official" corpus
 (`20260308000018`–`000021`), the ported docker corpus, and a **hybrid that is what actually exists
 in the dev database**. The ported file uses `CREATE TABLE IF NOT EXISTS`, so on a fresh build the
-official definition wins and the ported one silently no-ops — yielding a schema the application
-cannot use. Parts of the feature are already broken in dev, not merely on a fresh build.
+official definition wins for the table itself — but the ported migration does not silently no-op:
+it **aborts** with Postgres error 42703 (`column "postmark_message_id" does not exist`) partway
+through its own `CREATE INDEX` statements, at line 121 of
+`20260826000001_merge_notification_system.sql`. Because the script aborts there, the rest of that
+file's statements never run either — including the unrelated `user_account.email_bounced`/
+`email_bounced_at`/`email_complained`/`email_complained_at` columns at lines 147-150, which have
+nothing to do with the collision but get skipped anyway as collateral damage of the abort. Parts of
+the feature are already broken in dev, not merely on a fresh build.
 
 Stage 1 must decide, before `drizzle-kit pull` runs:
 

@@ -114,7 +114,10 @@ commands and what should change when Stage 1 wires up a real proxy.
 Debian 13 ships all four packages natively at exactly the versions the
 Task 6 brief's survey predicted, confirmed with `apt-cache policy` before
 installing anything (no third-party repo needed — only `debian.sources` and
-`docker.list`, no PGDG/NodeSource entries exist on the box):
+`docker.list` existed at the time, no PGDG/NodeSource entries; `docker.list`
+has since been removed by the Docker-removal update above, so
+`/etc/apt/sources.list.d/` now holds only `debian.sources` — see that
+update for the current state):
 
 ```
 postgresql-17           Candidate: 17.11-0+deb13u1
@@ -472,8 +475,10 @@ is listening or forwarded now.
 - `postgresql-17-postgis-3` pulls in a large GDAL/GEOS/PROJ dependency
   chain (~100 packages including e.g. `libgdal36`, `libheif1`,
   `libboost-serialization`). That's normal for PostGIS on Debian and not a
-  sign anything went wrong; disk usage after install is 2.5 GB/32 GB, still
-  well within budget.
+  sign anything went wrong; disk usage after install was 2.5 GB/32 GB. As of
+  this fix pass (2026-08-27), `df -h /` reports 2.1 GB/32 GB used — lower,
+  not higher, consistent with the Docker-removal update above reclaiming a
+  small amount and no other growth since; still well within budget.
 - `nginx`'s stock default site originally listened on `0.0.0.0:80`
   (Debian's package default) — a LAN-reachable HTTP port serving nothing
   but the stock nginx welcome page. Initially left as-is under a strict
