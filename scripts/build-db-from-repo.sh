@@ -22,6 +22,8 @@
 # this exact script is what Stage 1 runs afterward to prove the fix.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 DB_URL="${1:?usage: build-db-from-repo.sh <postgres-url>}"
 
 echo "==> Resetting public schema"
