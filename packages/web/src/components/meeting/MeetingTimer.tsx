@@ -42,16 +42,12 @@ export function MeetingTimer({
 
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
-      {label && (
-        <span className="text-xs text-muted-foreground">{label}</span>
-      )}
+      {label && <span className="text-xs text-muted-foreground">{label}</span>}
       <span className={cn("font-mono text-sm font-medium tabular-nums", colorClass)}>
         {formatted}
       </span>
       {estimatedDuration && estimatedDuration > 0 && (
-        <span className="text-xs text-muted-foreground">
-          / {estimatedDuration}m
-        </span>
+        <span className="text-xs text-muted-foreground">/ {estimatedDuration}m</span>
       )}
     </div>
   );

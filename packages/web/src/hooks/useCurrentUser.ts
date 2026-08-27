@@ -87,10 +87,7 @@ export function useCurrentUser(): CurrentUser | null {
     // Custom claims may be at the top level (from custom_access_token_hook)
     // or nested in app_metadata/user_metadata depending on Supabase config
     const townId =
-      payload?.town_id ??
-      payload?.app_metadata?.town_id ??
-      payload?.user_metadata?.town_id ??
-      null;
+      payload?.town_id ?? payload?.app_metadata?.town_id ?? payload?.user_metadata?.town_id ?? null;
 
     const VALID_ROLES = new Set(["sys_admin", "admin", "staff", "board_member"]);
     const topRole = VALID_ROLES.has(payload?.role ?? "") ? payload!.role : undefined;

@@ -28,7 +28,7 @@ Migrate all 11 route files from PowerSync Kysely queries to Supabase client call
 
 ## Prompt
 
-```
+````
 You are migrating all route-level data loading in the Town Meeting Manager from PowerSync Kysely queries to Supabase client calls. After this session, all 11 route files load data via Supabase with full JOIN support.
 
 PROJECT CONTEXT:
@@ -84,21 +84,19 @@ export default function MeetingPage() {
     initialData: meeting, // pre-populated from clientLoader
   });
 }
-```
+````
 
 MUTATION PATTERN FOR ROUTES WITH WRITES:
+
 ```tsx
 const saveMutation = useMutation({
   mutationFn: async (data: UpdateData) => {
-    const { error } = await supabase
-      .from('meeting')
-      .update(data)
-      .eq('id', meetingId);
+    const { error } = await supabase.from("meeting").update(data).eq("id", meetingId);
     if (error) throw error;
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
-    toast.success('Saved');
+    toast.success("Saved");
   },
   onError: (error) => {
     toast.error(`Failed to save: ${error.message}`);
@@ -111,49 +109,61 @@ TASK-BY-TASK INSTRUCTIONS:
 Read each route file in full before modifying it. The files are located in packages/web/src/routes/.
 
 TASK 2: dashboard.tsx
+
 - clientLoader needs: current town (from auth context or user_account.town_id), boards for that town, recent meetings
 - Since town_id comes from auth (JWT claims), the clientLoader may need to get it from the session:
   ```tsx
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   const townId = session?.user?.app_metadata?.town_id;
   ```
 - Fetch boards: `supabase.from('board').select('*').eq('town_id', townId).order('name')`
 - Fetch recent meetings: `supabase.from('meeting').select('*, board(name)').eq('town_id', townId).order('scheduled_date', { ascending: false }).limit(5)`
 
 TASK 3: boards.tsx
+
 - clientLoader fetches all boards for town
 - `supabase.from('board').select('*').eq('town_id', townId).eq('archived', false).order('name')`
 
 TASK 4: boards.$boardId.tsx
+
 - clientLoader fetches board with board_members and persons
 - `supabase.from('board').select('*, board_member(*, person(*))').eq('id', boardId).single()`
 - The JOIN eliminates the need to merge in JS that was required with PowerSync
 
 TASK 5: boards.$boardId.meetings.tsx
+
 - clientLoader fetches meetings for this board, ordered by date descending
 - `supabase.from('meeting').select('*').eq('board_id', boardId).order('scheduled_date', { ascending: false })`
 
 TASK 6: boards.$boardId.templates.tsx
+
 - clientLoader: `supabase.from('agenda_template').select('*, agenda_template_item(*)').eq('board_id', boardId)`
 - Also migrate the 4 execute() calls. Read the file to find them — they are likely for: create template, update template, delete template, reorder template items. Replace each with a useMutation calling supabase.from('agenda_template').insert/update/delete. Call queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) }) in onSuccess.
 
 TASK 7: boards.$boardId.templates.$templateId.edit.tsx
+
 - clientLoader: `supabase.from('agenda_template').select('*, agenda_template_item(*)').eq('id', templateId).single()`
 - Read the file to find the 1 execute() call and replace with useMutation
 
 TASK 8: meetings.$meetingId.tsx
+
 - clientLoader: `supabase.from('meeting').select('*, board(*), agenda_item(*, exhibit(*))').eq('id', meetingId).single()`
 
 TASK 9: meetings.$meetingId.agenda.tsx
+
 - clientLoader: `supabase.from('meeting').select('*, agenda_item(*, exhibit(*))').eq('id', meetingId).single()`
 - Read the file to find the 2 execute() calls — likely for reordering agenda items or updating item properties. Replace with useMutation.
 
 TASK 10: meetings.$meetingId.review.tsx
+
 - This route benefits most from JOINs. Read the file first to understand what it displays.
 - clientLoader: `supabase.from('meeting').select('*, board(*), agenda_item(*), meeting_attendance(*, board_member(*, person(*))), motion(*, vote_record(*))').eq('id', meetingId).single()`
 - Adjust the select string based on what the review page actually needs.
 
 TASK 11: meetings.$meetingId.minutes.tsx
+
 - Read the file in full — it has 9 execute() calls
 - clientLoader: fetch meeting with agenda items, motions, attendance, and minutes_document
 - For each of the 9 execute() calls: identify what it does (create draft, update content, mark reviewed, approve, etc.) and replace with useMutation calling the appropriate supabase table operation
@@ -161,44 +171,57 @@ TASK 11: meetings.$meetingId.minutes.tsx
 
 TASK 12: Check for other routes
 List all route files:
+
 ```bash
 ls packages/web/src/routes/
 ```
+
 Read any route files not covered above that have clientLoader functions with PowerSync/Kysely patterns and migrate them using the same pattern.
 
 HANDLING ERRORS FROM SUPABASE:
 Always check for errors and throw them so React Router can handle them:
+
 ```tsx
-const { data, error } = await supabase.from('meeting').select('*').eq('id', id).single();
+const { data, error } = await supabase.from("meeting").select("*").eq("id", id).single();
 if (error) throw new Response(error.message, { status: 404 });
 return data;
 ```
 
 HANDLING MISSING AUTH IN CLIENTLOADER:
 If the clientLoader needs the current user's town_id but auth isn't available yet:
+
 ```tsx
-const { data: { session } } = await supabase.auth.getSession();
-if (!session) throw new Response('Unauthorized', { status: 401 });
+const {
+  data: { session },
+} = await supabase.auth.getSession();
+if (!session) throw new Response("Unauthorized", { status: 401 });
 const townId = session.user.app_metadata?.town_id as string;
 ```
 
 WHAT NOT TO CHANGE IN THIS SESSION:
+
 - Do NOT migrate useQuery calls inside component bodies — those are M.07
 - Do NOT migrate powersync.execute() calls in sub-components imported by routes — those are M.07/M.08
 - ONLY migrate the clientLoader function and any powersync.execute() calls directly in the route file's component body
 - Leave all existing JSX, UI logic, and component structure unchanged
 
 VERIFICATION CHECKLIST:
+
 1. All 11 route files have clientLoader functions using `supabase.from(...)` (no Kysely or PowerSync)
 2. No route file imports from @powersync/kysely-driver or uses getPowerSyncDb()
 3. Write calls (execute → useMutation) are migrated in routes 6, 7, 9, 11
 4. Each mutation calls queryClient.invalidateQueries() in onSuccess
 5. Each mutation handles errors with toast.error() or similar
 6. TypeScript check shows no errors originating in route files: `pnpm --filter @town-meeting/web tsc --noEmit --skipLibCheck 2>&1 | grep "routes/"`
+
 ```
 
 ## Commit Message
 
 ```
+
 M.04: Migrate all route clientLoaders from PowerSync Kysely to Supabase
+
+```
+
 ```

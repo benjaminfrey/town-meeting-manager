@@ -36,12 +36,16 @@ export default function BoardDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  usePortalMeta(board ? {
-    title: `${board.name} - ${townName}`,
-    description: `Members and meeting information for ${board.name}.`,
-    siteName: townName ?? undefined,
-    ogImage: sealUrl,
-  } : null);
+  usePortalMeta(
+    board
+      ? {
+          title: `${board.name} - ${townName}`,
+          description: `Members and meeting information for ${board.name}.`,
+          siteName: townName ?? undefined,
+          ogImage: sealUrl,
+        }
+      : null,
+  );
 
   useEffect(() => {
     if (!boardId) return;
@@ -109,10 +113,7 @@ export default function BoardDetail() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground sm:text-3xl">
-              <Building2
-                className="h-7 w-7 text-muted-foreground"
-                aria-hidden="true"
-              />
+              <Building2 className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
               {board.name}
             </h1>
 
@@ -122,15 +123,12 @@ export default function BoardDetail() {
               </span>
               {board.elected_or_appointed && (
                 <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                  {board.elected_or_appointed === "elected"
-                    ? "Elected"
-                    : "Appointed"}
+                  {board.elected_or_appointed === "elected" ? "Elected" : "Appointed"}
                 </span>
               )}
               <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
                 <Users className="h-4 w-4" aria-hidden="true" />
-                {board.member_count}{" "}
-                {board.member_count === 1 ? "Member" : "Members"}
+                {board.member_count} {board.member_count === 1 ? "Member" : "Members"}
               </span>
             </div>
           </div>
@@ -139,10 +137,7 @@ export default function BoardDetail() {
 
       {/* Member Roster */}
       <section className="mt-6" aria-labelledby="members-heading">
-        <h2
-          id="members-heading"
-          className="mb-4 text-lg font-semibold text-foreground"
-        >
+        <h2 id="members-heading" className="mb-4 text-lg font-semibold text-foreground">
           Current Members
         </h2>
 

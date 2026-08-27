@@ -8,11 +8,7 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import {
-  calculateQuorum,
-  hasQuorum,
-  quorumAfterRecusal,
-} from "@town-meeting/shared";
+import { calculateQuorum, hasQuorum, quorumAfterRecusal } from "@town-meeting/shared";
 
 // ─── Mock TanStack Query ────────────────────────────────────────────
 
@@ -98,7 +94,12 @@ describe("useQuorumCheck", () => {
   });
 
   it("returns null when board data is not loaded", () => {
-    mockUseQuery.mockReturnValue({ data: undefined, isLoading: true, isFetching: false, error: undefined });
+    mockUseQuery.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: false,
+      error: undefined,
+    });
 
     const { result } = renderHook(() => useQuorumCheck("meeting-1", "board-1"));
 
@@ -154,7 +155,15 @@ describe("useQuorumCheck", () => {
       quorumType: "fixed_number",
       quorumValue: 4,
       totalActiveMembers: 7,
-      attendanceStatuses: ["present", "present", "present", "present", "absent", "absent", "absent"],
+      attendanceStatuses: [
+        "present",
+        "present",
+        "present",
+        "present",
+        "absent",
+        "absent",
+        "absent",
+      ],
     });
 
     const { result } = renderHook(() => useQuorumCheck("meeting-1", "board-1"));

@@ -106,9 +106,7 @@ export function checkPermission(
 
     // Board-specific override takes precedence
     if (boardId && permissions.board_overrides) {
-      const override = permissions.board_overrides.find(
-        (o) => o.board_id === boardId,
-      );
+      const override = permissions.board_overrides.find((o) => o.board_id === boardId);
       if (override && action in override.permissions) {
         return override.permissions[action] ?? false;
       }
@@ -151,10 +149,7 @@ export function usePermission(
  * @param actionCodes  Array of action codes, e.g. ["A1", "A2", "M1"]
  * @param boardId      Optional board UUID for board-scoped checks
  */
-export function usePermissions(
-  actionCodes: string[],
-  boardId?: string,
-): Record<string, boolean> {
+export function usePermissions(actionCodes: string[], boardId?: string): Record<string, boolean> {
   const { isLoading } = useAuth();
   const currentUser = useCurrentUser();
 

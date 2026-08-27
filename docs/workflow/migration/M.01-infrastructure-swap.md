@@ -27,7 +27,7 @@ Remove all PowerSync infrastructure from the monorepo: the Docker service, npm p
 
 ## Prompt
 
-```
+````
 You are performing the first step of a migration from PowerSync to TanStack Query + Supabase Realtime for the Town Meeting Manager project. This session removes PowerSync infrastructure and installs the replacement packages. The app will NOT compile at the end of this session — that is expected and intentional. Do not attempt to fix TypeScript errors caused by remaining @powersync imports in source files. Those will be resolved in sessions M.02 through M.11.
 
 PROJECT CONTEXT:
@@ -74,9 +74,10 @@ pnpm --filter @town-meeting/web add -D @tanstack/react-query-devtools
 pnpm --filter @town-meeting/web add react-hook-form @hookform/resolvers
 pnpm --filter @town-meeting/api add web-push
 pnpm --filter @town-meeting/api add -D @types/web-push
-```
+````
 
 TASK 5: Remove VITE_POWERSYNC_URL from environment files
+
 - File: packages/web/.env (if it exists)
   - Remove the line containing `VITE_POWERSYNC_URL`
   - Do not remove any other environment variables
@@ -85,25 +86,30 @@ TASK 5: Remove VITE_POWERSYNC_URL from environment files
   - Do not remove any other environment variable examples
 
 TASK 6: Delete the powersync/ directory
+
 - Delete the entire `powersync/` directory at the repo root
 - This contains: `powersync.yaml` and `sync-rules.yaml`
 - Command: `rm -rf powersync/`
 
 TASK 7: Update the lockfile
 Run from the repo root:
+
 ```bash
 pnpm install
 ```
+
 This updates pnpm-lock.yaml to reflect the removed and added packages.
 
 IMPORTANT RULES FOR THIS SESSION:
-1. Do NOT touch any TypeScript/TSX source files (*.ts, *.tsx) — those will be migrated in M.02–M.11
+
+1. Do NOT touch any TypeScript/TSX source files (_.ts, _.tsx) — those will be migrated in M.02–M.11
 2. Do NOT attempt to fix TypeScript compilation errors — the app will fail to compile after this session
 3. Do NOT run `pnpm build` or `pnpm typecheck` — they will fail and that is expected
 4. If pnpm install shows peer dependency warnings related to PowerSync packages that no longer exist, that is expected and acceptable
 5. Only modify: docker/docker-compose.yml, packages/web/package.json, packages/shared/package.json, packages/web/vite.config.ts, packages/web/.env, packages/web/.env.example, and run the install commands
 
 VERIFICATION CHECKLIST:
+
 1. docker/docker-compose.yml no longer contains a `powersync:` service block
 2. docker/docker-compose.yml no longer contains a `mongo:` service block (if it existed)
 3. packages/web/package.json does not contain @powersync/react, @powersync/web, or @powersync/kysely-driver
@@ -116,10 +122,15 @@ VERIFICATION CHECKLIST:
 10. packages/web/.env does not contain VITE_POWERSYNC_URL
 11. The powersync/ directory at the repo root no longer exists
 12. pnpm install completed without fatal errors (warnings are acceptable)
+
 ```
 
 ## Commit Message
 
 ```
+
 M.01: Remove PowerSync infrastructure, install TanStack Query and react-hook-form
+
+```
+
 ```

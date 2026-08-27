@@ -19,13 +19,7 @@ const PERMANENT_DISMISS_KEY = "tmm-notification-prompt-dismissed";
 const SESSION_DISMISS_KEY = "tmm-notification-prompt-session-dismissed";
 
 function NotificationPromptInner() {
-  const {
-    isSupported,
-    permission,
-    isSubscribed,
-    subscribe,
-    isLoading,
-  } = usePushNotifications();
+  const { isSupported, permission, isSubscribed, subscribe, isLoading } = usePushNotifications();
 
   const [visible, setVisible] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
@@ -39,9 +33,7 @@ function NotificationPromptInner() {
     if (sessionStorage.getItem(SESSION_DISMISS_KEY) === "true") return;
 
     const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-    const standalone = window.matchMedia(
-      "(display-mode: standalone)",
-    ).matches;
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
     setIsIOS(ios);
     setIsStandalone(standalone);
 
@@ -83,9 +75,7 @@ function NotificationPromptInner() {
             <Bell className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-medium">
-              Install the app first to enable notifications
-            </p>
+            <p className="text-sm font-medium">Install the app first to enable notifications</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Add Town Meeting Manager to your home screen, then you can enable push notifications.
             </p>
@@ -96,7 +86,10 @@ function NotificationPromptInner() {
               Dismiss
             </button>
           </div>
-          <button onClick={handleDismissSession} className="shrink-0 p-1 text-muted-foreground hover:bg-muted rounded">
+          <button
+            onClick={handleDismissSession}
+            className="shrink-0 p-1 text-muted-foreground hover:bg-muted rounded"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -143,7 +136,10 @@ function NotificationPromptInner() {
             </button>
           </div>
         </div>
-        <button onClick={handleDismissSession} className="shrink-0 p-1 text-muted-foreground hover:bg-muted rounded">
+        <button
+          onClick={handleDismissSession}
+          className="shrink-0 p-1 text-muted-foreground hover:bg-muted rounded"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>

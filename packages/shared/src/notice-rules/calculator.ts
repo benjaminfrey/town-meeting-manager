@@ -15,10 +15,8 @@ function addHours(date: Date, hours: number): Date {
 function getMostRestrictiveRule(rules: NoticeRule[]): NoticeRule | null {
   if (rules.length === 0) return null;
   return rules.reduce((most, rule) => {
-    const mostDays =
-      most.minimumNoticeDays ?? (most.minimumNoticeHours ?? 0) / 24;
-    const ruleDays =
-      rule.minimumNoticeDays ?? (rule.minimumNoticeHours ?? 0) / 24;
+    const mostDays = most.minimumNoticeDays ?? (most.minimumNoticeHours ?? 0) / 24;
+    const ruleDays = rule.minimumNoticeDays ?? (rule.minimumNoticeHours ?? 0) / 24;
     return ruleDays > mostDays ? rule : most;
   });
 }
@@ -26,7 +24,7 @@ function getMostRestrictiveRule(rules: NoticeRule[]): NoticeRule | null {
 function filterRules(
   rules: NoticeRule[],
   meetingType: MeetingType,
-  actionTypes?: string[]
+  actionTypes?: string[],
 ): NoticeRule[] {
   return rules.filter((rule) => {
     if (!rule.meetingTypes.includes(meetingType)) return false;
@@ -63,7 +61,7 @@ export function getNoticeDeadline(params: {
   }
 
   // Build the full meeting datetime
-  let meetingDateTime = new Date(meetingDate);
+  const meetingDateTime = new Date(meetingDate);
   if (meetingTime) {
     const parts = meetingTime.split(":").map(Number);
     meetingDateTime.setHours(parts[0] ?? 0, parts[1] ?? 0, 0, 0);

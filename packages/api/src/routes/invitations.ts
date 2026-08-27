@@ -12,10 +12,7 @@
 
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import {
-  renderEmailTemplate,
-  EmailSenderService,
-} from "../services/email-sender.js";
+import { renderEmailTemplate, EmailSenderService } from "../services/email-sender.js";
 import { getDefaultPostmarkClient } from "../lib/postmark.js";
 
 const APP_URL = process.env.APP_URL ?? "https://app.townmeetingmanager.com";
@@ -37,7 +34,8 @@ function validateUnsubscribeToken(token: string): { userId: string; eventType: s
     const [userId, eventType, ...hmacParts] = parts;
     const hmac = hmacParts.join(":");
     if (!userId || !eventType || !hmac) return null;
-    const expected = crypto.createHmac("sha256", APP_SECRET)
+    const expected = crypto
+      .createHmac("sha256", APP_SECRET)
       .update(`${userId}:${eventType}`)
       .digest("hex");
     if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(expected, "hex"))) {
@@ -113,9 +111,8 @@ export async function invitationRoutes(app: FastifyInstance) {
         .eq("id", user.id)
         .single();
 
-      const inviterName = (inviter?.display_name as string)
-        ?? (inviter?.email as string)
-        ?? "Town Administrator";
+      const inviterName =
+        (inviter?.display_name as string) ?? (inviter?.email as string) ?? "Town Administrator";
 
       const setupUrl = `${APP_URL}/invite/accept?token=${inv.token as string}`;
       const expiresDate = new Date(inv.expires_at as string).toLocaleDateString("en-US", {
@@ -249,9 +246,8 @@ export async function invitationRoutes(app: FastifyInstance) {
         .eq("id", user.id)
         .single();
 
-      const inviterName = (inviter?.display_name as string)
-        ?? (inviter?.email as string)
-        ?? "Town Administrator";
+      const inviterName =
+        (inviter?.display_name as string) ?? (inviter?.email as string) ?? "Town Administrator";
 
       const setupUrl = `${APP_URL}/invite/accept?token=${updated.token as string}`;
       const expiresDate = new Date(updated.expires_at as string).toLocaleDateString("en-US", {
@@ -303,53 +299,50 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/invitations/validate ────────────────────────────────
   // Public: validate token, return details for acceptance page
 
-  app.get<{ Querystring: { token: string } }>(
-    "/invitations/validate",
-    async (request, reply) => {
-      const { token } = request.query;
-      if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { token: string } }>("/invitations/validate", async (request, reply) => {
+    const { token } = request.query;
+    if (!token) return reply.badRequest("token required");
 
-      const { data: inv } = await supabase
-        .from("invitation")
-        .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
-        .eq("token", token)
-        .single();
+    const { data: inv } = await supabase
+      .from("invitation")
+      .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
+      .eq("token", token)
+      .single();
 
-      if (!inv) return reply.notFound("Invitation not found or already used");
+    if (!inv) return reply.notFound("Invitation not found or already used");
 
-      if ((inv.status as string) === "accepted") {
-        return reply.send({ valid: false, reason: "already_accepted" });
-      }
+    if ((inv.status as string) === "accepted") {
+      return reply.send({ valid: false, reason: "already_accepted" });
+    }
 
-      if (new Date(inv.expires_at as string) < new Date()) {
-        return reply.send({ valid: false, reason: "expired" });
-      }
+    if (new Date(inv.expires_at as string) < new Date()) {
+      return reply.send({ valid: false, reason: "expired" });
+    }
 
-      // Get person info
-      const { data: person } = await supabase
-        .from("person")
-        .select("name, email")
-        .eq("id", inv.person_id as string)
-        .single();
+    // Get person info
+    const { data: person } = await supabase
+      .from("person")
+      .select("name, email")
+      .eq("id", inv.person_id as string)
+      .single();
 
-      // Get town info
-      const { data: town } = await supabase
-        .from("town")
-        .select("name")
-        .eq("id", inv.town_id as string)
-        .single();
+    // Get town info
+    const { data: town } = await supabase
+      .from("town")
+      .select("name")
+      .eq("id", inv.town_id as string)
+      .single();
 
-      return reply.send({
-        valid: true,
-        invitation_id: inv.id,
-        person_name: person?.name ?? null,
-        person_email: person?.email ?? null,
-        town_name: town?.name ?? null,
-        role: inv.role ?? "board_member",
-        expires_at: inv.expires_at,
-      });
-    },
-  );
+    return reply.send({
+      valid: true,
+      invitation_id: inv.id,
+      person_name: person?.name ?? null,
+      person_email: person?.email ?? null,
+      town_name: town?.name ?? null,
+      role: inv.role ?? "board_member",
+      expires_at: inv.expires_at,
+    });
+  });
 
   // ── POST /api/invitations/accept ─────────────────────────────────
   // Public: accept invitation — creates auth user + links account
@@ -406,15 +399,13 @@ export async function invitationRoutes(app: FastifyInstance) {
       user_metadata: {
         display_name: name,
         town_id: inv.town_id as string,
-        role: inv.role as string ?? "board_member",
+        role: (inv.role as string) ?? "board_member",
       },
     });
 
     if (authError || !authData.user) {
       app.log.error({ authError }, "Failed to create auth user for invitation acceptance");
-      return reply.internalServerError(
-        authError?.message ?? "Failed to create account",
-      );
+      return reply.internalServerError(authError?.message ?? "Failed to create account");
     }
 
     const authUserId = authData.user.id;
@@ -447,38 +438,31 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/unsubscribe ─────────────────────────────────────────
   // Public: unsubscribe from a specific email type via signed token
 
-  app.get<{ Querystring: { t: string } }>(
-    "/unsubscribe",
-    async (request, reply) => {
-      const { t: token } = request.query;
-      if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { t: string } }>("/unsubscribe", async (request, reply) => {
+    const { t: token } = request.query;
+    if (!token) return reply.badRequest("token required");
 
-      const parsed = validateUnsubscribeToken(token);
-      if (!parsed) {
-        return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
-      }
+    const parsed = validateUnsubscribeToken(token);
+    if (!parsed) {
+      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+    }
 
-      const { userId, eventType } = parsed;
+    const { userId, eventType } = parsed;
 
-      // Upsert preference: enabled = false
-      await supabase
-        .from("subscriber_notification_preference")
-        .upsert(
-          {
-            subscriber_id: userId,
-            event_type: eventType,
-            channel: "email",
-            enabled: false,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "subscriber_id,event_type,channel" },
-        );
+    // Upsert preference: enabled = false
+    await supabase.from("subscriber_notification_preference").upsert(
+      {
+        subscriber_id: userId,
+        event_type: eventType,
+        channel: "email",
+        enabled: false,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "subscriber_id,event_type,channel" },
+    );
 
-      // Return a simple HTML confirmation
-      return reply
-        .header("Content-Type", "text/html")
-        .status(200)
-        .send(`<!DOCTYPE html>
+    // Return a simple HTML confirmation
+    return reply.header("Content-Type", "text/html").status(200).send(`<!DOCTYPE html>
 <html>
 <head><title>Unsubscribed</title>
 <style>body{font-family:Arial,sans-serif;max-width:600px;margin:60px auto;text-align:center;color:#374151;}
@@ -489,8 +473,7 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
 <p>You can <a href="${APP_URL}/settings/notifications">manage all your notification preferences</a> at any time.</p>
 </body>
 </html>`);
-    },
-  );
+  });
 
   // ── GET /api/notifications/preferences ──────────────────────────
   // Authenticated: get current user's email preferences
@@ -519,29 +502,23 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
       channel?: string;
       enabled: boolean;
     };
-  }>(
-    "/notifications/preferences",
-    { preHandler: [app.verifyAuth] },
-    async (request, reply) => {
-      const user = request.user!;
-      const { event_type, channel = "email", enabled } = request.body;
+  }>("/notifications/preferences", { preHandler: [app.verifyAuth] }, async (request, reply) => {
+    const user = request.user!;
+    const { event_type, channel = "email", enabled } = request.body;
 
-      await supabase
-        .from("subscriber_notification_preference")
-        .upsert(
-          {
-            subscriber_id: user.id,
-            event_type,
-            channel,
-            enabled,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "subscriber_id,event_type,channel" },
-        );
+    await supabase.from("subscriber_notification_preference").upsert(
+      {
+        subscriber_id: user.id,
+        event_type,
+        channel,
+        enabled,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "subscriber_id,event_type,channel" },
+    );
 
-      return reply.send({ ok: true });
-    },
-  );
+    return reply.send({ ok: true });
+  });
 }
 
 // ─── Export helper for use in email templates ─────────────────────────

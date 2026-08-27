@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  AgendaStatus,
-  MeetingFormality,
-  MeetingStatus,
-  MeetingType,
-} from "../constants/enums.js";
+import { AgendaStatus, MeetingFormality, MeetingStatus, MeetingType } from "../constants/enums.js";
 
 export const MeetingSchema = z.object({
   id: z.string().uuid(),
@@ -31,11 +26,7 @@ export const MeetingSchema = z.object({
   ]),
   agenda_status: z.enum([AgendaStatus.DRAFT, AgendaStatus.PUBLISHED]),
   formality_override: z
-    .enum([
-      MeetingFormality.INFORMAL,
-      MeetingFormality.SEMI_FORMAL,
-      MeetingFormality.FORMAL,
-    ])
+    .enum([MeetingFormality.INFORMAL, MeetingFormality.SEMI_FORMAL, MeetingFormality.FORMAL])
     .nullable(),
   started_at: z.string().datetime().nullable(),
   ended_at: z.string().datetime().nullable(),

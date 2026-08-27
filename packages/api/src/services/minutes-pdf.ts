@@ -56,12 +56,10 @@ export async function generateMinutesPdf(
   const timestamp = Date.now();
   const storagePath = `${townId}/meetings/${meetingId}/minutes-${timestamp}.pdf`;
 
-  const { error: uploadErr } = await supabase.storage
-    .from("documents")
-    .upload(storagePath, pdf, {
-      contentType: "application/pdf",
-      upsert: false,
-    });
+  const { error: uploadErr } = await supabase.storage.from("documents").upload(storagePath, pdf, {
+    contentType: "application/pdf",
+    upsert: false,
+  });
 
   if (uploadErr) {
     throw new Error(`Failed to upload minutes PDF: ${uploadErr.message}`);
@@ -87,5 +85,6 @@ function escapeHtml(str: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

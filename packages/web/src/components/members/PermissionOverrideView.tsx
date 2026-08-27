@@ -49,21 +49,18 @@ interface PermissionOverrideViewProps {
   townId: string;
 }
 
-export function PermissionOverrideView({
-  permissions,
-  townId,
-}: PermissionOverrideViewProps) {
+export function PermissionOverrideView({ permissions, townId }: PermissionOverrideViewProps) {
   const supabase = useSupabase();
 
   const { data: boardRows = [] } = useQuery({
     queryKey: queryKeys.boards.byTown(townId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('board')
-        .select('id, name')
-        .eq('town_id', townId)
-        .is('archived_at', null)
-        .order('name');
+        .from("board")
+        .select("id, name")
+        .eq("town_id", townId)
+        .is("archived_at", null)
+        .order("name");
       if (error) throw error;
       return data;
     },
@@ -132,10 +129,7 @@ export function PermissionOverrideView({
           <AccordionContent>
             <div className="space-y-1">
               {board.diffs.map((diff) => (
-                <div
-                  key={diff.action}
-                  className="flex items-center gap-2 text-sm"
-                >
+                <div key={diff.action} className="flex items-center gap-2 text-sm">
                   {diff.overrideValue ? (
                     <Check className="h-3.5 w-3.5 text-green-600" />
                   ) : (

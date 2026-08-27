@@ -23,15 +23,12 @@ export function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
       <div className="mx-auto w-full max-w-md rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
         {/* Header */}
         <div className="flex items-start gap-3">
-          <AlertTriangle
-            className="mt-0.5 h-5 w-5 shrink-0 text-destructive"
-            aria-hidden="true"
-          />
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
           <div className="flex-1 min-w-0">
             <h2 className="text-base font-semibold">Something went wrong</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              An error occurred in this section. Other parts of the application
-              should continue to work.
+              An error occurred in this section. Other parts of the application should continue to
+              work.
             </p>
           </div>
         </div>
@@ -71,9 +68,7 @@ export function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
           </button>
           {showDetails && (
             <div id="error-details" className="mt-2">
-              <p className="text-xs font-medium text-destructive break-words">
-                {errorMessage}
-              </p>
+              <p className="text-xs font-medium text-destructive break-words">{errorMessage}</p>
               {errorStack && (
                 <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-3 text-xs leading-relaxed">
                   <code>{errorStack}</code>

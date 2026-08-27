@@ -20,12 +20,7 @@ export const UserAccountSchema = z.object({
   id: z.string().uuid(),
   person_id: z.string().uuid(),
   town_id: z.string().uuid(),
-  role: z.enum([
-    UserRole.SYS_ADMIN,
-    UserRole.ADMIN,
-    UserRole.STAFF,
-    UserRole.BOARD_MEMBER,
-  ]),
+  role: z.enum([UserRole.SYS_ADMIN, UserRole.ADMIN, UserRole.STAFF, UserRole.BOARD_MEMBER]),
   gov_title: z.string().max(100).nullable(),
   permissions: z.object({
     global: z.record(z.string(), z.boolean()),

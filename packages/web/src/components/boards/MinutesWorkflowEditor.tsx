@@ -12,17 +12,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
-import {
-  AUDIO_RETENTION_LABELS,
-  type AudioRetentionPolicy,
-} from "@town-meeting/shared";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { AUDIO_RETENTION_LABELS, type AudioRetentionPolicy } from "@town-meeting/shared";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -61,29 +52,23 @@ export function MinutesWorkflowEditor({
   const queryClient = useQueryClient();
 
   // Board-only settings
-  const [consentAgenda, setConsentAgenda] = useState(
-    initialValues.minutes_consent_agenda
-  );
-  const [requiresSecond, setRequiresSecond] = useState(
-    initialValues.minutes_requires_second
-  );
-  const [r4Default, setR4Default] = useState(
-    initialValues.r4_board_member_default
-  );
+  const [consentAgenda, setConsentAgenda] = useState(initialValues.minutes_consent_agenda);
+  const [requiresSecond, setRequiresSecond] = useState(initialValues.minutes_requires_second);
+  const [r4Default, setR4Default] = useState(initialValues.r4_board_member_default);
 
   // Override settings
   const [overrideRetention, setOverrideRetention] = useState(
-    initialValues.audio_retention_policy_override !== null
+    initialValues.audio_retention_policy_override !== null,
   );
   const [retentionValue, setRetentionValue] = useState(
-    initialValues.audio_retention_policy_override ?? townDefaults.audio_retention_policy
+    initialValues.audio_retention_policy_override ?? townDefaults.audio_retention_policy,
   );
 
   const [overrideAutoPublish, setOverrideAutoPublish] = useState(
-    initialValues.auto_publish_on_approval_override !== null
+    initialValues.auto_publish_on_approval_override !== null,
   );
   const [autoPublishValue, setAutoPublishValue] = useState(
-    initialValues.auto_publish_on_approval_override ?? townDefaults.auto_publish_on_approval
+    initialValues.auto_publish_on_approval_override ?? townDefaults.auto_publish_on_approval,
   );
 
   const [dirty, setDirty] = useState(false);
@@ -96,12 +81,8 @@ export function MinutesWorkflowEditor({
           minutes_consent_agenda: consentAgenda,
           minutes_requires_second: requiresSecond,
           r4_board_member_default: r4Default,
-          audio_retention_policy_override: overrideRetention
-            ? retentionValue
-            : null,
-          auto_publish_on_approval_override: overrideAutoPublish
-            ? autoPublishValue
-            : null,
+          audio_retention_policy_override: overrideRetention ? retentionValue : null,
+          auto_publish_on_approval_override: overrideAutoPublish ? autoPublishValue : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", boardId);
@@ -122,8 +103,7 @@ export function MinutesWorkflowEditor({
       <CardHeader>
         <CardTitle className="text-lg">Minutes Workflow</CardTitle>
         <CardDescription>
-          Board-level minutes approval settings. Overrides apply only to this
-          board.
+          Board-level minutes approval settings. Overrides apply only to this board.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -135,12 +115,9 @@ export function MinutesWorkflowEditor({
 
           <div className="flex items-center justify-between">
             <div>
-              <Label className="text-sm font-medium">
-                Allow consent agenda approval
-              </Label>
+              <Label className="text-sm font-medium">Allow consent agenda approval</Label>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Minutes can be approved as part of the consent agenda without a
-                separate motion
+                Minutes can be approved as part of the consent agenda without a separate motion
               </p>
             </div>
             <Switch
@@ -154,9 +131,7 @@ export function MinutesWorkflowEditor({
 
           <div className="flex items-center justify-between">
             <div>
-              <Label className="text-sm font-medium">
-                Require second for approval motion
-              </Label>
+              <Label className="text-sm font-medium">Require second for approval motion</Label>
               <p className="text-xs text-muted-foreground mt-0.5">
                 A motion to approve minutes must be seconded before voting
               </p>
@@ -172,12 +147,9 @@ export function MinutesWorkflowEditor({
 
           <div className="flex items-center justify-between">
             <div>
-              <Label className="text-sm font-medium">
-                Board members can view drafts
-              </Label>
+              <Label className="text-sm font-medium">Board members can view drafts</Label>
               <p className="text-xs text-muted-foreground mt-0.5">
-                New board members get the R4 (View Draft Minutes) permission by
-                default
+                New board members get the R4 (View Draft Minutes) permission by default
               </p>
             </div>
             <Switch
@@ -200,13 +172,12 @@ export function MinutesWorkflowEditor({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div>
-                <Label className="text-sm font-medium">
-                  Audio retention policy
-                </Label>
+                <Label className="text-sm font-medium">Audio retention policy</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Town default:{" "}
-                  {AUDIO_RETENTION_LABELS[townDefaults.audio_retention_policy as AudioRetentionPolicy] ??
-                    townDefaults.audio_retention_policy}
+                  {AUDIO_RETENTION_LABELS[
+                    townDefaults.audio_retention_policy as AudioRetentionPolicy
+                  ] ?? townDefaults.audio_retention_policy}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -247,12 +218,9 @@ export function MinutesWorkflowEditor({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div>
-                <Label className="text-sm font-medium">
-                  Auto-publish on approval
-                </Label>
+                <Label className="text-sm font-medium">Auto-publish on approval</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Town default:{" "}
-                  {townDefaults.auto_publish_on_approval ? "Enabled" : "Disabled"}
+                  Town default: {townDefaults.auto_publish_on_approval ? "Enabled" : "Disabled"}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -273,9 +241,7 @@ export function MinutesWorkflowEditor({
             </div>
             {overrideAutoPublish && (
               <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                <span className="text-sm">
-                  Publish minutes automatically when approved
-                </span>
+                <span className="text-sm">Publish minutes automatically when approved</span>
                 <Switch
                   checked={!!autoPublishValue}
                   onCheckedChange={(v) => {
@@ -302,12 +268,8 @@ export function MinutesWorkflowEditor({
             )}
             Save
           </Button>
-          {saveMutation.isSuccess && (
-            <span className="text-sm text-green-600">Saved</span>
-          )}
-          {saveMutation.isError && (
-            <span className="text-sm text-red-600">Error saving</span>
-          )}
+          {saveMutation.isSuccess && <span className="text-sm text-green-600">Saved</span>}
+          {saveMutation.isError && <span className="text-sm text-red-600">Error saving</span>}
         </div>
       </CardContent>
     </Card>

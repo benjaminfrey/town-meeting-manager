@@ -16,9 +16,7 @@ test.describe("onboarding wizard", () => {
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
   });
 
-  test("full wizard flow: login → stages 1-5 → dashboard", async ({
-    page,
-  }) => {
+  test("full wizard flow: login → stages 1-5 → dashboard", async ({ page }) => {
     // Sign up a unique test user for this run
     const uniqueEmail = `e2e-${Date.now()}@test.local`;
     const password = "TestPassword123!";
@@ -94,8 +92,6 @@ test.describe("onboarding wizard", () => {
     }
 
     // Verify dashboard loaded
-    await expect(
-      page.getByRole("heading").first(),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 5_000 });
   });
 });

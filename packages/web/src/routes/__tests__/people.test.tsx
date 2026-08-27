@@ -39,15 +39,13 @@ function mockData({
   accounts = [] as Array<Record<string, unknown>>,
   memberships = [] as Array<Record<string, unknown>>,
 }) {
-  mockUseQuery.mockImplementation(
-    ({ queryKey }: { queryKey: readonly unknown[] }) => {
-      const key = queryKey[0] as string;
-      if (key === "persons") return { data: persons, isLoading: false };
-      if (key === "userAccounts") return { data: accounts, isLoading: false };
-      if (key === "members") return { data: memberships, isLoading: false };
-      return { data: [], isLoading: false };
-    },
-  );
+  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
+    const key = queryKey[0] as string;
+    if (key === "persons") return { data: persons, isLoading: false };
+    if (key === "userAccounts") return { data: accounts, isLoading: false };
+    if (key === "members") return { data: memberships, isLoading: false };
+    return { data: [], isLoading: false };
+  });
 }
 
 describe("PeoplePage", () => {
@@ -65,9 +63,7 @@ describe("PeoplePage", () => {
         { id: "p3", name: "Dan Directory", email: "dan@t.gov" },
       ],
       accounts: [{ person_id: "p2", role: "staff", gov_title: "Town Clerk" }],
-      memberships: [
-        { person_id: "p1", board: { id: "b1", name: "Select Board" } },
-      ],
+      memberships: [{ person_id: "p1", board: { id: "b1", name: "Select Board" } }],
     });
 
     render(<PeoplePage />);

@@ -47,7 +47,15 @@ import { MEETING_TYPE_LABELS } from "./meeting-labels";
 
 const CreateMeetingFormSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters").max(200),
-  meeting_type: z.enum(["regular", "special", "annual_town_meeting", "special_town_meeting", "public_hearing", "workshop", "emergency"]),
+  meeting_type: z.enum([
+    "regular",
+    "special",
+    "annual_town_meeting",
+    "special_town_meeting",
+    "public_hearing",
+    "workshop",
+    "emergency",
+  ]),
   scheduled_date: z.string().min(1, "Date is required"),
   scheduled_time: z.string().regex(/^\d{2}:\d{2}$/, "Must be HH:MM format"),
   location: z.string().max(200),
@@ -93,18 +101,20 @@ export function CreateMeetingDialog({
     template_id: "",
   };
 
-  const { values, errors, isValid, setValue, handleBlur, validate } =
-    useWizardForm(CreateMeetingFormSchema, initial);
+  const { values, errors, isValid, setValue, handleBlur, validate } = useWizardForm(
+    CreateMeetingFormSchema,
+    initial,
+  );
 
   // ─── Queries for validation & templates ─────────────────────────────
   const { data: activeMemberCount = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byBoard(boardId), 'activeCount'],
+    queryKey: [...queryKeys.members.byBoard(boardId), "activeCount"],
     queryFn: async () => {
       const { count, error } = await supabase
-        .from('board_member')
-        .select('*', { count: 'exact', head: true })
-        .eq('board_id', boardId)
-        .eq('status', 'active');
+        .from("board_member")
+        .select("*", { count: "exact", head: true })
+        .eq("board_id", boardId)
+        .eq("status", "active");
       if (error) throw error;
       return count ?? 0;
     },
@@ -115,9 +125,9 @@ export function CreateMeetingDialog({
     queryKey: queryKeys.towns.detail(townId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('town')
-        .select('retention_policy_acknowledged_at, state')
-        .eq('id', townId)
+        .from("town")
+        .select("retention_policy_acknowledged_at, state")
+        .eq("id", townId)
         .single();
       if (error) throw error;
       return data;
@@ -129,11 +139,11 @@ export function CreateMeetingDialog({
     queryKey: queryKeys.agendaTemplates.byBoard(boardId),
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('agenda_template')
-        .select('id, name, is_default, sections')
-        .eq('board_id', boardId)
-        .order('is_default', { ascending: false })
-        .order('name');
+        .from("agenda_template")
+        .select("id, name, is_default, sections")
+        .eq("board_id", boardId)
+        .order("is_default", { ascending: false })
+        .order("name");
       if (error) throw error;
       return data;
     },
@@ -162,11 +172,7 @@ export function CreateMeetingDialog({
   }
 
   // Pre-submit validation
-  const prereqValidation = validateMeetingCreation(
-    activeMemberCount,
-    retentionAck,
-    boardId,
-  );
+  const prereqValidation = validateMeetingCreation(activeMemberCount, retentionAck, boardId);
 
   const handleSave = useCallback(async () => {
     const data = validate();
@@ -177,7 +183,7 @@ export function CreateMeetingDialog({
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
 
-      const { error } = await supabase.from('meeting').insert({
+      const { error } = await supabase.from("meeting").insert({
         id,
         board_id: boardId,
         town_id: townId,
@@ -186,29 +192,22 @@ export function CreateMeetingDialog({
         scheduled_date: data.scheduled_date,
         scheduled_time: data.scheduled_time,
         location: data.location || null,
-        status: 'draft',
-        agenda_status: 'draft',
+        status: "draft",
+        agenda_status: "draft",
         formality_override: null,
-        created_by: currentUser?.id ?? '',
+        created_by: currentUser?.id ?? "",
         created_at: now,
         updated_at: now,
       });
       if (error) throw error;
 
       // Instantiate agenda from selected template
-      const selectedTemplate = templates.find(
-        (t) => String(t.id) === data.template_id,
-      );
+      const selectedTemplate = templates.find((t) => String(t.id) === data.template_id);
       if (selectedTemplate?.sections) {
         const sections = parseSections(
           selectedTemplate.sections as string,
         ) as AgendaTemplateSection[];
-        await instantiateAgendaFromTemplate(
-          id,
-          boardId,
-          townId,
-          sections,
-        );
+        await instantiateAgendaFromTemplate(id, boardId, townId, sections);
       }
 
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(boardId) });
@@ -235,9 +234,7 @@ export function CreateMeetingDialog({
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Meeting</DialogTitle>
-          <DialogDescription>
-            Schedule a new meeting for {boardName}.
-          </DialogDescription>
+          <DialogDescription>Schedule a new meeting for {boardName}.</DialogDescription>
         </DialogHeader>
 
         {/* Prerequisite errors */}
@@ -262,9 +259,7 @@ export function CreateMeetingDialog({
               onBlur={() => handleBlur("title")}
               placeholder="Meeting title"
             />
-            {errors.title && (
-              <p className="text-xs text-destructive">{errors.title}</p>
-            )}
+            {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
           </div>
 
           {/* Meeting Type */}
@@ -273,10 +268,7 @@ export function CreateMeetingDialog({
             <Select
               value={values.meeting_type}
               onValueChange={(val) =>
-                setValue(
-                  "meeting_type",
-                  val as CreateMeetingFormData["meeting_type"],
-                )
+                setValue("meeting_type", val as CreateMeetingFormData["meeting_type"])
               }
             >
               <SelectTrigger className="w-full">
@@ -303,9 +295,7 @@ export function CreateMeetingDialog({
                 onBlur={() => handleBlur("scheduled_date")}
               />
               {errors.scheduled_date && (
-                <p className="text-xs text-destructive">
-                  {errors.scheduled_date}
-                </p>
+                <p className="text-xs text-destructive">{errors.scheduled_date}</p>
               )}
             </div>
             <div className="space-y-1.5">
@@ -317,9 +307,7 @@ export function CreateMeetingDialog({
                 onBlur={() => handleBlur("scheduled_time")}
               />
               {errors.scheduled_time && (
-                <p className="text-xs text-destructive">
-                  {errors.scheduled_time}
-                </p>
+                <p className="text-xs text-destructive">{errors.scheduled_time}</p>
               )}
             </div>
           </div>
@@ -329,9 +317,7 @@ export function CreateMeetingDialog({
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
               <div className="flex items-start gap-2">
                 <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  {forecast.explanation}
-                </p>
+                <p className="text-sm text-blue-800 dark:text-blue-200">{forecast.explanation}</p>
               </div>
             </div>
           )}
@@ -345,9 +331,7 @@ export function CreateMeetingDialog({
               onBlur={() => handleBlur("location")}
               placeholder="e.g. Town Hall, Room 201"
             />
-            {errors.location && (
-              <p className="text-xs text-destructive">{errors.location}</p>
-            )}
+            {errors.location && <p className="text-xs text-destructive">{errors.location}</p>}
           </div>
 
           {/* Template select */}
@@ -380,24 +364,15 @@ export function CreateMeetingDialog({
                 </SelectContent>
               </Select>
             )}
-            {errors.template_id && (
-              <p className="text-xs text-destructive">{errors.template_id}</p>
-            )}
+            {errors.template_id && <p className="text-xs text-destructive">{errors.template_id}</p>}
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSaving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button
-            onClick={() => void handleSave()}
-            disabled={!isValid || isSaving}
-          >
+          <Button onClick={() => void handleSave()} disabled={!isValid || isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Create Meeting
           </Button>

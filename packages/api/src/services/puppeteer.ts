@@ -42,10 +42,7 @@ export interface PdfOptions {
  * Generate a PDF from an HTML string using Puppeteer.
  * Returns the PDF as a Buffer.
  */
-export async function generatePdf(
-  html: string,
-  options: PdfOptions = {},
-): Promise<Buffer> {
+export async function generatePdf(html: string, options: PdfOptions = {}): Promise<Buffer> {
   const start = Date.now();
   const b = await getBrowser();
   const page = await b.newPage();
@@ -67,7 +64,7 @@ export async function generatePdf(
     });
 
     const elapsed = Date.now() - start;
-    console.log(`PDF generated in ${elapsed}ms (${pdf.length} bytes)`);
+    console.warn(`[puppeteer] PDF generated in ${elapsed}ms (${pdf.length} bytes)`);
 
     return Buffer.from(pdf);
   } finally {

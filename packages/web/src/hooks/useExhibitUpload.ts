@@ -8,12 +8,7 @@ import { useCallback, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface UseExhibitUploadReturn {
-  upload: (
-    file: File,
-    townId: string,
-    meetingId: string,
-    agendaItemId: string,
-  ) => Promise<string>;
+  upload: (file: File, townId: string, meetingId: string, agendaItemId: string) => Promise<string>;
   isUploading: boolean;
   error: string | null;
 }

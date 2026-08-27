@@ -107,9 +107,7 @@ test.describe("Full Meeting Lifecycle", () => {
 
     // Step 6: Verify three-panel layout is visible
     // The live meeting page should show attendance, navigation, and detail panels
-    await expect(
-      page.locator("[data-testid], .flex").first(),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("[data-testid], .flex").first()).toBeVisible({ timeout: 10_000 });
 
     // Step 7: Check for adjournment controls
     const adjournButton = page.getByRole("button", { name: /adjourn/i });
@@ -144,10 +142,7 @@ test.describe("Full Meeting Lifecycle", () => {
     await expect(reviewContent).toBeVisible();
   });
 
-  test("records a motion and vote during meeting", async ({
-    authenticatedPage: page,
-    seededTown,
-  }) => {
+  test("records a motion and vote during meeting", async ({ authenticatedPage: page }) => {
     // Navigate to meetings list
     await page.goto("/meetings");
     await page.waitForTimeout(2000);
@@ -230,9 +225,7 @@ test.describe("Full Meeting Lifecycle", () => {
               await page.waitForTimeout(2000);
 
               // Verify vote was recorded - motion should show "Passed"
-              await expect(
-                page.getByText(/passed/i).first(),
-              ).toBeVisible({ timeout: 5000 });
+              await expect(page.getByText(/passed/i).first()).toBeVisible({ timeout: 5000 });
             }
           }
         }

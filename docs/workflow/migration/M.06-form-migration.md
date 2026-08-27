@@ -15,6 +15,7 @@ The migration in each file is mechanical: swap the import and the hook call. The
 ## Files Modified
 
 **Wizard stages (4 files):**
+
 - `packages/web/src/components/wizard/stages/WizardStage1.tsx`
 - `packages/web/src/components/wizard/stages/WizardStage2.tsx`
 - `packages/web/src/components/wizard/stages/WizardStage3.tsx`
@@ -22,6 +23,7 @@ The migration in each file is mechanical: swap the import and the hook call. The
 - `packages/web/src/components/wizard/stages/WizardStage5.tsx`
 
 **Dialog forms (9 files):**
+
 - `packages/web/src/components/meetings/CreateMeetingDialog.tsx`
 - `packages/web/src/components/boards/EditBoardDialog.tsx`
 - `packages/web/src/components/boards/AddBoardDialog.tsx`
@@ -52,7 +54,7 @@ The migration in each file is mechanical: swap the import and the hook call. The
 
 ## Prompt
 
-```
+````
 You are migrating all useWizardForm usages in the Town Meeting Manager to standard react-hook-form. The useWizardForm hook was a workaround for a PowerSync/react-hook-form bundle conflict. Now that PowerSync has been removed, react-hook-form can be used directly.
 
 PROJECT CONTEXT:
@@ -83,9 +85,10 @@ const { form, handleSubmit, isSubmitting } = useWizardForm({
   {form.formState.errors.field1 && <p>{form.formState.errors.field1.message}</p>}
   <Button type="submit" disabled={isSubmitting}>Save</Button>
 </form>
-```
+````
 
 New code (react-hook-form):
+
 ```typescript
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -111,6 +114,7 @@ const isSubmitting = form.formState.isSubmitting;
 ```
 
 IMPORTANT DIFFERENCES:
+
 1. `useForm` is called directly instead of the wrapper hook
 2. `handleSubmit` is now `form.handleSubmit(asyncFn)` — call it to get the event handler
 3. `isSubmitting` is now `form.formState.isSubmitting` — not a separate destructured value
@@ -134,6 +138,7 @@ For each of the 14 files:
 WIZARD STAGE FILES (packages/web/src/components/wizard/stages/):
 
 These files use useWizardForm with a WizardContext or parent-controlled submission. Read WizardProvider.tsx and the stage files carefully to understand the submission flow before migrating. The key patterns:
+
 - WizardStages likely receive `onNext: (values) => void` or `onComplete` props
 - The form may be controlled by a parent WizardProvider that collects data across steps
 - Preserve the multi-step wizard coordination logic exactly as-is
@@ -142,6 +147,7 @@ These files use useWizardForm with a WizardContext or parent-controlled submissi
 DIALOG FILES (packages/web/src/components/):
 
 These are self-contained dialogs with their own forms. Each:
+
 - Has a schema import from @town-meeting/shared
 - Calls useWizardForm with the schema and onSubmit handler
 - The onSubmit calls powersync.execute() — those will be migrated in M.08
@@ -163,6 +169,7 @@ If the file uses raw `<form>` element with `form.register()`, no JSX changes nee
 IMPORTANT: Do NOT change the submit body logic (the powersync.execute calls, Supabase calls, or anything that happens when the form is submitted). Only change the form hook setup at the top of the component. The submit body will be migrated in M.08.
 
 VERIFICATION CHECKLIST:
+
 1. No file in the 14 imports useWizardForm after migration
 2. All 14 files import useForm from 'react-hook-form'
 3. All 14 files import zodResolver from '@hookform/resolvers/zod'
@@ -170,10 +177,15 @@ VERIFICATION CHECKLIST:
 5. isSubmitting references use form.formState.isSubmitting
 6. Wizard stage coordination logic is preserved
 7. TypeScript check: `pnpm --filter @town-meeting/web tsc --noEmit --skipLibCheck 2>&1 | grep "useWizardForm"` — should return no matches (the hook no longer exists)
+
 ```
 
 ## Commit Message
 
 ```
+
 M.06: Replace useWizardForm with react-hook-form in all 14 form files
+
+```
+
 ```

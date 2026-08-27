@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "revival-*", "stage-*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # packages/web/.env is git-ignored (by design — dev instances point at
+      # a local Supabase). The client throws at import time if
+      # VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are unset, which the
+      # build's SPA prerender step and several test files hit. These are
+      # public client-side values (embedded in the shipped bundle either
+      # way), so the checked-in example placeholders are sufficient for
+      # build and test — they never need to resolve a real Supabase.
+      - name: Configure web environment
+        run: cp packages/web/.env.example packages/web/.env
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Build
+        run: pnpm build
+
+      # Run tests alone. Concurrent execution with other turbo tasks
+      # overloads the runner and produces spurious timeouts in
+      # unrelated test files.
+      - name: Test
+        run: pnpm test

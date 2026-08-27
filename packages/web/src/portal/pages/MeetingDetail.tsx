@@ -1,20 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import {
-  Calendar,
-  Clock,
-  MapPin,
-  FileText,
-  ExternalLink,
-  ChevronRight,
-} from "lucide-react";
+import { Calendar, Clock, MapPin, FileText, ExternalLink, ChevronRight } from "lucide-react";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
-import {
-  fetchMeetingDetail,
-  getAgendaPdfUrl,
-  getMinutesPdfUrl,
-} from "@/lib/portal-api";
+import { fetchMeetingDetail, getAgendaPdfUrl, getMinutesPdfUrl } from "@/lib/portal-api";
 import type { PortalMeetingDetail as PortalMeetingDetailType } from "@town-meeting/shared";
 
 function formatDate(date: string): string {
@@ -69,12 +58,16 @@ export default function MeetingDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  usePortalMeta(meeting ? {
-    title: `${meeting.board_name} Meeting - ${formatDate(meeting.scheduled_date)} - ${townName}`,
-    description: `${meeting.meeting_type} meeting of ${meeting.board_name} on ${formatDate(meeting.scheduled_date)}.`,
-    siteName: townName ?? undefined,
-    ogImage: sealUrl,
-  } : null);
+  usePortalMeta(
+    meeting
+      ? {
+          title: `${meeting.board_name} Meeting - ${formatDate(meeting.scheduled_date)} - ${townName}`,
+          description: `${meeting.meeting_type} meeting of ${meeting.board_name} on ${formatDate(meeting.scheduled_date)}.`,
+          siteName: townName ?? undefined,
+          ogImage: sealUrl,
+        }
+      : null,
+  );
 
   useEffect(() => {
     if (!meetingId) return;
@@ -111,9 +104,7 @@ export default function MeetingDetail() {
   if (error || !meeting) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-        <p className="text-red-800">
-          {error ?? "Meeting not found."}
-        </p>
+        <p className="text-red-800">{error ?? "Meeting not found."}</p>
         <a
           href="/meetings"
           className="mt-4 inline-block text-sm font-medium text-blue-700 underline hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
@@ -124,13 +115,10 @@ export default function MeetingDetail() {
     );
   }
 
-  const typeLabel =
-    MEETING_TYPE_LABELS[meeting.meeting_type] ?? meeting.meeting_type;
-  const typeColor =
-    MEETING_TYPE_COLORS[meeting.meeting_type] ?? "bg-muted text-foreground";
+  const typeLabel = MEETING_TYPE_LABELS[meeting.meeting_type] ?? meeting.meeting_type;
+  const typeColor = MEETING_TYPE_COLORS[meeting.meeting_type] ?? "bg-muted text-foreground";
   const statusLabel = STATUS_LABELS[meeting.status] ?? meeting.status;
-  const statusColor =
-    STATUS_COLORS[meeting.status] ?? "bg-muted text-foreground";
+  const statusColor = STATUS_COLORS[meeting.status] ?? "bg-muted text-foreground";
 
   return (
     <div>
@@ -169,9 +157,7 @@ export default function MeetingDetail() {
       <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-3">
-            <h2 className="text-xl font-bold text-foreground sm:text-2xl">
-              {meeting.board_name}
-            </h2>
+            <h2 className="text-xl font-bold text-foreground sm:text-2xl">{meeting.board_name}</h2>
 
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -209,10 +195,7 @@ export default function MeetingDetail() {
 
       {/* Available Documents */}
       <section className="mt-6" aria-labelledby="documents-heading">
-        <h3
-          id="documents-heading"
-          className="mb-4 text-lg font-semibold text-foreground"
-        >
+        <h3 id="documents-heading" className="mb-4 text-lg font-semibold text-foreground">
           Available Documents
         </h3>
 
@@ -221,16 +204,11 @@ export default function MeetingDetail() {
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="rounded-md bg-blue-50 p-2">
-                <FileText
-                  className="h-5 w-5 text-blue-600"
-                  aria-hidden="true"
-                />
+                <FileText className="h-5 w-5 text-blue-600" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
                 <h4 className="font-medium text-foreground">
-                  {meeting.has_published_agenda
-                    ? "Published Agenda"
-                    : "Meeting Agenda"}
+                  {meeting.has_published_agenda ? "Published Agenda" : "Meeting Agenda"}
                 </h4>
                 {meeting.has_published_agenda ? (
                   <div className="mt-2 flex flex-wrap gap-3">
@@ -239,10 +217,7 @@ export default function MeetingDetail() {
                       className="inline-flex items-center gap-1 text-sm font-medium text-blue-700 underline hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
                       View Agenda
-                      <ChevronRight
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
+                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </a>
                     <a
                       href={getAgendaPdfUrl(townId, meeting.id)}
@@ -251,16 +226,11 @@ export default function MeetingDetail() {
                       rel="noopener noreferrer"
                     >
                       Download PDF
-                      <ExternalLink
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                     </a>
                   </div>
                 ) : (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Agenda not yet published.
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">Agenda not yet published.</p>
                 )}
               </div>
             </div>
@@ -270,16 +240,11 @@ export default function MeetingDetail() {
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="rounded-md bg-green-50 p-2">
-                <FileText
-                  className="h-5 w-5 text-green-600"
-                  aria-hidden="true"
-                />
+                <FileText className="h-5 w-5 text-green-600" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
                 <h4 className="font-medium text-foreground">
-                  {meeting.has_published_minutes
-                    ? "Approved Minutes"
-                    : "Meeting Minutes"}
+                  {meeting.has_published_minutes ? "Approved Minutes" : "Meeting Minutes"}
                 </h4>
                 {meeting.has_published_minutes ? (
                   <div className="mt-2 flex flex-wrap gap-3">
@@ -288,10 +253,7 @@ export default function MeetingDetail() {
                       className="inline-flex items-center gap-1 text-sm font-medium text-blue-700 underline hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                     >
                       View Minutes
-                      <ChevronRight
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
+                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </a>
                     <a
                       href={getMinutesPdfUrl(townId, meeting.id)}
@@ -300,16 +262,11 @@ export default function MeetingDetail() {
                       rel="noopener noreferrer"
                     >
                       Download PDF
-                      <ExternalLink
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                     </a>
                   </div>
                 ) : (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Minutes pending approval.
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">Minutes pending approval.</p>
                 )}
               </div>
             </div>

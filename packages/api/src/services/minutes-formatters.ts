@@ -33,11 +33,7 @@ export function formatMinutes(
       sections = formatSummaryMinutes(contentJson, options, firstUseTracker);
   }
 
-  const adjournmentText = formatAdjournmentText(
-    contentJson,
-    options,
-    firstUseTracker,
-  );
+  const adjournmentText = formatAdjournmentText(contentJson, options, firstUseTracker);
 
   return {
     meeting_header: contentJson.meeting_header,
@@ -162,21 +158,13 @@ function formatMotionInline(
 
 // ─── Helper: format motion block ────────────────────────────────────
 
-function formatMotionBlock(
-  motion: MinutesMotion,
-  style: string,
-  hasDiscussion: boolean,
-): string {
-  const mover = motion.moved_by
-    ? memberRef(motion.moved_by, null, style)
-    : "Unknown";
-  const seconder = motion.seconded_by
-    ? memberRef(motion.seconded_by, null, style)
-    : "none";
+function formatMotionBlock(motion: MinutesMotion, style: string, hasDiscussion: boolean): string {
+  const mover = motion.moved_by ? memberRef(motion.moved_by, null, style) : "Unknown";
+  const seconder = motion.seconded_by ? memberRef(motion.seconded_by, null, style) : "none";
   const discussionText = hasDiscussion ? "see above" : "none";
 
   let voteText = "none";
-  let resultText = "pending";
+  let resultText: string;
 
   if (motion.vote) {
     const v = motion.vote;
@@ -212,7 +200,8 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ─── Helper: format recusals ────────────────────────────────────────
@@ -234,10 +223,7 @@ function formatRecusals(
 
 // ─── Helper: format speakers ────────────────────────────────────────
 
-function formatSpeakers(
-  speakers: MinutesSpeaker[],
-  sectionType: string,
-): string {
+function formatSpeakers(speakers: MinutesSpeaker[], sectionType: string): string {
   if (speakers.length === 0) return "";
 
   const lines = speakers.map((s) => {
@@ -258,6 +244,13 @@ function formatSpeakers(
   return lines.join("\n");
 }
 
+// ─── Helper: format operator notes ───────────────────────────────────
+
+function formatOperatorNotes(notes: string | null): string {
+  if (!notes || notes.trim() === "") return "";
+  return `<p class="operator-notes">${escapeHtml(notes.trim())}</p>`;
+}
+
 // ─── Helper: format motions for a given display format ──────────────
 
 function formatMotions(
@@ -271,11 +264,7 @@ function formatMotions(
   return motions
     .map((motion) => {
       if (options.motion_display_format === "block_format") {
-        return formatMotionBlock(
-          motion,
-          options.member_reference_style,
-          hasDiscussion,
-        );
+        return formatMotionBlock(motion, options.member_reference_style, hasDiscussion);
       }
       return `<p>${escapeHtml(formatMotionInline(motion, options.member_reference_style, firstUseTracker))}</p>`;
     })
@@ -294,10 +283,7 @@ function shouldOmitSection(section: MinutesContentSection): boolean {
 }
 
 function isSectionEmpty(section: MinutesContentSection): boolean {
-  return (
-    (section.marked_none || section.items.length === 0) &&
-    section.is_fixed
-  );
+  return (section.marked_none || section.items.length === 0) && section.is_fixed;
 }
 
 // ─── Action Minutes Formatter ───────────────────────────────────────
@@ -359,14 +345,13 @@ function formatActionMinutes(
       );
       if (recusalText) itemParts.push(recusalText);
 
-      if (item.minutes_behavior === "action_only" || item.minutes_behavior === "summarize" || item.minutes_behavior === "full_record") {
+      if (
+        item.minutes_behavior === "action_only" ||
+        item.minutes_behavior === "summarize" ||
+        item.minutes_behavior === "full_record"
+      ) {
         // Motions
-        const motionText = formatMotions(
-          item.motions,
-          options,
-          firstUseTracker,
-          false,
-        );
+        const motionText = formatMotions(item.motions, options, firstUseTracker, false);
 
         if (motionText) {
           itemParts.push(motionText);
@@ -374,6 +359,10 @@ function formatActionMinutes(
           itemParts.push("<p>No action was taken.</p>");
         }
       }
+
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
 
       if (itemParts.length > 0) {
         if (section.items.length > 1) {
@@ -460,23 +449,22 @@ function formatSummaryMinutes(
         if (item.discussion_summary) {
           itemParts.push(`<p>${escapeHtml(item.discussion_summary)}</p>`);
         } else {
-          itemParts.push(
-            "<p><em>[Discussion summary to be added during review]</em></p>",
-          );
+          itemParts.push("<p><em>[Discussion summary to be added during review]</em></p>");
         }
       }
 
       // Speakers for public sections
-      if (
-        section.section_type === "public_hearing" ||
-        section.section_type === "public_input"
-      ) {
+      if (section.section_type === "public_hearing" || section.section_type === "public_input") {
         const speakerText = formatSpeakers(item.speakers, section.section_type);
         if (speakerText) itemParts.push(speakerText);
       }
 
       // Motions
-      if (item.minutes_behavior === "action_only" || item.minutes_behavior === "summarize" || item.minutes_behavior === "full_record") {
+      if (
+        item.minutes_behavior === "action_only" ||
+        item.minutes_behavior === "summarize" ||
+        item.minutes_behavior === "full_record"
+      ) {
         const motionText = formatMotions(
           item.motions,
           options,
@@ -488,11 +476,15 @@ function formatSummaryMinutes(
           itemParts.push(motionText);
         } else if (
           section.section_type === "agenda_item" &&
-          (item.minutes_behavior === "action_only")
+          item.minutes_behavior === "action_only"
         ) {
           itemParts.push("<p>No action was taken.</p>");
         }
       }
+
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
 
       parts.push(itemParts.join("\n"));
     }
@@ -574,23 +566,22 @@ function formatNarrativeMinutes(
         if (item.discussion_summary) {
           itemParts.push(`<p>${escapeHtml(item.discussion_summary)}</p>`);
         } else {
-          itemParts.push(
-            "<p><em>[Detailed discussion to be added during review]</em></p>",
-          );
+          itemParts.push("<p><em>[Detailed discussion to be added during review]</em></p>");
         }
       }
 
       // Speaker attributions — narrative includes them for all relevant sections
-      if (
-        section.section_type === "public_hearing" ||
-        section.section_type === "public_input"
-      ) {
+      if (section.section_type === "public_hearing" || section.section_type === "public_input") {
         const speakerText = formatSpeakers(item.speakers, section.section_type);
         if (speakerText) itemParts.push(speakerText);
       }
 
       // Motions
-      if (item.minutes_behavior === "action_only" || item.minutes_behavior === "summarize" || item.minutes_behavior === "full_record") {
+      if (
+        item.minutes_behavior === "action_only" ||
+        item.minutes_behavior === "summarize" ||
+        item.minutes_behavior === "full_record"
+      ) {
         const motionText = formatMotions(
           item.motions,
           options,
@@ -607,6 +598,10 @@ function formatNarrativeMinutes(
           itemParts.push("<p>No action was taken.</p>");
         }
       }
+
+      // Operator notes
+      const notesText = formatOperatorNotes(item.operator_notes);
+      if (notesText) itemParts.push(notesText);
 
       parts.push(itemParts.join("\n"));
     }
@@ -654,11 +649,7 @@ function formatAdjournmentText(
     const motionText =
       options.motion_display_format === "block_format"
         ? formatMotionBlock(adj.motion, options.member_reference_style, false)
-        : formatMotionInline(
-            adj.motion,
-            options.member_reference_style,
-            firstUseTracker,
-          );
+        : formatMotionInline(adj.motion, options.member_reference_style, firstUseTracker);
 
     if (options.motion_display_format === "block_format") {
       text += "\n" + motionText;

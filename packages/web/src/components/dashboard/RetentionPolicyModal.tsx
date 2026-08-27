@@ -27,11 +27,7 @@ interface RetentionPolicyModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function RetentionPolicyModal({
-  townId,
-  open,
-  onOpenChange,
-}: RetentionPolicyModalProps) {
+export function RetentionPolicyModal({ townId, open, onOpenChange }: RetentionPolicyModalProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
 
@@ -60,8 +56,8 @@ export function RetentionPolicyModal({
         <DialogHeader>
           <DialogTitle>Data Retention Policy</DialogTitle>
           <DialogDescription>
-            Please review and acknowledge the data retention policy before
-            holding your first meeting.
+            Please review and acknowledge the data retention policy before holding your first
+            meeting.
           </DialogDescription>
         </DialogHeader>
 
@@ -69,15 +65,9 @@ export function RetentionPolicyModal({
           <div className="space-y-2">
             <h4 className="font-medium">Retained Indefinitely (Public Record)</h4>
             <ul className="ml-4 list-disc space-y-1 text-muted-foreground">
-              <li>
-                Name and government title of all board members and officials
-              </li>
-              <li>
-                Vote records, motions, and meeting attendance
-              </li>
-              <li>
-                Approved minutes and public documents
-              </li>
+              <li>Name and government title of all board members and officials</li>
+              <li>Vote records, motions, and meeting attendance</li>
+              <li>Approved minutes and public documents</li>
             </ul>
           </div>
 
@@ -85,43 +75,33 @@ export function RetentionPolicyModal({
             <h4 className="font-medium">Scrubbed After Departure</h4>
             <ul className="ml-4 list-disc space-y-1 text-muted-foreground">
               <li>
-                Email addresses and phone numbers are removed 1 year after
-                a member's departure from service (configurable)
+                Email addresses and phone numbers are removed 1 year after a member's departure from
+                service (configurable)
               </li>
-              <li>
-                Personal contact information is not part of the public record
-              </li>
+              <li>Personal contact information is not part of the public record</li>
             </ul>
           </div>
 
           <div className="space-y-2">
             <h4 className="font-medium">Deleted Immediately on Archival</h4>
             <ul className="ml-4 list-disc space-y-1 text-muted-foreground">
-              <li>
-                Login credentials and authentication tokens
-              </li>
-              <li>
-                Session data and browser fingerprints
-              </li>
+              <li>Login credentials and authentication tokens</li>
+              <li>Session data and browser fingerprints</li>
             </ul>
           </div>
 
           <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-            This policy complies with Maine's Freedom of Access Act (FOAA)
-            requirements for public records. Government meeting records are
-            public by law and must be retained. Personal contact information
-            is treated as private and is removed when no longer needed for
+            This policy complies with Maine's Freedom of Access Act (FOAA) requirements for public
+            records. Government meeting records are public by law and must be retained. Personal
+            contact information is treated as private and is removed when no longer needed for
             official communication.
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            onClick={() => mutation.mutate()}
-            disabled={mutation.isPending}
-          >
-            {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            I acknowledge this retention policy
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+            {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}I acknowledge
+            this retention policy
           </Button>
         </DialogFooter>
       </DialogContent>

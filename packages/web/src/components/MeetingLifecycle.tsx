@@ -20,9 +20,7 @@ export type LifecycleStageKey = (typeof LIFECYCLE_STAGES)[number]["key"];
 
 /** Map a raw meeting status to its lifecycle stage key (or null). */
 export function lifecycleStageForStatus(status: string): LifecycleStageKey | null {
-  const stage = LIFECYCLE_STAGES.find((s) =>
-    (s.statuses as readonly string[]).includes(status),
-  );
+  const stage = LIFECYCLE_STAGES.find((s) => (s.statuses as readonly string[]).includes(status));
   return stage ? stage.key : null;
 }
 
@@ -59,10 +57,7 @@ export function MeetingLifecycle({
 }) {
   return (
     <div
-      className={cn(
-        "flex overflow-hidden rounded-lg border bg-card",
-        className,
-      )}
+      className={cn("flex overflow-hidden rounded-lg border bg-card", className)}
       role="group"
       aria-label="Meeting lifecycle"
     >
@@ -91,9 +86,7 @@ export function MeetingLifecycle({
             <div
               className={cn(
                 "text-xs",
-                isCurrent
-                  ? "font-medium text-foreground"
-                  : "text-muted-foreground",
+                isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
               )}
             >
               {stage.label}

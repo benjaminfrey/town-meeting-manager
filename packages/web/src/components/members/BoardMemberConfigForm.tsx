@@ -27,10 +27,7 @@ export function BoardMemberConfigForm({
   onChange,
   electionMethod,
 }: BoardMemberConfigFormProps) {
-  const set = <K extends keyof BoardMemberFormData>(
-    key: K,
-    value: BoardMemberFormData[K],
-  ) => {
+  const set = <K extends keyof BoardMemberFormData>(key: K, value: BoardMemberFormData[K]) => {
     onChange({ ...values, [key]: value });
   };
 
@@ -38,18 +35,12 @@ export function BoardMemberConfigForm({
     <div className="space-y-4">
       {/* Seat title */}
       <div className="space-y-1.5">
-        <Label>
-          {electionMethod === "role_titled"
-            ? "Seat title"
-            : "Seat title (optional)"}
-        </Label>
+        <Label>{electionMethod === "role_titled" ? "Seat title" : "Seat title (optional)"}</Label>
         <Input
           value={values.seat_title}
           onChange={(e) => set("seat_title", e.target.value)}
           placeholder={
-            electionMethod === "role_titled"
-              ? "e.g., Chair, Vice Chair"
-              : "e.g., At-large"
+            electionMethod === "role_titled" ? "e.g., Chair, Vice Chair" : "e.g., At-large"
           }
           maxLength={50}
         />
@@ -72,9 +63,7 @@ export function BoardMemberConfigForm({
             value={values.term_end}
             onChange={(e) => set("term_end", e.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
-            Leave empty for indefinite terms
-          </p>
+          <p className="text-xs text-muted-foreground">Leave empty for indefinite terms</p>
         </div>
       </div>
 
@@ -90,8 +79,7 @@ export function BoardMemberConfigForm({
         <div className="flex items-start gap-1.5 mt-1">
           <Info className="mt-0.5 h-3 w-3 text-muted-foreground shrink-0" />
           <p className="text-xs text-muted-foreground">
-            Government title is for display purposes only. Permissions are
-            controlled separately.
+            Government title is for display purposes only. Permissions are controlled separately.
           </p>
         </div>
       </div>
@@ -105,9 +93,7 @@ export function BoardMemberConfigForm({
         />
         <Label htmlFor="rec-sec-default" className="text-sm leading-snug">
           Set as default recording secretary
-          <span className="block text-xs text-muted-foreground">
-            Can be overridden per meeting
-          </span>
+          <span className="block text-xs text-muted-foreground">Can be overridden per meeting</span>
         </Label>
       </div>
     </div>

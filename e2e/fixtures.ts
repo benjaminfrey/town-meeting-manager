@@ -55,7 +55,7 @@ export const test = base.extend<TestFixtures>({
    * Returns test town/board/user IDs from the seed data.
    * These match supabase/seed.sql values.
    */
-  seededTown: async ({}, use) => {
+  seededTown: async (_fixtures, use) => {
     await use({
       townId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       boardId: "bbbb0001-0000-0000-0000-000000000000",

@@ -9,7 +9,6 @@
     "start": "react-router-serve ./build/server/index.js",
     "clean": "rm -rf build .react-router *.tsbuildinfo",
     "typecheck": "react-router typegen && tsc",
-    "lint": "echo 'No linter configured yet'",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

@@ -138,21 +138,13 @@ function StatusBadge({ status }: { status: string }) {
   };
   const cls = map[status] ?? "bg-gray-100 text-gray-700";
   return (
-    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {status}
-    </span>
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${cls}`}>{status}</span>
   );
 }
 
 // ─── Sub-views ─────────────────────────────────────────────────────────────
 
-function DeliveryDetailView({
-  event,
-  onBack,
-}: {
-  event: NotificationEvent;
-  onBack: () => void;
-}) {
+function DeliveryDetailView({ event, onBack }: { event: NotificationEvent; onBack: () => void }) {
   const { data: deliveries, isLoading } = useQuery({
     queryKey: ["notification-deliveries", event.id],
     queryFn: () => fetchDeliveries(event.id),
@@ -218,7 +210,9 @@ function DeliveryDetailView({
                       <span className="text-xs text-red-700 truncate block" title={d.error_message}>
                         {d.error_message}
                       </span>
-                    ) : "—"}
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))}
@@ -282,10 +276,7 @@ export default function AdminNotificationsPage() {
   if (selectedEvent) {
     return (
       <div className="p-6">
-        <DeliveryDetailView
-          event={selectedEvent}
-          onBack={() => setSelectedEvent(null)}
-        />
+        <DeliveryDetailView event={selectedEvent} onBack={() => setSelectedEvent(null)} />
       </div>
     );
   }
@@ -294,9 +285,7 @@ export default function AdminNotificationsPage() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
-        <p className="mt-1 text-muted-foreground">
-          Email delivery health for the last 30 days
-        </p>
+        <p className="mt-1 text-muted-foreground">Email delivery health for the last 30 days</p>
       </div>
 
       {/* Summary cards */}
@@ -351,8 +340,8 @@ export default function AdminNotificationsPage() {
       </div>
 
       {/* Events table */}
-      {activeTab === "events" && (
-        eventsLoading ? (
+      {activeTab === "events" &&
+        (eventsLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <div className="overflow-x-auto rounded border">
@@ -393,7 +382,9 @@ export default function AdminNotificationsPage() {
                       <StatusBadge status={evt.status} />
                     </td>
                     <td className="px-3 py-2 text-right">{evt.delivery.total}</td>
-                    <td className="px-3 py-2 text-right text-green-700">{evt.delivery.delivered}</td>
+                    <td className="px-3 py-2 text-right text-green-700">
+                      {evt.delivery.delivered}
+                    </td>
                     <td className="px-3 py-2 text-right text-amber-700">{evt.delivery.bounced}</td>
                     <td className="px-3 py-2 text-right text-red-700">{evt.delivery.failed}</td>
                   </tr>
@@ -408,12 +399,11 @@ export default function AdminNotificationsPage() {
               </tbody>
             </table>
           </div>
-        )
-      )}
+        ))}
 
       {/* Bounces & complaints */}
-      {activeTab === "bounces" && (
-        bouncesLoading ? (
+      {activeTab === "bounces" &&
+        (bouncesLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <div className="overflow-x-auto rounded border">
@@ -470,8 +460,7 @@ export default function AdminNotificationsPage() {
               </tbody>
             </table>
           </div>
-        )
-      )}
+        ))}
     </div>
   );
 }

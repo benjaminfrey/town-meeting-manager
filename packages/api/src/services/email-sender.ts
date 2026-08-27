@@ -43,10 +43,7 @@ let layoutTemplate: Handlebars.TemplateDelegate | null = null;
 
 function getLayoutTemplate(): Handlebars.TemplateDelegate {
   if (layoutTemplate) return layoutTemplate;
-  const src = fs.readFileSync(
-    path.join(EMAIL_TEMPLATES_DIR, "layout.hbs"),
-    "utf-8",
-  );
+  const src = fs.readFileSync(path.join(EMAIL_TEMPLATES_DIR, "layout.hbs"), "utf-8");
   layoutTemplate = Handlebars.compile(src);
   return layoutTemplate;
 }
@@ -54,10 +51,7 @@ function getLayoutTemplate(): Handlebars.TemplateDelegate {
 function getEmailTemplate(name: string): Handlebars.TemplateDelegate {
   const cached = templateCache.get(name);
   if (cached) return cached;
-  const src = fs.readFileSync(
-    path.join(EMAIL_TEMPLATES_DIR, `${name}.hbs`),
-    "utf-8",
-  );
+  const src = fs.readFileSync(path.join(EMAIL_TEMPLATES_DIR, `${name}.hbs`), "utf-8");
   const compiled = Handlebars.compile(src);
   templateCache.set(name, compiled);
   return compiled;
@@ -160,10 +154,7 @@ export class EmailSenderService {
     return results;
   }
 
-  renderTemplate(
-    templateName: string,
-    variables: Record<string, unknown>,
-  ): RenderedEmail {
+  renderTemplate(templateName: string, variables: Record<string, unknown>): RenderedEmail {
     return renderEmailTemplate(templateName, variables);
   }
 }

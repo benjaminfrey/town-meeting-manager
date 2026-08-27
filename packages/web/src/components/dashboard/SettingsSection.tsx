@@ -7,11 +7,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Pencil } from "lucide-react";
-import {
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from "@/components/ui/accordion";
+import { AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 
 interface SettingsSectionProps {
@@ -38,9 +34,7 @@ export function SettingsSection({
 
   return (
     <AccordionItem value={value}>
-      <AccordionTrigger className="text-base font-semibold">
-        {title}
-      </AccordionTrigger>
+      <AccordionTrigger className="text-base font-semibold">{title}</AccordionTrigger>
       <AccordionContent>
         <div className="rounded-lg border bg-card p-4 text-card-foreground">
           {isEditing ? (
@@ -49,11 +43,7 @@ export function SettingsSection({
             <div className="space-y-3">
               {summary}
               <div className="pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setEditing(true)}
-                >
+                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                   <Pencil className="mr-2 h-3.5 w-3.5" />
                   Edit
                 </Button>

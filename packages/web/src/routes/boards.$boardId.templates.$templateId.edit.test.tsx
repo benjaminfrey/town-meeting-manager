@@ -21,12 +21,25 @@ const { mockChain, mockFrom } = vi.hoisted(() => {
   const chain: Record<string, unknown> = {};
   chain["then"] = (resolve: any, reject?: any) =>
     Promise.resolve({ data: [], error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: [], error: null }).catch(reject as any);
+  chain["catch"] = (reject: any) => Promise.resolve({ data: [], error: null }).catch(reject as any);
   const methods = [
-    "select", "insert", "update", "delete", "upsert",
-    "eq", "neq", "in", "gte", "lte", "order", "limit",
-    "single", "maybeSingle", "throwOnError", "or", "filter",
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "eq",
+    "neq",
+    "in",
+    "gte",
+    "lte",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "throwOnError",
+    "or",
+    "filter",
   ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
@@ -129,8 +142,10 @@ function setupQueryMocks(
 ) {
   mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
     const key = queryKey[0] as string;
-    if (key === "boards") return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
-    if (key === "agendaTemplates") return { data: template ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "boards")
+      return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
+    if (key === "agendaTemplates")
+      return { data: template ?? undefined, isLoading: false, isFetching: false, error: undefined };
     return mockQueryResult([]);
   });
 }
@@ -143,19 +158,40 @@ describe("AgendaTemplateEditorPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFrom.mockReturnValue(mockChain);
-    for (const m of ["select", "insert", "update", "delete", "eq", "neq", "order", "limit", "single", "throwOnError", "or", "filter", "upsert", "in", "maybeSingle"]) {
+    for (const m of [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "eq",
+      "neq",
+      "order",
+      "limit",
+      "single",
+      "throwOnError",
+      "or",
+      "filter",
+      "upsert",
+      "in",
+      "maybeSingle",
+    ]) {
       if (typeof mockChain[m]?.mockReturnValue === "function") {
         mockChain[m].mockReturnValue(mockChain);
       }
     }
-    mockUseQuery.mockReturnValue({ data: [], isLoading: false, isFetching: false, error: undefined });
+    mockUseQuery.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      error: undefined,
+    });
   });
 
   it("renders loading state when template not yet loaded", () => {
     setupQueryMocks(createMockBoard(), null);
 
     renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     expect(screen.getByText("Loading template...")).toBeInTheDocument();
@@ -168,7 +204,7 @@ describe("AgendaTemplateEditorPage", () => {
     );
 
     renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     // Breadcrumb links
@@ -185,7 +221,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     const saveButton = screen.getByRole("button", { name: /save/i });
@@ -196,7 +232,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     const nameInput = screen.getByDisplayValue("Regular Meeting");
@@ -211,7 +247,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     // Verify initial section count (2 sections from mock template)
@@ -232,7 +268,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     expect(screen.getByTestId("section-count")).toHaveTextContent("2");
@@ -252,7 +288,7 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     // Make the form dirty by changing the name
@@ -277,20 +313,16 @@ describe("AgendaTemplateEditorPage", () => {
     setupQueryMocks();
 
     const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...{loaderData: defaultLoaderData} as any} />,
+      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
     );
 
     // Initially the first section ("Call to Order") is selected (index 0)
-    expect(screen.getByTestId("section-title")).toHaveTextContent(
-      "Call to Order",
-    );
+    expect(screen.getByTestId("section-title")).toHaveTextContent("Call to Order");
 
     // Click to select the second section (index 1)
     await user.click(screen.getByTestId("select-section"));
 
     // The detail panel should now show the second section's title
-    expect(screen.getByTestId("section-title")).toHaveTextContent(
-      "Old Business",
-    );
+    expect(screen.getByTestId("section-title")).toHaveTextContent("Old Business");
   });
 });

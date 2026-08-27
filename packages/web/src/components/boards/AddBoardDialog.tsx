@@ -78,8 +78,10 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
   const navigate = useNavigate();
   const [seatTitles, setSeatTitles] = useState<string[]>([]);
 
-  const { values, errors, isValid, setValue, handleBlur, validate } =
-    useWizardForm(AddBoardSchema, INITIAL);
+  const { values, errors, isValid, setValue, handleBlur, validate } = useWizardForm(
+    AddBoardSchema,
+    INITIAL,
+  );
 
   // Town defaults for display
   const townFormality = String(town?.meeting_formality ?? "informal");
@@ -87,12 +89,13 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
 
   // Quorum display
   const quorumRequired = useMemo(
-    () => calculateQuorum(
-      values.member_count,
-      values.quorum_type as "simple_majority" | "two_thirds" | "three_quarters" | "fixed_number",
-      values.quorum_value,
-    ),
-    [values.member_count, values.quorum_type, values.quorum_value]
+    () =>
+      calculateQuorum(
+        values.member_count,
+        values.quorum_type as "simple_majority" | "two_thirds" | "three_quarters" | "fixed_number",
+        values.quorum_value,
+      ),
+    [values.member_count, values.quorum_type, values.quorum_value],
   );
 
   // Sync seat titles array when member count or election method changes
@@ -111,15 +114,15 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
       const formality = data.meeting_formality_override || null;
       const minutesStyle = data.minutes_style_override || null;
 
-      const { error } = await supabase.from('board').insert({
+      const { error } = await supabase.from("board").insert({
         id,
         town_id: townId,
         name: data.name,
-        board_type: 'other',
+        board_type: "other",
         elected_or_appointed: data.elected_or_appointed,
         member_count: data.member_count,
         election_method: data.election_method,
-        officer_election_method: 'vote_of_board',
+        officer_election_method: "vote_of_board",
         district_based: false,
         staggered_terms: false,
         is_governing_board: false,
@@ -174,7 +177,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
             <Label>Board type</Label>
             <RadioGroup
               value={values.elected_or_appointed}
-              onValueChange={(val) => setValue("elected_or_appointed", val as "elected" | "appointed")}
+              onValueChange={(val) =>
+                setValue("elected_or_appointed", val as "elected" | "appointed")
+              }
               className="flex gap-4"
             >
               <label className="flex items-center gap-2 cursor-pointer">
@@ -204,7 +209,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
                 You can add members later. A board must have at least 3 members to hold a meeting.
               </p>
             )}
-            {errors.member_count && <p className="text-xs text-destructive">{errors.member_count}</p>}
+            {errors.member_count && (
+              <p className="text-xs text-destructive">{errors.member_count}</p>
+            )}
           </div>
 
           {/* Election method */}
@@ -212,7 +219,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
             <Label>Election method</Label>
             <RadioGroup
               value={values.election_method}
-              onValueChange={(val) => setValue("election_method", val as "at_large" | "role_titled")}
+              onValueChange={(val) =>
+                setValue("election_method", val as "at_large" | "role_titled")
+              }
               className="flex gap-4"
             >
               <label className="flex items-center gap-2 cursor-pointer">
@@ -250,7 +259,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
             <Label>Meeting formality</Label>
             <Select
               value={values.meeting_formality_override || "__default__"}
-              onValueChange={(val) => setValue("meeting_formality_override", val === "__default__" ? "" : val)}
+              onValueChange={(val) =>
+                setValue("meeting_formality_override", val === "__default__" ? "" : val)
+              }
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select formality" />
@@ -271,7 +282,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
             <Label>Minutes style</Label>
             <Select
               value={values.minutes_style_override || "__default__"}
-              onValueChange={(val) => setValue("minutes_style_override", val === "__default__" ? "" : val)}
+              onValueChange={(val) =>
+                setValue("minutes_style_override", val === "__default__" ? "" : val)
+              }
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select minutes style" />
@@ -341,7 +354,9 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
             <Label>Motion display format</Label>
             <RadioGroup
               value={values.motion_display_format}
-              onValueChange={(val) => setValue("motion_display_format", val as AddBoardData["motion_display_format"])}
+              onValueChange={(val) =>
+                setValue("motion_display_format", val as AddBoardData["motion_display_format"])
+              }
               className="space-y-2"
             >
               <label className="flex items-start gap-2 rounded-md border p-3 cursor-pointer hover:bg-muted/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
@@ -349,7 +364,8 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
                 <div>
                   <div className="text-sm font-medium">Block format</div>
                   <div className="text-xs text-muted-foreground">
-                    Motions displayed as structured blocks with labeled fields (Motion, Moved by, Second, Vote, Result)
+                    Motions displayed as structured blocks with labeled fields (Motion, Moved by,
+                    Second, Vote, Result)
                   </div>
                 </div>
               </label>

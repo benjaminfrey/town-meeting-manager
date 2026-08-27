@@ -39,9 +39,9 @@ export function CancelMeetingDialog({
     try {
       const now = new Date().toISOString();
       const { error } = await supabase
-        .from('meeting')
-        .update({ status: 'cancelled', updated_at: now })
-        .eq('id', meetingId);
+        .from("meeting")
+        .update({ status: "cancelled", updated_at: now })
+        .eq("id", meetingId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.all });
@@ -57,23 +57,14 @@ export function CancelMeetingDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel Meeting</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to cancel "{meetingTitle}"? This action cannot
-            be undone.
+            Are you sure you want to cancel "{meetingTitle}"? This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSaving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Keep Meeting
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => void handleCancel()}
-            disabled={isSaving}
-          >
+          <Button variant="destructive" onClick={() => void handleCancel()} disabled={isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Cancel Meeting
           </Button>

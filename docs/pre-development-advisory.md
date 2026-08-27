@@ -23,6 +23,7 @@ This is the single highest-value pre-coding activity. The live meeting manager i
 **Go to real Select Board meetings.** Sit with the person who records the minutes. Watch what they actually do during the meeting — what they're tracking, what they're scrambling to keep up with, what they miss, where their attention goes. Ask to see their current notes or Word template afterward.
 
 Specific things to observe:
+
 - How far in advance do they know what's going to happen vs. what comes up unexpectedly?
 - How do they handle motions that happen mid-conversation without a clear "now we're making a motion" signal?
 - What does executive session entry actually look like in practice?
@@ -75,7 +76,7 @@ Specific requirements to validate:
 
 ### 2.1 The Onboarding Wizard Needs a Full UX Specification
 
-The five-stage wizard is well-described in terms of *what it collects*, but not in terms of *how it behaves*. Before development:
+The five-stage wizard is well-described in terms of _what it collects_, but not in terms of _how it behaves_. Before development:
 
 - What happens if the user exits mid-wizard? Is progress saved? Do they restart or resume?
 - What is the exact branching logic? (e.g., if "role-titled board" is selected, a seat-title table appears — but what if they change from role-titled to at-large after filling it in? Is the data discarded with a warning?)
@@ -88,7 +89,7 @@ A written UX specification (not wireframes necessarily, but a clear description 
 
 The AI-assisted minutes drafting is one of the strongest differentiators in the product, but "send structured meeting data to the Claude API and get back a draft" is a significant oversimplification of what needs to be designed. Before development:
 
-- **What is the exact structure of the data sent to the API?** The prompt engineering matters enormously for output quality. A minutes draft that sounds like AI-generated text will not be adopted by Town Clerks who have been writing minutes for 20 years. The output needs to sound like a human wrote it in the voice of *this town's* minutes style.
+- **What is the exact structure of the data sent to the API?** The prompt engineering matters enormously for output quality. A minutes draft that sounds like AI-generated text will not be adopted by Town Clerks who have been writing minutes for 20 years. The output needs to sound like a human wrote it in the voice of _this town's_ minutes style.
 - **How are board-specific templates incorporated?** The spec says "templates per board type and minutes style" — but these templates don't exist yet and need to be drafted, probably with input from real Town Clerks.
 - **How does the system handle incomplete data?** A motion was recorded without a mover. An executive session occurred but the return timestamp wasn't recorded. The prompt needs to handle these gracefully — flagging them in the draft rather than hallucinating plausible values.
 - **What is the review UX?** The administrator reviews and edits the draft. Is this a rich text editor? Does it show the AI-generated text alongside the structured data it was generated from? Can the administrator regenerate a specific section without regenerating the whole document?
@@ -163,6 +164,7 @@ Use TypeScript. Non-negotiable recommendation for a multi-package monorepo with 
 ### 4.2 What Is the URL Structure for the Public Portal?
 
 Two options:
+
 - **Subdomain per town:** `nobleboro.townmeetingmanager.com` — clean, town-branded, but requires wildcard SSL certificate and Nginx wildcard routing
 - **Path per town:** `townmeetingmanager.com/towns/nobleboro` — simpler infrastructure, but less clean for a town to share with residents
 
@@ -181,6 +183,7 @@ The spec says minutes are generated as PDFs. But approved minutes are also a leg
 ### 4.4 What Email Address Does the Platform Send From?
 
 Notification emails to residents need to come from an address that appears legitimate and trustworthy. Options:
+
 - `notifications@townmeetingmanager.com` — platform-branded
 - `notifications@nobleboro.townmeetingmanager.com` — town-branded subdomain
 - Custom domain per town (requires SPF/DKIM setup per town) — most legitimate-looking but operationally complex at scale
@@ -194,27 +197,18 @@ Subdomain approach is the right balance. Decide before the email system is built
 Given the above, here is the recommended sequence of activities before and during early development:
 
 **Immediate (before any code):**
+
 1. Attend 2–3 real Maine municipal meetings
 2. Draft the roles & permissions matrix
 3. Make the monorepo vs. separate repos decision and initialize the repository structure
 4. Make the Supabase Cloud vs. self-hosted decision for Phase 1
 5. Draft 3–5 sample minutes documents as AI output ground truth
 
-**Before Phase 1 MVP coding begins:**
-6. Complete the onboarding wizard UX specification (states, transitions, validation rules)
-7. Select and test the email provider (Resend or Postmark)
-8. Build the Supabase Realtime proof-of-concept for live meeting multi-device sync
-9. Decide document generation strategy (Puppeteer vs. pdfmake)
-10. Initialize the Supabase schema (all Phase 1 tables + PostGIS extension for future use)
+**Before Phase 1 MVP coding begins:** 6. Complete the onboarding wizard UX specification (states, transitions, validation rules) 7. Select and test the email provider (Resend or Postmark) 8. Build the Supabase Realtime proof-of-concept for live meeting multi-device sync 9. Decide document generation strategy (Puppeteer vs. pdfmake) 10. Initialize the Supabase schema (all Phase 1 tables + PostGIS extension for future use)
 
-**Before Phase 2 coding begins:**
-11. Select SMS provider (Telnyx or Twilio)
-12. Design the prompt architecture for AI minutes drafting
-13. Identify and recruit pilot town partners (before Phase 2 ships, not after)
+**Before Phase 2 coding begins:** 11. Select SMS provider (Telnyx or Twilio) 12. Design the prompt architecture for AI minutes drafting 13. Identify and recruit pilot town partners (before Phase 2 ships, not after)
 
-**Phase 3 preparation (can wait):**
-14. Maine GeoLibrary parcel data strategy
-15. Geocoding provider selection and cost modeling
+**Phase 3 preparation (can wait):** 14. Maine GeoLibrary parcel data strategy 15. Geocoding provider selection and cost modeling
 
 ---
 
@@ -225,6 +219,7 @@ Worth naming directly: **the live meeting manager failing during a real meeting 
 A town that tries this tool, has it crash or freeze during an actual Select Board meeting, and has to fall back to handwritten notes in front of the public — that town will never use it again, and they will tell every other town clerk they know. The municipal community is small and word travels fast in both directions.
 
 This means:
+
 - The live meeting manager must be resilient to brief network interruptions. When the network drops, the `ConnectionStatusBar` must show a clear warning immediately. Supabase Realtime should reconnect automatically within 10–15 seconds in most cases. Meeting operations during a brief disconnect should show a non-blocking warning; after 30 seconds of failed reconnection, writes should block with an explicit error message rather than silently queuing or silently failing.
 - Full offline capability (persistent offline operation with a local write queue) is not required — a complete network outage during a meeting is an edge case in 2026, and graceful degradation (read-only mode with clear status) is the appropriate response.
 - The live meeting manager must be the most thoroughly tested part of the application before any pilot deployment.
@@ -236,23 +231,23 @@ This is a resilience requirement, not a full offline requirement.
 
 ## Summary
 
-| Priority | Item | Estimated Effort |
-|----------|------|-----------------|
-| 🔴 Do first | Attend real Maine municipal meetings | 1–2 weeks, scheduling dependent |
-| 🔴 Do first | Roles & permissions matrix | 1–2 days |
-| 🔴 Do first | Monorepo structure decision & repo init | 1 day |
-| 🔴 Do first | Supabase Cloud vs. self-hosted decision | Half day |
-| 🟡 Before Phase 1 | Onboarding wizard UX spec | 2–3 days |
-| 🟡 Before Phase 1 | Supabase Realtime proof-of-concept (live meeting multi-device sync) | 2–3 days |
-| 🟡 Before Phase 1 | Sample minutes as AI output ground truth | 1–2 days |
-| 🟡 Before Phase 1 | Email provider selection & test | 1 day |
-| 🟡 Before Phase 1 | Document generation strategy decision | Half day |
-| 🟢 Before Phase 2 | SMS provider selection | Half day |
-| 🟢 Before Phase 2 | AI minutes prompt architecture | 3–5 days |
-| 🟢 Before Phase 2 | Pilot town recruitment | Ongoing |
-| 🔵 Phase 3 prep | Parcel data strategy | 1–2 days |
+| Priority          | Item                                                                | Estimated Effort                |
+| ----------------- | ------------------------------------------------------------------- | ------------------------------- |
+| 🔴 Do first       | Attend real Maine municipal meetings                                | 1–2 weeks, scheduling dependent |
+| 🔴 Do first       | Roles & permissions matrix                                          | 1–2 days                        |
+| 🔴 Do first       | Monorepo structure decision & repo init                             | 1 day                           |
+| 🔴 Do first       | Supabase Cloud vs. self-hosted decision                             | Half day                        |
+| 🟡 Before Phase 1 | Onboarding wizard UX spec                                           | 2–3 days                        |
+| 🟡 Before Phase 1 | Supabase Realtime proof-of-concept (live meeting multi-device sync) | 2–3 days                        |
+| 🟡 Before Phase 1 | Sample minutes as AI output ground truth                            | 1–2 days                        |
+| 🟡 Before Phase 1 | Email provider selection & test                                     | 1 day                           |
+| 🟡 Before Phase 1 | Document generation strategy decision                               | Half day                        |
+| 🟢 Before Phase 2 | SMS provider selection                                              | Half day                        |
+| 🟢 Before Phase 2 | AI minutes prompt architecture                                      | 3–5 days                        |
+| 🟢 Before Phase 2 | Pilot town recruitment                                              | Ongoing                         |
+| 🔵 Phase 3 prep   | Parcel data strategy                                                | 1–2 days                        |
 
 ---
 
-*Town Meeting Manager — Pre-Development Advisory Report*  
-*Maine-first · Open core · Built for towns that currently have nothing*
+_Town Meeting Manager — Pre-Development Advisory Report_  
+_Maine-first · Open core · Built for towns that currently have nothing_

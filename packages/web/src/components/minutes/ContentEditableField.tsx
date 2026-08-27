@@ -53,10 +53,7 @@ export function ContentEditableField({
   }, [onChange, updateActiveFormats]);
 
   const handleSelectionChange = useCallback(() => {
-    if (
-      editorRef.current &&
-      editorRef.current.contains(document.activeElement ?? null)
-    ) {
+    if (editorRef.current && editorRef.current.contains(document.activeElement ?? null)) {
       updateActiveFormats();
     }
   }, [updateActiveFormats]);

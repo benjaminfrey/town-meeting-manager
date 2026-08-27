@@ -237,18 +237,17 @@ export function buildStructuredMeetingRecord(
 
     // Get section timestamps from transitions
     const sectionTransitions = transitionsByItem.get(section.id) ?? [];
-    const firstChildTransitions = children.length > 0
-      ? (transitionsByItem.get(children[0]!.id) ?? [])
-      : [];
+    const firstChildTransitions =
+      children.length > 0 ? (transitionsByItem.get(children[0]!.id) ?? []) : [];
     const allTransitions = [...sectionTransitions, ...firstChildTransitions];
-    const timestampStart = allTransitions.length > 0
-      ? allTransitions.sort((a, b) => a.started_at.localeCompare(b.started_at))[0]!.started_at
-      : null;
+    const timestampStart =
+      allTransitions.length > 0
+        ? allTransitions.sort((a, b) => a.started_at.localeCompare(b.started_at))[0]!.started_at
+        : null;
 
     // Build items
     const items = children.map((item) => {
-      const itemMotions = (motionsByItem.get(item.id) ?? [])
-        .filter((m) => !m.parent_motion_id); // Only parent motions
+      const itemMotions = (motionsByItem.get(item.id) ?? []).filter((m) => !m.parent_motion_id); // Only parent motions
       const itemExhibits = exhibitsByItem.get(item.id) ?? [];
       const itemSpeakers = speakersByItem.get(item.id) ?? [];
       const itemTransitions = transitionsByItem.get(item.id) ?? [];
@@ -259,33 +258,37 @@ export function buildStructuredMeetingRecord(
         const voteSummary = m.vote_summary ? safeJsonParse(m.vote_summary) : null;
 
         // Amendments
-        const amendments = (motionsByItem.get(item.id) ?? [])
-          .filter((am) => am.parent_motion_id === m.id);
+        const amendments = (motionsByItem.get(item.id) ?? []).filter(
+          (am) => am.parent_motion_id === m.id,
+        );
 
         return {
           text: m.motion_text,
           motion_type: m.motion_type,
-          moved_by: m.moved_by ? memberNameMap.get(m.moved_by) ?? m.moved_by : null,
-          seconded_by: m.seconded_by ? memberNameMap.get(m.seconded_by) ?? m.seconded_by : null,
+          moved_by: m.moved_by ? (memberNameMap.get(m.moved_by) ?? m.moved_by) : null,
+          seconded_by: m.seconded_by ? (memberNameMap.get(m.seconded_by) ?? m.seconded_by) : null,
           status: m.status,
-          vote: votes.length > 0
-            ? {
-                type: "roll_call",
-                result: voteSummary?.result ?? m.status,
-                yeas: voteSummary?.yeas ?? 0,
-                nays: voteSummary?.nays ?? 0,
-                abstentions: voteSummary?.abstentions ?? 0,
-                individual_votes: votes.map((v) => ({
-                  member: memberNameMap.get(v.board_member_id) ?? v.board_member_id,
-                  vote: v.vote,
-                  reason: v.recusal_reason ?? undefined,
-                })),
-              }
-            : null,
+          vote:
+            votes.length > 0
+              ? {
+                  type: "roll_call",
+                  result: voteSummary?.result ?? m.status,
+                  yeas: voteSummary?.yeas ?? 0,
+                  nays: voteSummary?.nays ?? 0,
+                  abstentions: voteSummary?.abstentions ?? 0,
+                  individual_votes: votes.map((v) => ({
+                    member: memberNameMap.get(v.board_member_id) ?? v.board_member_id,
+                    vote: v.vote,
+                    reason: v.recusal_reason ?? undefined,
+                  })),
+                }
+              : null,
           amendments: amendments.map((am) => ({
             text: am.motion_text,
-            moved_by: am.moved_by ? memberNameMap.get(am.moved_by) ?? am.moved_by : null,
-            seconded_by: am.seconded_by ? memberNameMap.get(am.seconded_by) ?? am.seconded_by : null,
+            moved_by: am.moved_by ? (memberNameMap.get(am.moved_by) ?? am.moved_by) : null,
+            seconded_by: am.seconded_by
+              ? (memberNameMap.get(am.seconded_by) ?? am.seconded_by)
+              : null,
             status: am.status,
           })),
         };
@@ -302,15 +305,17 @@ export function buildStructuredMeetingRecord(
         }));
 
       // Timestamps
-      const startedAt = itemTransitions.length > 0
-        ? itemTransitions.sort((a, b) => a.started_at.localeCompare(b.started_at))[0]!.started_at
-        : null;
-      const endedAt = itemTransitions.length > 0
-        ? itemTransitions
-            .filter((t) => t.ended_at)
-            .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""))
-            [0]?.ended_at ?? null
-        : null;
+      const startedAt =
+        itemTransitions.length > 0
+          ? itemTransitions.sort((a, b) => a.started_at.localeCompare(b.started_at))[0]!.started_at
+          : null;
+      const endedAt =
+        itemTransitions.length > 0
+          ? (itemTransitions
+              .filter((t) => t.ended_at)
+              .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""))[0]?.ended_at ??
+            null)
+          : null;
 
       return {
         title: item.title,
@@ -337,7 +342,12 @@ export function buildStructuredMeetingRecord(
           entered_at: execSession.entered_at,
           returned_at: execSession.exited_at,
           statutory_basis: execSession.statutory_basis,
-          post_session_actions: buildPostSessionActions(execSession, motions, votesByMotion, memberNameMap),
+          post_session_actions: buildPostSessionActions(
+            execSession,
+            motions,
+            votesByMotion,
+            memberNameMap,
+          ),
         }
       : undefined;
 
@@ -351,11 +361,8 @@ export function buildStructuredMeetingRecord(
 
     // Future items queue
     const futureItemsQueue =
-      section.section_type === "discussion" &&
-      section.title.toLowerCase().includes("future")
-        ? items
-            .filter((i) => i.operator_notes)
-            .map((i) => i.title)
+      section.section_type === "discussion" && section.title.toLowerCase().includes("future")
+        ? items.filter((i) => i.operator_notes).map((i) => i.title)
         : undefined;
 
     return {
@@ -365,7 +372,8 @@ export function buildStructuredMeetingRecord(
       items,
       ...(execSessionData && { executive_session: execSessionData }),
       ...(adjournmentData && { adjournment: adjournmentData }),
-      ...(futureItemsQueue && futureItemsQueue.length > 0 && { future_items_queue: futureItemsQueue }),
+      ...(futureItemsQueue &&
+        futureItemsQueue.length > 0 && { future_items_queue: futureItemsQueue }),
     };
   });
 
@@ -414,7 +422,7 @@ function buildPostSessionActions(
   memberNameMap: Map<string, string>,
 ): Array<Record<string, unknown>> {
   const motionIds: string[] = execSession.post_session_action_motion_ids
-    ? (safeJsonParse(execSession.post_session_action_motion_ids) as unknown as string[]) ?? []
+    ? ((safeJsonParse(execSession.post_session_action_motion_ids) as unknown as string[]) ?? [])
     : [];
 
   return motionIds
@@ -426,20 +434,23 @@ function buildPostSessionActions(
 
       return {
         text: motion.motion_text,
-        moved_by: motion.moved_by ? memberNameMap.get(motion.moved_by) ?? motion.moved_by : null,
-        seconded_by: motion.seconded_by ? memberNameMap.get(motion.seconded_by) ?? motion.seconded_by : null,
-        vote: votes.length > 0
-          ? {
-              type: "roll_call",
-              result: summary?.result ?? motion.status,
-              yeas: summary?.yeas ?? 0,
-              nays: summary?.nays ?? 0,
-              individual_votes: votes.map((v) => ({
-                member: memberNameMap.get(v.board_member_id) ?? v.board_member_id,
-                vote: v.vote,
-              })),
-            }
+        moved_by: motion.moved_by ? (memberNameMap.get(motion.moved_by) ?? motion.moved_by) : null,
+        seconded_by: motion.seconded_by
+          ? (memberNameMap.get(motion.seconded_by) ?? motion.seconded_by)
           : null,
+        vote:
+          votes.length > 0
+            ? {
+                type: "roll_call",
+                result: summary?.result ?? motion.status,
+                yeas: summary?.yeas ?? 0,
+                nays: summary?.nays ?? 0,
+                individual_votes: votes.map((v) => ({
+                  member: memberNameMap.get(v.board_member_id) ?? v.board_member_id,
+                  vote: v.vote,
+                })),
+              }
+            : null,
       };
     })
     .filter(Boolean) as Array<Record<string, unknown>>;
@@ -456,7 +467,10 @@ export function downloadMeetingRecord(
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
 
-  const slug = boardName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  const slug = boardName
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
   const filename = `${slug}-${meetingDate}-meeting-data.json`;
 
   const a = document.createElement("a");

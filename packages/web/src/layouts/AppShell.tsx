@@ -84,9 +84,7 @@ function Sidebar({
 }) {
   const location = useLocation();
   const isActive = (item: NavItem) =>
-    item.exact
-      ? location.pathname === item.href
-      : location.pathname.startsWith(item.href);
+    item.exact ? location.pathname === item.href : location.pathname.startsWith(item.href);
 
   return (
     <div
@@ -203,9 +201,7 @@ export default function AppShell() {
     });
   };
 
-  const initials = currentUser?.email
-    ? currentUser.email.charAt(0).toUpperCase()
-    : "U";
+  const initials = currentUser?.email ? currentUser.email.charAt(0).toUpperCase() : "U";
 
   return (
     <ProtectedRoute>
@@ -232,15 +228,9 @@ export default function AppShell() {
         {/* Mobile sidebar drawer */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-50 md:hidden">
-            <div
-              className="fixed inset-0 bg-black/50"
-              onClick={() => setSidebarOpen(false)}
-            />
+            <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
             <div className="fixed inset-y-0 left-0 z-50 w-56">
-              <Sidebar
-                onClose={() => setSidebarOpen(false)}
-                liveMeetingId={liveMeetingId}
-              />
+              <Sidebar onClose={() => setSidebarOpen(false)} liveMeetingId={liveMeetingId} />
             </div>
           </div>
         )}
@@ -268,9 +258,7 @@ export default function AppShell() {
             >
               <Search className="h-4 w-4" />
               <span className="hidden sm:inline">Search</span>
-              <kbd className="hidden rounded border bg-muted px-1.5 text-[10px] sm:inline">
-                ⌘K
-              </kbd>
+              <kbd className="hidden rounded border bg-muted px-1.5 text-[10px] sm:inline">⌘K</kbd>
             </button>
 
             <ConnectionStatusBar />

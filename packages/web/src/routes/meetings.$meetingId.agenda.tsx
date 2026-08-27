@@ -25,15 +25,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {  Eye,
-  FileText,
-  GripVertical,
-  Loader2,
-  Play,
-  Plus,
-  ScrollText,
-  Send,
-} from "lucide-react";
+import { Eye, FileText, GripVertical, Loader2, Play, Plus, ScrollText, Send } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.agenda";
 import { useAuth } from "@/providers/AuthProvider";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -60,19 +52,18 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
-import {
-  getNoticeDeadline,
-  type MeetingType,
-  type ComplianceResult,
-} from "@town-meeting/shared";
+import { getNoticeDeadline, type MeetingType, type ComplianceResult } from "@town-meeting/shared";
 
 // ─── Compliance Banner ──────────────────────────────────────────────
 
 const COMPLIANCE_COLORS: Record<string, string> = {
   ok: "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200",
-  warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
-  danger: "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200",
-  overdue: "border-red-300 bg-red-100 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200",
+  warning:
+    "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
+  danger:
+    "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200",
+  overdue:
+    "border-red-300 bg-red-100 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200",
 };
 
 function NoticeComplianceBanner({
@@ -152,9 +143,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   return { meetingId };
 }
 
-export default function AgendaBuilderPage({
-  loaderData,
-}: Route.ComponentProps) {
+export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
   const { session } = useAuth();
@@ -317,7 +306,9 @@ export default function AgendaBuilderPage({
         },
       });
     } catch (err) {
-      toast.error(`Failed to generate agenda packet: ${err instanceof Error ? err.message : "Unknown error"}`);
+      toast.error(
+        `Failed to generate agenda packet: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
     } finally {
       setGeneratingPacket(false);
     }
@@ -348,7 +339,9 @@ export default function AgendaBuilderPage({
         },
       });
     } catch (err) {
-      toast.error(`Failed to generate meeting notice: ${err instanceof Error ? err.message : "Unknown error"}`);
+      toast.error(
+        `Failed to generate meeting notice: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
     } finally {
       setGeneratingNotice(false);
     }
@@ -362,10 +355,7 @@ export default function AgendaBuilderPage({
     }),
   );
 
-  const sectionIds = useMemo(
-    () => sections.map((s) => String(s.id)),
-    [sections],
-  );
+  const sectionIds = useMemo(() => sections.map((s) => String(s.id)), [sections]);
 
   const handleSectionDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -390,7 +380,7 @@ export default function AgendaBuilderPage({
             .from("agenda_item")
             .update({ sort_order: i, updated_at: now })
             .eq("id", String(s.id))
-            .throwOnError()
+            .throwOnError(),
         );
 
       await Promise.all(updates);
@@ -405,10 +395,7 @@ export default function AgendaBuilderPage({
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const maxSort = sections.reduce(
-      (max, s) => Math.max(max, Number(s.sort_order ?? 0)),
-      -1,
-    );
+    const maxSort = sections.reduce((max, s) => Math.max(max, Number(s.sort_order ?? 0)), -1);
 
     await supabase
       .from("agenda_item")
@@ -537,7 +524,10 @@ export default function AgendaBuilderPage({
                 Preview
               </Button>
               {(meetingStatus === "noticed" || meetingStatus === "open") && (
-                <Button variant="default" onClick={() => void navigate(`/meetings/${meetingId}/live`)}>
+                <Button
+                  variant="default"
+                  onClick={() => void navigate(`/meetings/${meetingId}/live`)}
+                >
                   <Play className="mr-2 h-4 w-4" />
                   Run Meeting
                 </Button>
@@ -552,15 +542,11 @@ export default function AgendaBuilderPage({
             {(agendaPacketGeneratedAt || meetingNoticeGeneratedAt) && (
               <div className="flex gap-3 text-xs text-muted-foreground">
                 {agendaPacketGeneratedAt && (
-                  <span>
-                    Packet generated{" "}
-                    {new Date(agendaPacketGeneratedAt).toLocaleString()}
-                  </span>
+                  <span>Packet generated {new Date(agendaPacketGeneratedAt).toLocaleString()}</span>
                 )}
                 {meetingNoticeGeneratedAt && (
                   <span>
-                    Notice generated{" "}
-                    {new Date(meetingNoticeGeneratedAt).toLocaleString()}
+                    Notice generated {new Date(meetingNoticeGeneratedAt).toLocaleString()}
                   </span>
                 )}
               </div>
@@ -575,10 +561,7 @@ export default function AgendaBuilderPage({
         collisionDetection={closestCenter}
         onDragEnd={(e) => void handleSectionDragEnd(e)}
       >
-        <SortableContext
-          items={sectionIds}
-          strategy={verticalListSortingStrategy}
-        >
+        <SortableContext items={sectionIds} strategy={verticalListSortingStrategy}>
           <div className="space-y-4">
             {sections.map((section, sectionIndex) => (
               <SortableSection
@@ -631,10 +614,7 @@ export default function AgendaBuilderPage({
               </div>
               <div className="w-48 space-y-1.5">
                 <label className="text-sm font-medium">Type</label>
-                <Select
-                  value={addingSectionType}
-                  onValueChange={setAddingSectionType}
-                >
+                <Select value={addingSectionType} onValueChange={setAddingSectionType}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -647,10 +627,7 @@ export default function AgendaBuilderPage({
                   </SelectContent>
                 </Select>
               </div>
-              <Button
-                onClick={() => void handleAddSection()}
-                disabled={!addingSectionTitle.trim()}
-              >
+              <Button onClick={() => void handleAddSection()} disabled={!addingSectionTitle.trim()}>
                 Add
               </Button>
               <Button
@@ -689,14 +666,9 @@ function SortableSection({
   readOnly: boolean;
   children: React.ReactNode;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -704,11 +676,7 @@ function SortableSection({
   };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={isDragging ? "opacity-50" : ""}
-    >
+    <div ref={setNodeRef} style={style} className={isDragging ? "opacity-50" : ""}>
       {!readOnly && (
         <div
           {...attributes}

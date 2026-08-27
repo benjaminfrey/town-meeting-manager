@@ -1,22 +1,9 @@
 import { useEffect, useState } from "react";
-import {
-  Calendar,
-  Clock,
-  MapPin,
-  FileText,
-  ChevronRight,
-  Building2,
-} from "lucide-react";
+import { Calendar, Clock, MapPin, FileText, ChevronRight, Building2 } from "lucide-react";
 import { usePortal } from "../PortalProvider";
 import { usePortalMeta } from "@/lib/portal/seo";
-import {
-  fetchMeetings,
-  fetchBoards,
-} from "@/lib/portal-api";
-import type {
-  PortalMeetingSummary,
-  PortalBoardSummary,
-} from "@town-meeting/shared";
+import { fetchMeetings, fetchBoards } from "@/lib/portal-api";
+import type { PortalMeetingSummary, PortalBoardSummary } from "@town-meeting/shared";
 
 function formatDate(date: string): string {
   return new Date(date + "T00:00:00").toLocaleDateString("en-US", {
@@ -111,8 +98,7 @@ export default function PortalHome() {
           Welcome to the {townName} Municipal Portal
         </h2>
         <p className="mt-2 text-muted-foreground">
-          Access meeting agendas, minutes, and board information for your
-          community.
+          Access meeting agendas, minutes, and board information for your community.
         </p>
       </section>
 
@@ -133,38 +119,25 @@ export default function PortalHome() {
           {loadingMeetings ? (
             <Spinner />
           ) : upcomingMeetings.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No upcoming meetings scheduled.
-            </p>
+            <p className="mt-4 text-sm text-muted-foreground">No upcoming meetings scheduled.</p>
           ) : (
             <ul className="mt-4 divide-y divide-border">
               {upcomingMeetings.map((meeting) => (
                 <li key={meeting.id} className="py-3 first:pt-0 last:pb-0">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-medium text-foreground">
-                        {meeting.board_name}
-                      </p>
+                      <p className="font-medium text-foreground">{meeting.board_name}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1">
-                          <Calendar
-                            className="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
+                          <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
                           {formatDate(meeting.scheduled_date)}
                         </span>
                         <span className="flex items-center gap-1">
-                          <Clock
-                            className="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
+                          <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                           {meeting.scheduled_time}
                         </span>
                         <span className="flex items-center gap-1">
-                          <MapPin
-                            className="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
+                          <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
                           {meeting.location}
                         </span>
                       </div>
@@ -210,9 +183,7 @@ export default function PortalHome() {
           {loadingMeetings ? (
             <Spinner />
           ) : recentMinutes.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No published minutes available.
-            </p>
+            <p className="mt-4 text-sm text-muted-foreground">No published minutes available.</p>
           ) : (
             <ul className="mt-4 divide-y divide-border">
               {recentMinutes.map((meeting) => (
@@ -221,9 +192,7 @@ export default function PortalHome() {
                   className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                 >
                   <div className="min-w-0">
-                    <p className="font-medium text-foreground">
-                      {meeting.board_name}
-                    </p>
+                    <p className="font-medium text-foreground">{meeting.board_name}</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
                       {formatDate(meeting.scheduled_date)}
                     </p>
@@ -267,9 +236,7 @@ export default function PortalHome() {
         {loadingBoards ? (
           <Spinner />
         ) : boards.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No boards are currently listed.
-          </p>
+          <p className="mt-4 text-sm text-muted-foreground">No boards are currently listed.</p>
         ) : (
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {boards.map((board) => (
@@ -282,8 +249,7 @@ export default function PortalHome() {
                   {board.name}
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {board.member_count}{" "}
-                  {board.member_count === 1 ? "member" : "members"}
+                  {board.member_count} {board.member_count === 1 ? "member" : "members"}
                 </p>
               </a>
             ))}

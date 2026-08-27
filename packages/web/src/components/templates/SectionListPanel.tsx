@@ -47,14 +47,9 @@ function SortableSectionItem({
   onSelect: () => void;
   onRemove: () => void;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: `section-${index}` });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: `section-${index}`,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -67,9 +62,7 @@ function SortableSectionItem({
       style={style}
       className={cn(
         "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer border transition-colors",
-        isSelected
-          ? "border-primary bg-primary/5"
-          : "border-transparent hover:bg-muted/50",
+        isSelected ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted/50",
         isDragging && "opacity-50",
       )}
       onClick={onSelect}
@@ -93,9 +86,7 @@ function SortableSectionItem({
       </div>
 
       {/* Fixed indicator */}
-      {section.is_fixed && (
-        <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      )}
+      {section.is_fixed && <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
 
       {/* Remove button (hidden for fixed sections) */}
       {!section.is_fixed && (
@@ -154,15 +145,8 @@ export function SectionListPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={items}
-            strategy={verticalListSortingStrategy}
-          >
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items} strategy={verticalListSortingStrategy}>
             {sections.map((section, index) => (
               <SortableSectionItem
                 key={`section-${index}`}
@@ -178,12 +162,7 @@ export function SectionListPanel({
       </div>
 
       <div className="p-2 border-t">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
-          onClick={onAdd}
-        >
+        <Button variant="outline" size="sm" className="w-full" onClick={onAdd}>
           <Plus className="mr-2 h-3.5 w-3.5" />
           Add Section
         </Button>

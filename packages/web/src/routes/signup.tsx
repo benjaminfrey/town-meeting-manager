@@ -29,10 +29,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 const signupSchema = z
   .object({
-    email: z
-      .string()
-      .min(1, "Email is required")
-      .email("Please enter a valid email"),
+    email: z.string().min(1, "Email is required").email("Please enter a valid email"),
     password: z
       .string()
       .min(1, "Password is required")
@@ -44,9 +41,7 @@ const signupSchema = z
     path: ["confirmPassword"],
   });
 
-type FieldErrors = Partial<
-  Record<keyof z.infer<typeof signupSchema>, string>
->;
+type FieldErrors = Partial<Record<keyof z.infer<typeof signupSchema>, string>>;
 
 // ─── Component ────────────────────────────────────────────────────────
 
@@ -94,10 +89,7 @@ export default function SignupPage() {
 
     setIsSubmitting(true);
 
-    const { error, confirmEmail } = await signUp(
-      result.data.email,
-      result.data.password,
-    );
+    const { error, confirmEmail } = await signUp(result.data.email, result.data.password);
 
     if (error) {
       setFormError(error);
@@ -126,8 +118,8 @@ export default function SignupPage() {
           <div>
             <CardTitle className="text-xl">Check your email</CardTitle>
             <CardDescription className="mt-1">
-              We've sent a confirmation link to your email address. Please
-              click the link to activate your account.
+              We've sent a confirmation link to your email address. Please click the link to
+              activate your account.
             </CardDescription>
           </div>
         </CardHeader>
@@ -156,9 +148,7 @@ export default function SignupPage() {
         </div>
         <div>
           <CardTitle className="text-xl">Create your account</CardTitle>
-          <CardDescription className="mt-1">
-            Start managing your town's meetings
-          </CardDescription>
+          <CardDescription className="mt-1">Start managing your town's meetings</CardDescription>
         </div>
       </CardHeader>
 
@@ -184,9 +174,7 @@ export default function SignupPage() {
               onChange={(e) => setEmail(e.target.value)}
               aria-invalid={!!fieldErrors.email}
             />
-            {fieldErrors.email && (
-              <p className="text-sm text-destructive">{fieldErrors.email}</p>
-            )}
+            {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}
           </div>
 
           {/* Password field */}
@@ -201,9 +189,7 @@ export default function SignupPage() {
               aria-invalid={!!fieldErrors.password}
             />
             {fieldErrors.password && (
-              <p className="text-sm text-destructive">
-                {fieldErrors.password}
-              </p>
+              <p className="text-sm text-destructive">{fieldErrors.password}</p>
             )}
           </div>
 
@@ -219,9 +205,7 @@ export default function SignupPage() {
               aria-invalid={!!fieldErrors.confirmPassword}
             />
             {fieldErrors.confirmPassword && (
-              <p className="text-sm text-destructive">
-                {fieldErrors.confirmPassword}
-              </p>
+              <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
             )}
           </div>
 
@@ -242,10 +226,7 @@ export default function SignupPage() {
       <CardFooter className="justify-center">
         <p className="text-sm text-muted-foreground">
           Already have an account?{" "}
-          <Link
-            to="/login"
-            className="text-primary underline-offset-4 hover:underline"
-          >
+          <Link to="/login" className="text-primary underline-offset-4 hover:underline">
             Sign in
           </Link>
         </p>

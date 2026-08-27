@@ -72,15 +72,11 @@ interface MinutesDocRow {
 // ─── Route Registration ─────────────────────────────────────────
 
 export async function minutesRoutes(fastify: FastifyInstance) {
-
   // ─── Generate Minutes Draft ─────────────────────────────────────
   fastify.post<{ Params: MeetingParams; Body: GenerateBody }>(
     "/meetings/:meetingId/minutes/generate",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("generate_ai_minutes"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("generate_ai_minutes")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -126,7 +122,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
       const [boardResult, townResult] = await Promise.all([
         fastify.supabase
           .from("board")
-          .select("id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override")
+          .select(
+            "id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override",
+          )
           .eq("id", meeting.board_id)
           .single<BoardRow>(),
         fastify.supabase
@@ -151,9 +149,12 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
       const renderOptions: MinutesRenderOptions = {
         minutes_style: minutesStyle as MinutesRenderOptions["minutes_style"],
-        motion_display_format: (board.motion_display_format ?? "inline_narrative") as MinutesRenderOptions["motion_display_format"],
-        member_reference_style: (board.member_reference_style ?? "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
-        certification_format: (board.certification_format ?? "prepared_by") as MinutesRenderOptions["certification_format"],
+        motion_display_format: (board.motion_display_format ??
+          "inline_narrative") as MinutesRenderOptions["motion_display_format"],
+        member_reference_style: (board.member_reference_style ??
+          "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
+        certification_format: (board.certification_format ??
+          "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: true,
         town_seal_url: town.seal_url,
       };
@@ -172,8 +173,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           public_hearing: "Public Hearing",
           emergency: "Emergency Meeting",
         };
-        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00")
-          .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00").toLocaleDateString(
+          "en-US",
+          { month: "long", day: "numeric", year: "numeric" },
+        );
 
         const html = renderMinutes({
           isDraft: true,
@@ -218,7 +221,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
-            generated_by: "ai",
+            generated_by: "manual",
             created_by: user.id,
             created_at: now,
             updated_at: now,
@@ -240,9 +243,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         }
 
         // Get public URL for the PDF
-        const { data: { publicUrl } } = fastify.supabase.storage
-          .from("documents")
-          .getPublicUrl(pdfStoragePath);
+        const {
+          data: { publicUrl },
+        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
 
         return {
           id: minutesDoc.id,
@@ -264,10 +267,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams; Body: GenerateBody }>(
     "/meetings/:meetingId/minutes/regenerate",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("generate_ai_minutes"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("generate_ai_minutes")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -308,7 +308,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
       const [boardResult, townResult] = await Promise.all([
         fastify.supabase
           .from("board")
-          .select("id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override")
+          .select(
+            "id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override",
+          )
           .eq("id", meeting.board_id)
           .single<BoardRow>(),
         fastify.supabase
@@ -332,9 +334,12 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
       const renderOptions: MinutesRenderOptions = {
         minutes_style: minutesStyle as MinutesRenderOptions["minutes_style"],
-        motion_display_format: (board.motion_display_format ?? "inline_narrative") as MinutesRenderOptions["motion_display_format"],
-        member_reference_style: (board.member_reference_style ?? "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
-        certification_format: (board.certification_format ?? "prepared_by") as MinutesRenderOptions["certification_format"],
+        motion_display_format: (board.motion_display_format ??
+          "inline_narrative") as MinutesRenderOptions["motion_display_format"],
+        member_reference_style: (board.member_reference_style ??
+          "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
+        certification_format: (board.certification_format ??
+          "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: true,
         town_seal_url: town.seal_url,
       };
@@ -349,8 +354,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           public_hearing: "Public Hearing",
           emergency: "Emergency Meeting",
         };
-        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00")
-          .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00").toLocaleDateString(
+          "en-US",
+          { month: "long", day: "numeric", year: "numeric" },
+        );
 
         const html = renderMinutes({
           isDraft: true,
@@ -391,7 +398,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             html_rendered: html,
             pdf_storage_path: pdfStoragePath,
             minutes_style: minutesStyle,
-            generated_by: "ai",
+            generated_by: "manual",
             updated_at: now,
           })
           .eq("id", existingMinutes.id)
@@ -403,9 +410,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           return reply.internalServerError("Failed to update minutes document");
         }
 
-        const { data: { publicUrl } } = fastify.supabase.storage
-          .from("documents")
-          .getPublicUrl(pdfStoragePath);
+        const {
+          data: { publicUrl },
+        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
 
         return {
           id: updated.id,
@@ -428,10 +435,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams; Body: RenderBody }>(
     "/meetings/:meetingId/minutes/render",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("edit_draft_minutes"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("edit_draft_minutes")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -472,7 +476,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
       const [boardResult, townResult] = await Promise.all([
         fastify.supabase
           .from("board")
-          .select("id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override")
+          .select(
+            "id, name, motion_display_format, certification_format, member_reference_style, minutes_style_override",
+          )
           .eq("id", meeting.board_id)
           .single<BoardRow>(),
         fastify.supabase
@@ -496,9 +502,12 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
       const renderOptions: MinutesRenderOptions = {
         minutes_style: minutesStyle as MinutesRenderOptions["minutes_style"],
-        motion_display_format: (board.motion_display_format ?? "inline_narrative") as MinutesRenderOptions["motion_display_format"],
-        member_reference_style: (board.member_reference_style ?? "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
-        certification_format: (board.certification_format ?? "prepared_by") as MinutesRenderOptions["certification_format"],
+        motion_display_format: (board.motion_display_format ??
+          "inline_narrative") as MinutesRenderOptions["motion_display_format"],
+        member_reference_style: (board.member_reference_style ??
+          "title_and_last_name") as MinutesRenderOptions["member_reference_style"],
+        certification_format: (board.certification_format ??
+          "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: isDraft,
         town_seal_url: town.seal_url,
       };
@@ -515,8 +524,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           public_hearing: "Public Hearing",
           emergency: "Emergency Meeting",
         };
-        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00")
-          .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+        const formattedDate = new Date(meeting.scheduled_date + "T00:00:00").toLocaleDateString(
+          "en-US",
+          { month: "long", day: "numeric", year: "numeric" },
+        );
 
         const html = renderMinutes({
           isDraft,
@@ -565,9 +576,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           return reply.internalServerError("Failed to update minutes document");
         }
 
-        const { data: { publicUrl } } = fastify.supabase.storage
-          .from("documents")
-          .getPublicUrl(pdfStoragePath);
+        const {
+          data: { publicUrl },
+        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
 
         return {
           id: updated.id,
@@ -591,10 +602,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams }>(
     "/meetings/:meetingId/minutes/submit",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("submit_minutes_review"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("submit_minutes_review")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -642,10 +650,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams }>(
     "/meetings/:meetingId/minutes/approve",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("approve_minutes"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("approve_minutes")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;

@@ -25,7 +25,10 @@ interface FutureItemsQueueProps {
   items: FutureQueueItem[];
 }
 
-const SOURCE_CONFIG: Record<string, { label: string; icon: React.ReactNode; variant: "default" | "secondary" | "outline" }> = {
+const SOURCE_CONFIG: Record<
+  string,
+  { label: string; icon: React.ReactNode; variant: "default" | "secondary" | "outline" }
+> = {
   tabled: {
     label: "Tabled",
     icon: <Pause className="h-3 w-3" />,
@@ -50,9 +53,7 @@ export function FutureItemsQueue({ items }: FutureItemsQueueProps) {
     return (
       <div className="rounded-md border border-dashed px-4 py-6 text-center">
         <ListTodo className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          No items queued for the next meeting.
-        </p>
+        <p className="text-sm text-muted-foreground">No items queued for the next meeting.</p>
       </div>
     );
   }
@@ -62,10 +63,7 @@ export function FutureItemsQueue({ items }: FutureItemsQueueProps) {
       {pendingItems.map((item) => {
         const config = (SOURCE_CONFIG[item.source] ?? SOURCE_CONFIG.future_queue)!;
         return (
-          <div
-            key={item.id}
-            className="flex items-start gap-3 rounded-md border px-4 py-3"
-          >
+          <div key={item.id} className="flex items-start gap-3 rounded-md border px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{item.title}</span>

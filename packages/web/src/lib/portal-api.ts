@@ -30,9 +30,7 @@ export class PortalApiError extends Error {
   }
 }
 
-export async function resolveSubdomain(
-  subdomain: string,
-): Promise<PortalTownInfo> {
+export async function resolveSubdomain(subdomain: string): Promise<PortalTownInfo> {
   return fetchJson(`${BASE}/resolve?subdomain=${encodeURIComponent(subdomain)}`);
 }
 
@@ -54,23 +52,15 @@ export async function fetchMeetingDetail(
   return fetchJson(`${BASE}/${townId}/meetings/${meetingId}`);
 }
 
-export async function fetchAgenda(
-  townId: string,
-  meetingId: string,
-): Promise<PortalAgenda> {
+export async function fetchAgenda(townId: string, meetingId: string): Promise<PortalAgenda> {
   return fetchJson(`${BASE}/${townId}/meetings/${meetingId}/agenda`);
 }
 
-export async function fetchMinutes(
-  townId: string,
-  meetingId: string,
-): Promise<PortalMinutes> {
+export async function fetchMinutes(townId: string, meetingId: string): Promise<PortalMinutes> {
   return fetchJson(`${BASE}/${townId}/meetings/${meetingId}/minutes`);
 }
 
-export async function fetchBoards(
-  townId: string,
-): Promise<PortalBoardSummary[]> {
+export async function fetchBoards(townId: string): Promise<PortalBoardSummary[]> {
   return fetchJson(`${BASE}/${townId}/boards`);
 }
 
@@ -89,17 +79,11 @@ export async function fetchCalendarEvents(
   return fetchJson(`${BASE}/${townId}/calendar?start=${start}&end=${end}`);
 }
 
-export function getMinutesPdfUrl(
-  townId: string,
-  meetingId: string,
-): string {
+export function getMinutesPdfUrl(townId: string, meetingId: string): string {
   return `${BASE}/${townId}/meetings/${meetingId}/minutes/pdf`;
 }
 
-export function getAgendaPdfUrl(
-  townId: string,
-  meetingId: string,
-): string {
+export function getAgendaPdfUrl(townId: string, meetingId: string): string {
   return `${BASE}/${townId}/meetings/${meetingId}/agenda/pdf`;
 }
 

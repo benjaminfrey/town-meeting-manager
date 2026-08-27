@@ -6,7 +6,7 @@
  *   const { data } = await supabase.from('meeting').select('*');
  */
 
-import { supabase } from '@/lib/supabase';
+import { supabase } from "@/lib/supabase";
 
 export function useSupabase() {
   return supabase;

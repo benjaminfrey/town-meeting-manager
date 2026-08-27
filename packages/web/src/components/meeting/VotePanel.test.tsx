@@ -7,14 +7,28 @@ import { VotePanel } from "./VotePanel";
 
 const { mockChain, mockFrom } = vi.hoisted(() => {
   const chain: Record<string, unknown> = {};
-  chain['then'] = (resolve: any, reject?: any) =>
+  chain["then"] = (resolve: any, reject?: any) =>
     Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain['catch'] = (reject: any) =>
+  chain["catch"] = (reject: any) =>
     Promise.resolve({ data: null, error: null }).catch(reject as any);
   const methods = [
-    'select', 'insert', 'update', 'delete', 'upsert',
-    'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit',
-    'single', 'maybeSingle', 'throwOnError', 'or', 'filter',
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "eq",
+    "neq",
+    "in",
+    "gte",
+    "lte",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "throwOnError",
+    "or",
+    "filter",
   ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
@@ -70,7 +84,7 @@ const defaultProps = {
 /** Click a vote button (Yea/Nay/Abstain) for a specific eligible member by index (alphabetical order, absent excluded). */
 function clickVoteButton(label: "Yea" | "Nay" | "Abstain", eligibleIndex: number) {
   const buttons = screen.getAllByRole("button", { name: label });
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+
   fireEvent.click(buttons[eligibleIndex]!);
 }
 
@@ -88,8 +102,24 @@ describe("VotePanel", () => {
     vi.clearAllMocks();
     // Restore chainable mock after clear
     mockFrom.mockReturnValue(mockChain);
-    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'order', 'limit', 'single', 'throwOnError', 'or', 'filter', 'upsert', 'in', 'maybeSingle']) {
-      if (typeof mockChain[m]?.mockReturnValue === 'function') {
+    for (const m of [
+      "select",
+      "insert",
+      "update",
+      "delete",
+      "eq",
+      "neq",
+      "order",
+      "limit",
+      "single",
+      "throwOnError",
+      "or",
+      "filter",
+      "upsert",
+      "in",
+      "maybeSingle",
+    ]) {
+      if (typeof mockChain[m]?.mockReturnValue === "function") {
         mockChain[m].mockReturnValue(mockChain);
       }
     }
@@ -121,7 +151,13 @@ describe("VotePanel", () => {
 
   it("shows recused badge for recused members", () => {
     const existingVotes = [
-      { id: "v-1", motion_id: "motion-1", board_member_id: "bm-3", vote: "recusal", recusal_reason: "Conflict of interest" },
+      {
+        id: "v-1",
+        motion_id: "motion-1",
+        board_member_id: "bm-3",
+        vote: "recusal",
+        recusal_reason: "Conflict of interest",
+      },
     ];
 
     renderWithProviders(<VotePanel {...defaultProps} existingVotes={existingVotes} />);

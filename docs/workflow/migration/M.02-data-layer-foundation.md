@@ -25,7 +25,7 @@ Create all new infrastructure files that replace PowerSync's data layer: a Query
 
 ## Prompt
 
-```
+````
 You are building the data layer foundation for the Town Meeting Manager migration from PowerSync to TanStack Query + Supabase Realtime. This session creates the infrastructure files that all other migration sessions will depend on. After this session, root.tsx and RootLayout.tsx use the new stack, and 6 new infrastructure files exist.
 
 PROJECT CONTEXT:
@@ -66,7 +66,7 @@ export const queryClient = new QueryClient({
 export function resetQueryCache() {
   queryClient.clear();
 }
-```
+````
 
 TASK 2: Create packages/web/src/providers/QueryProvider.tsx
 
@@ -99,103 +99,103 @@ Create a typed query key factory covering every entity in the database. The fact
 ```typescript
 export const queryKeys = {
   // Current authenticated user
-  currentUser: ['currentUser'] as const,
+  currentUser: ["currentUser"] as const,
 
   // Towns
   towns: {
-    all: ['towns'] as const,
-    detail: (townId: string) => ['towns', townId] as const,
+    all: ["towns"] as const,
+    detail: (townId: string) => ["towns", townId] as const,
   },
 
   // Boards
   boards: {
-    all: ['boards'] as const,
-    byTown: (townId: string) => ['boards', 'byTown', townId] as const,
-    detail: (boardId: string) => ['boards', boardId] as const,
+    all: ["boards"] as const,
+    byTown: (townId: string) => ["boards", "byTown", townId] as const,
+    detail: (boardId: string) => ["boards", boardId] as const,
   },
 
   // Board members
   members: {
-    all: ['members'] as const,
-    byBoard: (boardId: string) => ['members', 'byBoard', boardId] as const,
-    detail: (memberId: string) => ['members', memberId] as const,
-    byPerson: (personId: string) => ['members', 'byPerson', personId] as const,
+    all: ["members"] as const,
+    byBoard: (boardId: string) => ["members", "byBoard", boardId] as const,
+    detail: (memberId: string) => ["members", memberId] as const,
+    byPerson: (personId: string) => ["members", "byPerson", personId] as const,
   },
 
   // Persons
   persons: {
-    all: ['persons'] as const,
-    byTown: (townId: string) => ['persons', 'byTown', townId] as const,
-    detail: (personId: string) => ['persons', personId] as const,
+    all: ["persons"] as const,
+    byTown: (townId: string) => ["persons", "byTown", townId] as const,
+    detail: (personId: string) => ["persons", personId] as const,
   },
 
   // Meetings
   meetings: {
-    all: ['meetings'] as const,
-    byBoard: (boardId: string) => ['meetings', 'byBoard', boardId] as const,
-    byTown: (townId: string) => ['meetings', 'byTown', townId] as const,
-    detail: (meetingId: string) => ['meetings', meetingId] as const,
-    recent: (townId: string) => ['meetings', 'recent', townId] as const,
+    all: ["meetings"] as const,
+    byBoard: (boardId: string) => ["meetings", "byBoard", boardId] as const,
+    byTown: (townId: string) => ["meetings", "byTown", townId] as const,
+    detail: (meetingId: string) => ["meetings", meetingId] as const,
+    recent: (townId: string) => ["meetings", "recent", townId] as const,
   },
 
   // Agenda items
   agendaItems: {
-    byMeeting: (meetingId: string) => ['agendaItems', 'byMeeting', meetingId] as const,
-    detail: (itemId: string) => ['agendaItems', itemId] as const,
+    byMeeting: (meetingId: string) => ["agendaItems", "byMeeting", meetingId] as const,
+    detail: (itemId: string) => ["agendaItems", itemId] as const,
   },
 
   // Agenda templates
   agendaTemplates: {
-    byBoard: (boardId: string) => ['agendaTemplates', 'byBoard', boardId] as const,
-    detail: (templateId: string) => ['agendaTemplates', templateId] as const,
+    byBoard: (boardId: string) => ["agendaTemplates", "byBoard", boardId] as const,
+    detail: (templateId: string) => ["agendaTemplates", templateId] as const,
   },
 
   // Motions
   motions: {
-    byMeeting: (meetingId: string) => ['motions', 'byMeeting', meetingId] as const,
-    byItem: (agendaItemId: string) => ['motions', 'byItem', agendaItemId] as const,
-    detail: (motionId: string) => ['motions', motionId] as const,
+    byMeeting: (meetingId: string) => ["motions", "byMeeting", meetingId] as const,
+    byItem: (agendaItemId: string) => ["motions", "byItem", agendaItemId] as const,
+    detail: (motionId: string) => ["motions", motionId] as const,
   },
 
   // Vote records
   voteRecords: {
-    byMotion: (motionId: string) => ['voteRecords', 'byMotion', motionId] as const,
-    byMeeting: (meetingId: string) => ['voteRecords', 'byMeeting', meetingId] as const,
+    byMotion: (motionId: string) => ["voteRecords", "byMotion", motionId] as const,
+    byMeeting: (meetingId: string) => ["voteRecords", "byMeeting", meetingId] as const,
   },
 
   // Attendance
   attendance: {
-    byMeeting: (meetingId: string) => ['attendance', 'byMeeting', meetingId] as const,
-    detail: (attendanceId: string) => ['attendance', attendanceId] as const,
+    byMeeting: (meetingId: string) => ["attendance", "byMeeting", meetingId] as const,
+    detail: (attendanceId: string) => ["attendance", attendanceId] as const,
   },
 
   // Minutes
   minutes: {
-    byMeeting: (meetingId: string) => ['minutes', 'byMeeting', meetingId] as const,
-    detail: (minutesId: string) => ['minutes', minutesId] as const,
+    byMeeting: (meetingId: string) => ["minutes", "byMeeting", meetingId] as const,
+    detail: (minutesId: string) => ["minutes", minutesId] as const,
   },
 
   // Exhibits
   exhibits: {
-    byMeeting: (meetingId: string) => ['exhibits', 'byMeeting', meetingId] as const,
-    byItem: (agendaItemId: string) => ['exhibits', 'byItem', agendaItemId] as const,
+    byMeeting: (meetingId: string) => ["exhibits", "byMeeting", meetingId] as const,
+    byItem: (agendaItemId: string) => ["exhibits", "byItem", agendaItemId] as const,
   },
 
   // Executive sessions
   executiveSessions: {
-    byMeeting: (meetingId: string) => ['executiveSessions', 'byMeeting', meetingId] as const,
-    detail: (sessionId: string) => ['executiveSessions', sessionId] as const,
+    byMeeting: (meetingId: string) => ["executiveSessions", "byMeeting", meetingId] as const,
+    detail: (sessionId: string) => ["executiveSessions", sessionId] as const,
   },
 
   // Guest speakers
   guestSpeakers: {
-    byMeeting: (meetingId: string) => ['guestSpeakers', 'byMeeting', meetingId] as const,
-    byItem: (agendaItemId: string) => ['guestSpeakers', 'byItem', agendaItemId] as const,
+    byMeeting: (meetingId: string) => ["guestSpeakers", "byMeeting", meetingId] as const,
+    byItem: (agendaItemId: string) => ["guestSpeakers", "byItem", agendaItemId] as const,
   },
 
   // Push subscriptions
   pushSubscriptions: {
-    byUser: (userId: string) => ['pushSubscriptions', 'byUser', userId] as const,
+    byUser: (userId: string) => ["pushSubscriptions", "byUser", userId] as const,
   },
 } as const;
 ```
@@ -203,10 +203,10 @@ export const queryKeys = {
 TASK 4: Create packages/web/src/hooks/useRealtimeSubscription.ts
 
 ```typescript
-import { useEffect, useRef, useState } from 'react';
-import { useSupabase } from '@/hooks/useSupabase';
+import { useEffect, useRef, useState } from "react";
+import { useSupabase } from "@/hooks/useSupabase";
 
-export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected';
+export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 export interface UseRealtimeSubscriptionOptions {
   channelName: string;
@@ -221,35 +221,33 @@ export function useRealtimeSubscription(
   table: string,
   filter: string | undefined,
   callback: (payload: unknown) => void,
-  deps: unknown[] = []
+  deps: unknown[] = [],
 ) {
   const supabase = useSupabase();
-  const [status, setStatus] = useState<RealtimeStatus>('connecting');
+  const [status, setStatus] = useState<RealtimeStatus>("connecting");
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
 
   useEffect(() => {
     const channel = supabase
       .channel(channelName)
-      .on(
-        'postgres_changes' as const,
-        { event: '*', schema: 'public', table, filter },
-        (payload) => callbackRef.current(payload)
+      .on("postgres_changes" as const, { event: "*", schema: "public", table, filter }, (payload) =>
+        callbackRef.current(payload),
       )
       .subscribe((s) => {
-        if (s === 'SUBSCRIBED') {
-          setStatus('connected');
-        } else if (s === 'CLOSED' || s === 'CHANNEL_ERROR') {
-          setStatus('disconnected');
+        if (s === "SUBSCRIBED") {
+          setStatus("connected");
+        } else if (s === "CLOSED" || s === "CHANNEL_ERROR") {
+          setStatus("disconnected");
         } else {
-          setStatus('connecting');
+          setStatus("connecting");
         }
       });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelName, table, filter, ...deps]);
 
   return { status };
@@ -352,6 +350,7 @@ export function ConnectionStatusBar({ prominent = false, className }: Connection
 TASK 6: Update packages/web/src/root.tsx
 
 Read the current root.tsx first to understand the existing provider structure. Then:
+
 - Remove the `PowerSyncProvider` import
 - Remove any `VITE_POWERSYNC_URL` references (e.g., `import.meta.env.VITE_POWERSYNC_URL`)
 - Add `import { QueryProvider } from '@/providers/QueryProvider'`
@@ -362,6 +361,7 @@ Read the current root.tsx first to understand the existing provider structure. T
 TASK 7: Update packages/web/src/layouts/RootLayout.tsx
 
 Read the current RootLayout.tsx first. Then:
+
 - Remove the `SyncStatusBar` import
 - Add `import { ConnectionStatusBar } from '@/components/ConnectionStatusBar'`
 - Replace `<SyncStatusBar />` with `<ConnectionStatusBar />`
@@ -375,8 +375,8 @@ This shim prevents compile errors in the ~30 files that still import SyncStatusB
 // TEMPORARY MIGRATION SHIM — DELETE IN SESSION M.11
 // This file exists to prevent import errors during migration.
 // All files that import SyncStatusBar will be updated to import ConnectionStatusBar.
-export { ConnectionStatusBar as SyncStatusBar } from './ConnectionStatusBar';
-export { ConnectionStatusBar } from './ConnectionStatusBar';
+export { ConnectionStatusBar as SyncStatusBar } from "./ConnectionStatusBar";
+export { ConnectionStatusBar } from "./ConnectionStatusBar";
 export default function SyncStatusBar() {
   // Re-exported via named export above
   return null;
@@ -386,6 +386,7 @@ export default function SyncStatusBar() {
 TASK 9: Verify/create packages/web/src/hooks/useSupabase.ts
 
 Read the file if it exists. The hook must:
+
 - Return the Supabase client instance (the typed client created with `createClient<Database>`)
 - Be callable from any React component
 - Return the same singleton instance every time (no new client on every render)
@@ -393,10 +394,10 @@ Read the file if it exists. The hook must:
 If the hook doesn't exist or doesn't follow this pattern, create/update it:
 
 ```typescript
-import { useContext } from 'react';
+import { useContext } from "react";
 // Import from wherever the Supabase client is provided — check the existing auth setup
 // It may be from a SupabaseContext, or it may just re-export the singleton
-import { supabase } from '@/lib/supabase';
+import { supabase } from "@/lib/supabase";
 
 export function useSupabase() {
   return supabase;
@@ -408,6 +409,7 @@ Adapt this to match however the project currently exposes the Supabase client. C
 TASK 10: Verify new files compile
 
 Run this command to check only the new infrastructure files for TypeScript errors:
+
 ```bash
 cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeting/web tsc --noEmit --skipLibCheck 2>&1 | head -50
 ```
@@ -415,6 +417,7 @@ cd /Users/ben/Documents/GitHub/town-meeting-manager && pnpm --filter @town-meeti
 Errors in files other than the 6 new/updated files are expected and acceptable. Fix any errors in the new files only (queryClient.ts, queryKeys.ts, QueryProvider.tsx, useRealtimeSubscription.ts, ConnectionStatusBar.tsx, root.tsx, RootLayout.tsx).
 
 IMPORTANT NOTES:
+
 - Do NOT import from @powersync in any new file
 - Do NOT try to fix errors in components or routes that still use @powersync — leave those for M.04–M.09
 - The queryKeys factory uses `as const` for type safety — this is intentional
@@ -422,6 +425,7 @@ IMPORTANT NOTES:
 - The ConnectionStatusBar is silent when connected (returns null) — this is intentional per the design requirement
 
 VERIFICATION CHECKLIST:
+
 1. packages/web/src/lib/queryClient.ts exists with QueryClient singleton exported as `queryClient`
 2. packages/web/src/providers/QueryProvider.tsx wraps children in QueryClientProvider and conditionally renders ReactQueryDevtools in dev
 3. packages/web/src/lib/queryKeys.ts exports `queryKeys` with entries for all 16 entities listed
@@ -432,10 +436,15 @@ VERIFICATION CHECKLIST:
 8. packages/web/src/components/SyncStatusBar.tsx exists as a shim re-exporting ConnectionStatusBar
 9. packages/web/src/hooks/useSupabase.ts returns the Supabase client
 10. TypeScript shows no errors in the 7 new/updated files (errors in other files with @powersync imports are acceptable)
+
 ```
 
 ## Commit Message
 
 ```
+
 M.02: Add QueryClient, QueryProvider, queryKeys, ConnectionStatusBar, and Realtime hook
+
+```
+
 ```

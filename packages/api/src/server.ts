@@ -22,10 +22,7 @@ export async function buildServer() {
 
   // ─── Plugins ─────────────────────────────────────────────────────
   await app.register(cors, {
-    origin: [
-      process.env.CORS_ORIGIN ?? "http://localhost:5173",
-      /\.townmeetingmanager\.com$/,
-    ],
+    origin: [process.env.CORS_ORIGIN ?? "http://localhost:5173", /\.townmeetingmanager\.com$/],
     credentials: true,
   });
 

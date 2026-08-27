@@ -92,9 +92,7 @@ export function PortalProvider({
     error: null,
   };
 
-  return (
-    <PortalContext.Provider value={value}>{children}</PortalContext.Provider>
-  );
+  return <PortalContext.Provider value={value}>{children}</PortalContext.Provider>;
 }
 
 function TownNotFound({ subdomain }: { subdomain: string }) {

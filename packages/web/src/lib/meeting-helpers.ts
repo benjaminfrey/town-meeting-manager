@@ -51,13 +51,7 @@ export async function instantiateAgendaFromTemplate(
 
     // For minutes_approval sections, auto-populate with previous meetings
     if (section.section_type === "minutes_approval") {
-      await autoPopulateMinutesApproval(
-        meetingId,
-        boardId,
-        townId,
-        sectionId,
-        now,
-      );
+      await autoPopulateMinutesApproval(meetingId, boardId, townId, sectionId, now);
       continue;
     }
 
@@ -78,9 +72,7 @@ export async function instantiateAgendaFromTemplate(
         created_at: now,
         updated_at: now,
       }));
-      const { error: childError } = await supabase
-        .from("agenda_item")
-        .insert(childItems);
+      const { error: childError } = await supabase.from("agenda_item").insert(childItems);
       if (childError) throw childError;
     }
   }
@@ -175,8 +167,7 @@ async function autoPopulateMinutesApproval(
 
     // Determine if amendments were applied (amendments_history is JSONB — native array)
     const historyRaw = minutesDoc?.amendments_history;
-    const hasAmendments =
-      Array.isArray(historyRaw) && historyRaw.length > 0;
+    const hasAmendments = Array.isArray(historyRaw) && historyRaw.length > 0;
 
     const suffix = hasAmendments ? "as amended" : "as presented";
     const suggestedMotion = boardName

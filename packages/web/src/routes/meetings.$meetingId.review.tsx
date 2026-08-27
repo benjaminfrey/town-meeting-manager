@@ -346,14 +346,13 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
   // Build sections with child items
   const sections = useMemo(() => {
-    const parents = allItems.filter(
-      (item: Record<string, unknown>) => !item.parent_item_id,
-    );
+    const parents = allItems.filter((item: Record<string, unknown>) => !item.parent_item_id);
     return parents.map((section: Record<string, unknown>) => {
       const children = allItems
         .filter((item: Record<string, unknown>) => item.parent_item_id === section.id)
-        .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-          (a.sort_order as number) - (b.sort_order as number),
+        .sort(
+          (a: Record<string, unknown>, b: Record<string, unknown>) =>
+            (a.sort_order as number) - (b.sort_order as number),
         );
       return { section, children };
     });
@@ -400,19 +399,20 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   // Presiding officer and recording secretary names
   const presidingOfficerName = useMemo(() => {
     const id = (meeting?.presiding_officer_id as string) ?? null;
-    return id ? memberNameMap.get(id) ?? null : null;
+    return id ? (memberNameMap.get(id) ?? null) : null;
   }, [meeting, memberNameMap]);
 
   const recordingSecretaryName = useMemo(() => {
     const id = (meeting?.recording_secretary_id as string) ?? null;
-    return id ? memberNameMap.get(id) ?? null : null;
+    return id ? (memberNameMap.get(id) ?? null) : null;
   }, [meeting, memberNameMap]);
 
   // Adjournment data — Supabase returns native JSONB objects
   const adjournment = useMemo(() => {
     if (!meeting?.adjournment) return null;
     // Supabase returns JSONB as native objects; handle string fallback for safety
-    if (typeof meeting.adjournment === "object") return meeting.adjournment as Record<string, unknown>;
+    if (typeof meeting.adjournment === "object")
+      return meeting.adjournment as Record<string, unknown>;
     try {
       return JSON.parse(meeting.adjournment as string) as Record<string, unknown>;
     } catch {
@@ -507,16 +507,16 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-          throw new Error(
-            (errData.message as string) ?? `Generation failed (${res.status})`,
-          );
+          throw new Error((errData.message as string) ?? `Generation failed (${res.status})`);
         }
 
         // Success — close dialogs and invalidate minutes query
         setGenerateDialogOpen(false);
         setRegenerateDialogOpen(false);
         setStyleOverride("");
-        await queryClient.invalidateQueries({ queryKey: queryKeys.minutesDocuments.byMeeting(meetingId) });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
+        });
       } catch (err) {
         setGenerateError(
           err instanceof Error ? err.message : "An error occurred during generation.",
@@ -650,9 +650,21 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       (meeting.scheduled_date as string) ?? "unknown-date",
     );
   }, [
-    meeting, board, town, presidingOfficerName, recordingSecretaryName,
-    members, attendanceRows, allItems, motions, voteRecords,
-    execSessions, transitions, exhibitRows, speakerRows, meetingId,
+    meeting,
+    board,
+    town,
+    presidingOfficerName,
+    recordingSecretaryName,
+    members,
+    attendanceRows,
+    allItems,
+    motions,
+    voteRecords,
+    execSessions,
+    transitions,
+    exhibitRows,
+    speakerRows,
+    meetingId,
   ]);
 
   // ─── Loading / error states ────────────────────────────────────
@@ -715,22 +727,17 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
           {presidingOfficerName && (
             <span>
-              <span className="text-muted-foreground">Presiding:</span>{" "}
-              {presidingOfficerName}
+              <span className="text-muted-foreground">Presiding:</span> {presidingOfficerName}
             </span>
           )}
           {recordingSecretaryName && (
             <span>
-              <span className="text-muted-foreground">Secretary:</span>{" "}
-              {recordingSecretaryName}
+              <span className="text-muted-foreground">Secretary:</span> {recordingSecretaryName}
             </span>
           )}
           {adjournment && (
             <Badge variant="secondary" className="text-xs">
-              Adjourned{" "}
-              {adjournment.method === "motion"
-                ? "by motion"
-                : "without objection"}
+              Adjourned {adjournment.method === "motion" ? "by motion" : "without objection"}
             </Badge>
           )}
         </div>
@@ -756,15 +763,15 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                 ) as Record<string, unknown> | undefined;
                 const status = (att?.status as string) ?? "absent";
                 // Supabase returns native booleans
-                const isRecSec = att?.is_recording_secretary === true || (att?.is_recording_secretary as number) === 1;
+                const isRecSec =
+                  att?.is_recording_secretary === true ||
+                  (att?.is_recording_secretary as number) === 1;
                 const isPresiding = (meeting?.presiding_officer_id as string) === m.boardMemberId;
 
                 return (
                   <tr key={m.boardMemberId} className="border-b last:border-0">
                     <td className="px-4 py-2 font-medium">{m.name}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {m.seatTitle ?? "—"}
-                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">{m.seatTitle ?? "—"}</td>
                     <td className="px-4 py-2">
                       <AttendanceBadge status={status} />
                     </td>
@@ -791,9 +798,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                 {sIdx + 1}. {section.title as string}
               </h3>
               {children.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">
-                  No items in this section.
-                </p>
+                <p className="text-xs text-muted-foreground italic">No items in this section.</p>
               ) : (
                 <div className="space-y-1">
                   {children.map((item: Record<string, unknown>, iIdx: number) => {
@@ -814,9 +819,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                           {letter}. {item.title as string}
                         </span>
                         {timeSpent && (
-                          <span className="text-xs text-muted-foreground">
-                            {timeSpent}
-                          </span>
+                          <span className="text-xs text-muted-foreground">{timeSpent}</span>
                         )}
                         {itemMotions.length > 0 && (
                           <Badge variant="outline" className="text-xs gap-1">
@@ -859,16 +862,12 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
           <div className="space-y-4">
             {sections.map(({ section, children }) =>
               children
-                .filter((item: Record<string, unknown>) =>
-                  motionsByItem.has(item.id as string),
-                )
+                .filter((item: Record<string, unknown>) => motionsByItem.has(item.id as string))
                 .map((item: Record<string, unknown>) => {
                   const itemMotions = motionsByItem.get(item.id as string) ?? [];
                   return (
                     <div key={item.id as string}>
-                      <h4 className="mb-2 text-sm font-medium">
-                        {item.title as string}
-                      </h4>
+                      <h4 className="mb-2 text-sm font-medium">{item.title as string}</h4>
                       <div className="space-y-2 pl-4">
                         {itemMotions.map((m: Record<string, unknown>) => {
                           const mId = m.id as string;
@@ -880,22 +879,22 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                               summary = m.vote_summary as Record<string, unknown>;
                             } else {
                               try {
-                                summary = JSON.parse(m.vote_summary as string) as Record<string, unknown>;
-                              } catch { /* ignore */ }
+                                summary = JSON.parse(m.vote_summary as string) as Record<
+                                  string,
+                                  unknown
+                                >;
+                              } catch {
+                                /* ignore */
+                              }
                             }
                           }
 
                           return (
-                            <div
-                              key={mId}
-                              className="rounded-md border px-4 py-3"
-                            >
+                            <div key={mId} className="rounded-md border px-4 py-3">
                               <div className="flex items-start gap-2">
                                 <Gavel className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-sm">
-                                    {m.motion_text as string}
-                                  </p>
+                                  <p className="text-sm">{m.motion_text as string}</p>
                                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                                     {!!m.moved_by && (
                                       <span>
@@ -907,23 +906,19 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                                     {!!m.seconded_by && (
                                       <span>
                                         Seconded:{" "}
-                                        {memberNameMap.get(
-                                          m.seconded_by as string,
-                                        ) ?? (m.seconded_by as string)}
+                                        {memberNameMap.get(m.seconded_by as string) ??
+                                          (m.seconded_by as string)}
                                       </span>
                                     )}
-                                    {!!m.motion_type &&
-                                      m.motion_type !== "main" && (
-                                        <Badge variant="outline" className="text-xs">
-                                          {(m.motion_type as string).replace(/_/g, " ")}
-                                        </Badge>
-                                      )}
+                                    {!!m.motion_type && m.motion_type !== "main" && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {(m.motion_type as string).replace(/_/g, " ")}
+                                      </Badge>
+                                    )}
                                   </div>
                                   {summary && (
                                     <div className="mt-2 text-xs">
-                                      <span className="font-medium">
-                                        Result:{" "}
-                                      </span>
+                                      <span className="font-medium">Result: </span>
                                       <Badge
                                         variant={
                                           (m.status as string) === "passed"
@@ -935,36 +930,31 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                                         {(m.status as string) ?? "pending"}
                                       </Badge>
                                       <span className="ml-2">
-                                        Yeas: {(summary.yeas as number) ?? 0},
-                                        Nays: {(summary.nays as number) ?? 0},
-                                        Abstentions:{" "}
+                                        Yeas: {(summary.yeas as number) ?? 0}, Nays:{" "}
+                                        {(summary.nays as number) ?? 0}, Abstentions:{" "}
                                         {(summary.abstentions as number) ?? 0}
                                       </span>
                                     </div>
                                   )}
                                   {votes.length > 0 && (
                                     <div className="mt-2 flex flex-wrap gap-1">
-                                      {votes.map(
-                                        (v: Record<string, unknown>) => (
-                                          <span
-                                            key={v.id as string}
-                                            className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
-                                              v.vote === "yea"
-                                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                : v.vote === "nay"
-                                                  ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                                  : v.vote === "recusal"
-                                                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                                    : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
-                                            }`}
-                                          >
-                                            {memberNameMap.get(
-                                              v.board_member_id as string,
-                                            ) ?? "?"}
-                                            : {v.vote as string}
-                                          </span>
-                                        ),
-                                      )}
+                                      {votes.map((v: Record<string, unknown>) => (
+                                        <span
+                                          key={v.id as string}
+                                          className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
+                                            v.vote === "yea"
+                                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                              : v.vote === "nay"
+                                                ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                                : v.vote === "recusal"
+                                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                                  : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
+                                          }`}
+                                        >
+                                          {memberNameMap.get(v.board_member_id as string) ?? "?"}:{" "}
+                                          {v.vote as string}
+                                        </span>
+                                      ))}
                                     </div>
                                   )}
                                 </div>
@@ -986,44 +976,30 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         <section>
           <h2 className="mb-3 text-lg font-semibold">Executive Sessions</h2>
           <div className="space-y-3">
-            {(execSessions as Array<Record<string, unknown>>).map(
-              (es) => (
-                <div
-                  key={es.id as string}
-                  className="rounded-md border border-red-200 bg-red-50/50 px-4 py-3 dark:border-red-900 dark:bg-red-950/20"
-                >
-                  <div className="flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-red-500" />
-                    <span className="text-sm font-medium">
-                      {es.statutory_basis as string}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex gap-4 text-xs text-muted-foreground">
-                    {!!es.entered_at && (
-                      <span>
-                        Entered:{" "}
-                        {new Date(es.entered_at as string).toLocaleTimeString()}
-                      </span>
-                    )}
-                    {!!es.exited_at && (
-                      <span>
-                        Returned:{" "}
-                        {new Date(es.exited_at as string).toLocaleTimeString()}
-                      </span>
-                    )}
-                    {!!es.entered_at && !!es.exited_at && (
-                      <span>
-                        Duration:{" "}
-                        {computeDuration(
-                          es.entered_at as string,
-                          es.exited_at as string,
-                        )}
-                      </span>
-                    )}
-                  </div>
+            {(execSessions as Array<Record<string, unknown>>).map((es) => (
+              <div
+                key={es.id as string}
+                className="rounded-md border border-red-200 bg-red-50/50 px-4 py-3 dark:border-red-900 dark:bg-red-950/20"
+              >
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-red-500" />
+                  <span className="text-sm font-medium">{es.statutory_basis as string}</span>
                 </div>
-              ),
-            )}
+                <div className="mt-1 flex gap-4 text-xs text-muted-foreground">
+                  {!!es.entered_at && (
+                    <span>Entered: {new Date(es.entered_at as string).toLocaleTimeString()}</span>
+                  )}
+                  {!!es.exited_at && (
+                    <span>Returned: {new Date(es.exited_at as string).toLocaleTimeString()}</span>
+                  )}
+                  {!!es.entered_at && !!es.exited_at && (
+                    <span>
+                      Duration: {computeDuration(es.entered_at as string, es.exited_at as string)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}
@@ -1051,9 +1027,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                       </span>
                     </td>
                     <td className="px-4 py-2">{r.item}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {r.reason}
-                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">{r.reason}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1064,9 +1038,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
       {/* Future Items Queue */}
       <section>
-        <h2 className="mb-3 text-lg font-semibold">
-          Future Items Queue
-        </h2>
+        <h2 className="mb-3 text-lg font-semibold">Future Items Queue</h2>
         <FutureItemsQueue items={futureItems} />
       </section>
 
@@ -1095,11 +1067,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
               {canGenerateMinutes &&
                 minutesDoc?.status !== "approved" &&
                 minutesDoc?.status !== "published" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setRegenerateDialogOpen(true)}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setRegenerateDialogOpen(true)}>
                     <RefreshCw className="mr-1 h-4 w-4" />
                     Regenerate
                   </Button>
@@ -1133,9 +1101,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
           <div className="space-y-4 py-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                Minutes Style
-              </label>
+              <label className="mb-1.5 block text-sm font-medium">Minutes Style</label>
               <Select
                 value={styleOverride || effectiveMinutesStyle}
                 onValueChange={setStyleOverride}
@@ -1162,9 +1128,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             </div>
           </div>
 
-          {generateError && (
-            <p className="text-sm text-destructive">{generateError}</p>
-          )}
+          {generateError && <p className="text-sm text-destructive">{generateError}</p>}
 
           <DialogFooter>
             <Button
@@ -1177,10 +1141,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             >
               Cancel
             </Button>
-            <Button
-              onClick={() => void handleGenerateMinutes(false)}
-              disabled={generating}
-            >
+            <Button onClick={() => void handleGenerateMinutes(false)} disabled={generating}>
               {generating && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               {generating ? "Generating..." : "Generate Draft"}
             </Button>
@@ -1194,16 +1155,14 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
           <DialogHeader>
             <DialogTitle>Regenerate Minutes Draft</DialogTitle>
             <DialogDescription>
-              This will overwrite the existing minutes draft. The current draft
-              will be replaced with a freshly generated version.
+              This will overwrite the existing minutes draft. The current draft will be replaced
+              with a freshly generated version.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                Minutes Style
-              </label>
+              <label className="mb-1.5 block text-sm font-medium">Minutes Style</label>
               <Select
                 value={styleOverride || effectiveMinutesStyle}
                 onValueChange={setStyleOverride}
@@ -1220,9 +1179,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             </div>
           </div>
 
-          {generateError && (
-            <p className="text-sm text-destructive">{generateError}</p>
-          )}
+          {generateError && <p className="text-sm text-destructive">{generateError}</p>}
 
           <DialogFooter>
             <Button
@@ -1253,7 +1210,10 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 // ─── Helper Components ──────────────────────────────────────────────
 
 function AttendanceBadge({ status }: { status: string }) {
-  const config: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+  const config: Record<
+    string,
+    { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
+  > = {
     present: { label: "Present", variant: "default" },
     remote: { label: "Remote", variant: "secondary" },
     late_arrival: { label: "Late Arrival", variant: "secondary" },
@@ -1261,7 +1221,11 @@ function AttendanceBadge({ status }: { status: string }) {
     departed_early: { label: "Departed Early", variant: "outline" },
   };
   const c = config[status] ?? { label: status, variant: "outline" as const };
-  return <Badge variant={c.variant} className="text-xs">{c.label}</Badge>;
+  return (
+    <Badge variant={c.variant} className="text-xs">
+      {c.label}
+    </Badge>
+  );
 }
 
 function ItemStatusIcon({ status }: { status: string }) {

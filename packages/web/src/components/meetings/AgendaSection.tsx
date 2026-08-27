@@ -76,10 +76,7 @@ export function AgendaSection({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const itemIds = useMemo(
-    () => children_items.map((item) => String(item.id)),
-    [children_items],
-  );
+  const itemIds = useMemo(() => children_items.map((item) => String(item.id)), [children_items]);
 
   const handleItemDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -99,9 +96,9 @@ export function AgendaSection({
         const item = reordered[i]!;
         if (Number(item.sort_order) !== i) {
           const { error } = await supabase
-            .from('agenda_item')
+            .from("agenda_item")
             .update({ sort_order: i, updated_at: now })
-            .eq('id', String(item.id));
+            .eq("id", String(item.id));
           if (error) throw error;
         }
       }
@@ -113,17 +110,11 @@ export function AgendaSection({
   const handleDeleteSection = useCallback(async () => {
     // Delete all children first
     for (const child of children_items) {
-      const { error } = await supabase
-        .from('agenda_item')
-        .delete()
-        .eq('id', String(child.id));
+      const { error } = await supabase.from("agenda_item").delete().eq("id", String(child.id));
       if (error) throw error;
     }
     // Delete the section itself
-    const { error } = await supabase
-      .from('agenda_item')
-      .delete()
-      .eq('id', sectionId);
+    const { error } = await supabase.from("agenda_item").delete().eq("id", sectionId);
     if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     setConfirmDelete(false);
@@ -143,16 +134,10 @@ export function AgendaSection({
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setConfirmDelete(false)}
-              >
+              <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                 Keep
               </Button>
-              <Button
-                variant="destructive"
-                onClick={() => void handleDeleteSection()}
-              >
+              <Button variant="destructive" onClick={() => void handleDeleteSection()}>
                 Remove
               </Button>
             </AlertDialogFooter>
@@ -166,11 +151,7 @@ export function AgendaSection({
           className="text-muted-foreground hover:text-foreground"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          {isExpanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
         <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
           {sectionIndex + 1}. {SECTION_TYPE_LABELS[sectionType] ?? sectionType}
@@ -181,12 +162,7 @@ export function AgendaSection({
         </span>
         {!readOnly && (
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsAdding(true)}
-              title="Add item"
-            >
+            <Button variant="ghost" size="sm" onClick={() => setIsAdding(true)} title="Add item">
               <Plus className="h-3.5 w-3.5" />
               <span className="sr-only">Add item</span>
             </Button>
@@ -194,11 +170,7 @@ export function AgendaSection({
               variant="ghost"
               size="sm"
               className="text-destructive hover:text-destructive"
-              onClick={() =>
-                itemCount > 0
-                  ? setConfirmDelete(true)
-                  : void handleDeleteSection()
-              }
+              onClick={() => (itemCount > 0 ? setConfirmDelete(true) : void handleDeleteSection())}
               title="Remove section"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -216,10 +188,7 @@ export function AgendaSection({
             collisionDetection={closestCenter}
             onDragEnd={(e) => void handleItemDragEnd(e)}
           >
-            <SortableContext
-              items={itemIds}
-              strategy={verticalListSortingStrategy}
-            >
+            <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
               {children_items.map((item, itemIndex) => (
                 <AgendaItemRow
                   key={String(item.id)}
@@ -229,9 +198,7 @@ export function AgendaSection({
                   sectionId={sectionId}
                   meetingId={meetingId}
                   townId={townId}
-                  exhibits={exhibits.filter(
-                    (e) => e.agenda_item_id === item.id,
-                  )}
+                  exhibits={exhibits.filter((e) => e.agenda_item_id === item.id)}
                   readOnly={readOnly}
                 />
               ))}
@@ -256,9 +223,7 @@ export function AgendaSection({
           {/* Empty state */}
           {children_items.length === 0 && !isAdding && (
             <div className="px-4 py-6 text-center">
-              <p className="text-sm text-muted-foreground">
-                No items in this section.
-              </p>
+              <p className="text-sm text-muted-foreground">No items in this section.</p>
               {!readOnly && (
                 <Button
                   variant="ghost"

@@ -7,11 +7,33 @@
  * and the formatted HTML output for rendering / PDF export.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assembleMinutesJson } from "../minutes-assembler.js";
 import { formatMinutes } from "../minutes-formatters.js";
 import type { MinutesContentJson, MinutesRenderOptions } from "@town-meeting/shared";
+
+// packages/api is ESM ("type": "module"), so bare __dirname does not exist.
+// This is the idiom already used in services/templates.ts:13 and
+// services/email-sender.ts:17.
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const MINUTES_ROUTE = path.join(testDir, "..", "..", "routes", "minutes.ts");
+
+describe("generated_by labelling", () => {
+  it("never labels deterministically assembled minutes as ai-generated", () => {
+    const source = readFileSync(MINUTES_ROUTE, "utf8");
+    expect(source).not.toContain('generated_by: "ai"');
+  });
+
+  it("labels assembled minutes as manual at both write sites", () => {
+    const source = readFileSync(MINUTES_ROUTE, "utf8");
+    const matches = source.match(/generated_by: "manual"/g) ?? [];
+    expect(matches).toHaveLength(2);
+  });
+});
 
 // ─── Mock Supabase builder ────────────────────────────────────────────
 
@@ -35,19 +57,15 @@ function makeBuilder(data: unknown | unknown[] | null) {
   builder["not"] = () => builder;
   builder["single"] = () => Promise.resolve({ data: single, error: null });
   builder["maybeSingle"] = () => Promise.resolve({ data: single, error: null });
-  builder["then"] = (
-    resolve: (value: unknown) => unknown,
-    reject?: (reason: unknown) => unknown,
-  ) => Promise.resolve({ data: arr, error: null }).then(resolve, reject);
+  builder["then"] = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    Promise.resolve({ data: arr, error: null }).then(resolve, reject);
   return builder;
 }
 
 /**
  * Creates a mock SupabaseClient for testing assembleMinutesJson.
  */
-function createMockSupabase(
-  tables: Record<string, unknown | unknown[] | null>,
-): SupabaseClient {
+function createMockSupabase(tables: Record<string, unknown | unknown[] | null>): SupabaseClient {
   return {
     from: (table: string) => {
       const data = table in tables ? tables[table] : [];
@@ -129,10 +147,28 @@ const baseTown = {
 };
 
 const boardMembers = [
-  { id: BM_ALICE, person_id: P_ALICE, seat_title: "Chair", status: "active", is_default_rec_sec: false },
+  {
+    id: BM_ALICE,
+    person_id: P_ALICE,
+    seat_title: "Chair",
+    status: "active",
+    is_default_rec_sec: false,
+  },
   { id: BM_BOB, person_id: P_BOB, seat_title: null, status: "active", is_default_rec_sec: false },
-  { id: BM_CAROL, person_id: P_CAROL, seat_title: null, status: "active", is_default_rec_sec: false },
-  { id: BM_DAVID, person_id: P_DAVID, seat_title: "Clerk", status: "active", is_default_rec_sec: true },
+  {
+    id: BM_CAROL,
+    person_id: P_CAROL,
+    seat_title: null,
+    status: "active",
+    is_default_rec_sec: false,
+  },
+  {
+    id: BM_DAVID,
+    person_id: P_DAVID,
+    seat_title: "Clerk",
+    status: "active",
+    is_default_rec_sec: true,
+  },
   { id: BM_EVE, person_id: P_EVE, seat_title: null, status: "active", is_default_rec_sec: false },
 ];
 
@@ -146,51 +182,286 @@ const persons = [
 
 // 4 present, Eve absent
 const attendance = [
-  { id: "att-alice", board_member_id: BM_ALICE, person_id: P_ALICE, status: "present", is_recording_secretary: false, arrived_at: null, departed_at: null },
-  { id: "att-bob", board_member_id: BM_BOB, person_id: P_BOB, status: "present", is_recording_secretary: false, arrived_at: null, departed_at: null },
-  { id: "att-carol", board_member_id: BM_CAROL, person_id: P_CAROL, status: "present", is_recording_secretary: false, arrived_at: null, departed_at: null },
-  { id: "att-david", board_member_id: BM_DAVID, person_id: P_DAVID, status: "present", is_recording_secretary: true, arrived_at: null, departed_at: null },
+  {
+    id: "att-alice",
+    board_member_id: BM_ALICE,
+    person_id: P_ALICE,
+    status: "present",
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
+  },
+  {
+    id: "att-bob",
+    board_member_id: BM_BOB,
+    person_id: P_BOB,
+    status: "present",
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
+  },
+  {
+    id: "att-carol",
+    board_member_id: BM_CAROL,
+    person_id: P_CAROL,
+    status: "present",
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
+  },
+  {
+    id: "att-david",
+    board_member_id: BM_DAVID,
+    person_id: P_DAVID,
+    status: "present",
+    is_recording_secretary: true,
+    arrived_at: null,
+    departed_at: null,
+  },
 ];
 
 const sectionItems = [
-  { id: SEC_CALL, meeting_id: MEETING_ID, section_type: "call_to_order", sort_order: 0, title: "Call to Order", description: null, presenter: null, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
-  { id: SEC_PUBLIC, meeting_id: MEETING_ID, section_type: "public_input", sort_order: 1, title: "Public Comment", description: null, presenter: null, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
-  { id: SEC_NEW_BIZ, meeting_id: MEETING_ID, section_type: "agenda_item", sort_order: 2, title: "New Business", description: null, presenter: null, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
-  { id: SEC_ADJ, meeting_id: MEETING_ID, section_type: "adjournment", sort_order: 3, title: "Adjournment", description: null, presenter: null, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
+  {
+    id: SEC_CALL,
+    meeting_id: MEETING_ID,
+    section_type: "call_to_order",
+    sort_order: 0,
+    title: "Call to Order",
+    description: null,
+    presenter: null,
+    parent_item_id: null,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
+  {
+    id: SEC_PUBLIC,
+    meeting_id: MEETING_ID,
+    section_type: "public_input",
+    sort_order: 1,
+    title: "Public Comment",
+    description: null,
+    presenter: null,
+    parent_item_id: null,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
+  {
+    id: SEC_NEW_BIZ,
+    meeting_id: MEETING_ID,
+    section_type: "agenda_item",
+    sort_order: 2,
+    title: "New Business",
+    description: null,
+    presenter: null,
+    parent_item_id: null,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
+  {
+    id: SEC_ADJ,
+    meeting_id: MEETING_ID,
+    section_type: "adjournment",
+    sort_order: 3,
+    title: "Adjournment",
+    description: null,
+    presenter: null,
+    parent_item_id: null,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
 ];
 
 const childItems = [
-  { id: ITEM_BUDGET, meeting_id: MEETING_ID, section_type: "agenda_item", sort_order: 0, title: "FY2027 Budget Approval", description: "The board reviewed the proposed budget.", presenter: null, parent_item_id: SEC_NEW_BIZ, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
-  { id: ITEM_CONTRACT, meeting_id: MEETING_ID, section_type: "agenda_item", sort_order: 1, title: "Contract Award — ABC Contractors", description: "Award paving contract.", presenter: null, parent_item_id: SEC_NEW_BIZ, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
-  { id: ITEM_POLICY, meeting_id: MEETING_ID, section_type: "agenda_item", sort_order: 2, title: "Personnel Policy Amendment", description: "Proposed amendment to Section 4.", presenter: null, parent_item_id: SEC_NEW_BIZ, status: "completed", staff_resource: null, background: null, recommendation: null, operator_notes: null },
+  {
+    id: ITEM_BUDGET,
+    meeting_id: MEETING_ID,
+    section_type: "agenda_item",
+    sort_order: 0,
+    title: "FY2027 Budget Approval",
+    description: "The board reviewed the proposed budget.",
+    presenter: null,
+    parent_item_id: SEC_NEW_BIZ,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
+  {
+    id: ITEM_CONTRACT,
+    meeting_id: MEETING_ID,
+    section_type: "agenda_item",
+    sort_order: 1,
+    title: "Contract Award — ABC Contractors",
+    description: "Award paving contract.",
+    presenter: null,
+    parent_item_id: SEC_NEW_BIZ,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
+  {
+    id: ITEM_POLICY,
+    meeting_id: MEETING_ID,
+    section_type: "agenda_item",
+    sort_order: 2,
+    title: "Personnel Policy Amendment",
+    description: "Proposed amendment to Section 4.",
+    presenter: null,
+    parent_item_id: SEC_NEW_BIZ,
+    status: "completed",
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    operator_notes: null,
+  },
 ];
 
 const agendaItems = [...sectionItems, ...childItems];
 
 const motions = [
-  { id: MOT_BUDGET, agenda_item_id: ITEM_BUDGET, meeting_id: MEETING_ID, motion_text: "Approve the FY2027 operating budget as presented.", motion_type: "main", moved_by: BM_ALICE, seconded_by: BM_BOB, status: "passed", parent_motion_id: null, created_at: "2026-03-13T19:30:00.000Z" },
-  { id: MOT_CONTRACT, agenda_item_id: ITEM_CONTRACT, meeting_id: MEETING_ID, motion_text: "Award the paving contract to ABC Contractors for $485,000.", motion_type: "main", moved_by: BM_ALICE, seconded_by: BM_CAROL, status: "passed", parent_motion_id: null, created_at: "2026-03-13T19:50:00.000Z" },
-  { id: MOT_POLICY, agenda_item_id: ITEM_POLICY, meeting_id: MEETING_ID, motion_text: "Amend the personnel policy Section 4 as proposed.", motion_type: "main", moved_by: BM_BOB, seconded_by: BM_CAROL, status: "failed", parent_motion_id: null, created_at: "2026-03-13T20:10:00.000Z" },
+  {
+    id: MOT_BUDGET,
+    agenda_item_id: ITEM_BUDGET,
+    meeting_id: MEETING_ID,
+    motion_text: "Approve the FY2027 operating budget as presented.",
+    motion_type: "main",
+    moved_by: BM_ALICE,
+    seconded_by: BM_BOB,
+    status: "passed",
+    parent_motion_id: null,
+    created_at: "2026-03-13T19:30:00.000Z",
+  },
+  {
+    id: MOT_CONTRACT,
+    agenda_item_id: ITEM_CONTRACT,
+    meeting_id: MEETING_ID,
+    motion_text: "Award the paving contract to ABC Contractors for $485,000.",
+    motion_type: "main",
+    moved_by: BM_ALICE,
+    seconded_by: BM_CAROL,
+    status: "passed",
+    parent_motion_id: null,
+    created_at: "2026-03-13T19:50:00.000Z",
+  },
+  {
+    id: MOT_POLICY,
+    agenda_item_id: ITEM_POLICY,
+    meeting_id: MEETING_ID,
+    motion_text: "Amend the personnel policy Section 4 as proposed.",
+    motion_type: "main",
+    moved_by: BM_BOB,
+    seconded_by: BM_CAROL,
+    status: "failed",
+    parent_motion_id: null,
+    created_at: "2026-03-13T20:10:00.000Z",
+  },
 ];
 
 // Budget: 4 yeas, 0 nays → passed unanimously (no absent vote records)
 // Contract: Bob recuses, 3 yeas → passed
 // Policy: 1 yea, 3 nays → failed
 const voteRecords = [
-  { id: "vb-alice", motion_id: MOT_BUDGET, board_member_id: BM_ALICE, vote: "yea", recusal_reason: null },
-  { id: "vb-bob", motion_id: MOT_BUDGET, board_member_id: BM_BOB, vote: "yea", recusal_reason: null },
-  { id: "vb-carol", motion_id: MOT_BUDGET, board_member_id: BM_CAROL, vote: "yea", recusal_reason: null },
-  { id: "vb-david", motion_id: MOT_BUDGET, board_member_id: BM_DAVID, vote: "yea", recusal_reason: null },
+  {
+    id: "vb-alice",
+    motion_id: MOT_BUDGET,
+    board_member_id: BM_ALICE,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vb-bob",
+    motion_id: MOT_BUDGET,
+    board_member_id: BM_BOB,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vb-carol",
+    motion_id: MOT_BUDGET,
+    board_member_id: BM_CAROL,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vb-david",
+    motion_id: MOT_BUDGET,
+    board_member_id: BM_DAVID,
+    vote: "yea",
+    recusal_reason: null,
+  },
 
-  { id: "vc-alice", motion_id: MOT_CONTRACT, board_member_id: BM_ALICE, vote: "yea", recusal_reason: null },
-  { id: "vc-bob", motion_id: MOT_CONTRACT, board_member_id: BM_BOB, vote: "recusal", recusal_reason: "conflict of interest" },
-  { id: "vc-carol", motion_id: MOT_CONTRACT, board_member_id: BM_CAROL, vote: "yea", recusal_reason: null },
-  { id: "vc-david", motion_id: MOT_CONTRACT, board_member_id: BM_DAVID, vote: "yea", recusal_reason: null },
+  {
+    id: "vc-alice",
+    motion_id: MOT_CONTRACT,
+    board_member_id: BM_ALICE,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vc-bob",
+    motion_id: MOT_CONTRACT,
+    board_member_id: BM_BOB,
+    vote: "recusal",
+    recusal_reason: "conflict of interest",
+  },
+  {
+    id: "vc-carol",
+    motion_id: MOT_CONTRACT,
+    board_member_id: BM_CAROL,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vc-david",
+    motion_id: MOT_CONTRACT,
+    board_member_id: BM_DAVID,
+    vote: "yea",
+    recusal_reason: null,
+  },
 
-  { id: "vp-alice", motion_id: MOT_POLICY, board_member_id: BM_ALICE, vote: "nay", recusal_reason: null },
-  { id: "vp-bob", motion_id: MOT_POLICY, board_member_id: BM_BOB, vote: "yea", recusal_reason: null },
-  { id: "vp-carol", motion_id: MOT_POLICY, board_member_id: BM_CAROL, vote: "nay", recusal_reason: null },
-  { id: "vp-david", motion_id: MOT_POLICY, board_member_id: BM_DAVID, vote: "nay", recusal_reason: null },
+  {
+    id: "vp-alice",
+    motion_id: MOT_POLICY,
+    board_member_id: BM_ALICE,
+    vote: "nay",
+    recusal_reason: null,
+  },
+  {
+    id: "vp-bob",
+    motion_id: MOT_POLICY,
+    board_member_id: BM_BOB,
+    vote: "yea",
+    recusal_reason: null,
+  },
+  {
+    id: "vp-carol",
+    motion_id: MOT_POLICY,
+    board_member_id: BM_CAROL,
+    vote: "nay",
+    recusal_reason: null,
+  },
+  {
+    id: "vp-david",
+    motion_id: MOT_POLICY,
+    board_member_id: BM_DAVID,
+    vote: "nay",
+    recusal_reason: null,
+  },
 ];
 
 function buildFullMockSupabase() {
@@ -294,8 +565,24 @@ describe("assembleMinutesJson", () => {
         agenda_item: sectionItems,
         // Only 2 of 5 present
         meeting_attendance: [
-          { id: "att-alice", board_member_id: BM_ALICE, person_id: P_ALICE, status: "present", is_recording_secretary: false, arrived_at: null, departed_at: null },
-          { id: "att-bob", board_member_id: BM_BOB, person_id: P_BOB, status: "present", is_recording_secretary: false, arrived_at: null, departed_at: null },
+          {
+            id: "att-alice",
+            board_member_id: BM_ALICE,
+            person_id: P_ALICE,
+            status: "present",
+            is_recording_secretary: false,
+            arrived_at: null,
+            departed_at: null,
+          },
+          {
+            id: "att-bob",
+            board_member_id: BM_BOB,
+            person_id: P_BOB,
+            status: "present",
+            is_recording_secretary: false,
+            arrived_at: null,
+            departed_at: null,
+          },
         ],
         motion: [],
         vote_record: [],
@@ -391,7 +678,9 @@ describe("assembleMinutesJson", () => {
       const result = await assembleMinutesJson(supabase, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
-      const contractItem = newBiz.items.find((i) => i.title === "Contract Award — ABC Contractors")!;
+      const contractItem = newBiz.items.find(
+        (i) => i.title === "Contract Award — ABC Contractors",
+      )!;
       const vote = contractItem.motions[0].vote!;
 
       // Bob recused — only 3 valid votes counted
@@ -405,7 +694,9 @@ describe("assembleMinutesJson", () => {
       const result = await assembleMinutesJson(supabase, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
-      const contractItem = newBiz.items.find((i) => i.title === "Contract Award — ABC Contractors")!;
+      const contractItem = newBiz.items.find(
+        (i) => i.title === "Contract Award — ABC Contractors",
+      )!;
 
       expect(contractItem.recusals).toHaveLength(1);
       expect(contractItem.recusals[0].member).toBe("Bob Smith");
@@ -417,7 +708,12 @@ describe("assembleMinutesJson", () => {
       const result = await assembleMinutesJson(supabase, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
-      const policyItem = newBiz.items.find((i: { title: string; motions: { vote: { yeas: number; nays: number; result: string } | null }[] }) => i.title === "Personnel Policy Amendment")!;
+      const policyItem = newBiz.items.find(
+        (i: {
+          title: string;
+          motions: { vote: { yeas: number; nays: number; result: string } | null }[];
+        }) => i.title === "Personnel Policy Amendment",
+      )!;
       const vote = policyItem.motions[0].vote!;
 
       expect(vote.yeas).toBe(1);
@@ -511,13 +807,48 @@ function makeContent(overrides: Partial<MinutesContentJson> = {}): MinutesConten
     },
     attendance: {
       members_present: [
-        { name: "Alice Johnson", seat_title: "Chair", status: "present", arrived_at: null, is_presiding_officer: true, is_recording_secretary: false },
-        { name: "Bob Smith", seat_title: null, status: "present", arrived_at: null, is_presiding_officer: false, is_recording_secretary: false },
-        { name: "Carol Davis", seat_title: null, status: "present", arrived_at: null, is_presiding_officer: false, is_recording_secretary: false },
-        { name: "David Wilson", seat_title: "Clerk", status: "present", arrived_at: null, is_presiding_officer: false, is_recording_secretary: true },
+        {
+          name: "Alice Johnson",
+          seat_title: "Chair",
+          status: "present",
+          arrived_at: null,
+          is_presiding_officer: true,
+          is_recording_secretary: false,
+        },
+        {
+          name: "Bob Smith",
+          seat_title: null,
+          status: "present",
+          arrived_at: null,
+          is_presiding_officer: false,
+          is_recording_secretary: false,
+        },
+        {
+          name: "Carol Davis",
+          seat_title: null,
+          status: "present",
+          arrived_at: null,
+          is_presiding_officer: false,
+          is_recording_secretary: false,
+        },
+        {
+          name: "David Wilson",
+          seat_title: "Clerk",
+          status: "present",
+          arrived_at: null,
+          is_presiding_officer: false,
+          is_recording_secretary: true,
+        },
       ],
       members_absent: [
-        { name: "Eve Martinez", seat_title: null, status: "absent", arrived_at: null, is_presiding_officer: false, is_recording_secretary: false },
+        {
+          name: "Eve Martinez",
+          seat_title: null,
+          status: "absent",
+          arrived_at: null,
+          is_presiding_officer: false,
+          is_recording_secretary: false,
+        },
       ],
       staff_present: [],
       presiding_officer: "Alice Johnson",
@@ -601,7 +932,13 @@ describe("formatMinutes", () => {
     it("returns 'Passed X-Y' when there are dissenting nays", () => {
       const content = makeContent();
       content.sections[0]!.items[0]!.motions[0]!.vote = {
-        type: "roll_call", result: "passed", yeas: 3, nays: 2, abstentions: 0, absent: 0, individual_votes: [],
+        type: "roll_call",
+        result: "passed",
+        yeas: 3,
+        nays: 2,
+        abstentions: 0,
+        absent: 0,
+        individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
 
@@ -611,7 +948,13 @@ describe("formatMinutes", () => {
     it("returns 'Failed X-Y' for a failed motion", () => {
       const content = makeContent();
       content.sections[0]!.items[0]!.motions[0]!.vote = {
-        type: "roll_call", result: "failed", yeas: 1, nays: 3, abstentions: 0, absent: 0, individual_votes: [],
+        type: "roll_call",
+        result: "failed",
+        yeas: 1,
+        nays: 3,
+        abstentions: 0,
+        absent: 0,
+        individual_votes: [],
       };
       content.sections[0]!.items[0]!.motions[0]!.status = "failed";
       const formatted = formatMinutes(content, BASE_OPTIONS);
@@ -622,7 +965,13 @@ describe("formatMinutes", () => {
     it("appends abstention count to vote result", () => {
       const content = makeContent();
       content.sections[0]!.items[0]!.motions[0]!.vote = {
-        type: "roll_call", result: "passed", yeas: 3, nays: 1, abstentions: 1, absent: 0, individual_votes: [],
+        type: "roll_call",
+        result: "passed",
+        yeas: 3,
+        nays: 1,
+        abstentions: 1,
+        absent: 0,
+        individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
 
@@ -632,7 +981,13 @@ describe("formatMinutes", () => {
     it("does NOT say 'unanimously' when absent > 0", () => {
       const content = makeContent();
       content.sections[0]!.items[0]!.motions[0]!.vote = {
-        type: "roll_call", result: "passed", yeas: 4, nays: 0, abstentions: 0, absent: 1, individual_votes: [],
+        type: "roll_call",
+        result: "passed",
+        yeas: 4,
+        nays: 0,
+        abstentions: 0,
+        absent: 1,
+        individual_votes: [],
       };
       const formatted = formatMinutes(content, BASE_OPTIONS);
 
@@ -643,7 +998,10 @@ describe("formatMinutes", () => {
   describe("member reference styles", () => {
     it("last_name_only: uses only surname", () => {
       const content = makeContent();
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, member_reference_style: "last_name_only" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        member_reference_style: "last_name_only",
+      });
       const text = formatted.sections[0].formatted_text;
 
       // "Johnson moved" pattern (not "Alice Johnson moved")
@@ -661,10 +1019,21 @@ describe("formatMinutes", () => {
         seconded_by: "Bob Smith",
         status: "passed",
         amendments: [],
-        vote: { type: "roll_call", result: "passed", yeas: 4, nays: 0, abstentions: 0, absent: 0, individual_votes: [] },
+        vote: {
+          type: "roll_call",
+          result: "passed",
+          yeas: 4,
+          nays: 0,
+          abstentions: 0,
+          absent: 0,
+          individual_votes: [],
+        },
       });
 
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, member_reference_style: "full_name_first_then_last" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        member_reference_style: "full_name_first_then_last",
+      });
       const text = formatted.sections[0].formatted_text;
 
       // First mention is full name
@@ -679,7 +1048,9 @@ describe("formatMinutes", () => {
       ];
       const content = makeContent();
       for (const style of styles) {
-        expect(() => formatMinutes(content, { ...BASE_OPTIONS, member_reference_style: style })).not.toThrow();
+        expect(() =>
+          formatMinutes(content, { ...BASE_OPTIONS, member_reference_style: style }),
+        ).not.toThrow();
       }
     });
   });
@@ -687,7 +1058,10 @@ describe("formatMinutes", () => {
   describe("motion display formats", () => {
     it("inline_narrative: produces '[Mover] moved [text]. [Seconder] seconded. [Result].' pattern", () => {
       const content = makeContent();
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "inline_narrative" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        motion_display_format: "inline_narrative",
+      });
       const text = formatted.sections[0].formatted_text;
 
       expect(text).toMatch(/Johnson moved Approve the FY2027/);
@@ -696,7 +1070,10 @@ describe("formatMinutes", () => {
 
     it("block_format: produces div.motion-block HTML", () => {
       const content = makeContent();
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "block_format" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        motion_display_format: "block_format",
+      });
       const text = formatted.sections[0].formatted_text;
 
       expect(text).toContain('<div class="motion-block">');
@@ -709,7 +1086,10 @@ describe("formatMinutes", () => {
 
     it("block_format: vote line shows Yea/Nay counts", () => {
       const content = makeContent();
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "block_format" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        motion_display_format: "block_format",
+      });
       const text = formatted.sections[0].formatted_text;
 
       expect(text).toContain("Yea: 4");
@@ -718,7 +1098,10 @@ describe("formatMinutes", () => {
 
     it("block_format: passed motion shows 'The motion carried.'", () => {
       const content = makeContent();
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "block_format" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        motion_display_format: "block_format",
+      });
       const text = formatted.sections[0].formatted_text;
 
       expect(text).toContain("The motion carried.");
@@ -728,9 +1111,18 @@ describe("formatMinutes", () => {
       const content = makeContent();
       content.sections[0]!.items[0]!.motions[0]!.status = "failed";
       content.sections[0]!.items[0]!.motions[0]!.vote = {
-        type: "roll_call", result: "failed", yeas: 1, nays: 3, abstentions: 0, absent: 0, individual_votes: [],
+        type: "roll_call",
+        result: "failed",
+        yeas: 1,
+        nays: 3,
+        abstentions: 0,
+        absent: 0,
+        individual_votes: [],
       };
-      const formatted = formatMinutes(content, { ...BASE_OPTIONS, motion_display_format: "block_format" });
+      const formatted = formatMinutes(content, {
+        ...BASE_OPTIONS,
+        motion_display_format: "block_format",
+      });
       const text = formatted.sections[0].formatted_text;
 
       expect(text).toContain("The motion failed.");
@@ -890,9 +1282,7 @@ describe("formatMinutes", () => {
                 discussion_summary: "Hearing opened.",
                 motions: [],
                 recusals: [],
-                speakers: [
-                  { name: "Jane Doe", address: "456 Elm St", topic: "zoning variance" },
-                ],
+                speakers: [{ name: "Jane Doe", address: "456 Elm St", topic: "zoning variance" }],
                 operator_notes: null,
                 staff_resource: null,
                 background: null,
@@ -990,7 +1380,15 @@ describe("formatMinutes", () => {
                     seconded_by: "Carol Davis",
                     status: "passed",
                     amendments: [],
-                    vote: { type: "roll_call", result: "passed", yeas: 3, nays: 0, abstentions: 0, absent: 0, individual_votes: [] },
+                    vote: {
+                      type: "roll_call",
+                      result: "passed",
+                      yeas: 3,
+                      nays: 0,
+                      abstentions: 0,
+                      absent: 0,
+                      individual_votes: [],
+                    },
                   },
                 ],
                 recusals: [{ member: "Bob Smith", reason: "conflict of interest" }],
@@ -1045,7 +1443,15 @@ describe("formatMinutes", () => {
             seconded_by: "Carol Davis",
             status: "passed",
             amendments: [],
-            vote: { type: "roll_call", result: "passed", yeas: 4, nays: 0, abstentions: 0, absent: 0, individual_votes: [] },
+            vote: {
+              type: "roll_call",
+              result: "passed",
+              yeas: 4,
+              nays: 0,
+              abstentions: 0,
+              absent: 0,
+              individual_votes: [],
+            },
           },
         },
       });
@@ -1074,6 +1480,47 @@ describe("formatMinutes", () => {
       const content = makeContent();
       const formatted = formatMinutes(content, BASE_OPTIONS);
       expect(formatted.certification).toEqual(content.certification);
+    });
+  });
+
+  describe("operator notes", () => {
+    it.each(["action", "summary", "narrative"] as const)(
+      "renders operator notes in %s style",
+      (style) => {
+        const content = makeContent();
+        content.sections[0]!.items[0]!.operator_notes =
+          "Chair noted the shortfall stems from the culvert repair.";
+
+        const formatted = formatMinutes(content, {
+          ...BASE_OPTIONS,
+          minutes_style: style,
+        });
+
+        const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+        expect(allText).toContain("culvert repair");
+        expect(allText).toContain('class="operator-notes"');
+      },
+    );
+
+    it("escapes HTML in operator notes", () => {
+      const content = makeContent();
+      content.sections[0]!.items[0]!.operator_notes = "<script>alert(1)</script>";
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+
+      expect(allText).not.toContain("<script>");
+      expect(allText).toContain("&lt;script&gt;");
+    });
+
+    it("emits nothing when notes are absent", () => {
+      const content = makeContent();
+      content.sections[0]!.items[0]!.operator_notes = null;
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      const allText = formatted.sections.map((s) => s.formatted_text).join("\n");
+
+      expect(allText).not.toContain("operator-notes");
     });
   });
 });

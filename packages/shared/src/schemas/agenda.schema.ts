@@ -1,9 +1,5 @@
 import { z } from "zod";
-import {
-  AgendaItemSectionType,
-  AgendaItemStatus,
-  MinutesBehavior,
-} from "../constants/enums.js";
+import { AgendaItemSectionType, AgendaItemStatus, MinutesBehavior } from "../constants/enums.js";
 
 const agendaItemSectionTypes = [
   AgendaItemSectionType.CEREMONIAL,

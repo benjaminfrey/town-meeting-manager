@@ -45,11 +45,7 @@ interface AddPersonDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function AddPersonDialog({
-  townId,
-  open,
-  onOpenChange,
-}: AddPersonDialogProps) {
+export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2>(1);
@@ -167,8 +163,7 @@ export function AddPersonDialog({
       reset();
       onOpenChange(false);
     },
-    onError: () =>
-      toast.error("Couldn't create the staff account — please try again."),
+    onError: () => toast.error("Couldn't create the staff account — please try again."),
   });
 
   const saving = createDirectory.isPending || createStaff.isPending;
@@ -215,9 +210,7 @@ export function AddPersonDialog({
                 placeholder="email@example.com"
               />
               {personForm.errors.email && (
-                <p className="text-xs text-destructive">
-                  {personForm.errors.email}
-                </p>
+                <p className="text-xs text-destructive">{personForm.errors.email}</p>
               )}
               {emailExists && (
                 <p className="text-xs text-destructive">
@@ -226,10 +219,7 @@ export function AddPersonDialog({
               )}
             </div>
             <DialogFooter>
-              <Button
-                onClick={() => setStep(2)}
-                disabled={!personForm.isValid || emailExists}
-              >
+              <Button onClick={() => setStep(2)} disabled={!personForm.isValid || emailExists}>
                 Continue
               </Button>
             </DialogFooter>
@@ -276,11 +266,7 @@ export function AddPersonDialog({
                   </button>
                 </div>
                 <DialogFooter>
-                  <Button
-                    variant="outline"
-                    onClick={() => setStep(1)}
-                    disabled={saving}
-                  >
+                  <Button variant="outline" onClick={() => setStep(1)} disabled={saving}>
                     <ChevronLeft className="mr-1 h-3.5 w-3.5" />
                     Back
                   </Button>

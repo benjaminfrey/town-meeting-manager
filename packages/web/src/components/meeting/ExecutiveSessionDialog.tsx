@@ -8,8 +8,12 @@
 
 import { useState } from "react";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -17,14 +21,46 @@ import { AlertTriangle, Lock } from "lucide-react";
 
 // Maine 1 M.R.S.A. §405(6) categories
 const EXECUTIVE_SESSION_CITATIONS = [
-  { letter: "A", short: "Personnel matters", full: "Discussion of the employment, appointment, assignment, duties, promotion, demotion, compensation, evaluation, disciplining, resignation, or dismissal of an official, appointee, or employee" },
-  { letter: "B", short: "Student suspension or expulsion", full: "Discussion of suspension or expulsion of a public school student" },
-  { letter: "C", short: "Records exemption under FOAA", full: "Discussion of a matter which would be within the scope of the 'executive session' provisions of FOAA if it related to records" },
-  { letter: "D", short: "Labor contract negotiations", full: "Discussion of labor contract negotiations, including proposals and counterproposals" },
-  { letter: "E", short: "Consultation with legal counsel", full: "Consultations with a municipal attorney concerning pending or contemplated litigation" },
-  { letter: "F", short: "Confidential records", full: "Discussion of information contained in records made, maintained, or received by a body or agency when access by the general public to those records is prohibited" },
-  { letter: "G", short: "Examination content", full: "Discussion or approval of the content of examinations" },
-  { letter: "H", short: "Confidential information", full: "Discussion of information provided to the body in confidence" },
+  {
+    letter: "A",
+    short: "Personnel matters",
+    full: "Discussion of the employment, appointment, assignment, duties, promotion, demotion, compensation, evaluation, disciplining, resignation, or dismissal of an official, appointee, or employee",
+  },
+  {
+    letter: "B",
+    short: "Student suspension or expulsion",
+    full: "Discussion of suspension or expulsion of a public school student",
+  },
+  {
+    letter: "C",
+    short: "Records exemption under FOAA",
+    full: "Discussion of a matter which would be within the scope of the 'executive session' provisions of FOAA if it related to records",
+  },
+  {
+    letter: "D",
+    short: "Labor contract negotiations",
+    full: "Discussion of labor contract negotiations, including proposals and counterproposals",
+  },
+  {
+    letter: "E",
+    short: "Consultation with legal counsel",
+    full: "Consultations with a municipal attorney concerning pending or contemplated litigation",
+  },
+  {
+    letter: "F",
+    short: "Confidential records",
+    full: "Discussion of information contained in records made, maintained, or received by a body or agency when access by the general public to those records is prohibited",
+  },
+  {
+    letter: "G",
+    short: "Examination content",
+    full: "Discussion or approval of the content of examinations",
+  },
+  {
+    letter: "H",
+    short: "Confidential information",
+    full: "Discussion of information provided to the body in confidence",
+  },
 ] as const;
 
 interface ExecutiveSessionDialogProps {
@@ -33,10 +69,14 @@ interface ExecutiveSessionDialogProps {
   onProceed: (citation: string, citationLetter: string, prefillMotionText: string) => void;
 }
 
-export function ExecutiveSessionDialog({ open, onOpenChange, onProceed }: ExecutiveSessionDialogProps) {
+export function ExecutiveSessionDialog({
+  open,
+  onOpenChange,
+  onProceed,
+}: ExecutiveSessionDialogProps) {
   const [selectedLetter, setSelectedLetter] = useState<string>("");
 
-  const selected = EXECUTIVE_SESSION_CITATIONS.find(c => c.letter === selectedLetter);
+  const selected = EXECUTIVE_SESSION_CITATIONS.find((c) => c.letter === selectedLetter);
   const citation = selected ? `1 MRSA 405(6)(${selected.letter})` : "";
   const motionText = selected
     ? `to enter Executive Session pursuant to 1 M.R.S.A. Section 405(6)(${selected.letter}) — ${selected.short}`
@@ -58,8 +98,8 @@ export function ExecutiveSessionDialog({ open, onOpenChange, onProceed }: Execut
             Enter Executive Session
           </DialogTitle>
           <DialogDescription>
-            Select the statutory basis for entering executive session under
-            Maine 1 M.R.S.A. §405(6). A legal citation is required.
+            Select the statutory basis for entering executive session under Maine 1 M.R.S.A.
+            §405(6). A legal citation is required.
           </DialogDescription>
         </DialogHeader>
 
@@ -67,8 +107,8 @@ export function ExecutiveSessionDialog({ open, onOpenChange, onProceed }: Execut
           {/* Motion required warning */}
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/30">
             <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              A motion to enter executive session is required before proceeding. The motion will be pre-filled after selecting a citation.
+              <AlertTriangle className="h-3.5 w-3.5" />A motion to enter executive session is
+              required before proceeding. The motion will be pre-filled after selecting a citation.
             </div>
           </div>
 

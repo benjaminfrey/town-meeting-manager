@@ -1,0 +1,12 @@
+# Commits listed here are ignored by `git blame` (via `git config
+# blame.ignoreRevsFile .git-blame-ignore-revs`). Each entry is a
+# repo-wide mechanical reformat that would otherwise noise blame
+# output without representing a real content change.
+#
+# This file is opt-in: run
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# locally to use it (or add it via a committed .gitconfig include).
+# GitHub's web blame view respects this file automatically.
+
+# Add ESLint and Prettier configuration (282-file repo-wide reformat)
+3fcc6d9bec6176af795ea739b4858e234f350c0d

@@ -41,9 +41,7 @@ function SkeletonCard() {
 
 function ResultCard({ result }: { result: PortalSearchResult }) {
   const isMinutes = result.type === "minutes";
-  const badgeClass = isMinutes
-    ? "bg-blue-100 text-blue-800"
-    : "bg-green-100 text-green-800";
+  const badgeClass = isMinutes ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800";
   const label = isMinutes ? "Minutes" : "Agenda";
   const linkHref = isMinutes
     ? `/meetings/${result.meeting_id}/minutes`
@@ -62,14 +60,10 @@ function ResultCard({ result }: { result: PortalSearchResult }) {
         <span className="text-sm text-muted-foreground" aria-hidden="true">
           &middot;
         </span>
-        <span className="text-sm text-muted-foreground">
-          {formatDate(result.meeting_date)}
-        </span>
+        <span className="text-sm text-muted-foreground">{formatDate(result.meeting_date)}</span>
       </div>
 
-      <h3 className="text-base font-semibold text-foreground mb-1">
-        {result.title}
-      </h3>
+      <h3 className="text-base font-semibold text-foreground mb-1">{result.title}</h3>
 
       {result.snippet && (
         <p
@@ -104,16 +98,10 @@ export default function SearchResults() {
   const [contentType, setContentType] = useState<ContentType>(
     () => (getParams().get("type") as ContentType) || "all",
   );
-  const [boardFilter, setBoardFilter] = useState(
-    () => getParams().get("board") || "",
-  );
-  const [fromDate, setFromDate] = useState(
-    () => getParams().get("from") || "",
-  );
+  const [boardFilter, setBoardFilter] = useState(() => getParams().get("board") || "");
+  const [fromDate, setFromDate] = useState(() => getParams().get("from") || "");
   const [toDate, setToDate] = useState(() => getParams().get("to") || "");
-  const [page, setPage] = useState(
-    () => Number(getParams().get("page")) || 1,
-  );
+  const [page, setPage] = useState(() => Number(getParams().get("page")) || 1);
 
   // Track the search input separately so typing doesn't trigger searches
   const [inputValue, setInputValue] = useState(query);
@@ -141,14 +129,7 @@ export default function SearchResults() {
 
   // Sync URL params and perform search
   const performSearch = useCallback(
-    async (
-      q: string,
-      type: ContentType,
-      board: string,
-      from: string,
-      to: string,
-      pg: number,
-    ) => {
+    async (q: string, type: ContentType, board: string, from: string, to: string, pg: number) => {
       if (!q.trim()) {
         setResults(null);
         return;
@@ -414,9 +395,7 @@ export default function SearchResults() {
       {!query.trim() && !loading && (
         <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
           <Search className="mx-auto mb-3 h-10 w-10 text-muted-foreground" aria-hidden="true" />
-          <p className="text-muted-foreground">
-            Enter a search term to find agendas and minutes.
-          </p>
+          <p className="text-muted-foreground">Enter a search term to find agendas and minutes.</p>
         </div>
       )}
 
@@ -435,8 +414,8 @@ export default function SearchResults() {
           {results.results.length === 0 ? (
             <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">
               <p className="text-muted-foreground">
-                No results found for &ldquo;{query}&rdquo;. Try different search
-                terms or adjust your filters.
+                No results found for &ldquo;{query}&rdquo;. Try different search terms or adjust
+                your filters.
               </p>
             </div>
           ) : (

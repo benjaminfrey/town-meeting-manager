@@ -10,11 +10,7 @@ import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import {
-  MunicipalityType,
-  PopulationRange,
-  NEW_ENGLAND_STATES,
-} from "@town-meeting/shared";
+import { MunicipalityType, PopulationRange, NEW_ENGLAND_STATES } from "@town-meeting/shared";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -50,10 +46,7 @@ const TownSettingsSchema = z.object({
     PopulationRange.FROM_5000_TO_10000,
     PopulationRange.OVER_10000,
   ]),
-  contact_name: z
-    .string()
-    .min(2, "Contact name must be at least 2 characters")
-    .max(100),
+  contact_name: z.string().min(2, "Contact name must be at least 2 characters").max(100),
   contact_role: z.string().min(1, "Contact role is required").max(100),
 });
 
@@ -83,11 +76,7 @@ interface TownSettingsEditorProps {
   onDone: () => void;
 }
 
-export function TownSettingsEditor({
-  townId,
-  initial,
-  onDone,
-}: TownSettingsEditorProps) {
+export function TownSettingsEditor({ townId, initial, onDone }: TownSettingsEditorProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
   const { values, errors, isValid, setValue, handleBlur, validate } =
@@ -133,9 +122,7 @@ export function TownSettingsEditor({
             onChange={(e) => setValue("name", e.target.value)}
             onBlur={() => handleBlur("name")}
           />
-          {errors.name && (
-            <p className="text-xs text-destructive">{errors.name}</p>
-          )}
+          {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
         </div>
 
         {/* State */}
@@ -211,9 +198,7 @@ export function TownSettingsEditor({
             onChange={(e) => setValue("contact_name", e.target.value)}
             onBlur={() => handleBlur("contact_name")}
           />
-          {errors.contact_name && (
-            <p className="text-xs text-destructive">{errors.contact_name}</p>
-          )}
+          {errors.contact_name && <p className="text-xs text-destructive">{errors.contact_name}</p>}
         </div>
 
         {/* Contact role */}
@@ -225,9 +210,7 @@ export function TownSettingsEditor({
             onChange={(e) => setValue("contact_role", e.target.value)}
             onBlur={() => handleBlur("contact_role")}
           />
-          {errors.contact_role && (
-            <p className="text-xs text-destructive">{errors.contact_role}</p>
-          )}
+          {errors.contact_role && <p className="text-xs text-destructive">{errors.contact_role}</p>}
         </div>
       </div>
 

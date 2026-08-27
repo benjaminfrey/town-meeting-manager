@@ -79,8 +79,12 @@ export function RecusalDialog({
     },
     onSuccess: (_data, { trimmedReason }) => {
       if (activeMotionId) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(activeMotionId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.voteRecords.byMotion(activeMotionId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.voteRecords.byMeeting(meetingId),
+        });
       }
       toast.success("Recusal recorded");
       onRecusalRecorded(boardMemberId, trimmedReason, scope);
@@ -107,8 +111,8 @@ export function RecusalDialog({
         <DialogHeader>
           <DialogTitle>Record Recusal</DialogTitle>
           <DialogDescription>
-            Per Maine law 30-A M.R.S.A. §2605(4), the disclosure and
-            abstention must be recorded with the clerk or secretary.
+            Per Maine law 30-A M.R.S.A. §2605(4), the disclosure and abstention must be recorded
+            with the clerk or secretary.
           </DialogDescription>
         </DialogHeader>
 
@@ -116,9 +120,7 @@ export function RecusalDialog({
           {/* Member (read-only) */}
           <div>
             <Label>Member</Label>
-            <p className="mt-1 rounded-md border bg-muted/50 px-3 py-1.5 text-sm">
-              {memberName}
-            </p>
+            <p className="mt-1 rounded-md border bg-muted/50 px-3 py-1.5 text-sm">{memberName}</p>
           </div>
 
           {/* Reason (required) */}

@@ -16,13 +16,7 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useSupabase } from "@/hooks/useSupabase";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { queryKeys } from "@/lib/queryKeys";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
@@ -127,18 +121,16 @@ export default function NotificationPreferencesPage() {
   const toggleMutation = useMutation({
     mutationFn: async ({ eventType, enabled }: { eventType: string; enabled: boolean }) => {
       if (!currentUser?.id) throw new Error("Not authenticated");
-      const { error } = await supabase
-        .from("subscriber_notification_preference")
-        .upsert(
-          {
-            subscriber_id: currentUser.id,
-            event_type: eventType,
-            channel: "email",
-            enabled,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "subscriber_id,event_type,channel" },
-        );
+      const { error } = await supabase.from("subscriber_notification_preference").upsert(
+        {
+          subscriber_id: currentUser.id,
+          event_type: eventType,
+          channel: "email",
+          enabled,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "subscriber_id,event_type,channel" },
+      );
       if (error) throw error;
     },
     onSuccess: () => {
@@ -194,16 +186,12 @@ export default function NotificationPreferencesPage() {
                         >
                           {setting.label}
                         </Label>
-                        <p className="text-xs text-muted-foreground">
-                          {setting.description}
-                        </p>
+                        <p className="text-xs text-muted-foreground">{setting.description}</p>
                       </div>
                       <Switch
                         id={`pref-${setting.eventType}`}
                         checked={isEnabled(setting.eventType)}
-                        onCheckedChange={(checked) =>
-                          handleToggle(setting.eventType, checked)
-                        }
+                        onCheckedChange={(checked) => handleToggle(setting.eventType, checked)}
                         disabled={toggleMutation.isPending}
                         aria-label={`Toggle ${setting.label} notifications`}
                       />
@@ -217,8 +205,8 @@ export default function NotificationPreferencesPage() {
 
         {/* Info footer */}
         <p className="text-xs text-muted-foreground">
-          Account setup and password reset emails are always sent regardless of these settings.
-          For broadcast emails, you can also use the unsubscribe link at the bottom of any email.
+          Account setup and password reset emails are always sent regardless of these settings. For
+          broadcast emails, you can also use the unsubscribe link at the bottom of any email.
         </p>
       </div>
     </div>
@@ -228,14 +216,8 @@ export default function NotificationPreferencesPage() {
 // ─── Push Notification Card ──────────────────────────────────────
 
 function PushNotificationCard() {
-  const {
-    isSupported,
-    permission,
-    isSubscribed,
-    subscribe,
-    unsubscribe,
-    isLoading,
-  } = usePushNotifications();
+  const { isSupported, permission, isSubscribed, subscribe, unsubscribe, isLoading } =
+    usePushNotifications();
 
   const handleTogglePush = async (enabled: boolean) => {
     try {
@@ -271,12 +253,16 @@ function PushNotificationCard() {
         ) : permission === "denied" ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <BellOff className="h-4 w-4" />
-            Notifications are blocked. Please update your browser settings to allow notifications for this site.
+            Notifications are blocked. Please update your browser settings to allow notifications
+            for this site.
           </div>
         ) : (
           <div className="flex items-start justify-between gap-4 py-1">
             <div className="space-y-0.5">
-              <Label htmlFor="push-toggle" className="text-sm font-medium leading-none cursor-pointer">
+              <Label
+                htmlFor="push-toggle"
+                className="text-sm font-medium leading-none cursor-pointer"
+              >
                 {isSubscribed ? "Enabled" : "Disabled"}
               </Label>
               <p className="text-xs text-muted-foreground">

@@ -13,14 +13,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import {
-  Gavel,
-  Vote,
-  Pencil,
-  XCircle,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import { Gavel, Vote, Pencil, XCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -101,7 +94,10 @@ interface MotionPanelProps {
 
 // ─── Status / Type Badge Colors ─────────────────────────────────────
 
-const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; label: string }> = {
+const STATUS_BADGE: Record<
+  string,
+  { variant: "default" | "secondary" | "destructive" | "outline"; label: string }
+> = {
   pending: { variant: "secondary", label: "Pending" },
   seconded: { variant: "outline", label: "Seconded" },
   in_vote: { variant: "default", label: "Voting" },
@@ -228,9 +224,7 @@ export function MotionPanel({
   if (motions.length === 0) {
     return (
       <div className="py-2">
-        <p className="text-xs text-muted-foreground italic">
-          No motions recorded for this item
-        </p>
+        <p className="text-xs text-muted-foreground italic">No motions recorded for this item</p>
       </div>
     );
   }
@@ -287,9 +281,7 @@ export function MotionPanel({
                   displayFormat={motionDisplayFormat}
                   expanded={expandedMotionId === amendment.id}
                   onToggleExpand={() =>
-                    setExpandedMotionId((id) =>
-                      id === amendment.id ? null : amendment.id,
-                    )
+                    setExpandedMotionId((id) => (id === amendment.id ? null : amendment.id))
                   }
                   isVoting={votingMotionId === amendment.id}
                   quorumBlocked={quorumBlocked}
@@ -299,22 +291,21 @@ export function MotionPanel({
                 />
 
                 {/* VotePanel for amendment */}
-                {votingMotionId === amendment.id &&
-                  amendment.status === "in_vote" && (
-                    <div className="ml-4 mt-2">
-                      <VotePanel
-                        motionId={amendment.id}
-                        meetingId={meetingId}
-                        townId={townId}
-                        allMembers={allMembers}
-                        attendanceRecords={attendanceRecords}
-                        existingVotes={votesByMotion.get(amendment.id) ?? []}
-                        boardQuorumConfig={boardQuorumConfig}
-                        memberNameMap={memberNameMap}
-                        onComplete={handleVoteComplete}
-                      />
-                    </div>
-                  )}
+                {votingMotionId === amendment.id && amendment.status === "in_vote" && (
+                  <div className="ml-4 mt-2">
+                    <VotePanel
+                      motionId={amendment.id}
+                      meetingId={meetingId}
+                      townId={townId}
+                      allMembers={allMembers}
+                      attendanceRecords={attendanceRecords}
+                      existingVotes={votesByMotion.get(amendment.id) ?? []}
+                      boardQuorumConfig={boardQuorumConfig}
+                      memberNameMap={memberNameMap}
+                      onComplete={handleVoteComplete}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -379,17 +370,31 @@ function MotionCard({
   const statusInfo = (STATUS_BADGE[motion.status] ?? STATUS_BADGE.pending)!;
   const typeColor = TYPE_COLORS[motion.motionType] ?? TYPE_COLORS.main;
   const typeLabel = TYPE_LABELS[motion.motionType] ?? motion.motionType;
-  const movedByName = motion.movedBy ? memberNameMap.get(motion.movedBy) ?? "Unknown" : null;
-  const secondedByName = motion.secondedBy ? memberNameMap.get(motion.secondedBy) ?? "Unknown" : null;
+  const movedByName = motion.movedBy ? (memberNameMap.get(motion.movedBy) ?? "Unknown") : null;
+  const secondedByName = motion.secondedBy
+    ? (memberNameMap.get(motion.secondedBy) ?? "Unknown")
+    : null;
 
   // Vote summary — Supabase returns JSONB as a native object; no JSON.parse needed.
   // Defensive: if it's still a string (legacy), parse it.
-  const voteSummary = motion.voteSummary ? (() => {
-    try {
-      const raw = motion.voteSummary;
-      return (typeof raw === "string" ? JSON.parse(raw) : raw) as { yeas: number; nays: number; abstentions: number; recusals: number; absent: number; result: string; passed: boolean };
-    } catch { return null; }
-  })() : null;
+  const voteSummary = motion.voteSummary
+    ? (() => {
+        try {
+          const raw = motion.voteSummary;
+          return (typeof raw === "string" ? JSON.parse(raw) : raw) as {
+            yeas: number;
+            nays: number;
+            abstentions: number;
+            recusals: number;
+            absent: number;
+            result: string;
+            passed: boolean;
+          };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
 
   const isCompleted = motion.status === "passed" || motion.status === "failed";
   const isWithdrawn = motion.status === "withdrawn";
@@ -397,11 +402,12 @@ function MotionCard({
   const showActions = canAct && (motion.status === "seconded" || motion.status === "pending");
 
   // Build vote entries for detailed display
-  const voteEntries: VoteEntry[] | null = votes?.map((v) => ({
-    boardMemberId: v.board_member_id,
-    vote: v.vote,
-    recusalReason: v.recusal_reason,
-  })) ?? null;
+  const voteEntries: VoteEntry[] | null =
+    votes?.map((v) => ({
+      boardMemberId: v.board_member_id,
+      vote: v.vote,
+      recusalReason: v.recusal_reason,
+    })) ?? null;
 
   return (
     <div
@@ -414,11 +420,17 @@ function MotionCard({
             {typeLabel}
           </span>
           <Badge variant={statusInfo.variant} className="text-xs">
-            {isWithdrawn ? <span className="line-through">{statusInfo.label}</span> : statusInfo.label}
+            {isWithdrawn ? (
+              <span className="line-through">{statusInfo.label}</span>
+            ) : (
+              statusInfo.label
+            )}
           </Badge>
         </div>
         {voteSummary && (
-          <span className={`text-xs font-semibold ${voteSummary.result === "passed" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+          <span
+            className={`text-xs font-semibold ${voteSummary.result === "passed" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+          >
             {formatVoteCompact({
               ...voteSummary,
               votingMembers: voteSummary.yeas + voteSummary.nays,
@@ -467,24 +479,34 @@ function MotionCard({
         <div className="mt-3 border-t pt-2">
           {displayFormat === "inline_narrative" && movedByName ? (
             <p className="text-xs text-muted-foreground">
-              {formatVoteInline(
-                motion.motionText,
-                movedByName,
-                secondedByName,
-                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed", result: voteSummary.result as "passed" | "failed" },
-              )}
+              {formatVoteInline(motion.motionText, movedByName, secondedByName, {
+                ...voteSummary,
+                votingMembers: voteSummary.yeas + voteSummary.nays,
+                majorityNeeded: 0,
+                passed: voteSummary.result === "passed",
+                result: voteSummary.result as "passed" | "failed",
+              })}
             </p>
           ) : movedByName ? (
             <div className="space-y-0.5">
-              {formatVoteBlock(
-                motion.motionText,
-                movedByName,
-                secondedByName,
-                { ...voteSummary, votingMembers: voteSummary.yeas + voteSummary.nays, majorityNeeded: 0, passed: voteSummary.result === "passed", result: voteSummary.result as "passed" | "failed" },
-              ).map((line) => (
+              {formatVoteBlock(motion.motionText, movedByName, secondedByName, {
+                ...voteSummary,
+                votingMembers: voteSummary.yeas + voteSummary.nays,
+                majorityNeeded: 0,
+                passed: voteSummary.result === "passed",
+                result: voteSummary.result as "passed" | "failed",
+              }).map((line) => (
                 <div key={line.label} className="flex gap-2 text-xs">
                   <span className="min-w-[80px] text-muted-foreground">{line.label}:</span>
-                  <span className={line.label === "Result" ? (voteSummary.result === "passed" ? "font-semibold text-green-600 dark:text-green-400" : "font-semibold text-red-600 dark:text-red-400") : ""}>
+                  <span
+                    className={
+                      line.label === "Result"
+                        ? voteSummary.result === "passed"
+                          ? "font-semibold text-green-600 dark:text-green-400"
+                          : "font-semibold text-red-600 dark:text-red-400"
+                        : ""
+                    }
+                  >
                     {line.value}
                   </span>
                 </div>
@@ -507,12 +529,7 @@ function MotionCard({
             <Vote className="mr-1 h-3 w-3" /> Call the Vote
           </Button>
           {onAmend && motion.motionType === "main" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={onAmend}
-            >
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onAmend}>
               <Pencil className="mr-1 h-3 w-3" /> Amend
             </Button>
           )}

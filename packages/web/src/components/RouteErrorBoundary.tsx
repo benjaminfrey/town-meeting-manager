@@ -26,9 +26,7 @@ export function RouteErrorBoundary({ error }: { error: unknown }) {
 
         {isDev && error instanceof Error && (
           <div className="mt-4">
-            <p className="text-sm font-medium text-destructive">
-              {error.message}
-            </p>
+            <p className="text-sm font-medium text-destructive">{error.message}</p>
             {error.stack && (
               <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">
                 <code>{error.stack}</code>

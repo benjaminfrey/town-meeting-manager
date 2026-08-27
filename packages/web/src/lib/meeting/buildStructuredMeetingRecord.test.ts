@@ -61,32 +61,181 @@ function baseMembers(): StructuredMeetingRecordInput["members"] {
 
 function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
   return [
-    { board_member_id: "bm-1", person_id: "p-1", status: "present", arrived_at: "2026-03-10T18:30:00Z", departed_at: null, is_recording_secretary: 0 },
-    { board_member_id: "bm-2", person_id: "p-2", status: "present", arrived_at: "2026-03-10T18:30:00Z", departed_at: null, is_recording_secretary: 0 },
-    { board_member_id: "bm-3", person_id: "p-3", status: "present", arrived_at: "2026-03-10T18:31:00Z", departed_at: null, is_recording_secretary: 1 },
-    { board_member_id: "bm-4", person_id: "p-4", status: "absent", arrived_at: null, departed_at: null, is_recording_secretary: 0 },
-    { board_member_id: "bm-5", person_id: "p-5", status: "remote", arrived_at: "2026-03-10T18:30:00Z", departed_at: null, is_recording_secretary: 0 },
+    {
+      board_member_id: "bm-1",
+      person_id: "p-1",
+      status: "present",
+      arrived_at: "2026-03-10T18:30:00Z",
+      departed_at: null,
+      is_recording_secretary: 0,
+    },
+    {
+      board_member_id: "bm-2",
+      person_id: "p-2",
+      status: "present",
+      arrived_at: "2026-03-10T18:30:00Z",
+      departed_at: null,
+      is_recording_secretary: 0,
+    },
+    {
+      board_member_id: "bm-3",
+      person_id: "p-3",
+      status: "present",
+      arrived_at: "2026-03-10T18:31:00Z",
+      departed_at: null,
+      is_recording_secretary: 1,
+    },
+    {
+      board_member_id: "bm-4",
+      person_id: "p-4",
+      status: "absent",
+      arrived_at: null,
+      departed_at: null,
+      is_recording_secretary: 0,
+    },
+    {
+      board_member_id: "bm-5",
+      person_id: "p-5",
+      status: "remote",
+      arrived_at: "2026-03-10T18:30:00Z",
+      departed_at: null,
+      is_recording_secretary: 0,
+    },
   ];
 }
 
 function baseAgendaItems(): StructuredMeetingRecordInput["agendaItems"] {
   return [
     // Parent sections
-    { id: "ai-1", meeting_id: "meeting-1", section_type: "procedural", sort_order: 1, title: "Call to Order", description: null, presenter: null, estimated_duration: 5, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
-    { id: "ai-2", meeting_id: "meeting-1", section_type: "public_hearing", sort_order: 2, title: "Public Hearings", description: null, presenter: null, estimated_duration: 30, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
-    { id: "ai-3", meeting_id: "meeting-1", section_type: "action", sort_order: 3, title: "Action Items", description: null, presenter: null, estimated_duration: 45, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
-    { id: "ai-4", meeting_id: "meeting-1", section_type: "procedural", sort_order: 4, title: "Adjournment", description: null, presenter: null, estimated_duration: 2, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
+    {
+      id: "ai-1",
+      meeting_id: "meeting-1",
+      section_type: "procedural",
+      sort_order: 1,
+      title: "Call to Order",
+      description: null,
+      presenter: null,
+      estimated_duration: 5,
+      parent_item_id: null,
+      status: "completed",
+      staff_resource: null,
+      background: null,
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
+    {
+      id: "ai-2",
+      meeting_id: "meeting-1",
+      section_type: "public_hearing",
+      sort_order: 2,
+      title: "Public Hearings",
+      description: null,
+      presenter: null,
+      estimated_duration: 30,
+      parent_item_id: null,
+      status: "completed",
+      staff_resource: null,
+      background: null,
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
+    {
+      id: "ai-3",
+      meeting_id: "meeting-1",
+      section_type: "action",
+      sort_order: 3,
+      title: "Action Items",
+      description: null,
+      presenter: null,
+      estimated_duration: 45,
+      parent_item_id: null,
+      status: "completed",
+      staff_resource: null,
+      background: null,
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
+    {
+      id: "ai-4",
+      meeting_id: "meeting-1",
+      section_type: "procedural",
+      sort_order: 4,
+      title: "Adjournment",
+      description: null,
+      presenter: null,
+      estimated_duration: 2,
+      parent_item_id: null,
+      status: "completed",
+      staff_resource: null,
+      background: null,
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
 
     // Children under Public Hearings
-    { id: "ai-2a", meeting_id: "meeting-1", section_type: null, sort_order: 1, title: "Zoning Amendment - Elm St", description: "Proposed rezoning from R-1 to R-2", presenter: "Town Planner", estimated_duration: 20, parent_item_id: "ai-2", status: "completed", staff_resource: "Jane Doe, Town Planner", background: "Application received Feb 2026", recommendation: "Staff recommends approval", suggested_motion: "Move to approve the zoning amendment for Elm St", operator_notes: null },
+    {
+      id: "ai-2a",
+      meeting_id: "meeting-1",
+      section_type: null,
+      sort_order: 1,
+      title: "Zoning Amendment - Elm St",
+      description: "Proposed rezoning from R-1 to R-2",
+      presenter: "Town Planner",
+      estimated_duration: 20,
+      parent_item_id: "ai-2",
+      status: "completed",
+      staff_resource: "Jane Doe, Town Planner",
+      background: "Application received Feb 2026",
+      recommendation: "Staff recommends approval",
+      suggested_motion: "Move to approve the zoning amendment for Elm St",
+      operator_notes: null,
+    },
 
     // Children under Action Items
-    { id: "ai-3a", meeting_id: "meeting-1", section_type: null, sort_order: 1, title: "Approve February Minutes", description: null, presenter: null, estimated_duration: 5, parent_item_id: "ai-3", status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
-    { id: "ai-3b", meeting_id: "meeting-1", section_type: null, sort_order: 2, title: "Budget Review FY2027", description: "Annual budget proposal review", presenter: "Finance Director", estimated_duration: 30, parent_item_id: "ai-3", status: "completed", staff_resource: "Finance Director", background: "Draft budget submitted March 1", recommendation: null, suggested_motion: null, operator_notes: null },
+    {
+      id: "ai-3a",
+      meeting_id: "meeting-1",
+      section_type: null,
+      sort_order: 1,
+      title: "Approve February Minutes",
+      description: null,
+      presenter: null,
+      estimated_duration: 5,
+      parent_item_id: "ai-3",
+      status: "completed",
+      staff_resource: null,
+      background: null,
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
+    {
+      id: "ai-3b",
+      meeting_id: "meeting-1",
+      section_type: null,
+      sort_order: 2,
+      title: "Budget Review FY2027",
+      description: "Annual budget proposal review",
+      presenter: "Finance Director",
+      estimated_duration: 30,
+      parent_item_id: "ai-3",
+      status: "completed",
+      staff_resource: "Finance Director",
+      background: "Draft budget submitted March 1",
+      recommendation: null,
+      suggested_motion: null,
+      operator_notes: null,
+    },
   ];
 }
 
-function baseInput(overrides?: Partial<StructuredMeetingRecordInput>): StructuredMeetingRecordInput {
+function baseInput(
+  overrides?: Partial<StructuredMeetingRecordInput>,
+): StructuredMeetingRecordInput {
   return {
     meeting: baseMeeting(),
     board: baseBoard(),
@@ -170,9 +319,21 @@ describe("buildStructuredMeetingRecord", () => {
   it("builds sections from parent items with nested children in sort order", () => {
     const input = baseInput({
       transitions: [
-        { agenda_item_id: "ai-2a", started_at: "2026-03-10T18:35:00Z", ended_at: "2026-03-10T18:55:00Z" },
-        { agenda_item_id: "ai-3a", started_at: "2026-03-10T18:55:00Z", ended_at: "2026-03-10T19:00:00Z" },
-        { agenda_item_id: "ai-3b", started_at: "2026-03-10T19:00:00Z", ended_at: "2026-03-10T19:45:00Z" },
+        {
+          agenda_item_id: "ai-2a",
+          started_at: "2026-03-10T18:35:00Z",
+          ended_at: "2026-03-10T18:55:00Z",
+        },
+        {
+          agenda_item_id: "ai-3a",
+          started_at: "2026-03-10T18:55:00Z",
+          ended_at: "2026-03-10T19:00:00Z",
+        },
+        {
+          agenda_item_id: "ai-3b",
+          started_at: "2026-03-10T19:00:00Z",
+          ended_at: "2026-03-10T19:45:00Z",
+        },
       ],
     });
 
@@ -238,10 +399,34 @@ describe("buildStructuredMeetingRecord", () => {
         },
       ],
       voteRecords: [
-        { id: "vr-1", motion_id: "mot-1", board_member_id: "bm-1", vote: "yea", recusal_reason: null },
-        { id: "vr-2", motion_id: "mot-1", board_member_id: "bm-2", vote: "yea", recusal_reason: null },
-        { id: "vr-3", motion_id: "mot-1", board_member_id: "bm-3", vote: "yea", recusal_reason: null },
-        { id: "vr-4", motion_id: "mot-1", board_member_id: "bm-5", vote: "nay", recusal_reason: null },
+        {
+          id: "vr-1",
+          motion_id: "mot-1",
+          board_member_id: "bm-1",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-2",
+          motion_id: "mot-1",
+          board_member_id: "bm-2",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-3",
+          motion_id: "mot-1",
+          board_member_id: "bm-3",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-4",
+          motion_id: "mot-1",
+          board_member_id: "bm-5",
+          vote: "nay",
+          recusal_reason: null,
+        },
       ],
     });
 
@@ -285,7 +470,23 @@ describe("buildStructuredMeetingRecord", () => {
     const input = baseInput({
       agendaItems: [
         ...baseAgendaItems(),
-        { id: "ai-exec", meeting_id: "meeting-1", section_type: "executive_session", sort_order: 3.5, title: "Executive Session - Personnel", description: null, presenter: null, estimated_duration: 15, parent_item_id: null, status: "completed", staff_resource: null, background: null, recommendation: null, suggested_motion: null, operator_notes: null },
+        {
+          id: "ai-exec",
+          meeting_id: "meeting-1",
+          section_type: "executive_session",
+          sort_order: 3.5,
+          title: "Executive Session - Personnel",
+          description: null,
+          presenter: null,
+          estimated_duration: 15,
+          parent_item_id: null,
+          status: "completed",
+          staff_resource: null,
+          background: null,
+          recommendation: null,
+          suggested_motion: null,
+          operator_notes: null,
+        },
       ],
       executiveSessions: [
         {
@@ -302,7 +503,8 @@ describe("buildStructuredMeetingRecord", () => {
         {
           id: "mot-post-1",
           agenda_item_id: "ai-exec",
-          motion_text: "Move to authorize the Town Manager to proceed with the personnel action as discussed",
+          motion_text:
+            "Move to authorize the Town Manager to proceed with the personnel action as discussed",
           motion_type: "main",
           moved_by: "bm-1",
           seconded_by: "bm-2",
@@ -312,10 +514,34 @@ describe("buildStructuredMeetingRecord", () => {
         },
       ],
       voteRecords: [
-        { id: "vr-p1", motion_id: "mot-post-1", board_member_id: "bm-1", vote: "yea", recusal_reason: null },
-        { id: "vr-p2", motion_id: "mot-post-1", board_member_id: "bm-2", vote: "yea", recusal_reason: null },
-        { id: "vr-p3", motion_id: "mot-post-1", board_member_id: "bm-3", vote: "yea", recusal_reason: null },
-        { id: "vr-p4", motion_id: "mot-post-1", board_member_id: "bm-5", vote: "yea", recusal_reason: null },
+        {
+          id: "vr-p1",
+          motion_id: "mot-post-1",
+          board_member_id: "bm-1",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-p2",
+          motion_id: "mot-post-1",
+          board_member_id: "bm-2",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-p3",
+          motion_id: "mot-post-1",
+          board_member_id: "bm-3",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-p4",
+          motion_id: "mot-post-1",
+          board_member_id: "bm-5",
+          vote: "yea",
+          recusal_reason: null,
+        },
       ],
     });
 
@@ -391,12 +617,32 @@ describe("buildStructuredMeetingRecord", () => {
   it("includes exhibits and speakers for agenda items", () => {
     const input = baseInput({
       exhibits: [
-        { id: "ex-1", agenda_item_id: "ai-2a", title: "Site Plan - Elm St Parcel", file_name: "elm-st-site-plan.pdf" },
-        { id: "ex-2", agenda_item_id: "ai-2a", title: "Traffic Impact Study", file_name: "traffic-study-2026.pdf" },
-        { id: "ex-3", agenda_item_id: "ai-3b", title: "FY2027 Budget Draft", file_name: "fy2027-budget.xlsx" },
+        {
+          id: "ex-1",
+          agenda_item_id: "ai-2a",
+          title: "Site Plan - Elm St Parcel",
+          file_name: "elm-st-site-plan.pdf",
+        },
+        {
+          id: "ex-2",
+          agenda_item_id: "ai-2a",
+          title: "Traffic Impact Study",
+          file_name: "traffic-study-2026.pdf",
+        },
+        {
+          id: "ex-3",
+          agenda_item_id: "ai-3b",
+          title: "FY2027 Budget Draft",
+          file_name: "fy2027-budget.xlsx",
+        },
       ],
       speakers: [
-        { id: "sp-1", agenda_item_id: "ai-2a", name: "John Resident", topic: "Concerns about traffic on Elm St" },
+        {
+          id: "sp-1",
+          agenda_item_id: "ai-2a",
+          name: "John Resident",
+          topic: "Concerns about traffic on Elm St",
+        },
         { id: "sp-2", agenda_item_id: "ai-2a", name: "Mary Abutter", topic: null },
       ],
     });
@@ -445,9 +691,27 @@ describe("buildStructuredMeetingRecord", () => {
         },
       ],
       voteRecords: [
-        { id: "vr-r1", motion_id: "mot-r1", board_member_id: "bm-1", vote: "recusal", recusal_reason: "Property abutter" },
-        { id: "vr-r2", motion_id: "mot-r1", board_member_id: "bm-2", vote: "yea", recusal_reason: null },
-        { id: "vr-r3", motion_id: "mot-r1", board_member_id: "bm-3", vote: "yea", recusal_reason: null },
+        {
+          id: "vr-r1",
+          motion_id: "mot-r1",
+          board_member_id: "bm-1",
+          vote: "recusal",
+          recusal_reason: "Property abutter",
+        },
+        {
+          id: "vr-r2",
+          motion_id: "mot-r1",
+          board_member_id: "bm-2",
+          vote: "yea",
+          recusal_reason: null,
+        },
+        {
+          id: "vr-r3",
+          motion_id: "mot-r1",
+          board_member_id: "bm-3",
+          vote: "yea",
+          recusal_reason: null,
+        },
       ],
     });
 

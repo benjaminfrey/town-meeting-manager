@@ -56,9 +56,17 @@ const STATUS_CONFIG: Record<string, { icon: React.ReactNode; label: string; colo
   present: { icon: <Check className="h-3.5 w-3.5" />, label: "Present", color: "text-green-500" },
   absent: { icon: <X className="h-3.5 w-3.5" />, label: "Absent", color: "text-red-500" },
   late_arrival: { icon: <Clock className="h-3.5 w-3.5" />, label: "Late", color: "text-amber-500" },
-  early_departure: { icon: <LogOut className="h-3.5 w-3.5" />, label: "Departed", color: "text-muted-foreground" },
+  early_departure: {
+    icon: <LogOut className="h-3.5 w-3.5" />,
+    label: "Departed",
+    color: "text-muted-foreground",
+  },
   remote: { icon: <Check className="h-3.5 w-3.5" />, label: "Remote", color: "text-blue-500" },
-  excused: { icon: <X className="h-3.5 w-3.5" />, label: "Excused", color: "text-muted-foreground" },
+  excused: {
+    icon: <X className="h-3.5 w-3.5" />,
+    label: "Excused",
+    color: "text-muted-foreground",
+  },
 };
 
 const CYCLE_ORDER = ["absent", "present", "late_arrival", "early_departure"] as const;
@@ -90,7 +98,7 @@ export function AttendancePanel({
     mutationFn: async (member: MemberInfo) => {
       const record = getAttendance(member.boardMemberId);
       const currentStatus = (record?.status as string) ?? "absent";
-      const currentIdx = CYCLE_ORDER.indexOf(currentStatus as typeof CYCLE_ORDER[number]);
+      const currentIdx = CYCLE_ORDER.indexOf(currentStatus as (typeof CYCLE_ORDER)[number]);
       const nextStatus = CYCLE_ORDER[(currentIdx + 1) % CYCLE_ORDER.length];
       const now = new Date().toISOString();
 
@@ -170,7 +178,8 @@ export function AttendancePanel({
             const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.absent;
             const isPresiding = member.boardMemberId === presidingOfficerId;
             const isSecretary = member.personId === recordingSecretaryId;
-            const isPresent = status === "present" || status === "remote" || status === "late_arrival";
+            const isPresent =
+              status === "present" || status === "remote" || status === "late_arrival";
 
             return (
               <div key={member.boardMemberId} className="flex items-center gap-0.5">
@@ -182,17 +191,21 @@ export function AttendancePanel({
                     readOnly ? "cursor-default" : "hover:bg-muted",
                   )}
                 >
-                  <span className={cn("flex-shrink-0", config?.color)}>
-                    {config?.icon}
-                  </span>
+                  <span className={cn("flex-shrink-0", config?.color)}>{config?.icon}</span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <span className="truncate font-medium">{member.name}</span>
                       {isPresiding && (
-                        <Crown className="h-3 w-3 flex-shrink-0 text-amber-500" aria-label="Presiding Officer" />
+                        <Crown
+                          className="h-3 w-3 flex-shrink-0 text-amber-500"
+                          aria-label="Presiding Officer"
+                        />
                       )}
                       {isSecretary && (
-                        <BookOpen className="h-3 w-3 flex-shrink-0 text-blue-500" aria-label="Recording Secretary" />
+                        <BookOpen
+                          className="h-3 w-3 flex-shrink-0 text-blue-500"
+                          aria-label="Recording Secretary"
+                        />
                       )}
                     </div>
                     {member.seatTitle && (

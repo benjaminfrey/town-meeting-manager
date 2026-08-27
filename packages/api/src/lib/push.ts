@@ -97,9 +97,7 @@ export async function dispatchPushToUser(
 
   const rows = subscriptions as PushSubscriptionRow[];
 
-  const results = await Promise.allSettled(
-    rows.map((sub) => sendPushNotification(sub, payload)),
-  );
+  const results = await Promise.allSettled(rows.map((sub) => sendPushNotification(sub, payload)));
 
   // Clean up expired subscriptions
   const expiredEndpoints = rows
@@ -110,10 +108,7 @@ export async function dispatchPushToUser(
     .map((sub) => sub.endpoint);
 
   if (expiredEndpoints.length > 0) {
-    await supabase
-      .from("push_subscription")
-      .delete()
-      .in("endpoint", expiredEndpoints);
+    await supabase.from("push_subscription").delete().in("endpoint", expiredEndpoints);
   }
 }
 
@@ -155,8 +150,6 @@ export async function dispatchPushToTown(
     .map((ua) => ua.id);
 
   await Promise.allSettled(
-    eligibleUserIds.map((userId) =>
-      dispatchPushToUser(supabase, userId, payload),
-    ),
+    eligibleUserIds.map((userId) => dispatchPushToUser(supabase, userId, payload)),
   );
 }

@@ -22,8 +22,7 @@ const NAV_ITEMS = [
 ];
 
 export function PortalLayout({ children }: { children: React.ReactNode }) {
-  const { townName, sealUrl, municipalityType, contactName, contactRole } =
-    usePortal();
+  const { townName, sealUrl, municipalityType, contactName, contactRole } = usePortal();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -63,9 +62,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
           <div className="flex-1">
-            <h1 className="text-lg font-bold leading-tight sm:text-xl">
-              {fullName}
-            </h1>
+            <h1 className="text-lg font-bold leading-tight sm:text-xl">{fullName}</h1>
             <p className="text-sm text-muted-foreground">Municipal Government</p>
           </div>
 
@@ -95,22 +92,14 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
             className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring sm:hidden"
             aria-label={showMobileSearch ? "Close search" : "Open search"}
           >
-            {showMobileSearch ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Search className="h-5 w-5" />
-            )}
+            {showMobileSearch ? <X className="h-5 w-5" /> : <Search className="h-5 w-5" />}
           </button>
         </div>
 
         {/* Mobile search bar (expanded) */}
         {showMobileSearch && (
           <div className="border-t px-4 py-3 sm:hidden">
-            <form
-              role="search"
-              aria-label="Search portal"
-              onSubmit={handleSearch}
-            >
+            <form role="search" aria-label="Search portal" onSubmit={handleSearch}>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -153,11 +142,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
               aria-expanded={mobileNavOpen}
               aria-controls="mobile-nav"
             >
-              {mobileNavOpen ? (
-                <X className="h-5 w-5" />
-              ) : (
-                <Menu className="h-5 w-5" />
-              )}
+              {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               Menu
             </button>
           </div>
@@ -182,10 +167,7 @@ export function PortalLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {/* Main content */}
-      <main
-        id="main-content"
-        className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8"
-      >
+      <main id="main-content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
         {children}
       </main>
 

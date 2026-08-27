@@ -16,11 +16,7 @@ interface TemplatePreviewSheetProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function TemplatePreviewSheet({
-  template,
-  open,
-  onOpenChange,
-}: TemplatePreviewSheetProps) {
+export function TemplatePreviewSheet({ template, open, onOpenChange }: TemplatePreviewSheetProps) {
   const sections = template ? parseSections(template.sections) : [];
 
   return (
@@ -32,19 +28,12 @@ export function TemplatePreviewSheet({
         </SheetHeader>
         <div className="overflow-y-auto flex-1 px-4 py-2">
           {sections.map((section, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-3 py-3 border-b last:border-b-0"
-            >
-              <span className="text-sm font-mono text-muted-foreground w-6 shrink-0">
-                {i + 1}
-              </span>
+            <div key={i} className="flex items-start gap-3 py-3 border-b last:border-b-0">
+              <span className="text-sm font-mono text-muted-foreground w-6 shrink-0">{i + 1}</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{section.title}</span>
-                  {section.is_fixed && (
-                    <Lock className="h-3 w-3 text-muted-foreground" />
-                  )}
+                  {section.is_fixed && <Lock className="h-3 w-3 text-muted-foreground" />}
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   <Badge variant="outline" className="text-xs">

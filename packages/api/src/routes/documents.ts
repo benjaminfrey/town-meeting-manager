@@ -81,10 +81,7 @@ export async function documentRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams }>(
     "/meetings/:meetingId/agenda-packet",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("generate_agenda_packet"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("generate_agenda_packet")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -148,43 +145,41 @@ export async function documentRoutes(fastify: FastifyInstance) {
 
       // 3. Build template data — group into sections with children
       const sections = items.filter((i) => !i.parent_item_id);
-      const templateSections: AgendaPacketSection[] = sections.map(
-        (section) => {
-          const children = items
-            .filter((i) => i.parent_item_id === section.id)
-            .sort((a, b) => a.sort_order - b.sort_order);
+      const templateSections: AgendaPacketSection[] = sections.map((section) => {
+        const children = items
+          .filter((i) => i.parent_item_id === section.id)
+          .sort((a, b) => a.sort_order - b.sort_order);
 
-          const sectionItems: AgendaPacketItem[] = children.map((item) => {
-            const itemExhibits: AgendaPacketExhibit[] = allExhibits
-              .filter((e) => e.agenda_item_id === item.id)
-              .map((e) => ({
-                title: e.title,
-                fileName: e.file_name,
-                exhibitType: e.exhibit_type,
-              }));
+        const sectionItems: AgendaPacketItem[] = children.map((item) => {
+          const itemExhibits: AgendaPacketExhibit[] = allExhibits
+            .filter((e) => e.agenda_item_id === item.id)
+            .map((e) => ({
+              title: e.title,
+              fileName: e.file_name,
+              exhibitType: e.exhibit_type,
+            }));
 
-            // Sub-items are not currently nested deeper, but support them
-            return {
-              title: item.title,
-              description: item.description,
-              presenter: item.presenter,
-              estimatedDuration: item.estimated_duration,
-              staffResource: item.staff_resource,
-              background: item.background,
-              recommendation: item.recommendation,
-              suggestedMotion: item.suggested_motion,
-              exhibits: itemExhibits,
-              subItems: [] as AgendaPacketSubItem[],
-            };
-          });
-
+          // Sub-items are not currently nested deeper, but support them
           return {
-            title: section.title,
-            sectionType: section.section_type,
-            items: sectionItems,
+            title: item.title,
+            description: item.description,
+            presenter: item.presenter,
+            estimatedDuration: item.estimated_duration,
+            staffResource: item.staff_resource,
+            background: item.background,
+            recommendation: item.recommendation,
+            suggestedMotion: item.suggested_motion,
+            exhibits: itemExhibits,
+            subItems: [] as AgendaPacketSubItem[],
           };
-        },
-      );
+        });
+
+        return {
+          title: section.title,
+          sectionType: section.section_type,
+          items: sectionItems,
+        };
+      });
 
       // 4. Render HTML (hasExhibits computed inside renderAgendaPacket)
       const html = renderAgendaPacket({
@@ -201,20 +196,20 @@ export async function documentRoutes(fastify: FastifyInstance) {
 
       // 5. Generate PDF
       const formattedDate = meeting.scheduled_date
-        ? new Date(meeting.scheduled_date + "T00:00:00").toLocaleDateString(
-            "en-US",
-            { month: "long", day: "numeric", year: "numeric" },
-          )
+        ? new Date(meeting.scheduled_date + "T00:00:00").toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          })
         : "";
 
       let pdf: Buffer;
       try {
         pdf = await generatePdf(html, {
-            headerTemplate: `<div style="font-size:9px; text-align:center; width:100%; color:#666;">${board.name} — ${formattedDate}</div>`,
-            footerTemplate:
-              '<div style="font-size:9px; text-align:center; width:100%; color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
-          },
-        );
+          headerTemplate: `<div style="font-size:9px; text-align:center; width:100%; color:#666;">${board.name} — ${formattedDate}</div>`,
+          footerTemplate:
+            '<div style="font-size:9px; text-align:center; width:100%; color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
+        });
       } catch (err) {
         request.log.error(err, "PDF generation failed");
         return reply.internalServerError("PDF generation failed");
@@ -238,9 +233,7 @@ export async function documentRoutes(fastify: FastifyInstance) {
 
       const {
         data: { publicUrl },
-      } = fastify.supabase.storage
-        .from("documents")
-        .getPublicUrl(storagePath);
+      } = fastify.supabase.storage.from("documents").getPublicUrl(storagePath);
 
       // 7. Update meeting record
       const now = new Date().toISOString();
@@ -264,10 +257,7 @@ export async function documentRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams }>(
     "/meetings/:meetingId/meeting-notice",
     {
-      preHandler: [
-        fastify.verifyAuth,
-        requirePermission("generate_agenda_packet"),
-      ],
+      preHandler: [fastify.verifyAuth, requirePermission("generate_agenda_packet")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;
@@ -342,9 +332,7 @@ export async function documentRoutes(fastify: FastifyInstance) {
 
       const {
         data: { publicUrl },
-      } = fastify.supabase.storage
-        .from("documents")
-        .getPublicUrl(storagePath);
+      } = fastify.supabase.storage.from("documents").getPublicUrl(storagePath);
 
       // Update meeting record
       const now = new Date().toISOString();

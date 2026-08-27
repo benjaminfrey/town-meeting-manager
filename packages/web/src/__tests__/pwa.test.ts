@@ -228,7 +228,7 @@ describe("usePushNotifications source (src/hooks/usePushNotifications.ts)", () =
     const handlesUnsupported =
       hookSource.includes("isSupported") ||
       hookSource.includes("'PushManager' in window") ||
-      hookSource.includes("\"PushManager\" in window");
+      hookSource.includes('"PushManager" in window');
     expect(handlesUnsupported).toBe(true);
   });
 });

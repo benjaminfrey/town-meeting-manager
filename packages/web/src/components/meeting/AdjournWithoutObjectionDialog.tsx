@@ -6,8 +6,12 @@
 
 import { useState } from "react";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -38,15 +42,14 @@ export function AdjournWithoutObjectionDialog({
         <DialogHeader>
           <DialogTitle>Adjourn Without Objection</DialogTitle>
           <DialogDescription>
-            The Chair declares the meeting adjourned. No motion or vote is
-            required for this method.
+            The Chair declares the meeting adjourned. No motion or vote is required for this method.
           </DialogDescription>
         </DialogHeader>
 
         <div className="rounded-md border bg-muted/50 px-4 py-3">
           <p className="text-sm">
-            <span className="font-medium">{presidingOfficerName}</span>{" "}
-            adjourns the meeting without objection.
+            <span className="font-medium">{presidingOfficerName}</span> adjourns the meeting without
+            objection.
           </p>
         </div>
 
@@ -54,11 +57,7 @@ export function AdjournWithoutObjectionDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={confirming}
-          >
+          <Button variant="destructive" onClick={handleConfirm} disabled={confirming}>
             {confirming ? "Adjourning..." : "Confirm Adjournment"}
           </Button>
         </DialogFooter>

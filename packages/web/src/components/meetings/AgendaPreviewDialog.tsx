@@ -6,12 +6,7 @@
  * Sub-items = i, ii, iii...
  */
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface AgendaPreviewDialogProps {
   open: boolean;
@@ -51,18 +46,14 @@ export function AgendaPreviewDialog({
 
         {/* Print-friendly header */}
         <div className="text-center space-y-1 border-b pb-4">
-          <p className="text-sm text-muted-foreground uppercase tracking-wider">
-            {townName}
-          </p>
+          <p className="text-sm text-muted-foreground uppercase tracking-wider">{townName}</p>
           <h2 className="text-xl font-bold">{boardName}</h2>
           <h3 className="text-lg font-semibold">{meetingTitle}</h3>
           <p className="text-sm text-muted-foreground">
             {scheduledDate}
             {scheduledTime ? ` at ${scheduledTime}` : ""}
           </p>
-          {location && (
-            <p className="text-sm text-muted-foreground">{location}</p>
-          )}
+          {location && <p className="text-sm text-muted-foreground">{location}</p>}
         </div>
 
         {/* Agenda content */}
@@ -78,9 +69,7 @@ export function AgendaPreviewDialog({
                 </h4>
 
                 {section.children.length === 0 && (
-                  <p className="text-sm text-muted-foreground italic ml-6">
-                    No items
-                  </p>
+                  <p className="text-sm text-muted-foreground italic ml-6">No items</p>
                 )}
 
                 {section.children.map((item, itemIdx) => {
@@ -88,16 +77,12 @@ export function AgendaPreviewDialog({
                   const label = `${sectionNum}${letter}`;
                   const itemTitle = String(item.title ?? "");
                   const presenter = (item.presenter as string) || null;
-                  const duration = item.estimated_duration
-                    ? Number(item.estimated_duration)
-                    : null;
+                  const duration = item.estimated_duration ? Number(item.estimated_duration) : null;
                   const description = (item.description as string) || null;
                   const background = (item.background as string) || null;
                   const recommendation = (item.recommendation as string) || null;
                   const suggestedMotion = (item.suggested_motion as string) || null;
-                  const itemExhibits = allExhibits.filter(
-                    (e) => e.agenda_item_id === item.id,
-                  );
+                  const itemExhibits = allExhibits.filter((e) => e.agenda_item_id === item.id);
 
                   return (
                     <div key={String(item.id)} className="ml-6 mb-3">
@@ -121,9 +106,7 @@ export function AgendaPreviewDialog({
                       </div>
 
                       {description && (
-                        <p className="text-sm text-muted-foreground ml-8 mt-1">
-                          {description}
-                        </p>
+                        <p className="text-sm text-muted-foreground ml-8 mt-1">{description}</p>
                       )}
 
                       {background && (

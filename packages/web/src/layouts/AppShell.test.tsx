@@ -61,8 +61,6 @@ describe("AppShell", () => {
 
   it("exposes a command-palette search trigger", () => {
     renderWithProviders(<AppShell />, { route: "/" });
-    expect(
-      screen.getByRole("button", { name: /search/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /search/i })).toBeInTheDocument();
   });
 });

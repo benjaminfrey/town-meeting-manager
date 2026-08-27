@@ -37,9 +37,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
 
       if (uploadError) throw uploadError;
 
-      const { data: urlData } = supabase.storage
-        .from("town-seals")
-        .getPublicUrl(storagePath);
+      const { data: urlData } = supabase.storage.from("town-seals").getPublicUrl(storagePath);
 
       const publicUrl = urlData.publicUrl;
 
@@ -114,11 +112,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
         /* Current seal preview */
         <div className="flex items-start gap-4">
           <div className="h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border bg-muted">
-            <img
-              src={sealUrl}
-              alt="Town seal"
-              className="h-full w-full object-contain"
-            />
+            <img src={sealUrl} alt="Town seal" className="h-full w-full object-contain" />
           </div>
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">Town seal uploaded</p>
@@ -154,9 +148,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
             <p className="text-sm font-medium">
               {isUploading ? "Uploading..." : "Upload town seal"}
             </p>
-            <p className="text-xs text-muted-foreground">
-              PNG, JPEG, or SVG. Max 2 MB.
-            </p>
+            <p className="text-xs text-muted-foreground">PNG, JPEG, or SVG. Max 2 MB.</p>
           </div>
           {!isUploading && (
             <Button variant="outline" size="sm" type="button">
@@ -176,9 +168,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
         onChange={(e) => void handleFileSelect(e)}
       />
 
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

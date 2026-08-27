@@ -50,7 +50,7 @@ interface UseWizardFormReturn<T extends Record<string, unknown>> {
 
 export function useWizardForm<T extends Record<string, unknown>>(
   schema: SafeParseable<T>,
-  initialValues: T
+  initialValues: T,
 ): UseWizardFormReturn<T> {
   const form = useForm<T>({
     // zodResolver expects a ZodSchema — our SafeParseable duck-type is compatible
@@ -85,21 +85,21 @@ export function useWizardForm<T extends Record<string, unknown>>(
       // Clear error for this field (matches original behavior)
       form.clearErrors(field as any);
     },
-    [form]
+    [form],
   );
 
   const setValues = useCallback(
     (newValues: T) => {
       form.reset(newValues as any);
     },
-    [form]
+    [form],
   );
 
   const handleBlur = useCallback(
     (field: keyof T) => {
       form.trigger(field as any);
     },
-    [form]
+    [form],
   );
 
   const validate = useCallback(() => {

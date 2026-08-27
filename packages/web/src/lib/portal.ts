@@ -1,11 +1,4 @@
-const RESERVED_SUBDOMAINS = new Set([
-  "app",
-  "api",
-  "supabase",
-  "www",
-  "mail",
-  "smtp",
-]);
+const RESERVED_SUBDOMAINS = new Set(["app", "api", "supabase", "www", "mail", "smtp"]);
 
 /**
  * Detect if the current hostname is a portal subdomain.
@@ -15,11 +8,7 @@ const RESERVED_SUBDOMAINS = new Set([
  */
 export function detectPortalSubdomain(hostname: string): string | null {
   // Dev mode: check query param
-  if (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.startsWith("localhost:")
-  ) {
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("localhost:")) {
     const params = new URLSearchParams(window.location.search);
     return params.get("portal") || null;
   }

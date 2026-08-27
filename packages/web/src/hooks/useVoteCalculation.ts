@@ -133,12 +133,8 @@ export function formatVoteDetailed(
 
   const parts: string[] = [];
 
-  parts.push(
-    `Yea: ${yeaNames.length > 0 ? `${yeaNames.join(", ")} (${result.yeas})` : "None"}`,
-  );
-  parts.push(
-    `Nay: ${nayNames.length > 0 ? `${nayNames.join(", ")} (${result.nays})` : "None"}`,
-  );
+  parts.push(`Yea: ${yeaNames.length > 0 ? `${yeaNames.join(", ")} (${result.yeas})` : "None"}`);
+  parts.push(`Nay: ${nayNames.length > 0 ? `${nayNames.join(", ")} (${result.nays})` : "None"}`);
 
   if (result.abstentions > 0) {
     parts.push(`Abstained: ${abstainNames.join(", ")}`);

@@ -20,10 +20,7 @@ import {
   LayoutGrid,
   Play,
 } from "lucide-react";
-import {
-  calculateQuorum,
-  getEffectiveBoardSettings,
-} from "@town-meeting/shared";
+import { calculateQuorum, getEffectiveBoardSettings } from "@town-meeting/shared";
 import type { Route } from "./+types/boards.$boardId";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { EditBoardDialog } from "@/components/boards/EditBoardDialog";
@@ -40,19 +37,10 @@ import {
   ELECTION_METHOD_LABELS,
   OFFICER_ELECTION_LABELS,
 } from "@/components/boards/board-labels";
-import {
-  MEETING_STATUS_LABELS,
-  MEETING_STATUS_COLORS,
-} from "@/components/meetings/meeting-labels";
+import { MEETING_STATUS_LABELS, MEETING_STATUS_COLORS } from "@/components/meetings/meeting-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
@@ -61,24 +49,14 @@ import { cn } from "@/lib/utils";
 
 // ─── Helper ──────────────────────────────────────────────────────────
 
-function InfoRow({
-  label,
-  value,
-  suffix,
-}: {
-  label: string;
-  value: string;
-  suffix?: string;
-}) {
+function InfoRow({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
   return (
     <div className="flex items-start gap-2">
       <span className="min-w-[160px] text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">
         {value}
         {suffix && (
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            — {suffix}
-          </span>
+          <span className="ml-2 text-xs font-normal text-muted-foreground">— {suffix}</span>
         )}
       </span>
     </div>
@@ -254,8 +232,14 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
 
   const effective = town
     ? getEffectiveBoardSettings(
-        { meeting_formality_override: b.meeting_formality_override, minutes_style_override: b.minutes_style_override },
-        { meeting_formality: String(town.meeting_formality ?? "informal"), minutes_style: String(town.minutes_style ?? "summary") }
+        {
+          meeting_formality_override: b.meeting_formality_override,
+          minutes_style_override: b.minutes_style_override,
+        },
+        {
+          meeting_formality: String(town.meeting_formality ?? "informal"),
+          minutes_style: String(town.minutes_style ?? "summary"),
+        },
       )
     : null;
 
@@ -286,11 +270,7 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
         />
       )}
       {archiveOpen && (
-        <ArchiveBoardDialog
-          board={board}
-          open={archiveOpen}
-          onOpenChange={setArchiveOpen}
-        />
+        <ArchiveBoardDialog board={board} open={archiveOpen} onOpenChange={setArchiveOpen} />
       )}
 
       {/* Breadcrumb */}
@@ -328,18 +308,14 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight">{b.name}</h1>
-            {b.is_governing_board && (
-              <Badge variant="outline">Governing</Badge>
-            )}
+            {b.is_governing_board && <Badge variant="outline">Governing</Badge>}
             {isArchived ? (
               <Badge variant="secondary">Archived</Badge>
             ) : (
               <Badge className="bg-green-600 text-white hover:bg-green-600">Active</Badge>
             )}
           </div>
-          <p className="mt-1 text-muted-foreground capitalize">
-            {b.elected_or_appointed} board
-          </p>
+          <p className="mt-1 text-muted-foreground capitalize">{b.elected_or_appointed} board</p>
         </div>
         {!isArchived && (
           <div className="flex items-center gap-2">
@@ -388,26 +364,45 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               <CardTitle className="text-lg">Board Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <InfoRow label="Type" value={b.elected_or_appointed === "appointed" ? "Appointed" : "Elected"} />
+              <InfoRow
+                label="Type"
+                value={b.elected_or_appointed === "appointed" ? "Appointed" : "Elected"}
+              />
               <InfoRow label="Members" value={`${memberCount} active / ${b.member_count} seats`} />
               <InfoRow
                 label="Quorum"
                 value={`${quorumRequired} of ${b.member_count}`}
                 suffix={QUORUM_TYPE_LABELS[b.quorum_type] ?? b.quorum_type}
               />
-              <InfoRow label="Election method" value={ELECTION_METHOD_LABELS[b.election_method] ?? b.election_method} />
-              <InfoRow label="Officer election" value={OFFICER_ELECTION_LABELS[b.officer_election_method] ?? b.officer_election_method} />
+              <InfoRow
+                label="Election method"
+                value={ELECTION_METHOD_LABELS[b.election_method] ?? b.election_method}
+              />
+              <InfoRow
+                label="Officer election"
+                value={
+                  OFFICER_ELECTION_LABELS[b.officer_election_method] ?? b.officer_election_method
+                }
+              />
               {effective && (
                 <>
                   <InfoRow
                     label="Formality"
                     value={FORMALITY_LABELS[effective.formality] ?? effective.formality}
-                    suffix={effective.formalitySource === "board_override" ? "board override" : "town default"}
+                    suffix={
+                      effective.formalitySource === "board_override"
+                        ? "board override"
+                        : "town default"
+                    }
                   />
                   <InfoRow
                     label="Minutes style"
                     value={MINUTES_STYLE_LABELS[effective.minutesStyle] ?? effective.minutesStyle}
-                    suffix={effective.minutesStyleSource === "board_override" ? "board override" : "town default"}
+                    suffix={
+                      effective.minutesStyleSource === "board_override"
+                        ? "board override"
+                        : "town default"
+                    }
                   />
                 </>
               )}
@@ -426,7 +421,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               className="rounded-lg border bg-card p-4 text-left shadow-sm hover:bg-muted/50 transition-colors"
             >
               <Users className="h-5 w-5 text-muted-foreground mb-2" />
-              <p className="text-sm font-medium">{memberCount} member{memberCount !== 1 ? "s" : ""}</p>
+              <p className="text-sm font-medium">
+                {memberCount} member{memberCount !== 1 ? "s" : ""}
+              </p>
               <p className="text-xs text-muted-foreground">View roster →</p>
             </button>
             <button
@@ -435,7 +432,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               className="rounded-lg border bg-card p-4 text-left shadow-sm hover:bg-muted/50 transition-colors"
             >
               <CalendarDays className="h-5 w-5 text-muted-foreground mb-2" />
-              <p className="text-sm font-medium">{mtgCount} meeting{mtgCount !== 1 ? "s" : ""}</p>
+              <p className="text-sm font-medium">
+                {mtgCount} meeting{mtgCount !== 1 ? "s" : ""}
+              </p>
               <p className="text-xs text-muted-foreground">View meetings →</p>
             </button>
             <button
@@ -444,7 +443,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               className="rounded-lg border bg-card p-4 text-left shadow-sm hover:bg-muted/50 transition-colors"
             >
               <FileText className="h-5 w-5 text-muted-foreground mb-2" />
-              <p className="text-sm font-medium">{tmplCount} template{tmplCount !== 1 ? "s" : ""}</p>
+              <p className="text-sm font-medium">
+                {tmplCount} template{tmplCount !== 1 ? "s" : ""}
+              </p>
               <p className="text-xs text-muted-foreground">View templates →</p>
             </button>
           </div>
@@ -479,9 +480,13 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
             <div className="rounded-lg border bg-card p-8 text-center">
               <CalendarDays className="mx-auto h-8 w-8 text-muted-foreground" />
               <p className="mt-2 text-sm font-medium">No meetings yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">Schedule a meeting from the Manage Meetings page.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Schedule a meeting from the Manage Meetings page.
+              </p>
               <Link to={`/boards/${b.id}/meetings`}>
-                <Button variant="outline" size="sm" className="mt-3">Schedule Meeting</Button>
+                <Button variant="outline" size="sm" className="mt-3">
+                  Schedule Meeting
+                </Button>
               </Link>
             </div>
           ) : (
@@ -491,8 +496,12 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -500,7 +509,10 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
                     const status = String(m.status ?? "draft");
                     const isActive = status === "open";
                     return (
-                      <tr key={m.id} className="border-b last:border-b-0 hover:bg-muted/30 transition-colors">
+                      <tr
+                        key={m.id}
+                        className="border-b last:border-b-0 hover:bg-muted/30 transition-colors"
+                      >
                         <td className="px-4 py-3 whitespace-nowrap text-sm">
                           {m.scheduled_date ? formatMeetingDate(String(m.scheduled_date)) : "—"}
                         </td>
@@ -513,7 +525,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
                           </Link>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${MEETING_STATUS_COLORS[status] ?? ""}`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${MEETING_STATUS_COLORS[status] ?? ""}`}
+                          >
                             {MEETING_STATUS_LABELS[status] ?? status}
                           </span>
                         </td>
@@ -528,7 +542,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
                               </Link>
                             )}
                             <Link to={`/meetings/${m.id}/agenda`}>
-                              <Button variant="ghost" size="sm">View</Button>
+                              <Button variant="ghost" size="sm">
+                                View
+                              </Button>
                             </Link>
                           </div>
                         </td>
@@ -539,7 +555,10 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               </table>
               {mtgCount > 5 && (
                 <div className="border-t px-4 py-3">
-                  <Link to={`/boards/${b.id}/meetings`} className="text-sm text-primary hover:underline">
+                  <Link
+                    to={`/boards/${b.id}/meetings`}
+                    className="text-sm text-primary hover:underline"
+                  >
                     View all {mtgCount} meetings →
                   </Link>
                 </div>
@@ -565,8 +584,8 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
           <Card>
             <CardContent className="pt-6">
               <p className="text-sm text-muted-foreground">
-                Agenda templates define the default structure for meetings of this board.
-                Use the Manage Templates page to create and edit templates.
+                Agenda templates define the default structure for meetings of this board. Use the
+                Manage Templates page to create and edit templates.
               </p>
               <Link to={`/boards/${b.id}/templates`} className="mt-3 block">
                 <Button variant="outline">Open Template Manager</Button>
@@ -591,8 +610,10 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               minutes_consent_agenda: (board.minutes_consent_agenda as boolean) ?? false,
               minutes_requires_second: (board.minutes_requires_second as boolean) ?? true,
               r4_board_member_default: (board.r4_board_member_default as boolean) ?? true,
-              audio_retention_policy_override: (board.audio_retention_policy_override as string | null) ?? null,
-              auto_publish_on_approval_override: (board.auto_publish_on_approval_override as boolean | null) ?? null,
+              audio_retention_policy_override:
+                (board.audio_retention_policy_override as string | null) ?? null,
+              auto_publish_on_approval_override:
+                (board.auto_publish_on_approval_override as boolean | null) ?? null,
             }}
             townDefaults={{
               audio_retention_policy: (town?.audio_retention_policy as string) ?? "retain_30_days",

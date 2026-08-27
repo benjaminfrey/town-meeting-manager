@@ -19,11 +19,7 @@ interface AgendaPanelErrorBoundaryProps {
 }
 
 export function AgendaPanelErrorBoundary({ children }: AgendaPanelErrorBoundaryProps) {
-  return (
-    <ErrorBoundary FallbackComponent={CompactErrorFallback}>
-      {children}
-    </ErrorBoundary>
-  );
+  return <ErrorBoundary FallbackComponent={CompactErrorFallback}>{children}</ErrorBoundary>;
 }
 
 // ─── Voting / motion panel ────────────────────────────────────────────
@@ -33,11 +29,7 @@ interface VotingPanelErrorBoundaryProps {
 }
 
 export function VotingPanelErrorBoundary({ children }: VotingPanelErrorBoundaryProps) {
-  return (
-    <ErrorBoundary FallbackComponent={CompactErrorFallback}>
-      {children}
-    </ErrorBoundary>
-  );
+  return <ErrorBoundary FallbackComponent={CompactErrorFallback}>{children}</ErrorBoundary>;
 }
 
 // ─── Minutes panel ────────────────────────────────────────────────────
@@ -47,11 +39,7 @@ interface MinutesPanelErrorBoundaryProps {
 }
 
 export function MinutesPanelErrorBoundary({ children }: MinutesPanelErrorBoundaryProps) {
-  return (
-    <ErrorBoundary FallbackComponent={CompactErrorFallback}>
-      {children}
-    </ErrorBoundary>
-  );
+  return <ErrorBoundary FallbackComponent={CompactErrorFallback}>{children}</ErrorBoundary>;
 }
 
 // ─── Connection status bar ────────────────────────────────────────────
@@ -71,8 +59,6 @@ export function ConnectionStatusBarErrorBoundary({
   children,
 }: ConnectionStatusBarErrorBoundaryProps) {
   return (
-    <ErrorBoundary FallbackComponent={ConnectionStatusSilentFallback}>
-      {children}
-    </ErrorBoundary>
+    <ErrorBoundary FallbackComponent={ConnectionStatusSilentFallback}>{children}</ErrorBoundary>
   );
 }

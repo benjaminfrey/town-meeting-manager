@@ -40,10 +40,7 @@ export function PublishAgendaDialog({
   const [isSaving, setIsSaving] = useState(false);
 
   // Validation
-  const totalItems = sections.reduce(
-    (sum, s) => sum + s.children.length,
-    0,
-  );
+  const totalItems = sections.reduce((sum, s) => sum + s.children.length, 0);
   const hasItems = totalItems > 0;
 
   // Check for placeholder warnings
@@ -53,9 +50,7 @@ export function PublishAgendaDialog({
       for (const item of section.children) {
         const motion = (item.suggested_motion as string) || "";
         if (motion.includes("___") || motion.includes("[TBD]")) {
-          warnings.push(
-            `"${String(item.title)}" has unfilled placeholders in suggested motion`,
-          );
+          warnings.push(`"${String(item.title)}" has unfilled placeholders in suggested motion`);
         }
       }
     }
@@ -68,9 +63,9 @@ export function PublishAgendaDialog({
     try {
       const now = new Date().toISOString();
       const { error } = await supabase
-        .from('meeting')
-        .update({ agenda_status: 'published', updated_at: now })
-        .eq('id', meetingId);
+        .from("meeting")
+        .update({ agenda_status: "published", updated_at: now })
+        .eq("id", meetingId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       onOpenChange(false);
@@ -101,10 +96,7 @@ export function PublishAgendaDialog({
             </div>
             <ul className="space-y-1">
               {placeholderWarnings.map((w, i) => (
-                <li
-                  key={i}
-                  className="text-xs text-amber-700 dark:text-amber-300"
-                >
+                <li key={i} className="text-xs text-amber-700 dark:text-amber-300">
                   {w}
                 </li>
               ))}
@@ -113,17 +105,10 @@ export function PublishAgendaDialog({
         )}
 
         <AlertDialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSaving}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button
-            onClick={() => void handlePublish()}
-            disabled={!hasItems || isSaving}
-          >
+          <Button onClick={() => void handlePublish()} disabled={!hasItems || isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Publish
           </Button>

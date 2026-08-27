@@ -1,11 +1,5 @@
 import { Link } from "react-router";
-import {
-  Bell,
-  Building2,
-  ChevronRight,
-  ClipboardCheck,
-  FileText,
-} from "lucide-react";
+import { Bell, Building2, ChevronRight, ClipboardCheck, FileText } from "lucide-react";
 import type { Route } from "./+types/settings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
@@ -41,17 +35,14 @@ function SettingLink({
   );
 }
 
-const SECTION_HEADING =
-  "mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground";
+const SECTION_HEADING = "mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground";
 
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="mt-1 text-muted-foreground">
-          Town configuration and your preferences
-        </p>
+        <p className="mt-1 text-muted-foreground">Town configuration and your preferences</p>
       </div>
 
       <h2 className={SECTION_HEADING}>Town configuration</h2>
@@ -87,8 +78,7 @@ export default function SettingsPage() {
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">
-        Looking for board-specific settings (quorum, agenda templates, workflow
-        overrides)? Open a{" "}
+        Looking for board-specific settings (quorum, agenda templates, workflow overrides)? Open a{" "}
         <Link to="/boards" className="underline hover:text-foreground">
           board
         </Link>{" "}

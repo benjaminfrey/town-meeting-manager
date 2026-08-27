@@ -23,11 +23,7 @@ const MeetingDefaultsSchema = z.object({
     MeetingFormality.SEMI_FORMAL,
     MeetingFormality.FORMAL,
   ]),
-  minutes_style: z.enum([
-    MinutesStyle.ACTION,
-    MinutesStyle.SUMMARY,
-    MinutesStyle.NARRATIVE,
-  ]),
+  minutes_style: z.enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE]),
 });
 
 type MeetingDefaultsData = z.infer<typeof MeetingDefaultsSchema>;
@@ -59,8 +55,7 @@ export const MINUTES_STYLE_OPTIONS = [
   {
     value: MinutesStyle.ACTION,
     label: "Action minutes",
-    description:
-      "Records only decisions, motions, votes, and assignments. Shortest format.",
+    description: "Records only decisions, motions, votes, and assignments. Shortest format.",
   },
   {
     value: MinutesStyle.SUMMARY,
@@ -71,8 +66,7 @@ export const MINUTES_STYLE_OPTIONS = [
   {
     value: MinutesStyle.NARRATIVE,
     label: "Narrative minutes",
-    description:
-      "Detailed account including who said what. Most thorough but most time-consuming.",
+    description: "Detailed account including who said what. Most thorough but most time-consuming.",
   },
 ] as const;
 
@@ -84,15 +78,13 @@ interface MeetingDefaultsEditorProps {
   onDone: () => void;
 }
 
-export function MeetingDefaultsEditor({
-  townId,
-  initial,
-  onDone,
-}: MeetingDefaultsEditorProps) {
+export function MeetingDefaultsEditor({ townId, initial, onDone }: MeetingDefaultsEditorProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
-  const { values, isValid, setValue, validate } =
-    useWizardForm<MeetingDefaultsData>(MeetingDefaultsSchema, initial);
+  const { values, isValid, setValue, validate } = useWizardForm<MeetingDefaultsData>(
+    MeetingDefaultsSchema,
+    initial,
+  );
 
   const mutation = useMutation({
     mutationFn: async (data: MeetingDefaultsData) => {

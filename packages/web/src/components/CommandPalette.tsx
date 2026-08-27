@@ -9,14 +9,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import {
-  Search,
-  CalendarDays,
-  List,
-  Plus,
-  Settings,
-  ArrowRight,
-} from "lucide-react";
+import { Search, CalendarDays, List, Plus, Settings, ArrowRight } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
@@ -181,9 +174,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   <Command.Item
                     key={board.id}
                     value={`board ${board.name}`}
-                    onSelect={() =>
-                      runAction(() => navigate(`/boards/${board.id}`))
-                    }
+                    onSelect={() => runAction(() => navigate(`/boards/${board.id}`))}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm aria-selected:bg-muted/70"
                   >
                     <List className="h-3.5 w-3.5 text-muted-foreground" />
@@ -204,9 +195,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   <Command.Item
                     key={meeting.id}
                     value={`meeting ${meeting.title} ${meeting.board?.name ?? ""} ${meeting.scheduled_date}`}
-                    onSelect={() =>
-                      runAction(() => navigate(`/meetings/${meeting.id}`))
-                    }
+                    onSelect={() => runAction(() => navigate(`/meetings/${meeting.id}`))}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm aria-selected:bg-muted/70"
                   >
                     <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />

@@ -53,28 +53,25 @@ const PAGE_SIZE = 20;
 
 export async function portalRoutes(fastify: FastifyInstance) {
   // ─── GET /resolve?subdomain=X ──────────────────────────────────
-  fastify.get<{ Querystring: ResolveQuery }>(
-    "/resolve",
-    async (request, reply) => {
-      const { subdomain } = request.query;
+  fastify.get<{ Querystring: ResolveQuery }>("/resolve", async (request, reply) => {
+    const { subdomain } = request.query;
 
-      if (!subdomain) {
-        return reply.badRequest("subdomain query parameter is required");
-      }
+    if (!subdomain) {
+      return reply.badRequest("subdomain query parameter is required");
+    }
 
-      const { data: town, error } = await fastify.supabase
-        .from("town")
-        .select("id, name, state, municipality_type, seal_url, contact_name, contact_role, subdomain")
-        .eq("subdomain", subdomain)
-        .single();
+    const { data: town, error } = await fastify.supabase
+      .from("town")
+      .select("id, name, state, municipality_type, seal_url, contact_name, contact_role, subdomain")
+      .eq("subdomain", subdomain)
+      .single();
 
-      if (error || !town) {
-        return reply.notFound("Town not found");
-      }
+    if (error || !town) {
+      return reply.notFound("Town not found");
+    }
 
-      return town;
-    },
-  );
+    return town;
+  });
 
   // ─── GET /:townId/meetings?board=X&page=N ─────────────────────
   fastify.get<{ Params: TownParams; Querystring: MeetingsQuery }>(
@@ -104,7 +101,9 @@ export async function portalRoutes(fastify: FastifyInstance) {
       // Fetch upcoming meetings (scheduled_date >= today), ascending
       let upcomingQuery = fastify.supabase
         .from("meeting")
-        .select("id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status")
+        .select(
+          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
+        )
         .eq("town_id", townId)
         .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
         .gte("scheduled_date", today)
@@ -119,7 +118,9 @@ export async function portalRoutes(fastify: FastifyInstance) {
       // Fetch past meetings (scheduled_date < today), descending
       let pastQuery = fastify.supabase
         .from("meeting")
-        .select("id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status")
+        .select(
+          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
+        )
         .eq("town_id", townId)
         .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
         .lt("scheduled_date", today)
@@ -177,47 +178,46 @@ export async function portalRoutes(fastify: FastifyInstance) {
   );
 
   // ─── GET /:townId/meetings/:meetingId ──────────────────────────
-  fastify.get<{ Params: MeetingParams }>(
-    "/:townId/meetings/:meetingId",
-    async (request, reply) => {
-      const { townId, meetingId } = request.params;
+  fastify.get<{ Params: MeetingParams }>("/:townId/meetings/:meetingId", async (request, reply) => {
+    const { townId, meetingId } = request.params;
 
-      const { data: meeting, error } = await fastify.supabase
-        .from("meeting")
-        .select("id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status")
-        .eq("id", meetingId)
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .single();
+    const { data: meeting, error } = await fastify.supabase
+      .from("meeting")
+      .select(
+        "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
+      )
+      .eq("id", meetingId)
+      .eq("town_id", townId)
+      .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
+      .single();
 
-      if (error || !meeting) {
-        return reply.notFound("Meeting not found");
-      }
+    if (error || !meeting) {
+      return reply.notFound("Meeting not found");
+    }
 
-      // Fetch board name
-      const { data: board } = await fastify.supabase
-        .from("board")
-        .select("name")
-        .eq("id", meeting.board_id)
-        .single();
+    // Fetch board name
+    const { data: board } = await fastify.supabase
+      .from("board")
+      .select("name")
+      .eq("id", meeting.board_id)
+      .single();
 
-      // Check for published minutes
-      const { data: minutesDoc } = await fastify.supabase
-        .from("minutes_document")
-        .select("id")
-        .eq("meeting_id", meetingId)
-        .eq("town_id", townId)
-        .eq("status", "published")
-        .maybeSingle();
+    // Check for published minutes
+    const { data: minutesDoc } = await fastify.supabase
+      .from("minutes_document")
+      .select("id")
+      .eq("meeting_id", meetingId)
+      .eq("town_id", townId)
+      .eq("status", "published")
+      .maybeSingle();
 
-      return {
-        ...meeting,
-        board_name: board?.name ?? null,
-        has_published_agenda: meeting.agenda_status === "published",
-        has_published_minutes: !!minutesDoc,
-      };
-    },
-  );
+    return {
+      ...meeting,
+      board_name: board?.name ?? null,
+      has_published_agenda: meeting.agenda_status === "published",
+      has_published_minutes: !!minutesDoc,
+    };
+  });
 
   // ─── GET /:townId/meetings/:meetingId/agenda ───────────────────
   fastify.get<{ Params: MeetingParams }>(
@@ -228,7 +228,9 @@ export async function portalRoutes(fastify: FastifyInstance) {
       // Verify meeting exists and agenda is published
       const { data: meeting, error } = await fastify.supabase
         .from("meeting")
-        .select("id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, agenda_status")
+        .select(
+          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, agenda_status",
+        )
         .eq("id", meetingId)
         .eq("town_id", townId)
         .single();
@@ -251,7 +253,9 @@ export async function portalRoutes(fastify: FastifyInstance) {
       // Fetch agenda items ordered by sort_order
       const { data: items } = await fastify.supabase
         .from("agenda_item")
-        .select("id, title, description, item_type, sort_order, parent_item_id, duration_minutes, presenter")
+        .select(
+          "id, title, description, item_type, sort_order, parent_item_id, duration_minutes, presenter",
+        )
         .eq("meeting_id", meetingId)
         .eq("town_id", townId)
         .order("sort_order", { ascending: true });
@@ -260,7 +264,10 @@ export async function portalRoutes(fastify: FastifyInstance) {
 
       // Fetch public exhibits for all agenda items
       const itemIds = allItems.map((i) => i.id);
-      const exhibitMap: Record<string, Array<{ id: string; title: string; file_url: string; file_type: string }>> = {};
+      const exhibitMap: Record<
+        string,
+        Array<{ id: string; title: string; file_url: string; file_type: string }>
+      > = {};
 
       if (itemIds.length > 0) {
         const { data: exhibits } = await fastify.supabase
@@ -437,80 +444,76 @@ export async function portalRoutes(fastify: FastifyInstance) {
   );
 
   // ─── GET /:townId/boards ───────────────────────────────────────
-  fastify.get<{ Params: TownParams }>(
-    "/:townId/boards",
-    async (request, reply) => {
-      const { townId } = request.params;
+  fastify.get<{ Params: TownParams }>("/:townId/boards", async (request, reply) => {
+    const { townId } = request.params;
 
-      const { data: boards, error } = await fastify.supabase
-        .from("board")
-        .select("id, name, board_type, elected_or_appointed, member_count")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name", { ascending: true });
+    const { data: boards, error } = await fastify.supabase
+      .from("board")
+      .select("id, name, board_type, elected_or_appointed, member_count")
+      .eq("town_id", townId)
+      .is("archived_at", null)
+      .order("name", { ascending: true });
 
-      if (error) {
-        return reply.internalServerError("Failed to fetch boards");
-      }
+    if (error) {
+      return reply.internalServerError("Failed to fetch boards");
+    }
 
-      return boards ?? [];
-    },
-  );
+    return boards ?? [];
+  });
 
   // ─── GET /:townId/boards/:boardId ──────────────────────────────
-  fastify.get<{ Params: BoardParams }>(
-    "/:townId/boards/:boardId",
-    async (request, reply) => {
-      const { townId, boardId } = request.params;
+  fastify.get<{ Params: BoardParams }>("/:townId/boards/:boardId", async (request, reply) => {
+    const { townId, boardId } = request.params;
 
-      const { data: board, error } = await fastify.supabase
-        .from("board")
-        .select("id, name, board_type, elected_or_appointed, member_count, meeting_schedule, quorum_type, quorum_custom_value")
-        .eq("id", boardId)
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .single();
+    const { data: board, error } = await fastify.supabase
+      .from("board")
+      .select(
+        "id, name, board_type, elected_or_appointed, member_count, meeting_schedule, quorum_type, quorum_custom_value",
+      )
+      .eq("id", boardId)
+      .eq("town_id", townId)
+      .is("archived_at", null)
+      .single();
 
-      if (error || !board) {
-        return reply.notFound("Board not found");
+    if (error || !board) {
+      return reply.notFound("Board not found");
+    }
+
+    // Fetch active members
+    const { data: members } = await fastify.supabase
+      .from("board_member")
+      .select("id, person_id, seat_title, term_start, term_end")
+      .eq("board_id", boardId)
+      .eq("town_id", townId)
+      .eq("status", "active");
+
+    // Fetch person names for members
+    const personIds = (members ?? []).map((m) => m.person_id).filter(Boolean);
+    const personNameMap: Record<string, string> = {};
+
+    if (personIds.length > 0) {
+      const { data: persons } = await fastify.supabase
+        .from("person")
+        .select("id, first_name, last_name")
+        .in("id", personIds);
+
+      for (const p of persons ?? []) {
+        personNameMap[p.id] = `${p.first_name} ${p.last_name}`;
       }
+    }
 
-      // Fetch active members
-      const { data: members } = await fastify.supabase
-        .from("board_member")
-        .select("id, person_id, seat_title, term_start, term_end")
-        .eq("board_id", boardId)
-        .eq("town_id", townId)
-        .eq("status", "active");
+    const memberList = (members ?? []).map((m) => ({
+      name: personNameMap[m.person_id] ?? "Unknown",
+      seat_title: m.seat_title,
+      term_start: m.term_start,
+      term_end: m.term_end,
+    }));
 
-      // Fetch person names for members
-      const personIds = (members ?? []).map((m) => m.person_id).filter(Boolean);
-      const personNameMap: Record<string, string> = {};
-
-      if (personIds.length > 0) {
-        const { data: persons } = await fastify.supabase
-          .from("person")
-          .select("id, first_name, last_name")
-          .in("id", personIds);
-
-        for (const p of persons ?? []) {
-          personNameMap[p.id] = `${p.first_name} ${p.last_name}`;
-        }
-      }
-
-      const memberList = (members ?? []).map((m) => ({
-        name: personNameMap[m.person_id] ?? "Unknown",
-        seat_title: m.seat_title,
-        term_start: m.term_start,
-        term_end: m.term_end,
-      }));
-
-      return {
-        ...board,
-        members: memberList,
-      };
-    },
-  );
+    return {
+      ...board,
+      members: memberList,
+    };
+  });
 
   // ─── GET /:townId/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD ────
   fastify.get<{ Params: TownParams; Querystring: CalendarQuery }>(
@@ -619,151 +622,141 @@ export async function portalRoutes(fastify: FastifyInstance) {
   );
 
   // ─── GET /:townId/sitemap.xml ───────────────────────────────
-  fastify.get<{ Params: TownParams }>(
-    "/:townId/sitemap.xml",
-    async (request, reply) => {
-      const { townId } = request.params;
+  fastify.get<{ Params: TownParams }>("/:townId/sitemap.xml", async (request, reply) => {
+    const { townId } = request.params;
 
-      // Resolve subdomain for full URLs
-      const { data: town } = await fastify.supabase
-        .from("town")
-        .select("subdomain")
-        .eq("id", townId)
-        .single();
+    // Resolve subdomain for full URLs
+    const { data: town } = await fastify.supabase
+      .from("town")
+      .select("subdomain")
+      .eq("id", townId)
+      .single();
 
-      if (!town?.subdomain) {
-        return reply.notFound("Town not found");
+    if (!town?.subdomain) {
+      return reply.notFound("Town not found");
+    }
+
+    const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
+
+    // Fetch active boards
+    const { data: boards } = await fastify.supabase
+      .from("board")
+      .select("id, name")
+      .eq("town_id", townId)
+      .is("archived_at", null);
+
+    // Fetch meetings with published agendas or published minutes
+    const { data: meetings } = await fastify.supabase
+      .from("meeting")
+      .select("id, scheduled_date, agenda_status")
+      .eq("town_id", townId)
+      .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
+      .order("scheduled_date", { ascending: false });
+
+    // Check which meetings have published minutes
+    const meetingIds = (meetings ?? []).map((m) => m.id);
+    const publishedMinutesSet = new Set<string>();
+
+    if (meetingIds.length > 0) {
+      const { data: minutesDocs } = await fastify.supabase
+        .from("minutes_document")
+        .select("meeting_id")
+        .in("meeting_id", meetingIds)
+        .eq("status", "published");
+
+      for (const doc of minutesDocs ?? []) {
+        publishedMinutesSet.add(doc.meeting_id);
       }
+    }
 
-      const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
+    const urls: Array<{ loc: string; lastmod?: string; changefreq: string; priority: string }> = [];
 
-      // Fetch active boards
-      const { data: boards } = await fastify.supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null);
+    // Homepage
+    urls.push({ loc: baseUrl, changefreq: "daily", priority: "1.0" });
 
-      // Fetch meetings with published agendas or published minutes
-      const { data: meetings } = await fastify.supabase
-        .from("meeting")
-        .select("id, scheduled_date, agenda_status")
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .order("scheduled_date", { ascending: false });
+    // Board pages
+    for (const board of boards ?? []) {
+      urls.push({
+        loc: `${baseUrl}/boards/${board.id}`,
+        changefreq: "weekly",
+        priority: "0.7",
+      });
+    }
 
-      // Check which meetings have published minutes
-      const meetingIds = (meetings ?? []).map((m) => m.id);
-      const publishedMinutesSet = new Set<string>();
+    // Meeting pages with published agendas or minutes
+    for (const meeting of meetings ?? []) {
+      const hasAgenda = meeting.agenda_status === "published";
+      const hasMinutes = publishedMinutesSet.has(meeting.id);
 
-      if (meetingIds.length > 0) {
-        const { data: minutesDocs } = await fastify.supabase
-          .from("minutes_document")
-          .select("meeting_id")
-          .in("meeting_id", meetingIds)
-          .eq("status", "published");
-
-        for (const doc of minutesDocs ?? []) {
-          publishedMinutesSet.add(doc.meeting_id);
-        }
-      }
-
-      const urls: Array<{ loc: string; lastmod?: string; changefreq: string; priority: string }> = [];
-
-      // Homepage
-      urls.push({ loc: baseUrl, changefreq: "daily", priority: "1.0" });
-
-      // Board pages
-      for (const board of boards ?? []) {
+      if (hasAgenda || hasMinutes) {
         urls.push({
-          loc: `${baseUrl}/boards/${board.id}`,
-          changefreq: "weekly",
-          priority: "0.7",
+          loc: `${baseUrl}/meetings/${meeting.id}`,
+          lastmod: meeting.scheduled_date,
+          changefreq: "monthly",
+          priority: "0.6",
         });
-      }
 
-      // Meeting pages with published agendas or minutes
-      for (const meeting of meetings ?? []) {
-        const hasAgenda = meeting.agenda_status === "published";
-        const hasMinutes = publishedMinutesSet.has(meeting.id);
-
-        if (hasAgenda || hasMinutes) {
+        if (hasAgenda) {
           urls.push({
-            loc: `${baseUrl}/meetings/${meeting.id}`,
+            loc: `${baseUrl}/meetings/${meeting.id}/agenda`,
             lastmod: meeting.scheduled_date,
             changefreq: "monthly",
-            priority: "0.6",
+            priority: "0.5",
           });
+        }
 
-          if (hasAgenda) {
-            urls.push({
-              loc: `${baseUrl}/meetings/${meeting.id}/agenda`,
-              lastmod: meeting.scheduled_date,
-              changefreq: "monthly",
-              priority: "0.5",
-            });
-          }
-
-          if (hasMinutes) {
-            urls.push({
-              loc: `${baseUrl}/meetings/${meeting.id}/minutes`,
-              lastmod: meeting.scheduled_date,
-              changefreq: "yearly",
-              priority: "0.5",
-            });
-          }
+        if (hasMinutes) {
+          urls.push({
+            loc: `${baseUrl}/meetings/${meeting.id}/minutes`,
+            lastmod: meeting.scheduled_date,
+            changefreq: "yearly",
+            priority: "0.5",
+          });
         }
       }
+    }
 
-      const xml = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-        ...urls.map((u) => {
-          let entry = `  <url>\n    <loc>${escapeXml(u.loc)}</loc>`;
-          if (u.lastmod) entry += `\n    <lastmod>${u.lastmod}</lastmod>`;
-          entry += `\n    <changefreq>${u.changefreq}</changefreq>`;
-          entry += `\n    <priority>${u.priority}</priority>`;
-          entry += "\n  </url>";
-          return entry;
-        }),
-        "</urlset>",
-      ].join("\n");
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...urls.map((u) => {
+        let entry = `  <url>\n    <loc>${escapeXml(u.loc)}</loc>`;
+        if (u.lastmod) entry += `\n    <lastmod>${u.lastmod}</lastmod>`;
+        entry += `\n    <changefreq>${u.changefreq}</changefreq>`;
+        entry += `\n    <priority>${u.priority}</priority>`;
+        entry += "\n  </url>";
+        return entry;
+      }),
+      "</urlset>",
+    ].join("\n");
 
-      reply.header("Cache-Control", "public, max-age=3600");
-      return reply.type("application/xml").send(xml);
-    },
-  );
+    reply.header("Cache-Control", "public, max-age=3600");
+    return reply.type("application/xml").send(xml);
+  });
 
   // ─── GET /:townId/robots.txt ────────────────────────────────
-  fastify.get<{ Params: TownParams }>(
-    "/:townId/robots.txt",
-    async (request, reply) => {
-      const { townId } = request.params;
+  fastify.get<{ Params: TownParams }>("/:townId/robots.txt", async (request, reply) => {
+    const { townId } = request.params;
 
-      const { data: town } = await fastify.supabase
-        .from("town")
-        .select("subdomain")
-        .eq("id", townId)
-        .single();
+    const { data: town } = await fastify.supabase
+      .from("town")
+      .select("subdomain")
+      .eq("id", townId)
+      .single();
 
-      if (!town?.subdomain) {
-        return reply.notFound("Town not found");
-      }
+    if (!town?.subdomain) {
+      return reply.notFound("Town not found");
+    }
 
-      const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
+    const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
 
-      const text = [
-        "User-agent: *",
-        "Allow: /",
-        "",
-        `Sitemap: ${baseUrl}/sitemap.xml`,
-        "",
-      ].join("\n");
+    const text = ["User-agent: *", "Allow: /", "", `Sitemap: ${baseUrl}/sitemap.xml`, ""].join(
+      "\n",
+    );
 
-      reply.header("Cache-Control", "public, max-age=86400");
-      return reply.type("text/plain").send(text);
-    },
-  );
+    reply.header("Cache-Control", "public, max-age=86400");
+    return reply.type("text/plain").send(text);
+  });
 
   // ─── Subdomain-based sitemap/robots (used by Nginx proxy) ──
   // These resolve the town from the X-Town-Subdomain header
@@ -783,13 +776,8 @@ export async function portalRoutes(fastify: FastifyInstance) {
   }
 
   fastify.get("/sitemap", async (request, reply) => {
-    const subdomain = request.headers["x-town-subdomain"] as
-      | string
-      | undefined;
-    const town = await resolveTownIdFromSubdomain(
-      fastify.supabase,
-      subdomain,
-    );
+    const subdomain = request.headers["x-town-subdomain"] as string | undefined;
+    const town = await resolveTownIdFromSubdomain(fastify.supabase, subdomain);
     if (!town) {
       return reply.notFound("Town not found");
     }
@@ -799,20 +787,12 @@ export async function portalRoutes(fastify: FastifyInstance) {
       url: `/api/portal/${town.id}/sitemap.xml`,
       headers: request.headers,
     });
-    reply
-      .status(response.statusCode)
-      .headers(response.headers)
-      .send(response.body);
+    reply.status(response.statusCode).headers(response.headers).send(response.body);
   });
 
   fastify.get("/robots", async (request, reply) => {
-    const subdomain = request.headers["x-town-subdomain"] as
-      | string
-      | undefined;
-    const town = await resolveTownIdFromSubdomain(
-      fastify.supabase,
-      subdomain,
-    );
+    const subdomain = request.headers["x-town-subdomain"] as string | undefined;
+    const town = await resolveTownIdFromSubdomain(fastify.supabase, subdomain);
     if (!town) {
       return reply.notFound("Town not found");
     }
@@ -821,10 +801,7 @@ export async function portalRoutes(fastify: FastifyInstance) {
       url: `/api/portal/${town.id}/robots.txt`,
       headers: request.headers,
     });
-    reply
-      .status(response.statusCode)
-      .headers(response.headers)
-      .send(response.body);
+    reply.status(response.statusCode).headers(response.headers).send(response.body);
   });
 }
 
