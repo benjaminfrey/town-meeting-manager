@@ -28,8 +28,34 @@ containers, images, or volumes (`docker ps -a`, `docker images`, `docker
 volume ls` all empty, verified both before and after this task). There was
 no Supabase stack to remove — the "drop the eight Supabase containers"
 framing in the master plan assumed a state this box was never actually in.
-Docker itself was left alone: removing it wasn't asked for and nothing in
-Stage 0 needs it gone.
+
+**Update 2026-08-26 — Docker has since been removed entirely.** At the
+owner's request, so that nothing can accidentally be deployed to this box
+as containers. It was still empty at removal time, so nothing was
+destroyed. This was done outside Task 6's scope and does not affect Steps
+2–5 below, which never touched Docker either way — the recipe replays
+identically on a box that never had it.
+
+```bash
+sudo systemctl disable --now docker.socket docker.service containerd.service
+sudo apt-get purge -y docker-ce docker-ce-cli docker-ce-rootless-extras \
+  containerd.io docker-buildx-plugin docker-compose-plugin docker-model-plugin
+sudo apt-get autoremove -y
+sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /run/docker.sock
+sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.asc
+sudo groupdel docker
+sudo apt-get update
+```
+
+Verified afterwards: no `docker`/`containerd`/`runc` binaries, packages, or
+residual `rc`-state configs; no systemd units; no `docker` group;
+`/etc/apt/sources.list.d/` reduced to `debian.sources`. **PostgreSQL 17.11
+and nginx both confirmed still `active`.**
+
+Removal reclaimed almost nothing — `/var/lib/docker` held 212 KB. Free
+space actually went _down_ slightly across this task (29 GB → 28 GB),
+because Postgres, PostGIS, Node and nginx were installed in the same
+window. The motivation was closing off a deployment path, not disk.
 
 No Postgres, Node, or nginx were present before this task. Nothing else of
 note runs on the box.
