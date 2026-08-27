@@ -37,14 +37,14 @@ Every task's requirements implicitly include this section.
 
 Each stage ends at a review gate. A stage's detailed task plan is written at its boundary, when its inputs exist — writing Stage 1's exact tasks today would mean writing code blocks against `drizzle-kit pull` output that does not yet exist.
 
-| Stage                    | Scope                                                                                                                                                                                                                                  | Gate                                                                                                                 | Detailed plan            |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| **0 · Ground**           | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation                                                                                               | CI green on a clean clone, **and a working database builds from the repository alone**                               | **In this document**     |
-| **1 · Platform**         | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** Feature parity on CI. | Written at Stage 1 start |
-| **2 · Repair**           | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests                                                                                                                  | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert             | Written at Stage 2 start |
-| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion                                                                                                                                         | An adopted minutes record cannot be altered by any application path, proven by test                                  | Written at Stage 3 start |
-| **4 · Vision**           | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile                                                                                                                                         | All six blocks shipped on the new stack                                                                              | One plan per block       |
-| **5 · Scale**            | Parcels · proximity · postal mail · consortiums · zoning                                                                                                                                                                               | —                                                                                                                    | One plan per block       |
+| Stage                    | Scope                                                                                                                                                                                                                                  | Gate                                                                                                                                                                                                                              | Detailed plan            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **0 · Ground**           | ESLint + Prettier + CI · `generated_by` mislabel · `operator_notes` rendering · doc corrections · VM provisioning · schema consolidation                                                                                               | CI green on a clean clone · one authoritative migration corpus · a build gate that **fails loudly** · a column-level drift diff with every difference classified (see the correction under Stage 0 exit criteria)                 | **In this document**     |
+| **1 · Platform**         | Drizzle baseline (non-owner role, FORCE RLS, rewritten helpers) · Better Auth · SSE spike · tRPC vertical slice · fan out 244 call sites · realtime · storage · permission middleware · auth-by-default routes · decommission Supabase | **A test proves cross-tenant reads return zero rows while connected as the application role.** `./scripts/build-db-from-repo.sh` exits 0 (moved here from Stage 0 — it cannot pass until `auth.*` is gone). Feature parity on CI. | Written at Stage 1 start |
+| **2 · Repair**           | Portal switch-on · notification recipients · backups incl. PDFs + tested restore + PITR · observability · route tests                                                                                                                  | Portal renders a real town end to end · a restore is demonstrated · an induced failure produces an alert                                                                                                                          | Written at Stage 2 start |
+| **3 · Record integrity** | DB-level minutes immutability + addendum-only path · FOAA publish loop · notice PDF completion                                                                                                                                         | An adopted minutes record cannot be altered by any application path, proven by test                                                                                                                                               | Written at Stage 3 start |
+| **4 · Vision**           | AI minutes · audio + transcription · warrant articles · SMS · residents + straw polls · mobile                                                                                                                                         | All six blocks shipped on the new stack                                                                                                                                                                                           | One plan per block       |
+| **5 · Scale**            | Parcels · proximity · postal mail · consortiums · zoning                                                                                                                                                                               | —                                                                                                                                                                                                                                 | One plan per block       |
 
 ### Stage 1 parallelization
 
@@ -122,7 +122,6 @@ pnpm-lock.yaml
 docker/volumes
 playwright-report
 supabase/migrations
-docker/migrations
 ```
 
 SQL migrations are excluded deliberately: they are an append-only historical record and reformatting them would create noise while changing nothing.
@@ -662,7 +661,30 @@ Also ignores playwright-report/ and test-results/, and untracks .DS_Store."
 
 ### Task 6: Provision the VM
 
-**Prerequisite — blocks this task.** Provide SSH access to the VM (hostname or IP, user, key) and confirm what else runs on it. The 4 GB budget is the binding constraint: Postgres wants roughly 1 GB, Node 200–500 MB, and Puppeteer 300–500 MB per Chromium instance. Dropping the eight Supabase containers is what makes that budget work; anything already resident on the box changes the sizing.
+**Target, surveyed 2026-08-26 — this supersedes the plan's earlier assumptions.**
+
+|                   |                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| Host              | `192.168.1.162`, hostname `tmm`, user `ben`, SSH key auth working, **passwordless sudo** |
+| OS                | **Debian 13 (trixie)**, kernel 6.12.95-cloud-amd64 — _not_ Ubuntu 24.04 as first assumed |
+| Resources         | 2 vCPU · 3.8 GB RAM · 32 GB disk (29 GB free)                                            |
+| Already installed | Docker 29.6.2, running but **completely empty** — zero containers, volumes, images       |
+| Not installed     | Postgres, Node, nginx, Supabase (nothing to remove)                                      |
+
+The 4 GB budget is the binding constraint: Postgres wants roughly 1 GB, Node 200–500 MB, and
+Puppeteer 300–500 MB per Chromium instance. Dropping the eight Supabase containers is what makes
+that budget work. Note the disk is 32 GB, not the "plenty" first assumed — adequate now, but
+backups and generated PDFs accumulate, so Stage 2's backup work must not assume unlimited space.
+
+Debian 13 ships everything needed natively, so **no third-party APT repositories are required** —
+no PGDG, no NodeSource:
+
+| Package                   | Debian 13 candidate                               |
+| ------------------------- | ------------------------------------------------- |
+| `postgresql-17`           | 17.11-0+deb13u1                                   |
+| `postgresql-17-postgis-3` | 3.5.2 (Stage 5 parcels)                           |
+| `nodejs`                  | 20.19.2 — satisfies the `>=20.19.0` floor exactly |
+| `nginx`                   | 1.26.3                                            |
 
 **Files:**
 
@@ -681,7 +703,9 @@ Write `infrastructure/provision/README.md` capturing hostname, OS and version, v
 
 - [ ] **Step 2: Install Postgres, Node and nginx**
 
-Install PostgreSQL 16 (the dev volume was PG 15, but nothing is being restored from it, so take the newer major), Node 20 matching `.nvmrc`, and nginx. Record the exact commands used in the README as they are run — this file is the reproduction recipe, and a command that was run but not recorded is a step that will be forgotten.
+Install **PostgreSQL 17** (Debian 13's native version — the abandoned dev volume was PG 15, but nothing is being restored from it, so there is no compatibility reason to hold back, and using the distro's own package avoids adding the PGDG repository), plus `postgresql-17-postgis-3` so Stage 5 does not require a later reinstall, `nodejs` (20.19.2, satisfying the `>=20.19.0` floor), and `nginx`.
+
+Record the exact commands used in the README **as they are run** — this file is the reproduction recipe, and a command that was run but not recorded is a step that will be forgotten. Do not paraphrase them afterwards from memory.
 
 - [ ] **Step 3: Tune Postgres for 4 GB**
 
@@ -728,9 +752,10 @@ Expected: the version string, and `tmm_app` with `rolsuper = f`. If `rolsuper` i
 git add infrastructure/provision/
 git commit -m "Add VM provisioning record
 
-Postgres 16, Node 20, nginx on the 2 vCPU / 4 GB dev-staging VM. Postgres
-tuned for the memory budget; max_connections lowered to 50 because Puppeteer
-needs the headroom more than the connection slots.
+PostgreSQL 17.11, PostGIS 3.5.2, Node 20.19.2 and nginx 1.26.3 — all Debian 13
+native packages, no third-party repositories — on the 2 vCPU / 3.8 GB dev-staging
+VM. Postgres tuned for the memory budget; max_connections lowered to 50 because
+Puppeteer needs the headroom more than the connection slots.
 
 Two roles: tmm_owner owns the schema and runs migrations, tmm_app is the
 application's non-owner login. That separation is what makes RLS function —
@@ -755,7 +780,7 @@ Two migration corpora exist. `supabase/migrations/` holds 56 files and `docker/m
 **Interfaces:**
 
 - Consumes: the Postgres instance from Task 6.
-- Produces: `scripts/build-db-from-repo.sh` builds a complete database from a clean clone. Stage 1's `drizzle-kit pull` runs against exactly this database.
+- Produces: `scripts/build-db-from-repo.sh`, a gate that fails loudly rather than exiting 0 on a partial build (it cannot build a complete database from a clean clone in Stage 0 — see the correction under "Stage 0 exit criteria" — that's moved to Stage 1's gate, once the `auth.*` baseline lands). Stage 1's `drizzle-kit pull` runs against exactly this script's output.
 
 - [ ] **Step 1: Establish the true starting state**
 
@@ -849,7 +874,7 @@ Note for Stage 1: this script's `schema_migrations` table is superseded by Drizz
 ./scripts/build-db-from-repo.sh "postgresql://tmm_owner@<host>/town_meeting_manager"
 ```
 
-Expected: every migration applies, the seed applies, and the table count is at least 26. Any failure not attributable to a missing `auth.*` schema is a genuine gap that must be closed before Stage 1 — `drizzle-kit pull` can only introspect what actually exists.
+Expected: the script fails loudly at the first `auth.*`-caused error (see the correction under "Stage 0 exit criteria" below) — this is known and not a genuine gap. Record the table count wherever the script actually halts, and separately verify the corpus itself is sound with a throwaway `auth`/`storage` shim (diagnostic only, never applied to a real database — see `scripts/dev/auth-shim.sql`): 56 of 58 migrations apply and 27 tables result. Any failure under the shim not attributable to `auth.*`, `storage.foldername`, or the known notification-table collision is a genuine gap that must be closed before Stage 1 — `drizzle-kit pull` can only introspect what actually exists.
 
 - [ ] **Step 8: Commit**
 
@@ -885,8 +910,55 @@ where it needs a decision on how a board member resolves to a user account."
 - [ ] No `generated_by: "ai"` remains in the codebase
 - [ ] Operator notes render in all three minutes styles, HTML-escaped
 - [ ] One migration corpus; `docker/migrations/` is gone
-- [ ] `./scripts/build-db-from-repo.sh` builds a complete database from a clean clone
+- [ ] `./scripts/build-db-from-repo.sh` exists and **fails loudly** rather than exiting 0 on a partial build
+- [ ] A column-level diff of the corpus-built database (via the `auth`/`storage` shim) against the generated types in `packages/shared/src/types/database.ts`, recorded, with every difference classified (dev-only vs. corpus-only vs. name/type mismatch) and a root cause given for each class
 - [ ] `tmm_app` exists, is not superuser, and does not own tables
+
+### Correction — the original criterion was unachievable
+
+This section first read _"`./scripts/build-db-from-repo.sh` builds a complete database from a clean
+clone."_ That was **impossible for Stage 0 to satisfy, and I should have seen it when writing the
+plan.** `supabase/migrations/20260308000004_create_user_account.sql:26` declares
+`auth_user_id REFERENCES auth.users(id)`. The `auth` schema belongs to Supabase's GoTrue and does
+not exist on plain PostgreSQL. That FK sits at file 4 of 58, so it blocks the corpus almost
+immediately — and removing the `auth.*` dependency is **Stage 1's** job, by design.
+
+Stage 0's honest deliverable is therefore a single authoritative corpus, a gate that refuses to lie,
+and an accurate inventory. Task 7 confirmed the corpus is **structurally sound**: with a throwaway
+`auth`/`storage` shim, **56 of 58 migrations apply and produce 27 tables**. Exactly two things
+remain behind that wall — the notification-table collision (below) and one `storage.foldername`
+dependency.
+
+**Moved to Stage 1's gate:** `./scripts/build-db-from-repo.sh` exits 0 and builds a complete
+database from a clean clone.
+
+### Carried into Stage 1 from Task 7
+
+The notification tables are defined **three** incompatible ways: the "official" corpus
+(`20260308000018`–`000021`), the ported docker corpus, and a **hybrid that is what actually exists
+in the dev database**. The ported file uses `CREATE TABLE IF NOT EXISTS`, so on a fresh build the
+official definition wins for the table itself — but the ported migration does not silently no-op:
+it **aborts** with Postgres error 42703 (`column "postmark_message_id" does not exist`) partway
+through its own `CREATE INDEX` statements, at line 121 of
+`20260826000001_merge_notification_system.sql`. Because the script aborts there, the rest of that
+file's statements never run either — including the unrelated `user_account.email_bounced`/
+`email_bounced_at`/`email_complained`/`email_complained_at` columns at lines 147-150, which have
+nothing to do with the collision but get skipped anyway as collateral damage of the abort. Parts of
+the feature are already broken in dev, not merely on a fresh build.
+
+Stage 1 must decide, before `drizzle-kit pull` runs:
+
+1. Which of the three shapes is canonical.
+2. Whether `town_id` stays on `notification_delivery` as a denormalized tenant key for RLS, or is dropped in favour of joining through `notification_event`.
+3. **Whether subscribers are `person` or `user_account`.** This is the same open question as `board_member.user_account_id` — answering it once resolves both.
+4. Whether the TCPA `consent_*` columns survive; only the official shape carries them.
+5. Whether `external_id` and `postmark_message_id` merge into one column.
+6. Whether any dev data must migrate.
+
+Also carried: the two ported migrations contain 8 bare `CREATE POLICY` statements and PostgreSQL has
+no `CREATE POLICY IF NOT EXISTS`, so their first application against a database that already has
+those policies will abort `migrate.sh`. Stage 1 needs `DROP POLICY IF EXISTS` guards or a
+`schema_migrations` backfill.
 
 When these hold, write the Stage 1 detailed plan. Its first task is the SSE spike, because tRPC SSE on the Fastify adapter is unproven in public and the fallback decision must be made before anything depends on the transport.
 

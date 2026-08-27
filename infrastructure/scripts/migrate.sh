@@ -4,6 +4,14 @@
 # Idempotent: tracks applied files in a schema_migrations table and skips
 # anything already applied, so it is safe to re-run on every deploy.
 #
+# Targets the legacy Docker Compose deploy (infrastructure/
+# docker-compose.production.yml) — it cannot run against the Task 6 VM,
+# which has no Docker (removed in this branch) and whose database is
+# town_meeting_manager owned by tmm_owner, not postgres/postgres. On the
+# VM, scripts/build-db-from-repo.sh is what applies this same
+# supabase/migrations/*.sql corpus. Superseded entirely once Stage 1's
+# Drizzle migrations take over; not rewritten here.
+#
 # Run from the repository root.
 set -euo pipefail
 
@@ -20,6 +28,9 @@ $PSQL -q -c "CREATE TABLE IF NOT EXISTS public.schema_migrations (
 
 applied=0
 skipped=0
+# Single source of truth. docker/migrations/ was merged into this directory
+# on 2026-08-26 — it had never been read by this script. Do not add a second
+# migration directory; tooling reads only this one.
 for file in supabase/migrations/*.sql; do
   name="$(basename "$file")"
   already="$($PSQL -tAq -c "SELECT 1 FROM public.schema_migrations WHERE filename = '$name'" || true)"

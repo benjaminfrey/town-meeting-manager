@@ -8,7 +8,6 @@ pnpm-lock.yaml
 docker/volumes
 playwright-report
 supabase/migrations
-docker/migrations
 
 # SDD scratch workspace: git-ignored working files (task briefs, reports,
 # progress notes), not part of the deliverable. Prettier's broad **/*.md
