@@ -114,6 +114,25 @@ export function createAuth(options: CreateAuthOptions) {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
+
+      // Task C2. Without this, `POST /api/auth/request-password-reset` answers
+      // 400 `RESET_PASSWORD_DISABLED` — Better Auth refuses to mint a reset
+      // token it has no way to deliver. The web client's "Forgot password"
+      // link would then fail with a message about a disabled feature rather
+      // than doing anything, and "a user can reset a password" is one of
+      // Phase C's exit criteria.
+      //
+      // It shares `sendAuthEmail` with verification deliberately: there is one
+      // place an auth email leaves the building, so there is one place that
+      // throws when Postmark is not configured. See `email.ts`.
+      sendResetPassword: async ({ user, url }) => {
+        await sendAuthEmail({
+          to: user.email,
+          subject: "Reset your password",
+          url,
+          kind: "reset-password",
+        });
+      },
     },
 
     emailVerification: {

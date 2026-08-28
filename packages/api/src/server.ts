@@ -20,6 +20,7 @@ import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { invitationRoutes } from "./routes/invitations.js";
+import { sessionRoutes } from "./routes/session.js";
 import { NotificationService } from "./services/notification-service.js";
 
 export interface BuildServerOptions {
@@ -66,15 +67,29 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // ─── Plugins ─────────────────────────────────────────────────────
   //
   // CORS is registered BEFORE the Better Auth handler so its preflight
-  // handling is in place for any route that still needs it. It should
-  // increasingly need to cover nothing: `infrastructure/nginx/nginx.conf`
-  // proxies `/api/` on the `app.` server block to this process, which makes
-  // auth same-origin — and same-origin is what lets the session cookie stay
-  // `SameSite=Lax` and have the browser enforce CSRF protection, instead of
-  // `SameSite=None` plus a header check. The dev-server origin below is the
-  // one genuine remaining cross-origin path.
+  // handling is in place for any route that still needs it.
+  //
+  // ─── Task C2: the dev-server origin is gone from this list ────────────
+  //
+  // It used to read `process.env.CORS_ORIGIN ?? "http://localhost:5173"`,
+  // which made the Vite dev server a credentialed cross-origin caller — a
+  // second cookie topology alongside the same-origin one nginx serves in
+  // production, and the one shape guaranteed to produce a "works locally,
+  // fails in production" session bug. `packages/web/vite.config.ts` proxies
+  // `/api` to this process WITHOUT rewriting the Host header, so development
+  // is now same-origin exactly as `infrastructure/nginx/nginx.conf` makes it
+  // in production, and the browser needs no CORS allowance at all.
+  //
+  // A developer who bypasses the proxy and points a page straight at
+  // `localhost:3001` now gets a CORS error. That is the intended, loud
+  // outcome: the session cookie would not have been sent anyway, and a silent
+  // half-working setup is what this removal exists to prevent.
   await app.register(cors, {
-    origin: [process.env.CORS_ORIGIN ?? "http://localhost:5173", /\.townmeetingmanager\.com$/],
+    // Non-browser callers on the `api.` server block only. `CORS_ORIGIN` is
+    // still honoured so an operator can add one deliberately.
+    origin: process.env.CORS_ORIGIN
+      ? [process.env.CORS_ORIGIN, /\.townmeetingmanager\.com$/]
+      : [/\.townmeetingmanager\.com$/],
     credentials: true,
   });
 
@@ -111,7 +126,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const auth = createAuth({
     db,
     secret,
-    baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+    // The origin the BROWSER loads the app from — not this process's own
+    // listen address. Better Auth derives `trustedOrigins` from it and refuses
+    // any state-changing request whose `Origin` header does not match, so
+    // pointing it at the API's port makes every sign-in a 403 INVALID_ORIGIN.
+    //
+    // The development default is the Vite dev server, which proxies `/api` here
+    // without rewriting `Host`; production is the `app.` host, which nginx
+    // proxies the same way. Same value, same meaning, both environments.
+    baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:5173",
     sendAuthEmail: createPostmarkAuthEmailSender(),
   });
 
@@ -149,6 +172,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(portalRoutes, { prefix: "/api/portal" });
   await app.register(notificationRoutes, { prefix: "/api" });
   await app.register(invitationRoutes, { prefix: "/api" });
+  await app.register(sessionRoutes, { prefix: "/api" });
 
   // ─── Retry processor — runs every 60 seconds ─────────────────────
   const retryInterval = setInterval(() => {

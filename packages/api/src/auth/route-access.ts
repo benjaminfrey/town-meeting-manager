@@ -50,10 +50,11 @@ declare module "fastify" {
      * Explicit opt-out from the authenticated-by-default policy.
      *
      * Omitted — the default, and the value every route added without thinking
-     * about it gets — means the route requires a session. Spell it with
-     * `PUBLIC_ROUTE` rather than by hand so the intent greps.
+     * about it gets — means the route requires a session AND a resolved town.
+     * Spell the exceptions with `PUBLIC_ROUTE` / `SESSION_WITHOUT_TENANT`
+     * rather than by hand so the intent greps.
      */
-    auth?: "public";
+    auth?: "public" | "session-without-tenant";
   }
 }
 
@@ -78,4 +79,51 @@ export const PUBLIC_ROUTE = { auth: "public" } as const;
  */
 export function isPublicRoute(request: FastifyRequest): boolean {
   return request.routeOptions?.config?.auth === "public";
+}
+
+/**
+ * Spread into a route's `config` to declare it reachable by a signed-in
+ * identity that does not (yet) belong to a town.
+ *
+ *     app.post("/onboarding", { config: { ...SESSION_WITHOUT_TENANT } }, handler)
+ *
+ * ─── Why a third category exists at all, and why it is not "public" ───────
+ *
+ * There are exactly two moments in this product's life when a real, verified
+ * identity has no town: the instant after sign-up, and the instant after an
+ * invitation is accepted but before the link is read back. Two routes have to
+ * work then — `GET /api/me`, which is how the client decides between the
+ * dashboard and the onboarding wizard, and `POST /api/onboarding`, which is
+ * what creates the town. Under the default policy both answer 403 to precisely
+ * the user they exist for, so the wizard could never run.
+ *
+ * The alternative — marking them `PUBLIC_ROUTE` and re-checking the session
+ * inside the handler — was rejected. It would put a second, hand-written
+ * authentication path next to the one in `fastify.ts`, which is the shape Task
+ * G1 spent its entire budget removing. This marker keeps authentication in one
+ * place and relaxes only the *tenant* half.
+ *
+ * ─── What a route marked this way gets, and does not get ─────────────────
+ *
+ * It gets `request.authUser` — the Better Auth identity, and nothing derived
+ * from anything the client sent. It gets `request.tenant` and
+ * `request.withTenant` too, but ONLY if resolution succeeded; a handler must
+ * treat both as optional, and TypeScript already makes it.
+ *
+ * It therefore gets **no database access at all** when there is no town, since
+ * `request.withTenant` is the only handle the bridge hands out. That is the
+ * property that makes this marker safe: relaxing the tenant requirement cannot
+ * widen what a query can see, because with no tenant there is no query.
+ */
+export const SESSION_WITHOUT_TENANT = { auth: "session-without-tenant" } as const;
+
+/**
+ * True when the matched route accepts a session that resolves to no town.
+ *
+ * Read from the MATCHED ROUTE's config for the same reason as
+ * `isPublicRoute` — a path that merely looks like one of these two routes
+ * cannot borrow the relaxation.
+ */
+export function toleratesMissingTenant(request: FastifyRequest): boolean {
+  return request.routeOptions?.config?.auth === "session-without-tenant";
 }

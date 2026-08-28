@@ -59,7 +59,16 @@
  *   Session, no town         → 403 and an error-level log. NEVER continue.
  *   Session, account deleted → 403 and an error-level log. NEVER continue.
  *
- * The last two are the reason this file exists. Continuing with no tenant
+ * Task C2 adds one relaxation, and only one: a route marked
+ * `SESSION_WITHOUT_TENANT` is served to a session that resolves to no town,
+ * with `request.tenant` and `request.withTenant` left undefined. It exists for
+ * the two routes that must work for an identity which does not belong to a
+ * town yet — `GET /api/me` and `POST /api/onboarding` — and it relaxes the
+ * TENANT requirement only; the session check above is unchanged. Because
+ * `request.withTenant` is the only database handle this bridge hands out, such
+ * a route has no query it can run until a town exists.
+ *
+ * The 401 and the two 403s are the reason this file exists. Continuing with no tenant
  * context does not fail — it succeeds, quietly, returning zero rows from every
  * table, which is indistinguishable from a town that has no data. See
  * `tenant-context.ts`.
@@ -115,11 +124,42 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { withTenant, type TenantTx } from "../db/with-tenant.js";
 import { resolveTenant, TenantResolutionError, type ResolvedTenant } from "./tenant-context.js";
 import type { TenantResolverDb } from "./tenant-context.js";
-import { PUBLIC_ROUTE, isPublicRoute } from "./route-access.js";
+import { PUBLIC_ROUTE, isPublicRoute, toleratesMissingTenant } from "./route-access.js";
 import type { Auth } from "./auth.js";
 
 declare module "fastify" {
+  interface FastifyInstance {
+    /**
+     * The Better Auth instance, so a route can act on identities without
+     * constructing a second one (which would sign with a different context and
+     * write through a different adapter).
+     *
+     * `routes/invitations.ts` uses `auth.api.signUpEmail` here — the
+     * replacement for `supabase.auth.admin.createUser`, which used the
+     * service-role key to create users out of band. There is no equivalent
+     * bypass in Better Auth and none is built: creating a user goes through
+     * the same endpoint a person's own sign-up does.
+     */
+    auth: Auth;
+    /**
+     * The Drizzle handle the tenant bridge resolves against.
+     *
+     * Exposed so a route reachable WITHOUT a resolved tenant — `POST
+     * /api/onboarding`, which creates the town there is not yet one of — can
+     * still open a `withTenant` transaction against a town id it generates
+     * itself. Every other route must use `request.withTenant`.
+     */
+    tenantDb: TenantResolverDb;
+  }
   interface FastifyRequest {
+    /**
+     * The authenticated Better Auth identity.
+     *
+     * Set on every request that carried a valid session, INCLUDING those on
+     * routes marked `SESSION_WITHOUT_TENANT` where no town could be resolved.
+     * Nothing on it is derived from anything the client sent.
+     */
+    authUser?: { id: string; email: string; emailVerified: boolean; name?: string };
     /** Present only on requests carrying a session that resolved to a town. */
     tenant?: ResolvedTenant;
     /**
@@ -157,6 +197,9 @@ function toWebHeaders(request: FastifyRequest): Headers {
 export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts) => {
   const { auth, db } = opts;
   const basePath = opts.basePath ?? "/api/auth";
+
+  fastify.decorate("auth", auth);
+  fastify.decorate("tenantDb", db);
 
   // ─── 1. Better Auth's handler ──────────────────────────────────────────
   //
@@ -245,11 +288,32 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
       );
     }
 
+    request.authUser = {
+      id: session.user.id,
+      email: session.user.email ?? "",
+      emailVerified: session.user.emailVerified === true,
+      name: session.user.name ?? undefined,
+    };
+
     let tenant: ResolvedTenant;
     try {
       tenant = await resolveTenant(db, session);
     } catch (err) {
       if (err instanceof TenantResolutionError) {
+        // Task C2's third category. Two routes — `GET /api/me` and
+        // `POST /api/onboarding` — exist FOR the identity that belongs to no
+        // town yet, so for them "no town" is the expected state and not a
+        // refusal. They still required a session, which was checked above, and
+        // they still get no database handle, because `request.withTenant` is
+        // only set below. See `route-access.ts` for why this is a marker
+        // rather than a second auth check inside those handlers.
+        if (toleratesMissingTenant(request)) {
+          request.log.info(
+            { authUserId: session.user.id },
+            "session resolves to no town; serving a route marked SESSION_WITHOUT_TENANT",
+          );
+          return;
+        }
         // Error level, not warn. An authenticated identity that belongs to no
         // town is either an interrupted onboarding or a deleted account whose
         // session is still live — both need a human, and neither should be

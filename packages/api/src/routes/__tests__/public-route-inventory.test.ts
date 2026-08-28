@@ -66,9 +66,24 @@ const EXPECTED_PUBLIC_ROUTES = [
   "POST /api/webhooks/postmark",
 ];
 
+/**
+ * Every route this API serves to a session that resolves to NO town.
+ *
+ * Task C2's third category (`SESSION_WITHOUT_TENANT` in
+ * `auth/route-access.ts`). It is pinned for the same reason the public set is:
+ * the marker relaxes a check, and a relaxation that can be added without
+ * appearing in a diff is one that will be added to make a 403 go away.
+ *
+ * There are exactly two moments a real identity has no town — just after
+ * sign-up, and just after an invitation is accepted — and exactly two routes
+ * that must work then. A third entry here should be hard to justify.
+ */
+const EXPECTED_TENANT_EXEMPT_ROUTES = ["GET /api/me", "POST /api/onboarding"];
+
 interface CollectedRoute {
   readonly signature: string;
   readonly isPublic: boolean;
+  readonly tenantExempt: boolean;
 }
 
 /** The environment `buildServer` refuses to boot without. */
@@ -105,6 +120,7 @@ async function collectRoutes(): Promise<CollectedRoute[]> {
         collected.push({
           signature: `${method} ${route.url}`,
           isPublic: route.config?.auth === "public",
+          tenantExempt: route.config?.auth === "session-without-tenant",
         });
       }
     },
@@ -130,6 +146,28 @@ describe("the public route inventory", () => {
       .sort();
 
     expect(publicSignatures).toEqual([...EXPECTED_PUBLIC_ROUTES].sort());
+  });
+
+  it("serves exactly these routes to a session with no town, and no others", async () => {
+    const routes = withoutHeadTwins(await collectRoutes());
+
+    const exemptSignatures = routes
+      .filter((r) => r.tenantExempt)
+      .map((r) => r.signature)
+      .sort();
+
+    expect(exemptSignatures).toEqual([...EXPECTED_TENANT_EXEMPT_ROUTES].sort());
+  });
+
+  it("keeps the public and tenant-exempt sets disjoint", async () => {
+    const routes = withoutHeadTwins(await collectRoutes());
+
+    // `config.auth` is a single value, so this cannot currently be violated —
+    // which is the point of asserting it. If the marker ever becomes a set of
+    // flags, a route that is both "reachable without a session" and "reachable
+    // without a town" is a route whose author has stopped distinguishing the
+    // two, and this fails before it ships.
+    expect(routes.filter((r) => r.isPublic && r.tenantExempt)).toEqual([]);
   });
 
   it("reads the REAL route table, inline routes included", async () => {
