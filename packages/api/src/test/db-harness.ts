@@ -178,6 +178,47 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
   }
 }
 
+/**
+ * Open a SECOND connection to the database `ownerSql` is attached to, running
+ * as the non-owner runtime role `tmm_app` (Task B3).
+ *
+ * Why this exists: the client `withTestDb` hands back is the owner, and in
+ * every supported setup that owner is a superuser — so it bypasses RLS
+ * outright. Measured on a database with one town row and no tenant context
+ * set: the owner connection sees 1, a `tmm_app` connection sees 0. A tenancy
+ * test run on the owner connection would therefore pass with RLS switched off
+ * entirely, which is why the isolation gate uses this instead.
+ *
+ * How the role switch is done, and why it is not a login: the baseline creates
+ * `tmm_app` NOLOGIN when no superuser has created it out of band (see
+ * `0000_baseline.sql` § 4), so there is no password and no direct login to
+ * make. It also does `GRANT tmm_app TO current_user`, which makes the `role`
+ * startup parameter below legal. `options=-c role=tmm_app` sets that GUC at
+ * connection start, so `current_user` is `tmm_app` from the first statement
+ * onward and stays that way across transactions — there is no per-transaction
+ * `SET ROLE` for a test to forget. `session_user` remains the owner, which is
+ * the one way this differs from production; it does not matter, because
+ * Postgres decides RLS bypass on the CURRENT role, not the session one
+ * (demonstrated by the measurement above, taken on this exact connection
+ * shape).
+ *
+ * The caller owns the returned client and must `end()` it.
+ */
+export async function connectAsAppRole(ownerSql: postgres.Sql): Promise<postgres.Sql> {
+  const [row] = await ownerSql<{ db: string }[]>`SELECT current_database() AS db`;
+  const databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+  return postgres(databaseUrl, {
+    database: row!.db,
+    // One connection, so "the same pooled connection" is a fact rather than a
+    // hope — the transaction-leak assertion in the isolation gate depends on
+    // two sequential transactions landing on the same backend, and asserts the
+    // backend pid to prove they did.
+    max: 1,
+    onnotice: () => {},
+    connection: { options: "-c role=tmm_app" },
+  });
+}
+
 async function applyMigrations(sql: postgres.Sql): Promise<void> {
   // Same file list, same order, and the same journal cross-check that
   // scripts/build-db-from-repo.sh uses, so this harness and the Stage 1 gate
