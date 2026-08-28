@@ -21,7 +21,7 @@ All configuration lives in [`infrastructure/`](../infrastructure):
 >
 > - **Database name is `postgres`**, not `town_meeting_manager`. The
 >   `supabase/postgres` image initializes its roles and schemas in `postgres`,
->   and every file in `supabase/migrations/` assumes it.
+>   and the schema assumes it.
 > - **Puppeteer runs in-process** inside the API container
 >   (`packages/api/src/services/puppeteer.ts`) — there is no separate Puppeteer
 >   service. PDF memory is bounded by the API container's `mem_limit` and
@@ -117,7 +117,19 @@ docker compose --env-file .env.production \
 ```
 
 `deploy.sh` runs `migrate.sh`, which applies every file in
-`supabase/migrations/` exactly once (tracked in a `schema_migrations` table).
+`packages/api/drizzle/` exactly once (tracked in a `schema_migrations` table).
+
+> **Out of date as of Stage 1 (Task B2).** `supabase/migrations/` is a
+> historical record now and is applied by nothing — see
+> `supabase/migrations/README.md`. The schema is
+> `packages/api/drizzle/0000_baseline.sql`, applied by
+> `scripts/build-db-from-repo.sh`.
+>
+> `infrastructure/scripts/migrate.sh` still loops `supabase/migrations/*.sql`
+> and is inoperative; it also targets the Docker Compose deploy, and Docker was
+> removed from the VM. The rest of this document describes that same
+> Docker/Supabase deployment and is being replaced wholesale by Stage 1's
+> Task G2. Treat everything below as historical until then.
 
 ## 8. First admin account
 

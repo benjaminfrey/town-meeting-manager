@@ -48,9 +48,13 @@ vi.mock("../../lib/push.js", () => ({
 const TOWN_ID = "town-1";
 const EVENT_ID = "event-1";
 const BOARD_ID = "board-1";
-const USER_ALICE = "user-alice";
-const USER_BOB = "user-bob";
-const USER_CAROL = "user-carol";
+// Notification subscribers are PERSON records, not user_account records
+// (see supabase/migrations/20260827000001_canonicalize_notifications.sql)
+// — board_member links to person_id, and notification_delivery.subscriber_id
+// / subscriber_notification_preference.person_id both reference person(id).
+const PERSON_ALICE = "person-alice";
+const PERSON_BOB = "person-bob";
+const PERSON_CAROL = "person-carol";
 
 // Board-scoped event — needs board_id in payload for subscriber resolution
 const mockEvent = {
@@ -67,32 +71,31 @@ const mockEvent = {
 };
 
 const mockBoardMembers = [
-  { user_account_id: USER_ALICE },
-  { user_account_id: USER_BOB },
-  { user_account_id: USER_CAROL },
+  { person_id: PERSON_ALICE },
+  { person_id: PERSON_BOB },
+  { person_id: PERSON_CAROL },
 ];
 
-const mockUsers = [
+// person rows as returned by getSubscribersForPersonIds's embedded
+// user_account(email_bounced, email_complained) query.
+const mockPersons = [
   {
-    id: USER_ALICE,
+    id: PERSON_ALICE,
+    name: "Alice Johnson",
     email: "alice@testville.gov",
-    display_name: "Alice Johnson",
-    email_bounced: false,
-    email_complained: false,
+    user_account: { email_bounced: false, email_complained: false },
   },
   {
-    id: USER_BOB,
+    id: PERSON_BOB,
+    name: "Bob Smith",
     email: "bob@testville.gov",
-    display_name: "Bob Smith",
-    email_bounced: false,
-    email_complained: false,
+    user_account: { email_bounced: false, email_complained: false },
   },
   {
-    id: USER_CAROL,
+    id: PERSON_CAROL,
+    name: "Carol Davis",
     email: "carol@testville.gov",
-    display_name: "Carol Davis",
-    email_bounced: false,
-    email_complained: false,
+    user_account: { email_bounced: false, email_complained: false },
   },
 ];
 
@@ -113,7 +116,7 @@ function buildProcessSupabase(
   opts: {
     event?: object | null;
     boardMembers?: object[];
-    users?: object[];
+    persons?: object[];
     townConfig?: object | null;
     town?: object;
     disabledPrefs?: object[];
@@ -123,7 +126,7 @@ function buildProcessSupabase(
   const {
     event = mockEvent,
     boardMembers = mockBoardMembers,
-    users = mockUsers,
+    persons = mockPersons,
     townConfig = mockTownConfig,
     town = { name: "Testville", subdomain: "testville" },
     disabledPrefs = [],
@@ -158,8 +161,8 @@ function buildProcessSupabase(
           data = townConfig;
         } else if (table === "notification_delivery") {
           data = delivery;
-        } else if (table === "user_account") {
-          data = users[0] ?? null;
+        } else if (table === "person") {
+          data = persons[0] ?? null;
         } else if (table === "town") {
           data = town ?? null;
         }
@@ -172,8 +175,8 @@ function buildProcessSupabase(
           case "board_member":
             arr = boardMembers;
             break;
-          case "user_account":
-            arr = users;
+          case "person":
+            arr = persons;
             break;
           case "subscriber_notification_preference":
             arr = disabledPrefs;
@@ -311,7 +314,7 @@ describe("NotificationService", () => {
 
     it("excludes subscribers who have disabled the notification type", async () => {
       const supabase = buildProcessSupabase({
-        disabledPrefs: [{ subscriber_id: USER_BOB }],
+        disabledPrefs: [{ person_id: PERSON_BOB }],
       });
       const service = new NotificationService(supabase);
 
@@ -326,9 +329,9 @@ describe("NotificationService", () => {
     it("sends zero emails when all subscribers have opted out", async () => {
       const supabase = buildProcessSupabase({
         disabledPrefs: [
-          { subscriber_id: USER_ALICE },
-          { subscriber_id: USER_BOB },
-          { subscriber_id: USER_CAROL },
+          { person_id: PERSON_ALICE },
+          { person_id: PERSON_BOB },
+          { person_id: PERSON_CAROL },
         ],
       });
       const service = new NotificationService(supabase);
@@ -483,8 +486,8 @@ describe("NotificationService", () => {
 
     it("falls back to email address when display_name is null", async () => {
       const { renderEmailTemplate } = await import("../email-sender.js");
-      const usersNoName = mockUsers.map((u) => ({ ...u, display_name: null }));
-      const supabase = buildProcessSupabase({ users: usersNoName });
+      const personsNoName = mockPersons.map((p) => ({ ...p, name: null }));
+      const supabase = buildProcessSupabase({ persons: personsNoName });
       const service = new NotificationService(supabase);
 
       await service.processNotificationEvent(EVENT_ID);

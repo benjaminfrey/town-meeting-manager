@@ -4,6 +4,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
+import noSessionScopedSetConfig from "./eslint-rules/no-session-scoped-set-config.js";
 
 // The root "lint" script runs a single `eslint .` from the repo root, so cwd
 // is always the repo root today. Each package previously had its own "lint"
@@ -47,7 +48,18 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
     },
+    plugins: {
+      // Repo-local rules. See eslint-rules/ for each rule's rationale; they
+      // exist to make an invariant mechanical rather than cultural.
+      tmm: { rules: { "no-session-scoped-set-config": noSessionScopedSetConfig } },
+    },
     rules: {
+      // Tenant context must be transaction-scoped. A session-scoped
+      // `app.town_id` survives into the next request handed the same pooled
+      // connection, with no error anywhere — see
+      // eslint-rules/no-session-scoped-set-config.js.
+      "tmm/no-session-scoped-set-config": "error",
+
       // Errors: these indicate real defects.
       "no-console": ["error", { allow: ["warn", "error"] }],
       "@typescript-eslint/no-floating-promises": "off",
@@ -83,5 +95,14 @@ export default tseslint.config(
     // ban-ts-comment repo-wide, which would hide a real footgun everywhere else.
     files: ["**/minutes-generation.test.ts"],
     rules: { "@typescript-eslint/ban-ts-comment": "warn" },
+  },
+  {
+    // The rule's own RuleTester fixtures are string literals containing the
+    // exact SQL the rule bans, so the rule flags its own test file — eight
+    // errors, all of them the rule working correctly. Scoped to this one file
+    // rather than to `**/__tests__/**`, because a real session-scoped
+    // set_config in some other test would still be a defect worth failing on.
+    files: ["**/no-session-scoped-set-config.test.ts"],
+    rules: { "tmm/no-session-scoped-set-config": "off" },
   },
 );

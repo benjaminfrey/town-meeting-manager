@@ -4,10 +4,34 @@
 -- Realistic Maine town government data for development.
 -- Uses Newcastle, Maine (Lincoln County) as the sample town.
 --
--- NOTE: Does NOT create auth.users records — those are created
--- through the Supabase Auth system in session 01.08.
--- auth_user_id on user_account is left NULL until then.
+-- NOTE: Creates no identity-provider records. user_account.auth_user_id
+-- is left NULL; Better Auth (Stage 1 Task C1) owns identity.
 -- ============================================================
+
+-- ─── TENANT CONTEXT ────────────────────────────────────────
+-- Every table below is under FORCE ROW LEVEL SECURITY
+-- (packages/api/drizzle/0000_baseline.sql § 3), which binds the table OWNER
+-- too — so this seed does not get a free pass just because it runs as the
+-- role that created the tables. Without this line every INSERT below fails
+-- with "new row violates row-level security policy" for any role that is not
+-- a superuser. That is not a nuisance to work around; it is the seed proving
+-- the tenancy model is actually on.
+--
+-- It matters that this is exercised: locally and in CI the seed runs as a
+-- superuser, which bypasses RLS regardless, so a missing tenant context here
+-- would stay invisible until the first deploy to the VM — where migrations
+-- run as the non-superuser tmm_owner. Verified by running this seed as a
+-- non-superuser owner.
+--
+-- `false` (session-scoped, not SET LOCAL) is deliberate and is the one place
+-- it is correct: psql applies this file outside any transaction, so a
+-- transaction-scoped setting would revert before the next statement. The
+-- application code never does this — see Task B3's withTenant, which uses
+-- SET LOCAL so tenant context cannot outlive a request on a pooled
+-- connection.
+--
+-- The value is Newcastle's town id, the same literal every INSERT below uses.
+DO $$ BEGIN PERFORM set_config('app.town_id', 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', false); END $$;
 
 -- ─── TOWN ──────────────────────────────────────────────────
 

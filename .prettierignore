@@ -9,6 +9,13 @@ docker/volumes
 playwright-report
 supabase/migrations
 
+# drizzle-kit's own output (Task 4/B1): the generated SQL migration and the
+# meta/ snapshot it diffs future `generate` runs against. Same rationale as
+# supabase/migrations above — tool-owned, not hand-authored. The TypeScript
+# schema/relations files drizzle-kit also writes are NOT excluded (they move
+# to packages/api/src/db/ and are committed, hand-reviewed source).
+packages/api/drizzle
+
 # SDD scratch workspace: git-ignored working files (task briefs, reports,
 # progress notes), not part of the deliverable. Prettier's broad **/*.md
 # glob would otherwise reach in and reformat/rewrite them.

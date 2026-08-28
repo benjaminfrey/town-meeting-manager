@@ -4,13 +4,16 @@
 # Idempotent: tracks applied files in a schema_migrations table and skips
 # anything already applied, so it is safe to re-run on every deploy.
 #
-# Targets the legacy Docker Compose deploy (infrastructure/
-# docker-compose.production.yml) — it cannot run against the Task 6 VM,
-# which has no Docker (removed in this branch) and whose database is
-# town_meeting_manager owned by tmm_owner, not postgres/postgres. On the
-# VM, scripts/build-db-from-repo.sh is what applies this same
-# supabase/migrations/*.sql corpus. Superseded entirely once Stage 1's
-# Drizzle migrations take over; not rewritten here.
+# INOPERATIVE as of Stage 1 Task B2. It loops supabase/migrations/*.sql,
+# which is no longer applied by anything and no longer CAN be: that corpus
+# depends on Supabase GoTrue's `auth` schema and aborts at file 4 of 58 on
+# plain Postgres. The schema now lives in packages/api/drizzle/ and is
+# applied by scripts/build-db-from-repo.sh. This script also targets the
+# legacy Docker Compose deploy, and Docker was removed from the VM.
+#
+# Left in place rather than deleted because Task G2 owns decommissioning the
+# whole Docker deployment path in one piece; running it today would fail
+# loudly at the first migration, not corrupt anything.
 #
 # Run from the repository root.
 set -euo pipefail

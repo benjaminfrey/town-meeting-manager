@@ -78,7 +78,11 @@ export async function notificationRoutes(app: FastifyInstance) {
               .eq("id", deliveryId);
 
             if (isHardBounce && meta.delivery_id) {
-              // Flag the subscriber to prevent future sends
+              // Flag the subscriber to prevent future sends. subscriber_id
+              // is a person id — the bounce flag itself still lives on
+              // user_account, so this reaches it via person_id (an
+              // account-less person has no account row to flag, and
+              // therefore nothing that can bounce).
               const { data: delivery } = await supabase
                 .from("notification_delivery")
                 .select("subscriber_id")
@@ -92,7 +96,7 @@ export async function notificationRoutes(app: FastifyInstance) {
                     email_bounced: true,
                     email_bounced_at: new Date().toISOString(),
                   })
-                  .eq("id", (delivery as { subscriber_id: string }).subscriber_id);
+                  .eq("person_id", (delivery as { subscriber_id: string }).subscriber_id);
               }
             } else if (!isHardBounce) {
               // Soft bounce — schedule retry
@@ -130,13 +134,14 @@ export async function notificationRoutes(app: FastifyInstance) {
               .single();
 
             if (delivery) {
+              // subscriber_id is a person id — see the hard-bounce branch above.
               await supabase
                 .from("user_account")
                 .update({
                   email_complained: true,
                   email_complained_at: new Date().toISOString(),
                 })
-                .eq("id", (delivery as { subscriber_id: string }).subscriber_id);
+                .eq("person_id", (delivery as { subscriber_id: string }).subscriber_id);
             }
             break;
           }
@@ -226,7 +231,7 @@ export async function notificationRoutes(app: FastifyInstance) {
           `
           id, status, postmark_message_id, sent_at, delivered_at, opened_at,
           error_message, retry_count, created_at,
-          user_account:subscriber_id (id, email, display_name)
+          person:subscriber_id (id, name, email)
         `,
         )
         .eq("event_id", eventId)
