@@ -178,10 +178,7 @@ export function canSelectMinutesDocument(actor: Actor, row: { status: MinutesSta
   return resolvePermission(actor, "R4");
 }
 
-export function assertCanSelectMinutesDocument(
-  actor: Actor,
-  row: { status: MinutesStatus },
-): void {
+export function assertCanSelectMinutesDocument(actor: Actor, row: { status: MinutesStatus }): void {
   if (canSelectMinutesDocument(actor, row)) return;
   throw new AuthorizationError(
     `These minutes are still ${row.status}. Reading minutes before they are adopted ` +
@@ -245,10 +242,7 @@ export function canSelectExhibit(actor: Actor, row: { visibility: ExhibitVisibil
   }
 }
 
-export function assertCanSelectExhibit(
-  actor: Actor,
-  row: { visibility: ExhibitVisibility },
-): void {
+export function assertCanSelectExhibit(actor: Actor, row: { visibility: ExhibitVisibility }): void {
   if (canSelectExhibit(actor, row)) return;
   throw new AuthorizationError(
     `This attachment is marked ${row.visibility}. Reading it requires ` +
@@ -421,10 +415,7 @@ export function assertCanInsertUserAccount(actor: Actor): void {
  * onboarding reused one uuid for the person, the account and the auth user.
  * Restored against the account id, which is what "your own row" actually means.
  */
-export function assertCanUpdateUserAccount(
-  actor: Actor,
-  subject: { userAccountId: string },
-): void {
+export function assertCanUpdateUserAccount(actor: Actor, subject: { userAccountId: string }): void {
   if (isAdmin(actor)) return;
   if (actor.userAccountId !== null && subject.userAccountId === actor.userAccountId) return;
   throw new AuthorizationError(

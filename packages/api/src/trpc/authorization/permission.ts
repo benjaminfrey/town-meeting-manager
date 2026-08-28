@@ -150,11 +150,7 @@ export function toNameKeyedMatrix(matrix: PermissionMatrixByCode): PermissionsMa
  * sys_admin no, then the board override for that board if it names the code,
  * then the global grant.
  */
-export function resolvePermission(
-  actor: Actor,
-  code: PermissionCode,
-  boardId?: string,
-): boolean {
+export function resolvePermission(actor: Actor, code: PermissionCode, boardId?: string): boolean {
   // The public portal. No account, so no permission — stated as its own
   // branch so that it can never become "an actor with an empty matrix".
   if (actor.kind === "anonymous") return false;

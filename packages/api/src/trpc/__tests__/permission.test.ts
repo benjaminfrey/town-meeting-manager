@@ -44,7 +44,11 @@ import * as rules from "../authorization/rules.js";
  * permission under test, a staff member without it, a sys_admin and a board
  * member.
  */
-async function cast(db: TestDb, town: TownFixture, code: Parameters<typeof seedActor>[2]["global"]) {
+async function cast(
+  db: TestDb,
+  town: TownFixture,
+  code: Parameters<typeof seedActor>[2]["global"],
+) {
   const [admin, granted, denied, sysAdmin, boardMember] = await Promise.all([
     seedActor(db, town, { role: "admin" }),
     seedActor(db, town, { role: "staff", global: code }),
@@ -193,9 +197,7 @@ describe("the 21 authorization rules", () => {
 
       for (const status of ["approved", "published"] as const) {
         expect(rules.canSelectMinutesDocument(denied.actor, { status })).toBe(true);
-        expect(() =>
-          rules.assertCanSelectMinutesDocument(denied.actor, { status }),
-        ).not.toThrow();
+        expect(() => rules.assertCanSelectMinutesDocument(denied.actor, { status })).not.toThrow();
       }
 
       // The list form must filter, not throw — a clerk without R4 listing a
@@ -206,7 +208,10 @@ describe("the 21 authorization rules", () => {
         { id: "a", status: "approved" as const },
         { id: "p", status: "published" as const },
       ];
-      expect(rules.visibleMinutesDocuments(denied.actor, rows).map((r) => r.id)).toEqual(["a", "p"]);
+      expect(rules.visibleMinutesDocuments(denied.actor, rows).map((r) => r.id)).toEqual([
+        "a",
+        "p",
+      ]);
       expect(rules.visibleMinutesDocuments(granted.actor, rows).map((r) => r.id)).toEqual([
         "d",
         "r",
@@ -373,9 +378,9 @@ describe("the 21 authorization rules", () => {
       const { granted, denied } = await cast(db, town, ["C2"]);
       const stranger = await seedActor(db, town, { role: "staff", global: [] });
 
-      expect(
-        rules.canSelectSubscriberPreference(denied.actor, { personId: denied.personId }),
-      ).toBe(true);
+      expect(rules.canSelectSubscriberPreference(denied.actor, { personId: denied.personId })).toBe(
+        true,
+      );
       expect(
         rules.canSelectSubscriberPreference(denied.actor, { personId: stranger.personId }),
       ).toBe(false);
@@ -429,9 +434,12 @@ describe("the 21 authorization rules", () => {
       expect(() =>
         rules.assertCanInsertMeeting(globalA1.actor, { boardId: town.boardId }),
       ).not.toThrow();
-      await expectRefusal(() => rules.assertCanInsertMeeting(none.actor, { boardId: town.boardId }), {
-        code: "A1",
-      });
+      await expectRefusal(
+        () => rules.assertCanInsertMeeting(none.actor, { boardId: town.boardId }),
+        {
+          code: "A1",
+        },
+      );
 
       // The grant is scoped: allowed on its own board, refused on the other.
       expect(() =>
@@ -482,7 +490,9 @@ describe("the 21 authorization rules", () => {
         rules.assertCanUpdateMeeting(buildsAgendas.actor, { boardId: town.boardId }),
       ).not.toThrow();
 
-      await expectRefusal(() => rules.assertCanUpdateMeeting(none.actor, { boardId: town.boardId }));
+      await expectRefusal(() =>
+        rules.assertCanUpdateMeeting(none.actor, { boardId: town.boardId }),
+      );
       // Both grants are board-scoped, so neither reaches the other board.
       await expectRefusal(() =>
         rules.assertCanUpdateMeeting(runsMeetings.actor, { boardId: town.otherBoardId }),

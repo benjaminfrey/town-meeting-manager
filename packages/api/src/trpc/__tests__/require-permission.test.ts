@@ -20,7 +20,11 @@ import { toRows } from "../../db/rows.js";
 import { testDb, seedTown, seedActor, type TownFixture, type TestDb } from "./fixtures.js";
 import { withTenant } from "../../db/with-tenant.js";
 import { loadActor } from "../authorization/actor.js";
-import { toNameKeyedMatrix, resolvePermission, PERMISSION_CODES } from "../authorization/permission.js";
+import {
+  toNameKeyedMatrix,
+  resolvePermission,
+  PERMISSION_CODES,
+} from "../authorization/permission.js";
 import {
   router,
   protectedProcedure,
@@ -125,7 +129,9 @@ describe("requirePermission", () => {
         "edited",
       );
 
-      const err = await expectForbidden(() => createCaller(contextFor(db, town, denied)).editAgenda());
+      const err = await expectForbidden(() =>
+        createCaller(contextFor(db, town, denied)).editAgenda(),
+      );
       expect(err.code).toBe("FORBIDDEN");
       // The refusal has to be actionable: a clerk needs to know which
       // permission to ask for, and support needs to know which one to grant.
@@ -210,9 +216,7 @@ describe("requirePermission", () => {
   });
 
   it("serves a public procedure with no context at all", async () => {
-    await expect(
-      createCaller({ req: {} as never, res: {} as never }).ping(),
-    ).resolves.toBe("pong");
+    await expect(createCaller({ req: {} as never, res: {} as never }).ping()).resolves.toBe("pong");
   });
 });
 

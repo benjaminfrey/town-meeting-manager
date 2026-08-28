@@ -78,12 +78,14 @@ const translateAuthorizationErrors = t.middleware(async ({ next }) => {
     result = await next();
   } catch (err) {
     const refusal = findAuthorizationError(err);
-    if (refusal) throw new TRPCError({ code: "FORBIDDEN", message: refusal.message, cause: refusal });
+    if (refusal)
+      throw new TRPCError({ code: "FORBIDDEN", message: refusal.message, cause: refusal });
     throw err;
   }
   if (!result.ok) {
     const refusal = findAuthorizationError(result.error);
-    if (refusal) throw new TRPCError({ code: "FORBIDDEN", message: refusal.message, cause: refusal });
+    if (refusal)
+      throw new TRPCError({ code: "FORBIDDEN", message: refusal.message, cause: refusal });
   }
   return result;
 });
@@ -131,9 +133,7 @@ const requireTenant = t.middleware(async ({ ctx, next }) => {
   });
 });
 
-export const protectedProcedure = t.procedure
-  .use(translateAuthorizationErrors)
-  .use(requireTenant);
+export const protectedProcedure = t.procedure.use(translateAuthorizationErrors).use(requireTenant);
 
 export interface RequirePermissionOptions<TInput> {
   /**
