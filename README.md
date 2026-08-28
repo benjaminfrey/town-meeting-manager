@@ -172,6 +172,12 @@ Maine Municipal Association (MMA) as primary institutional channel. Pilot deploy
 
 ---
 
+## Running Tests
+
+`pnpm test` requires a reachable Postgres — `packages/api`'s integration test harness (`packages/api/src/test/db-harness.ts`) provisions and tears down a real database per test. Point it at one via `DATABASE_URL`, e.g. `DATABASE_URL=postgres://$USER@localhost:5432/postgres` for a local Homebrew install. CI provisions its own disposable `postgres:17` service container automatically (see `.github/workflows/ci.yml`) — nothing to configure there. Run `pnpm test` alone, never concurrently with other `turbo` tasks, to avoid spurious timeouts in unrelated files.
+
+---
+
 ## License
 
 TBD — open core model. Core will be open source; managed hosting and AI features are commercial.
