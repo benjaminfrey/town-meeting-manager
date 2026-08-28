@@ -104,7 +104,7 @@ async function getSubscribersForPersonIds(
  * column; membership links to a person, who may or may not have a
  * login).
  */
-async function getBoardSubscribers(
+export async function getBoardSubscribers(
   supabase: SupabaseClient,
   boardId: string,
   townId: string,
@@ -176,7 +176,7 @@ async function getSingleSubscriber(
   return row ? [row] : [];
 }
 
-interface SubscriberRow {
+export interface SubscriberRow {
   id: string;
   email: string;
   display_name: string | null;
@@ -473,9 +473,14 @@ export class NotificationService {
 
       case "user_invited":
       case "password_reset": {
-        const userId = payload.user_id as string | undefined;
-        if (!userId) return [];
-        return getSingleSubscriber(this.supabase, userId);
+        // payload.user_id is dead-code-era naming (nothing currently
+        // calls createNotificationEvent with these event types) — kept as
+        // the wire key since no caller exists to migrate, but it now
+        // resolves to a person id, not a user_account id. See
+        // getSingleSubscriber below.
+        const personId = payload.user_id as string | undefined;
+        if (!personId) return [];
+        return getSingleSubscriber(this.supabase, personId);
       }
 
       default:

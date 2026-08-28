@@ -29,10 +29,9 @@
 --     its own enums (notification_event_type / notification_event_status)
 --     that are never actually applied to any column, because the
 --     CREATE TABLE no-ops. Its indexes on this table apply harmlessly
---     (columns match) but never persist — the whole file's statements
---     run as one implicit multi-statement transaction and roll back
---     together when a later statement in the same file errors (see
---     notification_delivery below).
+--     (columns match) — whether they PERSIST past the file's abort (see
+--     notification_delivery below) depends on which tool applies the
+--     corpus; see "Builder divergence" below.
 --   dev db (database.ts, 2026-03-13): matches official exactly.
 --   → Canonical: official, unchanged. No migration needed for this table.
 --
@@ -48,12 +47,16 @@
 --     opened_at, retry_count, next_retry_at. Its own CREATE INDEX
 --     idx_notification_delivery_postmark references postmark_message_id,
 --     which does not exist on the official table the no-op left in
---     place — this statement fails with 42703 (undefined_column),
---     which aborts and rolls back the rest of THIS FILE (the tail:
+--     place — this statement fails with 42703 (undefined_column), which
+--     aborts the file. The tail after that point (the
 --     subscriber_notification_preference block, the four
 --     user_account.email_bounced* columns, and all 8 RLS policies in
---     this file never get created on a fresh build — see the tolerated
---     failure entry in packages/api/src/test/db-harness.ts).
+--     this file) never runs, on EITHER builder — see the tolerated
+--     failure entry in packages/api/src/test/db-harness.ts. Whether the
+--     statements BEFORE the abort persist is builder-dependent — see
+--     "Builder divergence" below; it does not matter for this table
+--     (none of its pre-abort statements are ones this migration needs
+--     to guard against — no CREATE POLICY runs before the abort).
 --   dev db (database.ts, 2026-03-13): a HYBRID — the official base
 --     (town_id NOT NULL, external_id, notification_status enum,
 --     subscriber_id → person) PLUS the ported tracking columns bolted
@@ -90,6 +93,34 @@
 --     NOT NULL. Never applied to a fresh build.
 --   dev db (database.ts, 2026-03-13): matches official exactly.
 --   → Canonical: official, unchanged. No migration needed for this table.
+--
+-- ─── Builder divergence — CORRECTED after code review ────────────────
+--
+-- An earlier draft of this comment claimed 20260826000001's statements
+-- "run as one implicit multi-statement transaction and roll back
+-- together" on abort. That is true ONLY of packages/api/src/test/
+-- db-harness.ts's builder (postgres.js's sql.file() sends a whole file
+-- as one simple-query message, which Postgres wraps in an implicit
+-- transaction). It is FALSE of scripts/build-db-from-repo.sh, the
+-- Stage 0 gate, which runs `psql -f <file>` with no explicit
+-- transaction wrapper — psql executes each top-level statement in its
+-- own autocommitted transaction. Under that builder, everything BEFORE
+-- the postmark_message_id failure in 20260826000001 commits and
+-- persists: three orphan enum types with no column ever using them
+-- (notification_event_type, notification_event_status,
+-- notification_delivery_status — notification_channel is a fourth type
+-- the file also declares, but that name collides with the official
+-- enum and is caught by the file's own `EXCEPTION WHEN duplicate_object`
+-- guard, so it is not orphaned), plus two indexes duplicating official
+-- ones under different names (idx_notification_delivery_event,
+-- idx_notification_event_town_created, etc.) — harmless redundancy, not
+-- addressed here. The three orphan enum TYPES are addressed below,
+-- because unlike redundant indexes they would make `drizzle-kit pull`
+-- (Task 4) generate different output depending on which builder most
+-- recently touched the database it pulls from — a real corpus-shape
+-- divergence, not a cosmetic one. Which database Task 4 actually pulls
+-- from is Task 4's decision; this migration just makes the two builders
+-- converge on the same enum inventory regardless.
 --
 -- ─── Decisions carried forward from the task brief ───────────────────
 --
@@ -129,34 +160,65 @@
 -- verified source of truth for this table) doesn't have it either, so
 -- there was never a real column to reconcile toward, unlike
 -- notification_delivery's tracking columns above.
+--
+-- user_account.email_bounced / email_bounced_at / email_complained /
+-- email_complained_at (added by 20260826000001's own DO block, lines
+-- 146-153) are ALSO part of the never-reached tail — on every builder,
+-- these four columns never get created, because the DO block sits after
+-- the postmark_message_id abort. But notification-service.ts's
+-- subscriber-resolution path (getSubscribersForPersonIds,
+-- getAdminSubscribers, retryDelivery, both Postmark webhook handlers,
+-- and the /admin/notifications/bounces endpoints) all read or write
+-- these four columns via an embedded `user_account(email_bounced,
+-- email_complained)` select. Against a database missing them, PostgREST
+-- returns 42703, supabase-js surfaces it as `{data: null, error}`, and
+-- the current code's `?? []` fallbacks silently swallow it — the exact
+-- same failure shape as board_member.user_account_id, one join further
+-- out. user_account is not one of this task's four target tables, but
+-- this migration now depends on these four columns existing, so they
+-- are bolted on below alongside notification_delivery's tracking
+-- columns, matching the dev db's verified hybrid shape exactly.
+-- Relocating these flags onto person (so an account-less person can be
+-- bounce-tracked too, not just defaulted to never-bounced) is the
+-- better long-term answer and is deliberately deferred — out of scope
+-- for this task, which only needs the columns to exist before Task 4
+-- pulls the schema.
 -- ============================================================
 
--- ─── Guard the 8 bare CREATE POLICY statements in the two ported files
---     against re-application to a database that already has them
---     (PostgreSQL has no CREATE POLICY IF NOT EXISTS, so a second
---     application — e.g. a database that once had docker/migrations/011
---     and 012 applied by hand per their own file headers — aborts with
---     42710, duplicate_object) ────────────────────────────────────────
+-- ─── Guard the ported files' bare CREATE POLICY statements against
+--     re-application to a database that already has them (PostgreSQL
+--     has no CREATE POLICY IF NOT EXISTS, so a second application —
+--     e.g. a database that once had docker/migrations/011 and 012
+--     applied by hand per their own file headers — aborts with 42710,
+--     duplicate_object) ────────────────────────────────────────────
 --
--- 5 policies from 20260826000001 (lines 163, 173, 184, 195, 213) never
--- get created on a FRESH build (the file aborts earlier at the
--- postmark_message_id index, rolling back its own CREATE POLICY
--- statements with it — see above) and are superseded by the correct,
--- person-based RLS already shipped in 20260308000035_rls_notification.sql.
--- They are dropped defensively and NOT recreated — recreating them would
--- reintroduce user_account-keyed policies that contradict the
--- person-based decision this migration exists to enforce.
-DROP POLICY IF EXISTS town_notification_config_select ON town_notification_config;
-DROP POLICY IF EXISTS town_notification_config_update ON town_notification_config;
-DROP POLICY IF EXISTS notification_event_select ON notification_event;
-DROP POLICY IF EXISTS notification_delivery_select ON notification_delivery;
+-- CORRECTED after code review: an earlier draft of this migration also
+-- dropped town_notification_config_select, town_notification_config_update,
+-- notification_event_select, and notification_delivery_select — believing
+-- all 5 names in 20260826000001's RLS block belonged only to that file.
+-- FOUR of those five names are ALSO used by the OFFICIAL, person-based RLS
+-- in 20260308000035_rls_notification.sql (lines 92, 106, 19, 37
+-- respectively). DROP POLICY matches by name, not by origin file — on
+-- every builder, 20260826000001 aborts (see "Builder divergence" above)
+-- before it ever reaches its own copies of these 4 names, so the ONLY
+-- policies ever bearing them are the official ones, and the earlier draft
+-- deleted the official, person-based RLS that implements this task's own
+-- decision (notification_delivery_select's predicate is literally
+-- `subscriber_id = get_current_person_id()`) while claiming to enforce it.
+-- Only subscriber_pref_all is a name unique to the ported file — nothing
+-- official uses that name (official's three subscriber_notification_
+-- preference policies are subscriber_pref_select/_insert/_update) — so
+-- only that one is dropped, and it is not recreated (it never gets
+-- created by 20260826000001 on any builder either, per "Builder
+-- divergence" above, so there is nothing to restore).
 DROP POLICY IF EXISTS subscriber_pref_all ON subscriber_notification_preference;
 
--- 3 policies from 20260826000002 (lines 39, 47, 55) DO succeed on a
--- fresh build (that file has no equivalent abort) and are correct as
--- written — the invitation table is untouched by the person/user_account
--- decision. These are dropped and recreated identically, purely so this
--- migration (and hence the whole corpus) is idempotent if ever
+-- The invitation table's 3 policies (20260826000002 lines 39, 47, 55) DO
+-- succeed on every builder (that file has no equivalent abort) and are
+-- correct as written — the invitation table is untouched by the
+-- person/user_account decision, and none of their 3 names collide with
+-- anything official. These are dropped and recreated identically, purely
+-- so this migration (and hence the whole corpus) is idempotent if ever
 -- re-applied to a database that already ran 20260826000002.
 DROP POLICY IF EXISTS "town_members_see_invitations" ON invitation;
 DROP POLICY IF EXISTS "town_members_insert_invitations" ON invitation;
@@ -205,8 +267,38 @@ CREATE INDEX IF NOT EXISTS idx_notification_delivery_retry
   ON notification_delivery (next_retry_at)
   WHERE status IN ('sent', 'failed') AND retry_count < 3 AND next_retry_at IS NOT NULL;
 
+-- ─── user_account: bolt on the bounce/complaint tracking columns that
+--     never actually made it in — see "Additional discrepancies" above.
+--     Not one of this task's four target tables, but notification-
+--     service.ts's canonical (person-based) subscriber path now depends
+--     on these existing. ──────────────────────────────────────────────
+
+ALTER TABLE user_account
+  ADD COLUMN IF NOT EXISTS email_bounced BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS email_bounced_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS email_complained BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS email_complained_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN user_account.email_bounced IS 'Set true on a hard Postmark bounce — skip future sends to this account. Deliberately still account-scoped, not person-scoped: an account-less person has nothing that can bounce yet (see header).';
+COMMENT ON COLUMN user_account.email_complained IS 'Set true on a Postmark spam complaint — skip future sends to this account.';
+
 -- ─── notification_status: add the two values existing (unchanged) call
 --     sites already write — see "Additional discrepancies" above ─────
 
 ALTER TYPE notification_status ADD VALUE IF NOT EXISTS 'completed';
 ALTER TYPE notification_status ADD VALUE IF NOT EXISTS 'complained';
+
+-- ─── Defensive cleanup: the 3 enum types 20260826000001 creates and
+--     never uses (see "Builder divergence" above). No-op under
+--     db-harness.ts (postgres.js rolls the whole file back, so they
+--     never exist there); real cleanup under scripts/build-db-from-
+--     repo.sh's psql/autocommit builder, where they persist as orphans.
+--     Safe to drop unconditionally — nothing in the corpus or the
+--     application code references these three type names; only
+--     notification_channel (a real, shared, official type) survives
+--     the ported file's own EXCEPTION WHEN duplicate_object guard, and
+--     that one is untouched here. ──────────────────────────────────
+
+DROP TYPE IF EXISTS notification_event_type;
+DROP TYPE IF EXISTS notification_event_status;
+DROP TYPE IF EXISTS notification_delivery_status;

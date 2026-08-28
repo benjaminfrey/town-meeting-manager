@@ -172,7 +172,36 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
       // scripts/build-db-from-repo.sh's header documents as missing on
       // plain Postgres. This is temporary scaffolding with a named
       // removal point, not a permanent dependency of this harness.
-      await sql.file(AUTH_SHIM_PATH);
+      //
+      // auth-shim.sql's own CREATE ROLE guards
+      // (`DO $$ BEGIN CREATE ROLE x; EXCEPTION WHEN duplicate_object ...`)
+      // are not safe under real concurrency: two withTestDb() calls
+      // racing this statement can both pass the existence check and
+      // collide on pg_authid's physical unique index, surfacing as a
+      // raw `23505 duplicate key value violates unique constraint
+      // "pg_authid_rolname_index"` instead of the `42710 duplicate_object`
+      // the guard catches — roles are cluster-scoped, so every
+      // concurrently-running test file's withTestDb() call contends on
+      // the same four role names. An advisory lock serializes this one
+      // step (not database creation or migrations, which don't touch
+      // cluster-scoped state) across every concurrent caller on this
+      // Postgres instance — deliberately acquired on `admin`, not `sql`:
+      // Postgres advisory locks are scoped PER DATABASE, not cluster-wide,
+      // and `sql` connects to this test's own uniquely-named database, so
+      // two concurrent withTestDb() calls locking on their own `sql`
+      // connections would never actually contend (verified this the hard
+      // way — an earlier version of this fix used `sql` and measurably
+      // did nothing, still failing 4/4 full-suite runs). `admin` connects
+      // to the one shared maintenance database every caller uses, so
+      // locks taken there really do serialize across the whole process
+      // pool. Not a fix to auth-shim.sql itself (out of scope — Task 5
+      // deletes it), just to this harness's own concurrent usage of it.
+      await admin`SELECT pg_advisory_lock(727100001)`;
+      try {
+        await sql.file(AUTH_SHIM_PATH);
+      } finally {
+        await admin`SELECT pg_advisory_unlock(727100001)`;
+      }
 
       await applyMigrations(sql);
 
