@@ -222,7 +222,11 @@ export function MemberTransitionDialog({
           role: "staff",
           gov_title: staffResult.gov_title || null,
           permissions: staffResult.permissions,
-          auth_user_id: "",
+          // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
+          // foreign key to `better_auth."user"(id)`, so an empty string is
+          // rejected with SQLSTATE 23503 and the whole insert fails. The
+          // column is nullable by design: a `user_account` exists before any
+          // login does, and invitation acceptance is what fills it in.
           created_at: now,
         });
         if (error) throw error;
