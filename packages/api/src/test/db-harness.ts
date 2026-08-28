@@ -18,10 +18,18 @@
  * will correctly fail.
  *
  * That is deliberate, not an oversight: an owner connection is what schema
- * tests need. It is also why an owner connection proves NOTHING about
- * tenancy isolation. Task B3's gate connects as `tmm_app` (via SET ROLE, or
- * its own client) precisely because a test run as the owner would pass with
- * RLS switched off entirely.
+ * tests need. It is also why THIS connection, as handed back, proves nothing
+ * about tenancy isolation — a test run on it would pass with RLS switched off
+ * entirely. Task B3's gate therefore uses `connectAsAppRole()` below for its
+ * tenancy assertions.
+ *
+ * What it does NOT mean is that owner-side behaviour is untestable. The gate's
+ * FORCE test creates a throwaway `NOSUPERUSER NOLOGIN` role on this
+ * connection, hands it ownership of every table, and reads through `SET ROLE`
+ * — a superuser's SET ROLE to a non-superuser drops the RLS bypass, giving a
+ * genuine non-superuser table owner, which is production's topology
+ * (`tmm_owner`). See `db/__tests__/tenant-isolation.test.ts`. Roles created
+ * that way are cluster-scoped; `global-teardown.ts` sweeps any the test leaks.
  *
  * ─── Where the test database lives, and why (Task A2, Step 3) ─────────────
  *

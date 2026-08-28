@@ -66,6 +66,25 @@ export async function teardown(): Promise<void> {
     // forced cleanup would be exactly the wrong response to the legitimate
     // case where a non-test database still uses it. See the header.
     await admin.unsafe(`DROP ROLE IF EXISTS ${CLUSTER_ROLES.join(", ")}`);
+
+    // Safety net for the isolation gate's FORCE test (Task B3), which creates
+    // a uniquely-named `tmm_force_probe_*` role, takes ownership of the test
+    // database's tables with it, and drops it again in its own `finally`. That
+    // finally covers a failing assertion; it does not cover the process being
+    // killed. These roles are cluster-scoped and would otherwise accumulate,
+    // which is the leak this file exists to prevent.
+    //
+    // Safe to sweep unconditionally: unlike `tmm_app`, nothing outside that
+    // test ever creates this prefix, and by the time teardown runs every
+    // database that could have referenced one has been dropped. Roles still
+    // holding privileges somewhere make DROP ROLE fail, which lands in the
+    // warning below rather than deleting anything unexpected.
+    const leaked = await admin<{ rolname: string }[]>`
+      SELECT rolname FROM pg_roles WHERE rolname LIKE 'tmm\\_force\\_probe\\_%'
+    `;
+    for (const role of leaked) {
+      await admin.unsafe(`DROP ROLE IF EXISTS "${role.rolname}"`);
+    }
   } catch (err) {
     // Deliberately swallowed, not rethrown: this is cleanup for state that
     // db-harness.ts's own withTestDb() only ever creates AFTER a

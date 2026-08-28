@@ -16,6 +16,14 @@
  * Every list below is DERIVED from the live catalog, never hand-copied — a
  * table, function or policy added later is picked up automatically instead of
  * being quietly exempt.
+ *
+ * The relation filters read `relkind IN ('r', 'p')`, not `= 'r'`. A partitioned
+ * table is `'p'`, and one filtered out here would be exempt from every
+ * invariant in this file with nothing saying so — `audit_log` and
+ * `notification_delivery` are the two most likely to be partitioned by date
+ * later. Views and materialized views are a separate hazard (a view runs as its
+ * owner unless `security_invoker`, and RLS never applies to a matview at all);
+ * they are asserted absent by the isolation gate, `tenant-isolation.test.ts`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -69,7 +77,7 @@ describe("baseline schema invariants", () => {
         SELECT c.relname, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
         ORDER BY c.relname
       `;
 
@@ -95,7 +103,7 @@ describe("baseline schema invariants", () => {
         SELECT c.relname
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
         ORDER BY c.relname
       `;
       const policies = await sql<
@@ -235,7 +243,7 @@ describe("baseline schema invariants", () => {
                  WHERE has_table_privilege('tmm_app', c.oid, p)) AS privs
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
         ORDER BY c.relname
       `;
       // Exactly DML. No TRUNCATE (bypasses DELETE policies entirely), no

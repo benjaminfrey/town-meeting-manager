@@ -31,26 +31,36 @@
  *    exactly what a dropped policy produces. So every table is also asserted
  *    to return town A's own row to town A. Both halves, always.
  *
- * ─── One thing this gate structurally cannot see, stated plainly ─────────
+ * ─── FORCE ROW LEVEL SECURITY, and why it needs its own connection ───────
  *
- * `FORCE ROW LEVEL SECURITY` constrains the *table owner*. `tmm_app` is not
- * the owner, so removing FORCE from a table is completely invisible to every
- * read, write and delete assertion below — verified by mutation: with
- * `town` set to NO FORCE, the `tmm_app` connection still returned 0 rows with
- * no context and 0 rows in the wrong tenant's context. FORCE is what stops the
- * roles that run migrations and the seed — and any connection string that
- * accidentally names the owner — from seeing everything. It cannot be proven
- * behaviourally from a non-owner connection, and it cannot be proven from the
- * owner connection either, because that owner is a superuser and bypasses RLS
- * regardless of FORCE.
+ * `FORCE ROW LEVEL SECURITY` constrains the *table owner*, and `tmm_app` is
+ * not the owner — so removing FORCE is invisible to every assertion that runs
+ * on the `tmm_app` connection. Measured, not assumed: with `town` set to
+ * NO FORCE, `tmm_app` still returned 0 rows with no context and 0 rows in the
+ * wrong tenant's context, exactly as with FORCE on.
  *
- * So it is asserted from the catalog, in the last test in this file, and that
- * assertion is load-bearing rather than redundant with
- * `schema-invariants.test.ts`: the gate must not depend on another file's test
- * to mean what it claims to mean.
+ * That is a property about a role this file would otherwise never exercise —
+ * and it is the role that runs migrations, runs the seed, and is where a
+ * mistyped connection string lands. Production's owner is `tmm_owner`, a
+ * NON-superuser; the owner here is a superuser, which bypasses RLS regardless
+ * of FORCE and so cannot show anything.
+ *
+ * The last test in this file closes that by *constructing* the production
+ * topology: it creates a throwaway `NOSUPERUSER NOLOGIN` role, hands it
+ * ownership of all 27 tables, and reads through `SET ROLE`. A superuser's
+ * `SET ROLE` to a non-superuser drops the RLS bypass, so the result is a
+ * genuine non-superuser table owner. With FORCE on it sees zero rows with no
+ * context and only its own tenant's rows with one; with FORCE off it sees
+ * everything. Both directions verified by mutation. No login, no password, no
+ * pg_hba change, and no CI difference — CI's `postgres` is a superuser too.
+ *
+ * A catalog assertion is kept alongside it, because the behavioural test can
+ * only observe FORCE where a policy also exists: on a table with RLS enabled
+ * and no policy, the owner is denied everything with or without FORCE.
  */
 
 import { describe, it, expect } from "vitest";
+import { randomBytes } from "node:crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import type postgres from "postgres";
@@ -221,9 +231,15 @@ async function seedTown(app: postgres.Sql, prefix: string, label: string): Promi
 }
 
 /**
- * The tables under test, taken from the live catalog.
+ * Every relation in `public` that RLS can protect, taken from the live
+ * catalog: ordinary tables (`r`) AND partitioned tables (`p`).
  *
- * Two lists, not one: every table in `public`, and the subset with
+ * `p` is not hypothetical bookkeeping. A partitioned table filtered out by a
+ * `relkind = 'r'` predicate would be exempt from every assertion in this file
+ * without anything saying so — and `audit_log` and `notification_delivery` are
+ * the two tables in this schema most likely to be partitioned by date later.
+ *
+ * Two lists are derived, not one: all such relations, and the subset with
  * `relrowsecurity`. They must be equal. Deriving only from `relrowsecurity`
  * would mean an `ALTER TABLE ... DISABLE ROW LEVEL SECURITY` quietly removes
  * that table from the gate instead of failing it — the precise silent
@@ -234,12 +250,49 @@ async function rlsEnabledTables(owner: postgres.Sql): Promise<string[]> {
     SELECT c.relname, c.relrowsecurity AS enabled
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'r'
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
     ORDER BY c.relname
   `;
   const notEnabled = rows.filter((r) => !r.enabled).map((r) => r.relname);
   expect(notEnabled, "tables in public with row-level security disabled").toEqual([]);
   return rows.map((r) => r.relname);
+}
+
+/**
+ * Refuse to run against a schema containing a relation that can hand a
+ * tenant's rows to another tenant without any policy being involved.
+ *
+ * A view runs its query as the view's OWNER unless it is declared
+ * `security_invoker = true`, and the owner is not `tmm_app` — so a plain view
+ * over `minutes_document` would return every town's rows to every town, obey
+ * no policy, and be invisible to every other assertion in this file because it
+ * is not a table. A materialized view is worse: RLS does not apply to it at
+ * all and there is no `security_invoker` option to fix that, so its contents
+ * are a snapshot of all tenants' data with no tenancy check available.
+ *
+ * There are zero of either today. This asserts that stays true, or that a view
+ * added later is `security_invoker`.
+ */
+async function assertNoRlsBypassingRelations(owner: postgres.Sql): Promise<void> {
+  const rows = await owner<{ relname: string; kind: string; opts: string | null }[]>`
+    SELECT c.relname, c.relkind AS kind, array_to_string(c.reloptions, ',') AS opts
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm')
+    ORDER BY c.relname
+  `;
+
+  expect(
+    rows.filter((r) => r.kind === "m").map((r) => r.relname),
+    "materialized views in public — RLS does not apply to them at all, so " +
+      "their contents are every tenant's data with no tenancy check available",
+  ).toEqual([]);
+
+  expect(
+    rows.filter((r) => r.kind === "v" && !/security_invoker=(true|on)/i.test(r.opts ?? "")),
+    "views in public without security_invoker=true — these run as the view " +
+      "owner and return every tenant's rows regardless of policy",
+  ).toEqual([]);
 }
 
 /**
@@ -466,6 +519,31 @@ describe("tenant isolation gate", () => {
           survivors.rows.filter((r) => r.present !== 1).map((r) => r.table),
           "town B rows that did not survive town A's cross-tenant writes",
         ).toEqual([]);
+
+        // The five shared `permission_template` system defaults are the one
+        // row-set no tenant owns, and the sweep above cannot reach them (it
+        // works by id, and those ids belong to neither town). They are
+        // readable by everyone through a `FOR SELECT` policy, so nothing grants
+        // a write path to them — but "no policy grants it" is a claim worth
+        // testing rather than reasoning about, because adding `FOR ALL` to that
+        // second policy would hand every town write access to every town's
+        // reference data and break no other assertion in this file.
+        const shared = await withTenant(db, { townId: a.town }, async (tx) => {
+          const upd = await tx.execute(
+            sql`UPDATE permission_template SET name = 'SEIZED' WHERE town_id IS NULL`,
+          );
+          const del = await tx.execute(sql`DELETE FROM permission_template WHERE town_id IS NULL`);
+          return {
+            updated: (upd as unknown as { count: number }).count,
+            deleted: (del as unknown as { count: number }).count,
+          };
+        });
+        expect(shared.updated, "town A rewrote the shared system-default templates").toBe(0);
+        expect(shared.deleted, "town A deleted the shared system-default templates").toBe(0);
+        const [stillThere] = await app<CountRow[]>`
+          SELECT count(*)::int AS n FROM permission_template
+          WHERE is_system_default = true AND town_id IS NULL AND name <> 'SEIZED'`;
+        expect(stillThere!.n).toBe(5);
       } finally {
         await app.end();
       }
@@ -574,6 +652,34 @@ describe("tenant isolation gate", () => {
           return rows[0]!.n;
         });
         expect(inB, "town B gained a row from town A's rejected INSERTs").toBe(4);
+
+        // TRUNCATE is the one DML-ish operation RLS cannot restrict at all: it
+        // takes no WHERE clause and consults no policy, so a successful
+        // TRUNCATE removes every tenant's rows regardless of how correct the
+        // tenancy model is. The only thing standing in its way is the absence
+        // of the TRUNCATE grant — Task B2 granted `tmm_app` exactly
+        // SELECT/INSERT/UPDATE/DELETE for this reason. That absence is asserted
+        // from the catalog in schema-invariants.test.ts; asserted here as
+        // behaviour, because this gate must not depend on another file's test
+        // to mean what it claims to mean.
+        let truncate: { code?: string; message: string };
+        try {
+          await withTenant(db, { townId: a.town }, (tx) => tx.execute(sql`TRUNCATE board`));
+          truncate = { message: "SUCCEEDED — every town's boards were removed" };
+        } catch (err) {
+          truncate = unwrapDriverError(err);
+        }
+        expect(truncate.code, `TRUNCATE as tmm_app: ${truncate.message}`).toBe("42501");
+        expect(truncate.message).toMatch(/permission denied/i);
+
+        // And it really did not happen.
+        const boardsInB = await withTenant(db, { townId: b.town }, async (tx) => {
+          const rows = (await tx.execute(
+            sql`SELECT count(*)::int AS n FROM board`,
+          )) as unknown as CountRow[];
+          return rows[0]!.n;
+        });
+        expect(boardsInB, "town B's board did not survive town A's TRUNCATE").toBe(1);
       } finally {
         await app.end();
       }
@@ -651,23 +757,138 @@ describe("tenant isolation gate", () => {
     );
   });
 
-  it("keeps FORCE ROW LEVEL SECURITY on every table — the one property this gate cannot observe", async () => {
+  it("binds a NON-SUPERUSER TABLE OWNER too — FORCE ROW LEVEL SECURITY, behaviourally", async () => {
     await withTestDb(async (owner) => {
-      // Read this together with the note at the top of the file. FORCE binds
-      // the table OWNER, and every assertion above runs as `tmm_app`, which is
-      // not the owner — so removing FORCE changes none of their results
-      // (verified by mutation). The owner is the role that applies migrations
-      // and runs the seed, and it is the role a mistyped connection string
-      // lands on; without FORCE it reads and writes every town's rows.
+      // Production's table owner is `tmm_owner`, a non-superuser. Nothing else
+      // in this repository exercises that topology: the harness's owner is a
+      // superuser (as is CI's `postgres`), which bypasses RLS regardless of
+      // FORCE, and every other test here runs as `tmm_app`, which is not the
+      // owner at all and so cannot see FORCE either way.
       //
-      // Catalog state is therefore the only place this is observable, and this
-      // assertion is the reason `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`
-      // fails the gate rather than passing it quietly.
+      // So the topology is constructed. A throwaway NOSUPERUSER NOLOGIN role
+      // takes ownership of all 27 tables, and the assertions run through
+      // `SET LOCAL ROLE` — a superuser's SET ROLE to a non-superuser drops the
+      // RLS bypass, so what reads below is a genuine non-superuser table owner.
+      // NOLOGIN because nothing ever connects as it; there is no password and
+      // no pg_hba change.
+      //
+      // Cluster roles outlive the per-test database, and this project has
+      // leaked roles three times, so the role is uniquely named (databases are
+      // created in parallel), and REASSIGN/DROP OWNED/DROP ROLE run in a
+      // `finally`. global-teardown.ts sweeps any that a crash leaves behind.
+      const probeRole = `tmm_force_probe_${randomBytes(6).toString("hex")}`;
+      const app = await connectAsAppRole(owner);
+      const [self] = await owner<{ me: string }[]>`SELECT current_user AS me`;
+
+      try {
+        const a = await seedTown(app, PREFIX_A, "A");
+        const b = await seedTown(app, PREFIX_B, "B");
+
+        const tables = await rlsEnabledTables(owner);
+        assertSeedCoversEveryTable(tables);
+        await assertNoRlsBypassingRelations(owner);
+
+        await owner.unsafe(`CREATE ROLE "${probeRole}" NOSUPERUSER NOLOGIN`);
+        try {
+          // The baseline REVOKEs schema privileges from PUBLIC, so a table
+          // owner still needs USAGE on the schema to reach its own tables.
+          await owner.unsafe(`GRANT USAGE ON SCHEMA public TO "${probeRole}"`);
+          for (const table of tables) {
+            await owner.unsafe(`ALTER TABLE public."${table}" OWNER TO "${probeRole}"`);
+          }
+
+          const [transferred] = await owner<CountRow[]>`
+            SELECT count(*)::int AS n
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+              AND c.relowner = ${probeRole}::regrole`;
+          expect(
+            transferred!.n,
+            "ownership transfer did not cover every table, so the tables it " +
+              "missed are still owned by a superuser and prove nothing",
+          ).toBe(tables.length);
+
+          const observed = await owner.begin(async (tx) => {
+            await tx.unsafe(`SET LOCAL ROLE "${probeRole}"`);
+
+            const [who] = await tx<{ me: string; su: boolean }[]>`
+              SELECT current_user AS me, (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS su`;
+
+            // Phase 1 — no tenant context. This is what a migration script or
+            // a mistyped connection string looks like. With FORCE it sees
+            // nothing; without FORCE it sees every town.
+            const noContext: { table: string; rows: number }[] = [];
+            for (const table of tables) {
+              const [n] = await tx<CountRow[]>`
+                SELECT count(*)::int AS n FROM ${tx(table)}
+                WHERE id IN (${a[table]}, ${b[table]})`;
+              noContext.push({ table, rows: n!.n });
+            }
+
+            // Phase 2 — town A's context. Same connection, same role.
+            await tx`SELECT set_config('app.town_id', ${a.town}, true)`;
+            const inTownA: { table: string; own: number; foreign: number }[] = [];
+            for (const table of tables) {
+              const [own] = await tx<CountRow[]>`
+                SELECT count(*)::int AS n FROM ${tx(table)} WHERE id = ${a[table]}`;
+              const [foreign] = await tx<CountRow[]>`
+                SELECT count(*)::int AS n FROM ${tx(table)} WHERE id = ${b[table]}`;
+              inTownA.push({ table, own: own!.n, foreign: foreign!.n });
+            }
+
+            return { who: who!, noContext, inTownA };
+          });
+
+          // If either of these is wrong the rest is a test of superuser-ness.
+          expect(observed.who.me).toBe(probeRole);
+          expect(observed.who.su, "the probe role is a superuser and bypasses RLS").toBe(false);
+
+          expect(
+            observed.noContext.filter((r) => r.rows !== 0).map((r) => r.table),
+            "tables the NON-SUPERUSER OWNER could read with no tenant context — " +
+              "FORCE ROW LEVEL SECURITY is not binding the owner on these",
+          ).toEqual([]);
+
+          expect(
+            observed.inTownA.filter((r) => r.foreign !== 0).map((r) => r.table),
+            "tables leaking town B's row to a non-superuser owner in town A's context",
+          ).toEqual([]);
+
+          // Positive control, and the half that distinguishes "FORCE works"
+          // from "this role cannot read anything at all".
+          expect(
+            observed.inTownA.filter((r) => r.own !== 1).map((r) => r.table),
+            "tables the non-superuser owner could NOT read in its own tenant's " +
+              "context — the assertions above prove nothing if every read is empty",
+          ).toEqual([]);
+        } finally {
+          // Ownership first: DROP ROLE refuses while the role owns anything,
+          // and DROP OWNED BY would drop the tables themselves rather than the
+          // role's grants if ownership were still in place.
+          await owner.unsafe(`REASSIGN OWNED BY "${probeRole}" TO "${self!.me}"`);
+          await owner.unsafe(`DROP OWNED BY "${probeRole}"`);
+          await owner.unsafe(`DROP ROLE IF EXISTS "${probeRole}"`);
+        }
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("keeps FORCE ROW LEVEL SECURITY set on every table, per the catalog", async () => {
+    await withTestDb(async (owner) => {
+      // Kept alongside the behavioural test above rather than replaced by it,
+      // because the two see different things. The behavioural test can only
+      // observe FORCE where a policy also exists: on a table with RLS enabled
+      // and no policy, the owner is denied everything with or without FORCE,
+      // so a missing FORCE line would hide behind a missing policy. This reads
+      // the flag directly and does not care.
       const rows = await owner<{ relname: string; enabled: boolean; forced: boolean }[]>`
         SELECT c.relname, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
         ORDER BY c.relname
       `;
 
@@ -678,9 +899,11 @@ describe("tenant isolation gate", () => {
       ).toEqual([]);
       expect(
         rows.filter((r) => !r.forced).map((r) => r.relname),
-        "tables without FORCE ROW LEVEL SECURITY — the owner bypasses every " +
-          "policy on these and no behavioural test in this file can see it",
+        "tables without FORCE ROW LEVEL SECURITY — the table owner bypasses " +
+          "every policy on these",
       ).toEqual([]);
+
+      await assertNoRlsBypassingRelations(owner);
     });
   });
 });

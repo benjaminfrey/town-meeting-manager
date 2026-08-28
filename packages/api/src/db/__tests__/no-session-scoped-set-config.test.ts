@@ -53,6 +53,11 @@ describe("no-session-scoped-set-config", () => {
         // message inside with-tenant.ts itself, which is exactly how a rule
         // earns a blanket disable comment.
         "throw new Error('A malformed value would set app.town_id to something get_current_town_id() resolves to NULL');",
+        // Not this rule's business. A session-scoped statement_timeout is a
+        // legitimate pattern, and flagging it is how a rule earns a blanket
+        // disable comment that then hides the real thing.
+        "const q = `select set_config('statement_timeout', '5s', false)`;",
+        "const q = `SET statement_timeout = '5s'`;",
       ],
       invalid: [
         {
@@ -89,6 +94,29 @@ describe("no-session-scoped-set-config", () => {
           // Two calls in one literal are two findings, not one.
           code: "const q = `select set_config('app.town_id', $1, false), set_config('app.role', $2, false)`;",
           errors: [{ messageId: "sessionScoped" }, { messageId: "sessionScoped" }],
+        },
+        {
+          // Nested parentheses in the third argument. The first version of the
+          // rule used `\\(([^()]*)\\)` to grab the argument list and this went
+          // straight past it.
+          code: "const q = `select set_config('app.town_id', $1, (1=0))`;",
+          errors: [{ messageId: "sessionScoped" }],
+        },
+        {
+          // Split across a concatenation, so neither half matches on its own.
+          // Checked once, at the outermost `+`, from the flattened text.
+          code: 'const q = "select set_config(\'app.town_id\', $1, " + "false)";',
+          errors: [{ messageId: "sessionScoped" }],
+        },
+        {
+          code: "const q = 'SET app.town_id = ' + \"'x'\";",
+          errors: [{ messageId: "bareSet" }],
+        },
+        {
+          // A three-part concatenation is still one finding, not three: the
+          // operands are skipped and only the root is checked.
+          code: 'const q = "select set_config(\'app." + "town_id\', $1, " + "false)";',
+          errors: [{ messageId: "sessionScoped" }],
         },
       ],
     });
