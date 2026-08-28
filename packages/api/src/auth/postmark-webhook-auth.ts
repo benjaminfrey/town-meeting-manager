@@ -128,14 +128,14 @@ export function verifyPostmarkWebhookAuth(
     return { outcome: "rejected", reason: "Authorization header is not HTTP Basic" };
   }
 
-  let decoded: string;
-  try {
-    decoded = Buffer.from(authorizationHeader.slice(prefix.length).trim(), "base64").toString(
-      "utf8",
-    );
-  } catch {
-    return { outcome: "rejected", reason: "Authorization credentials are not valid base64" };
-  }
+  // No try/catch: `Buffer.from(x, "base64")` does not throw on malformed
+  // input — it ignores characters outside the alphabet and returns whatever it
+  // could decode. Wrapping it looked prudent and only added an unreachable
+  // branch. Garbage decodes to garbage, which then fails the colon check below
+  // or the credential comparison, which is the correct outcome either way.
+  const decoded = Buffer.from(authorizationHeader.slice(prefix.length).trim(), "base64").toString(
+    "utf8",
+  );
 
   // A password may itself contain ':' — RFC 7617 splits on the FIRST colon
   // only. `split(":")[1]` would silently truncate such a password and then

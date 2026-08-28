@@ -1,10 +1,11 @@
 /**
- * Stage 1, Task C1, step 7 — Better Auth on Fastify, and the tenant preHandler.
+ * Stage 1, Task C1, step 7 — Better Auth on Fastify, and the tenant gate.
  *
  * Two things live here:
  *
  *   1. Better Auth's own handler, mounted at `/api/auth/*`.
- *   2. A `preHandler` that turns a session into a tenant context, or refuses.
+ *   2. A hook that turns a session into a tenant context, or refuses.
+ *      (A `preHandler` in C1; an `onRequest` since Task G1 — see below.)
  *
  * ─── Why `/api/auth/*` and not a separate origin ──────────────────────────
  *
@@ -18,9 +19,9 @@
  * That is also why `@fastify/cors` is not extended to cover this route: the
  * point of same-origin is that no cross-origin path remains.
  *
- * ─── Why the preHandler does not open a transaction for the request ───────
+ * ─── Why the gate does not open a transaction for the request ────────────
  *
- * The brief asks for a preHandler that "runs every authenticated request
+ * The brief asks for a hook that "runs every authenticated request
  * inside `withTenant`". Taken literally — open a transaction in the hook and
  * hold it until the response — that would pin one pooled connection per
  * in-flight request and hold its locks for the whole handler, including
@@ -85,6 +86,28 @@
  * whose account is mid-migration get a 403 from a page that is supposed to
  * work for people with no account at all. No public route reads
  * `request.tenant`; a future one that wants to must ask for it explicitly.
+ *
+ * ─── Why the gate is an `onRequest` hook and not a `preHandler` ───────────
+ *
+ * G1 first put it in `preHandler`, which was already unbypassable by every
+ * shape anyone could find. `onRequest` closes two more, both cheap:
+ *
+ *   1. **Route-level `onRequest` runs before instance-level `preHandler`.** A
+ *      route could therefore have replied — with anything — before the gate
+ *      ever ran. No route in this codebase has such a hook, so this was
+ *      theoretical; but "theoretical until someone adds one" is the exact
+ *      shape of the omission this task exists to make impossible. Instance
+ *      `onRequest` precedes route `onRequest`, so there is now no hook a route
+ *      can install ahead of the gate.
+ *   2. **`onRequest` fires before body parsing.** An unauthenticated POST to
+ *      an unmarked route no longer has its body read and JSON-parsed before
+ *      being refused.
+ *
+ * Nothing is given up. Routing has happened by `onRequest`, so
+ * `request.routeOptions.config` is populated — that is what the exemption is
+ * read from — and `request.tenant` / `request.withTenant` are set before any
+ * route-level `preHandler`, which is what `plugins/auth.ts`'s `verifyAuth`
+ * needs. `__tests__/route-access.test.ts` pins both orderings.
  */
 
 import fp from "fastify-plugin";
@@ -194,8 +217,13 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
     });
   });
 
-  // ─── 2. The tenant preHandler ──────────────────────────────────────────
-  fastify.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
+  // ─── 2. The gate: authenticate, resolve a tenant, or refuse ────────────
+  //
+  // `onRequest`, deliberately — see this file's header. It is the earliest
+  // point at which the matched route is known, which makes it the earliest
+  // point the exemption can be read, which makes it the point with the fewest
+  // hooks able to run ahead of it.
+  fastify.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     // The ONLY exemption, and it comes from the matched route's own config —
     // never from the request's path. Better Auth's handler above carries it,
     // as do the public portal, the invitation-acceptance routes, the

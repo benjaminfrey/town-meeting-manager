@@ -1,45 +1,49 @@
 /**
- * Stage 1, Task G1 — the list of routes this API serves without a session.
+ * Stage 1, Task G1 — the list of routes THIS API serves without a session.
  *
  * `auth/__tests__/route-access.test.ts` proves the DEFAULT: an unmarked route
  * is refused. That makes forgetting safe. It does nothing about the opposite
  * mistake — someone marking a route public because a 401 was in their way,
  * which is how a considered exemption becomes an unconsidered one.
  *
- * So this enumerates every route the five route files register and asserts the
- * public ones are EXACTLY the list below. Marking one more route public fails
- * this test until the author adds it here, which is a diff a reviewer can see.
- * Adding an authenticated route needs no change: that direction is already
- * safe.
+ * So this enumerates the route table and asserts the public set is EXACTLY the
+ * list below. Marking one more route public fails this test until the author
+ * adds it here, which is a diff a reviewer can see. Adding an AUTHENTICATED
+ * route needs no change: that direction is already safe.
  *
- * Two public routes are registered outside these files and so are not in the
- * list: `GET /api/health` in `server.ts`, and Better Auth's own
- * `GET|POST /api/auth/*` in `auth/fastify.ts`. Both are marked with the same
- * mechanism and both carry a comment saying why.
+ * ─── Why this drives `buildServer()` and not a hand-built instance ────────
  *
- * No database and no network: `onRoute` fires at registration, and the
- * decorators the route files read at registration time are stubbed. The point
- * is the route table, not the handlers.
+ * The first version of this test imported the five route modules and
+ * registered them with the prefixes `server.ts` uses. Within those five it was
+ * sound — but it could not see a sixth route file, or a route declared inline
+ * in `buildServer` itself, and `/api/health` is exactly that. A `PUBLIC_ROUTE`
+ * marking in either place would have landed with zero test pressure, which is
+ * the failure this file exists to prevent, reproduced one level up. A test
+ * that mirrors the thing it is testing tests the mirror.
+ *
+ * `buildServer` therefore takes an optional `onRoute` observer (it builds its
+ * own instance, so there is no way to attach one from outside), and this reads
+ * the real table. Nothing is stubbed except the four environment variables the
+ * factory refuses to boot without: no connection is opened — `postgres.js`
+ * pools lazily and `createClient` does no I/O — no handler runs, and the
+ * instance is closed immediately, which clears the retry interval.
  */
 
-import { describe, it, expect } from "vitest";
-import Fastify from "fastify";
-import sensible from "@fastify/sensible";
-import { documentRoutes } from "../documents.js";
-import { minutesRoutes } from "../minutes.js";
-import { portalRoutes } from "../portal.js";
-import { notificationRoutes } from "../notifications.js";
-import { invitationRoutes } from "../invitations.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { buildServer } from "../../server.js";
 
 /**
- * Every route these files serve without a session.
+ * Every route this API serves without a session.
  *
  * Each line is a decision. The reasoning lives in each file's header — the
- * portal's review of all fifteen of its routes, invitations' three, and the
- * Postmark webhook's Basic-auth verification — and belongs there rather than
- * duplicated here, where it would drift.
+ * portal's review of all fifteen of its routes, invitations' three, the
+ * Postmark webhook's Basic-auth verification, health's probe rationale, and
+ * Better Auth's own endpoints being how a session starts at all — and belongs
+ * there rather than duplicated here, where it would drift.
  */
 const EXPECTED_PUBLIC_ROUTES = [
+  "GET /api/auth/*",
+  "GET /api/health",
   "GET /api/invitations/validate",
   "GET /api/portal/:townId/boards",
   "GET /api/portal/:townId/boards/:boardId",
@@ -57,6 +61,7 @@ const EXPECTED_PUBLIC_ROUTES = [
   "GET /api/portal/robots",
   "GET /api/portal/sitemap",
   "GET /api/unsubscribe",
+  "POST /api/auth/*",
   "POST /api/invitations/accept",
   "POST /api/webhooks/postmark",
 ];
@@ -66,83 +71,113 @@ interface CollectedRoute {
   readonly isPublic: boolean;
 }
 
-async function collectRoutes(): Promise<CollectedRoute[]> {
-  const server = Fastify({ logger: false });
-  await server.register(sensible);
+/** The environment `buildServer` refuses to boot without. */
+const REQUIRED_ENV = {
+  BETTER_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+  SUPABASE_URL: "http://localhost:54321",
+  SUPABASE_SERVICE_ROLE_KEY: "service-role-key-for-this-test-only",
+  DATABASE_URL: process.env.DATABASE_URL ?? "postgres://localhost:5432/postgres",
+} as const;
 
-  // The route files read these at REGISTRATION time — `const supabase =
-  // app.supabase`, and `[app.verifyAuth, requirePermission(...)]` in preHandler
-  // arrays — so they have to exist. Neither is called: no handler runs here.
-  server.decorate("supabase", {} as never);
-  server.decorate("verifyAuth", async () => {});
+const savedEnv: Record<string, string | undefined> = {};
+
+afterEach(() => {
+  for (const [key, previous] of Object.entries(savedEnv)) {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+});
+
+async function collectRoutes(): Promise<CollectedRoute[]> {
+  for (const [key, value] of Object.entries(REQUIRED_ENV)) {
+    savedEnv[key] = process.env[key];
+    process.env[key] = value;
+  }
 
   const collected: CollectedRoute[] = [];
-  server.addHook("onRoute", (route) => {
-    // Fastify expands a route with several methods into one `onRoute` call
-    // carrying an array. Flattening keeps `HEAD` (which Fastify adds beside
-    // every GET) from being silently dropped.
-    const methods = Array.isArray(route.method) ? route.method : [route.method];
-    for (const method of methods) {
-      collected.push({
-        signature: `${method} ${route.url}`,
-        isPublic: route.config?.auth === "public",
-      });
-    }
+  const app = await buildServer({
+    onRoute(route) {
+      // Fastify expands a multi-method route into one `onRoute` call carrying
+      // an array — Better Auth's handler is `["GET", "POST"]`. Flattening keeps
+      // one of those methods from being silently dropped.
+      const methods = Array.isArray(route.method) ? route.method : [route.method];
+      for (const method of methods) {
+        collected.push({
+          signature: `${method} ${route.url}`,
+          isPublic: route.config?.auth === "public",
+        });
+      }
+    },
   });
-
-  // Same prefixes as `server.ts`. A mismatch here would test a route table
-  // that does not exist.
-  await server.register(documentRoutes, { prefix: "/api" });
-  await server.register(minutesRoutes, { prefix: "/api" });
-  await server.register(portalRoutes, { prefix: "/api/portal" });
-  await server.register(notificationRoutes, { prefix: "/api" });
-  await server.register(invitationRoutes, { prefix: "/api" });
-  await server.ready();
-  await server.close();
+  // Closing clears the notification retry interval and the database pool.
+  await app.close();
 
   return collected;
 }
 
+/** `HEAD` is auto-registered beside each `GET` and inherits its config. */
+function withoutHeadTwins(routes: CollectedRoute[]): CollectedRoute[] {
+  return routes.filter((r) => !r.signature.startsWith("HEAD "));
+}
+
 describe("the public route inventory", () => {
   it("serves exactly these routes without a session, and no others", async () => {
-    const routes = await collectRoutes();
+    const routes = withoutHeadTwins(await collectRoutes());
 
-    // `HEAD` is auto-registered alongside each `GET` and inherits its config,
-    // so it would double every portal line without adding a decision.
     const publicSignatures = routes
-      .filter((r) => r.isPublic && !r.signature.startsWith("HEAD "))
+      .filter((r) => r.isPublic)
       .map((r) => r.signature)
       .sort();
 
     expect(publicSignatures).toEqual([...EXPECTED_PUBLIC_ROUTES].sort());
   });
 
-  it("finds the routes at all — a plugin that registered nothing would pass vacuously", async () => {
-    const routes = await collectRoutes();
-    // Guards the test above: if a refactor made `collectRoutes` return an
-    // empty list, its `toEqual` would fail loudly for public routes but the
-    // suite would still be asserting nothing about the authenticated ones.
+  it("reads the REAL route table, inline routes included", async () => {
+    const routes = withoutHeadTwins(await collectRoutes());
+    const signatures = routes.map((r) => r.signature);
+
+    // The specific gap this test was rewritten to close: `/api/health` and
+    // Better Auth's handler are declared inside `buildServer` and
+    // `auth/fastify.ts`, not in any of the five route files. A test that
+    // imported those five could not see either, so a `PUBLIC_ROUTE` marking
+    // there had no test pressure at all.
+    expect(signatures).toContain("GET /api/health");
+    expect(signatures).toContain("GET /api/auth/*");
+    expect(signatures).toContain("POST /api/auth/*");
+
+    // And a route from each of the five files, so a registration silently
+    // dropped from `server.ts` fails here rather than quietly shrinking the
+    // surface this test believes it covers.
+    for (const expected of [
+      "POST /api/meetings/:meetingId/agenda-packet", // documents.ts
+      "POST /api/meetings/:meetingId/minutes/approve", // minutes.ts
+      "GET /api/portal/resolve", // portal.ts
+      "POST /api/webhooks/postmark", // notifications.ts
+      "POST /api/invitations/:id/send", // invitations.ts
+    ]) {
+      expect(signatures).toContain(expected);
+    }
+
+    // Guards against a vacuous pass: an empty table would satisfy every
+    // `toEqual` on the public set above.
     expect(routes.length).toBeGreaterThan(30);
-    expect(routes.some((r) => r.signature === "POST /api/invitations/:id/send")).toBe(true);
   });
 
   it("leaves every notification route except the webhook requiring a session", async () => {
-    const routes = await collectRoutes();
-    const notificationRouteSignatures = routes.filter(
+    const routes = withoutHeadTwins(await collectRoutes());
+    const notificationRoutes = routes.filter(
       (r) =>
-        !r.signature.startsWith("HEAD ") &&
-        (r.signature.includes("/api/admin/notifications") ||
-          r.signature.includes("/api/notifications/") ||
-          r.signature.includes("/api/webhooks/")),
+        r.signature.includes("/api/admin/notifications") ||
+        r.signature.includes("/api/notifications/") ||
+        r.signature.includes("/api/webhooks/"),
     );
-
-    const publicOnes = notificationRouteSignatures
-      .filter((r) => r.isPublic)
-      .map((r) => r.signature);
 
     // The specific regression this task closed: ten routes in one file, none
     // of them requiring anything.
-    expect(publicOnes).toEqual(["POST /api/webhooks/postmark"]);
+    expect(notificationRoutes.filter((r) => r.isPublic).map((r) => r.signature)).toEqual([
+      "POST /api/webhooks/postmark",
+    ]);
+    expect(notificationRoutes.length).toBeGreaterThanOrEqual(9);
   });
 
   it("has no /test/ routes left in the served table", async () => {

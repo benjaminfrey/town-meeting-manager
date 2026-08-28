@@ -159,10 +159,13 @@ describe("deny-by-default route access", () => {
   });
 
   it("covers routes registered BEFORE the plugin, not only after", async () => {
-    // Fastify runs instance-level preHandler hooks for routes registered
-    // earlier as well as later. `server.ts` registers `/api/health` before the
-    // route plugins and the auth plugin sits between them, so if this were not
-    // true the ordering would decide which routes were protected — silently.
+    // Fastify runs instance-level hooks for routes registered earlier as well
+    // as later. Nothing in `server.ts` relies on this today — every route is
+    // registered after `betterAuthPlugin`, including `/api/health` — so this
+    // pins a property rather than protecting a current caller. It is worth
+    // pinning anyway: without it, registration order would silently decide
+    // which routes were protected, and the first route to be added above the
+    // plugin would be served to anyone with nothing in the diff to show it.
     await withTestDb(async (owner) => {
       const app = await connectAsAppRole(owner);
       try {
@@ -195,6 +198,87 @@ describe("deny-by-default route access", () => {
     });
   });
 
+  it("answers 401, not 404, for a path that matches no route", async () => {
+    // Fastify runs instance-level request hooks for the default 404 handler
+    // too, and an unmatched request has no route config — so it is not public,
+    // so it is refused. Documented and pinned rather than left as a surprise:
+    //
+    //   - It is DEFENSIBLE and mildly preferable: an anonymous caller cannot
+    //     use status codes to map which routes exist.
+    //   - It is also a real change in behaviour. Anything that distinguishes
+    //     "wrong URL" from "not signed in" by status code — a smoke test, an
+    //     uptime monitor pointed at a typo, a developer wondering why their
+    //     new route 401s (see the first test in this file) — sees 401 now.
+    //   - A signed-in request to a nonexistent path still gets 404, so the
+    //     oracle is closed only for anonymous callers.
+    await withServer(async (server) => {
+      const res = await server.inject({ method: "GET", url: "/api/no-such-path" });
+      expect(res.statusCode).toBe(401);
+    });
+  });
+
+  it("runs the gate ahead of a route's own onRequest hook", async () => {
+    // The one shape a `preHandler` gate could not cover: route-level
+    // `onRequest` runs BEFORE instance-level `preHandler`, so a route could
+    // have replied before the gate ever ran. No route in this codebase has
+    // such a hook, which is why moving the gate to `onRequest` was cheap — but
+    // "theoretical until someone adds one" is the exact shape of the omission
+    // this whole task exists to make impossible.
+    await withServer(async (server) => {
+      let routeHookRan = false;
+      server.get(
+        "/api/route-with-its-own-onrequest",
+        {
+          onRequest: [
+            async (_request, reply) => {
+              routeHookRan = true;
+              return reply.send({ secrets: "everything in this town" });
+            },
+          ],
+        },
+        async () => ({ ok: true }),
+      );
+
+      const res = await server.inject({
+        method: "GET",
+        url: "/api/route-with-its-own-onrequest",
+      });
+
+      expect(res.statusCode).toBe(401);
+      expect(routeHookRan).toBe(false);
+    });
+  });
+
+  it("refuses an unmarked POST before its body is parsed", async () => {
+    // `onRequest` fires before body parsing, so an unauthenticated POST no
+    // longer has its payload read and JSON-parsed on the way to being refused.
+    // Asserted through a content-type parser that records whether it ran: a
+    // 401 alone would not distinguish "refused early" from "parsed, then
+    // refused".
+    await withServer(async (server) => {
+      let parserRan = false;
+      server.addContentTypeParser(
+        "application/vnd.test+json",
+        { parseAs: "string" },
+        (_request, body, done) => {
+          parserRan = true;
+          done(null, body);
+        },
+      );
+      server.post("/api/unmarked-body", async () => ({ ok: true }));
+
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/unmarked-body",
+        headers: { "content-type": "application/vnd.test+json" },
+        payload: "{}",
+      });
+
+      expect(res.statusCode).toBe(401);
+      expect(parserRan).toBe(false);
+    });
+  });
+
   it("keeps Better Auth's own endpoints reachable — a session has to start somewhere", async () => {
     await withServer(async (server) => {
       const res = await server.inject({
@@ -219,11 +303,11 @@ describe("deny-by-default route access", () => {
  * These exist for three reasons, in order of how expensively each would fail:
  *
  *   1. **Hook ordering.** `verifyAuth` reads `request.tenant`, which the
- *      instance-level preHandler in `auth/fastify.ts` sets. Fastify runs
- *      instance-level `preHandler` hooks BEFORE a route's own `preHandler`
- *      array — verified empirically, and pinned here, because if that were the
- *      other way round every authenticated route in the API would 401 and the
- *      cause would not be visible in either file.
+ *      instance-level `onRequest` gate in `auth/fastify.ts` sets. Fastify runs
+ *      instance-level `onRequest` hooks before any route-level hook — verified
+ *      empirically, and pinned here, because if that were the other way round
+ *      every authenticated route in the API would 401 and the cause would not
+ *      be visible in either file.
  *   2. **`request.user.id` is `user_account.id`.** Four call sites already
  *      used it that way; the old implementation put the auth provider's user
  *      id there. The two coinciding was luck, and it is the sort of thing that

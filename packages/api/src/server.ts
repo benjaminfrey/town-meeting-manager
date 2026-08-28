@@ -4,7 +4,7 @@
  * Creates and configures the Fastify server with plugins and routes.
  */
 
-import Fastify from "fastify";
+import Fastify, { type onRouteHookHandler } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import sensible from "@fastify/sensible";
@@ -22,7 +22,29 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { NotificationService } from "./services/notification-service.js";
 
-export async function buildServer() {
+export interface BuildServerOptions {
+  /**
+   * Observe every route as it is registered.
+   *
+   * Exists for `routes/__tests__/public-route-inventory.test.ts`, which pins
+   * the exact set of routes this API serves without a session. That test used
+   * to hand-mirror the registrations below by importing the five route
+   * modules, which meant a sixth route file — or a route declared inline in
+   * this function, like `/api/health` — could be marked public with no test
+   * pressure at all. Deny-by-default still protected such a route if it were
+   * left unmarked, but the pin's whole purpose is to make MARKING something
+   * public visible in a diff, and that purpose lapsed silently outside those
+   * five imports.
+   *
+   * `buildServer` constructs its own instance, so a caller has no way to
+   * attach an `onRoute` hook from outside. Hence this. It is a read-only
+   * observer: it cannot alter a route, and passing nothing is the production
+   * path.
+   */
+  onRoute?: onRouteHookHandler;
+}
+
+export async function buildServer(options: BuildServerOptions = {}) {
   // `trustProxy` matters for auth specifically (Stage 1, Task C1). Better Auth
   // reconstructs the request URL from `request.protocol` + `request.host` and
   // compares its origin against `baseURL`. Without this, a request that arrived
@@ -36,6 +58,10 @@ export async function buildServer() {
   // a client sent. If the API is ever exposed directly, this must be narrowed
   // to the proxy's address.
   const app = Fastify({ logger: true, trustProxy: true });
+
+  // Registered before anything else so it sees every route, including those
+  // inside encapsulated children (`onRoute` propagates down).
+  if (options.onRoute) app.addHook("onRoute", options.onRoute);
 
   // ─── Plugins ─────────────────────────────────────────────────────
   //
