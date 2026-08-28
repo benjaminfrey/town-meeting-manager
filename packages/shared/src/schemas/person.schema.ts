@@ -31,7 +31,12 @@ export const UserAccountSchema = z.object({
       }),
     ),
   }),
-  auth_user_id: z.string().uuid(),
+  // Better Auth's user id: a 32-character alphanumeric string generated in
+  // application code, NOT a UUID (Stage 1, Task C1 — see
+  // packages/api/drizzle/0001_better_auth_and_tenant_bridge.sql § 4). Nullable
+  // because deleting a login sets it null rather than deleting the account:
+  // recorded votes and attendance outlive the ability to sign in.
+  auth_user_id: z.string().min(1).nullable(),
   created_at: z.string().datetime(),
   archived_at: z.string().datetime().nullable(),
 });

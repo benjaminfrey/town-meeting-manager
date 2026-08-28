@@ -53,8 +53,17 @@ if [ "${#migrations[@]}" -eq 0 ]; then
   exit 1
 fi
 
-echo "==> Resetting public schema"
-psql "$DB_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+# `better_auth` is reset alongside `public` (Stage 1, Task C1). It holds Better
+# Auth's four tables and the identity->town mapping, deliberately outside
+# `public` and outside RLS — see packages/api/drizzle/
+# 0001_better_auth_and_tenant_bridge.sql § 1. Resetting only `public` would
+# leave that schema behind, and the second run of this script would abort on
+# `CREATE SCHEMA better_auth` — turning "the repo can rebuild the database" into
+# "the repo can rebuild the database exactly once". CASCADE also removes the
+# cross-schema foreign key public.user_account.auth_user_id -> better_auth.user,
+# which is why the drop order does not matter.
+echo "==> Resetting public and better_auth schemas"
+psql "$DB_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS better_auth CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
 
 echo "==> Applying migrations in order"
 for file in "${migrations[@]}"; do
