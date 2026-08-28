@@ -4,14 +4,10 @@ import { defineConfig } from "drizzle-kit";
 //
 // `entities.roles.exclude` below is what keeps this schema from managing
 // (and, on a future `generate`/`push`, proposing to DROP) any Postgres
-// role it doesn't already know about — `tmm_owner`/`tmm_app` (the
-// application's own login roles on the dev VM — a generated migration
-// that drops its own connecting role is not hypothetical) and the four
-// roles GoTrue/Supabase create (`anon`/`authenticated`/`service_role`/
-// `supabase_auth_admin`, present locally only because
-// `scripts/dev/auth-shim.sql` stubs them so the corpus's
-// `GRANT ... TO authenticated` etc. statements have something to grant
-// to).
+// role it doesn't already know about — `tmm_owner` and `tmm_app`, the
+// application's own roles. A generated migration that drops its own
+// connecting role is not hypothetical. `tmm_app` is created by
+// `drizzle/0000_baseline.sql` § 4 and is not modelled here.
 //
 // The mechanism is NOT "drizzle-kit manages roles by default and this
 // carves out an exclusion" — verified against drizzle-kit@0.31.10's own
@@ -36,26 +32,15 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL ?? "postgres://ben@localhost:5432/postgres",
   },
-  // Includes `auth` alongside `public` so `pull` also introspects the auth
-  // shim's `auth.users` table (see scripts/dev/auth-shim.sql). Without this,
-  // pull only sees `public`, but user_account.auth_user_id still has a real
-  // FK into auth.users — pull then emits a dangling, unresolvable `users`
-  // reference in the generated schema/relations files instead of a proper
-  // `auth.table(...)` definition. This is throwaway scaffolding: Task B2
-  // removes the corpus's dependency on Supabase GoTrue's `auth` schema
-  // entirely, at which point this line (and `auth.users` in the generated
-  // schema) goes away too.
-  schemaFilter: ["public", "auth"],
+  // `public` only. Task 4 had to add `auth` here so `pull` could resolve
+  // user_account.auth_user_id's FK into Supabase GoTrue's auth.users;
+  // Task B2 dropped that FK and the `auth` schema with it, so the workaround
+  // is gone along with the thing it worked around. `public` is drizzle-kit's
+  // default; stated explicitly so a future `pull` cannot widen silently.
+  schemaFilter: ["public"],
   entities: {
     roles: {
-      exclude: [
-        "tmm_owner",
-        "tmm_app",
-        "anon",
-        "authenticated",
-        "service_role",
-        "supabase_auth_admin",
-      ],
+      exclude: ["tmm_owner", "tmm_app"],
     },
   },
   verbose: true,

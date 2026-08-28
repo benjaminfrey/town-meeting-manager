@@ -334,19 +334,27 @@ describe("Push notification API routes (packages/api/src/routes/notifications.ts
 // ─── push_subscription Migration Tests ───────────────────────────────
 
 describe("push_subscription database migration", () => {
-  it("migration file exists", () => {
-    const migrationsDir = path.join(PROJECT_ROOT, "supabase/migrations");
-    const migrations = fs.readdirSync(migrationsDir);
-    const pushMigration = migrations.find((f) => f.includes("push_subscription"));
-    expect(pushMigration, "No push_subscription migration found").toBeTruthy();
+  // Reads packages/api/drizzle/, not supabase/migrations/. Since Stage 1's
+  // baseline (Task B2) the corpus is a historical record that nothing applies,
+  // so asserting against it would prove the table is defined somewhere that
+  // never reaches a database.
+  const migrationsDir = path.join(PROJECT_ROOT, "packages/api/drizzle");
+
+  function appliedSchemaSql(): string {
+    return fs
+      .readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+      .map((f) => fs.readFileSync(path.join(migrationsDir, f), "utf8"))
+      .join("\n");
+  }
+
+  it("the applied schema defines push_subscription", () => {
+    expect(appliedSchemaSql()).toContain("CREATE TABLE public.push_subscription");
   });
 
-  it("migration defines push_subscription table with required columns", () => {
-    const migrationsDir = path.join(PROJECT_ROOT, "supabase/migrations");
-    const migrations = fs.readdirSync(migrationsDir);
-    const pushMigration = migrations.find((f) => f.includes("push_subscription"))!;
-    const sql = fs.readFileSync(path.join(migrationsDir, pushMigration), "utf8");
-
+  it("push_subscription has the required columns", () => {
+    const sql = appliedSchemaSql();
     expect(sql).toContain("push_subscription");
     expect(sql).toContain("endpoint");
     expect(sql).toContain("p256dh");

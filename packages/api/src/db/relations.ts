@@ -27,7 +27,6 @@ import {
   minutesAddendum,
   pushSubscription,
   invitation,
-  usersInAuth,
 } from "./schema.js";
 
 export const boardMemberRelations = relations(boardMember, ({ one, many }) => ({
@@ -377,10 +376,6 @@ export const userAccountRelations = relations(userAccount, ({ one, many }) => ({
     fields: [userAccount.townId],
     references: [town.id],
   }),
-  usersInAuth: one(usersInAuth, {
-    fields: [userAccount.authUserId],
-    references: [usersInAuth.id],
-  }),
 }));
 
 export const exhibitRelations = relations(exhibit, ({ one }) => ({
@@ -536,8 +531,4 @@ export const invitationRelations = relations(invitation, ({ one }) => ({
     references: [userAccount.id],
     relationName: "invitation_invitedBy_userAccount_id",
   }),
-}));
-
-export const usersInAuthRelations = relations(usersInAuth, ({ many }) => ({
-  userAccounts: many(userAccount),
 }));

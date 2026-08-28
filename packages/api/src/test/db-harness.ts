@@ -2,9 +2,26 @@
  * Postgres-backed integration test harness.
  *
  * `withTestDb(fn)` provisions a fresh, uniquely-named database, applies the
- * full migration corpus to it, hands `fn` a live `postgres.js` client, and
- * drops the database again in a `finally` — so a thrown assertion still
- * tears down and never leaks a database on the target server.
+ * migrations in `packages/api/drizzle/` to it, hands `fn` a live
+ * `postgres.js` client, and drops the database again in a `finally` — so a
+ * thrown assertion still tears down and never leaks a database on the target
+ * server.
+ *
+ * ─── What `fn` is connected as (Task B2) ─────────────────────────────────
+ *
+ * The client handed to `fn` is the database OWNER — the role in
+ * `DATABASE_URL`, which created the schema. Every table is under FORCE ROW
+ * LEVEL SECURITY, which binds owners too, so that role only gets to write
+ * freely because it is a superuser in every supported setup (CI's `postgres`
+ * user; a Homebrew install's `$USER`). Point `DATABASE_URL` at a
+ * non-superuser and tests that insert rows without setting `app.town_id`
+ * will correctly fail.
+ *
+ * That is deliberate, not an oversight: an owner connection is what schema
+ * tests need. It is also why an owner connection proves NOTHING about
+ * tenancy isolation. Task B3's gate connects as `tmm_app` (via SET ROLE, or
+ * its own client) precisely because a test run as the owner would pass with
+ * RLS switched off entirely.
  *
  * ─── Where the test database lives, and why (Task A2, Step 3) ─────────────
  *
@@ -43,8 +60,7 @@
  * (`` sql`SELECT ...` ``) is exactly what test code should be able to write
  * against the client this harness hands back, and its `sql.file(path)`
  * applies a whole multi-statement `.sql` file (including `DO $$ ... $$`
- * blocks) in one call, which is what applying the auth shim and each
- * migration file needs. Using `pg` here would mean either building a
+ * blocks) in one call, which is what applying each migration file needs. Using `pg` here would mean either building a
  * template-tag wrapper by hand or hand-rolling multi-statement file
  * execution — extra code for no benefit, since nothing about database
  * provisioning needs `pg`'s feature set.
@@ -60,45 +76,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/api/src/test -> repo root
 const REPO_ROOT = path.join(__dirname, "..", "..", "..", "..");
 
-const AUTH_SHIM_PATH = path.join(REPO_ROOT, "scripts", "dev", "auth-shim.sql");
-const MIGRATIONS_DIR = path.join(REPO_ROOT, "supabase", "migrations");
+const MIGRATIONS_DIR = path.join(REPO_ROOT, "packages", "api", "drizzle");
+const JOURNAL_PATH = path.join(MIGRATIONS_DIR, "meta", "_journal.json");
 
 // Matches the CI `postgres:17` service defined in .github/workflows/ci.yml.
 // Not a claim that this resolves anywhere outside CI — see the file header.
 const DEFAULT_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/postgres";
-
-/**
- * Migration files this harness is known NOT to be able to apply cleanly,
- * and why. Both are pre-existing, previously-documented defects in the
- * migration corpus itself (see scripts/build-db-from-repo.sh's own header
- * comment and .superpowers/sdd/2026-08-26-tmm-revival-master-plan/task-7-report.md)
- * — not bugs in this harness. Tolerating them here is a deliberate,
- * narrow allowance: matched by BOTH the exact migration filename AND the
- * expected error text, so an unrelated failure in either file still
- * aborts the harness instead of being silently swallowed.
- */
-const TOLERATED_MIGRATION_FAILURES: ReadonlyArray<{
-  file: string;
-  messageIncludes: string;
-  reason: string;
-}> = [
-  {
-    file: "20260311000003_session_0603_storage_bucket.sql",
-    messageIncludes: "storage.foldername",
-    reason:
-      "The auth shim deliberately does not implement storage.foldername() " +
-      "(scripts/dev/auth-shim.sql's header explains why: a stub that faked " +
-      "it would misrepresent how much of the corpus is actually proven).",
-  },
-  {
-    file: "20260826000001_merge_notification_system.sql",
-    messageIncludes: "postmark_message_id",
-    reason:
-      "Known notification-schema collision in the migration corpus itself " +
-      "(a later migration's column reference outruns this one's shape). " +
-      "Not introduced by, or fixable from, this harness.",
-  },
-];
 
 function generateTestDbName(): string {
   // Lowercase alphanumeric + underscore only, well under Postgres's 63-byte
@@ -164,45 +147,6 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
       // database instead of the maintenance one.
       sql = postgres(databaseUrl, { database: dbName, max: 1, onnotice: () => {} });
 
-      // TODO(B2): remove this call once the Drizzle baseline (Task B2)
-      // drops the migration corpus's dependency on Supabase GoTrue's
-      // `auth` schema and Storage's `storage` schema. Until then, every
-      // fresh database needs the same auth.uid()/auth.jwt() stubs and
-      // storage.buckets/storage.objects tables that
-      // scripts/build-db-from-repo.sh's header documents as missing on
-      // plain Postgres. This is temporary scaffolding with a named
-      // removal point, not a permanent dependency of this harness.
-      //
-      // auth-shim.sql's own CREATE ROLE guards
-      // (`DO $$ BEGIN CREATE ROLE x; EXCEPTION WHEN duplicate_object ...`)
-      // are not safe under real concurrency: two withTestDb() calls
-      // racing this statement can both pass the existence check and
-      // collide on pg_authid's physical unique index, surfacing as a
-      // raw `23505 duplicate key value violates unique constraint
-      // "pg_authid_rolname_index"` instead of the `42710 duplicate_object`
-      // the guard catches — roles are cluster-scoped, so every
-      // concurrently-running test file's withTestDb() call contends on
-      // the same four role names. An advisory lock serializes this one
-      // step (not database creation or migrations, which don't touch
-      // cluster-scoped state) across every concurrent caller on this
-      // Postgres instance — deliberately acquired on `admin`, not `sql`:
-      // Postgres advisory locks are scoped PER DATABASE, not cluster-wide,
-      // and `sql` connects to this test's own uniquely-named database, so
-      // two concurrent withTestDb() calls locking on their own `sql`
-      // connections would never actually contend (verified this the hard
-      // way — an earlier version of this fix used `sql` and measurably
-      // did nothing, still failing 4/4 full-suite runs). `admin` connects
-      // to the one shared maintenance database every caller uses, so
-      // locks taken there really do serialize across the whole process
-      // pool. Not a fix to auth-shim.sql itself (out of scope — Task 5
-      // deletes it), just to this harness's own concurrent usage of it.
-      await admin`SELECT pg_advisory_lock(727100001)`;
-      try {
-        await sql.file(AUTH_SHIM_PATH);
-      } finally {
-        await admin`SELECT pg_advisory_unlock(727100001)`;
-      }
-
       await applyMigrations(sql);
 
       return await fn(sql);
@@ -235,34 +179,38 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
 }
 
 async function applyMigrations(sql: postgres.Sql): Promise<void> {
-  // Same file list, same order, that scripts/build-db-from-repo.sh uses —
-  // both read supabase/migrations/*.sql sorted lexicographically (the
-  // migration filenames are zero-padded timestamps, so lexicographic order
-  // is chronological order), so this harness and the Stage 0 gate can
-  // never quietly diverge on which migrations exist or what order they
-  // apply in.
+  // Same file list, same order, and the same journal cross-check that
+  // scripts/build-db-from-repo.sh uses, so this harness and the Stage 1 gate
+  // can never quietly diverge on which migrations exist or what order they
+  // apply in. Migration filenames are `NNNN_name.sql`, so lexicographic order
+  // is journal order.
+  //
+  // There is no tolerated-failure list any more. There used to be one, for the
+  // two corpus files that could not be applied on plain Postgres; the baseline
+  // (Task B2) removed both problems at the source, so any failure here is now
+  // a real one and aborts.
   const files = fs
     .readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
+  // A .sql file the journal does not record will never run in production. If
+  // one appears here, applying it would make tests pass against a schema no
+  // deploy can reproduce — the exact failure mode this whole task exists to
+  // close — so refuse rather than guess which side is right.
+  const journal = JSON.parse(fs.readFileSync(JOURNAL_PATH, "utf8")) as {
+    entries: { tag: string }[];
+  };
+  const expected = journal.entries.map((e) => `${e.tag}.sql`);
+  if (files.join(",") !== expected.join(",")) {
+    throw new Error(
+      `db-harness: ${MIGRATIONS_DIR} contains [${files.join(", ")}] but ` +
+        `${JOURNAL_PATH} records [${expected.join(", ")}]. Refusing to apply an ` +
+        "unregistered or missing migration.",
+    );
+  }
+
   for (const file of files) {
-    try {
-      await sql.file(path.join(MIGRATIONS_DIR, file));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const tolerated = TOLERATED_MIGRATION_FAILURES.find(
-        (t) => t.file === file && message.includes(t.messageIncludes),
-      );
-
-      if (!tolerated) {
-        throw err;
-      }
-
-      // Deliberate, not debug noise: records exactly which known failure
-      // was tolerated and why, so a harness run is never silently missing
-      // part of the corpus.
-      console.warn(`[db-harness] tolerating known failure in ${file}: ${tolerated.reason}`);
-    }
+    await sql.file(path.join(MIGRATIONS_DIR, file));
   }
 }

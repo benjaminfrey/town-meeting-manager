@@ -1,32 +1,53 @@
 // ============================================================================
-// DO NOT RUN `drizzle-kit generate` FROM THIS FILE AGAINST A REAL DATABASE
-// UNTIL TASK 5 RESOLVES THE ITEM BELOW.
+// THIS FILE DOES NOT DEFINE ROW LEVEL SECURITY. THAT IS DELIBERATE.
 //
-// 53 of this file's 79 `pgPolicy()` calls (Task 4 / B1 hand-review, Step 5;
-// see task-4-report.md §2.1) are missing the `using`/`withCheck` clause
-// that the live database actually enforces for that policy — `pull`
-// dropped them, and they were deliberately left dropped here rather than
-// hand-patched, so this file stays an honest, reproducible mirror of what
-// `pull` produced. The consequence: `drizzle-kit generate` run today
-// against this schema emits 79 `CREATE POLICY` statements, of which those
-// same 53 carry no `USING`/`WITH CHECK` at all — i.e. unconditionally
-// permissive, including on core tenant-isolation checks like
-// `town_id = get_current_town_id()`. This is not hypothetical; it is
-// `generate`'s default output right now, verified directly.
+// Decision (Stage 1, Task B2; the resolution of the warning this banner used
+// to carry): the `pgPolicy()` calls that `drizzle-kit pull` generated were
+// DELETED rather than completed. RLS lives in hand-written SQL, in
+// `packages/api/drizzle/0000_baseline.sql` § 3, which is the source of truth
+// for every policy.
 //
-// Task 5 owns the fix (hand-write all 53 predicates into `pgPolicy`, or
-// drop the `pgPolicy` calls and keep RLS defined in hand-written SQL
-// instead) — do not attempt it here.
+// The problem being solved: `pull` silently dropped the `USING`/`WITH CHECK`
+// clause from 53 of the 79 policies it emitted — every policy after the first
+// on each table (Task 4 / B1, task-4-report.md §2.1). `drizzle-kit generate`
+// from that file emitted 79 live `CREATE POLICY` statements, 53 of them
+// unconditionally permissive, on tenant-isolation-critical tables. Not
+// hypothetical: that was `generate`'s actual default output.
+//
+// Why deletion rather than hand-writing the 53 missing predicates:
+//
+//   1. Drizzle cannot express most of the security model anyway. It has no
+//      representation for `FORCE ROW LEVEL SECURITY` at all — grep for it
+//      across drizzle-orm@0.45.2 and drizzle-kit@0.31.10 and there are zero
+//      hits, while `enableRLS()` does exist — and FORCE is the single
+//      statement without which the whole model is decorative for the table
+//      owner. It also cannot model the 13 SQL functions every policy calls
+//      (`get_current_town_id()` and friends), the 9 triggers, the 132
+//      `COMMENT ON` objects, the grants, or the `tmm_app` role. More than half
+//      the security-relevant DDL is permanently outside this file. Declaring
+//      it "the source of truth for RLS" would be a fiction that rots.
+//   2. Two copies of a security predicate with nothing keeping them in sync is
+//      worse than one. The next `pull` would reintroduce the same silent
+//      clause loss into the copy that looks authoritative.
+//   3. With no `pgPolicy()` here, `drizzle-kit generate` emits no
+//      `CREATE POLICY` at all — so "generate silently produces wide-open
+//      policies" stops being a documented hazard and becomes structurally
+//      impossible.
+//
+// The cost, and how it is covered: a table added through this file and
+// `generate` would get no RLS. `src/db/__tests__/schema-invariants.test.ts`
+// asserts that every table in `public` has RLS enabled AND forced AND exactly
+// one tenancy policy — so a new table without RLS fails the suite rather than
+// shipping open. Add the table here, add its policy to a new forward-only
+// migration in `packages/api/drizzle/`, and that test tells you if you forgot.
 // ============================================================================
 
 import {
   pgTable,
-  pgSchema,
   uuid,
   index,
   foreignKey,
   unique,
-  pgPolicy,
   text,
   date,
   boolean,
@@ -62,7 +83,6 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
-export const auth = pgSchema("auth");
 export const agendaItemStatus = pgEnum("agenda_item_status", [
   "pending",
   "active",
@@ -151,10 +171,6 @@ export const notificationStatus = pgEnum("notification_status", [
 export const userRole = pgEnum("user_role", ["sys_admin", "admin", "staff", "board_member"]);
 export const voteType = pgEnum("vote_type", ["yes", "no", "abstain", "recusal", "absent"]);
 
-export const usersInAuth = auth.table("users", {
-  id: uuid().defaultRandom().primaryKey().notNull(),
-});
-
 export const boardMember = pgTable(
   "board_member",
   {
@@ -194,14 +210,6 @@ export const boardMember = pgTable(
       name: "board_member_town_id_fkey",
     }).onDelete("cascade"),
     unique("board_member_unique_active").on(table.personId, table.boardId, table.status),
-    pgPolicy("board_member_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("board_member_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("board_member_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -245,14 +253,6 @@ export const voteRecord = pgTable(
       name: "vote_record_board_member_id_fkey",
     }).onDelete("cascade"),
     unique("vote_record_unique_per_motion").on(table.motionId, table.boardMemberId),
-    pgPolicy("vote_record_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('M3'::text))`,
-    }),
-    pgPolicy("vote_record_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("vote_record_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -295,14 +295,6 @@ export const meetingAttendance = pgTable(
       name: "meeting_attendance_person_id_fkey",
     }).onDelete("cascade"),
     unique("attendance_unique_per_meeting").on(table.meetingId, table.personId),
-    pgPolicy("attendance_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('M2'::text))`,
-    }),
-    pgPolicy("attendance_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("attendance_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -347,14 +339,6 @@ export const minutesSection = pgTable(
       foreignColumns: [agendaItem.id],
       name: "minutes_section_source_agenda_item_id_fkey",
     }),
-    pgPolicy("minutes_section_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('R1'::text))`,
-    }),
-    pgPolicy("minutes_section_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("minutes_section_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -388,15 +372,6 @@ export const agendaTemplate = pgTable(
       name: "agenda_template_town_id_fkey",
     }).onDelete("cascade"),
     unique("template_name_unique_per_board").on(table.boardId, table.name),
-    pgPolicy("agenda_template_delete", {
-      as: "permissive",
-      for: "delete",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("agenda_template_update", { as: "permissive", for: "update", to: ["public"] }),
-    pgPolicy("agenda_template_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("agenda_template_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -430,13 +405,6 @@ export const notificationEvent = pgTable(
       foreignColumns: [town.id],
       name: "notification_event_town_id_fkey",
     }).onDelete("cascade"),
-    pgPolicy("notification_event_insert", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-      withCheck: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("notification_event_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -467,14 +435,6 @@ export const subscriberNotificationPreference = pgTable(
       name: "subscriber_notification_preference_town_id_fkey",
     }).onDelete("cascade"),
     unique("subscriber_pref_unique").on(table.personId, table.channel, table.eventType),
-    pgPolicy("subscriber_pref_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND ((person_id = get_current_person_id()) OR is_admin()))`,
-    }),
-    pgPolicy("subscriber_pref_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("subscriber_pref_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -505,22 +465,6 @@ export const townNotificationConfig = pgTable(
       name: "town_notification_config_town_id_fkey",
     }).onDelete("cascade"),
     unique("town_notification_config_town_id_key").on(table.townId),
-    pgPolicy("town_notification_config_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("town_notification_config_insert", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-    }),
-    pgPolicy("town_notification_config_select", {
-      as: "permissive",
-      for: "select",
-      to: ["public"],
-    }),
   ],
 );
 
@@ -545,15 +489,6 @@ export const permissionTemplate = pgTable(
       name: "permission_template_town_id_fkey",
     }).onDelete("cascade"),
     unique("template_name_unique").on(table.townId, table.name),
-    pgPolicy("permission_template_delete", {
-      as: "permissive",
-      for: "delete",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin() AND (is_system_default = false))`,
-    }),
-    pgPolicy("permission_template_update", { as: "permissive", for: "update", to: ["public"] }),
-    pgPolicy("permission_template_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("permission_template_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -594,13 +529,6 @@ export const auditLog = pgTable(
       foreignColumns: [userAccount.id],
       name: "audit_log_user_account_id_fkey",
     }).onDelete("set null"),
-    pgPolicy("audit_log_insert", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-      withCheck: sql`(town_id = get_current_town_id())`,
-    }),
-    pgPolicy("audit_log_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -628,14 +556,6 @@ export const person = pgTable(
       name: "person_town_id_fkey",
     }).onDelete("cascade"),
     unique("person_email_unique_per_town").on(table.townId, table.email),
-    pgPolicy("person_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("person_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("person_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -678,14 +598,6 @@ export const exhibit = pgTable(
       foreignColumns: [userAccount.id],
       name: "exhibit_uploaded_by_fkey",
     }),
-    pgPolicy("exhibit_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('A3'::text))`,
-    }),
-    pgPolicy("exhibit_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("exhibit_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -750,14 +662,6 @@ export const motion = pgTable(
       foreignColumns: [table.id],
       name: "motion_parent_motion_id_fkey",
     }),
-    pgPolicy("motion_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('M3'::text))`,
-    }),
-    pgPolicy("motion_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("motion_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -817,13 +721,6 @@ export const notificationDelivery = pgTable(
       foreignColumns: [person.id],
       name: "notification_delivery_subscriber_id_fkey",
     }).onDelete("cascade"),
-    pgPolicy("notification_delivery_insert", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-      withCheck: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("notification_delivery_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -859,14 +756,6 @@ export const guestSpeaker = pgTable(
       foreignColumns: [town.id],
       name: "guest_speaker_town_id_fkey",
     }).onDelete("cascade"),
-    pgPolicy("guest_speaker_delete", {
-      as: "permissive",
-      for: "delete",
-      to: ["public"],
-      using: sql`(town_id = get_current_town_id())`,
-    }),
-    pgPolicy("guest_speaker_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("guest_speaker_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -901,14 +790,6 @@ export const agendaItemTransition = pgTable(
       foreignColumns: [town.id],
       name: "agenda_item_transition_town_id_fkey",
     }).onDelete("cascade"),
-    pgPolicy("transition_insert", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-      withCheck: sql`(town_id = get_current_town_id())`,
-    }),
-    pgPolicy("transition_select", { as: "permissive", for: "select", to: ["public"] }),
-    pgPolicy("transition_update", { as: "permissive", for: "update", to: ["public"] }),
   ],
 );
 
@@ -981,14 +862,6 @@ export const minutesDocument = pgTable(
       name: "minutes_document_created_by_fkey",
     }).onDelete("set null"),
     unique("minutes_document_meeting_id_key").on(table.meetingId),
-    pgPolicy("minutes_document_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('R1'::text))`,
-    }),
-    pgPolicy("minutes_document_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("minutes_document_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -1031,15 +904,6 @@ export const executiveSession = pgTable(
       foreignColumns: [motion.id],
       name: "executive_session_entry_motion_id_fkey",
     }).onDelete("set null"),
-    pgPolicy("executive_session_delete", {
-      as: "permissive",
-      for: "delete",
-      to: ["public"],
-      using: sql`(town_id = ( SELECT ((((current_setting('request.jwt.claims'::text, true))::jsonb -> 'app_metadata'::text) ->> 'town_id'::text))::uuid AS uuid))`,
-    }),
-    pgPolicy("executive_session_update", { as: "permissive", for: "update", to: ["public"] }),
-    pgPolicy("executive_session_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("executive_session_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -1123,14 +987,6 @@ export const agendaItem = pgTable(
       foreignColumns: [minutesDocumentIdRef()],
       name: "agenda_item_source_minutes_document_id_fkey",
     }).onDelete("set null"),
-    pgPolicy("agenda_item_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND has_permission('A2'::text))`,
-    }),
-    pgPolicy("agenda_item_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("agenda_item_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -1184,15 +1040,6 @@ export const futureItemQueue = pgTable(
       foreignColumns: [agendaItem.id],
       name: "future_item_queue_placed_agenda_item_id_fkey",
     }).onDelete("set null"),
-    pgPolicy("future_item_queue_delete", {
-      as: "permissive",
-      for: "delete",
-      to: ["public"],
-      using: sql`(town_id = ( SELECT ((((current_setting('request.jwt.claims'::text, true))::jsonb -> 'app_metadata'::text) ->> 'town_id'::text))::uuid AS uuid))`,
-    }),
-    pgPolicy("future_item_queue_update", { as: "permissive", for: "update", to: ["public"] }),
-    pgPolicy("future_item_queue_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("future_item_queue_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -1242,14 +1089,6 @@ export const board = pgTable(
       name: "board_town_id_fkey",
     }).onDelete("cascade"),
     unique("board_name_unique_per_town").on(table.townId, table.name),
-    pgPolicy("board_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("board_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("board_select", { as: "permissive", for: "select", to: ["public"] }),
     check(
       "board_audio_retention_policy_override_check",
       sql`audio_retention_policy_override = ANY (ARRAY['purge_on_approval'::text, 'retain_30_days'::text, 'retain_90_days'::text, 'retain_indefinitely'::text])`,
@@ -1337,14 +1176,6 @@ export const meeting = pgTable(
       foreignColumns: [boardMember.id],
       name: "meeting_presiding_officer_id_fkey",
     }).onDelete("set null"),
-    pgPolicy("meeting_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((town_id = get_current_town_id()) AND (is_admin() OR has_board_permission('A1'::text, board_id) OR has_board_permission('M1'::text, board_id)))`,
-    }),
-    pgPolicy("meeting_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("meeting_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
 
@@ -1385,13 +1216,6 @@ export const town = pgTable(
   },
   (table) => [
     unique("town_subdomain_key").on(table.subdomain),
-    pgPolicy("town_update", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`((id = get_current_town_id()) AND is_admin())`,
-    }),
-    pgPolicy("town_select", { as: "permissive", for: "select", to: ["public"] }),
     check(
       "town_audio_retention_policy_check",
       sql`audio_retention_policy = ANY (ARRAY['purge_on_approval'::text, 'retain_30_days'::text, 'retain_90_days'::text, 'retain_indefinitely'::text])`,
@@ -1446,24 +1270,6 @@ export const minutesAddendum = pgTable(
       columns: [table.createdBy],
       foreignColumns: [userAccount.id],
       name: "minutes_addendum_created_by_fkey",
-    }),
-    pgPolicy("Authenticated users can update addenda for their town", {
-      as: "permissive",
-      for: "update",
-      to: ["authenticated"],
-      using: sql`(town_id IN ( SELECT ua.town_id
-   FROM user_account ua
-  WHERE (ua.id = auth.uid())))`,
-    }),
-    pgPolicy("Authenticated users can insert addenda for their town", {
-      as: "permissive",
-      for: "insert",
-      to: ["authenticated"],
-    }),
-    pgPolicy("Authenticated users can read addenda for their town", {
-      as: "permissive",
-      for: "select",
-      to: ["authenticated"],
     }),
   ],
 );
@@ -1547,20 +1353,6 @@ export const invitation = pgTable(
       name: "invitation_invited_by_fkey",
     }).onDelete("set null"),
     unique("invitation_token_key").on(table.token),
-    pgPolicy("town_members_update_invitations", {
-      as: "permissive",
-      for: "update",
-      to: ["public"],
-      using: sql`(town_id IN ( SELECT user_account.town_id
-   FROM user_account
-  WHERE (user_account.auth_user_id = auth.uid())))`,
-    }),
-    pgPolicy("town_members_insert_invitations", {
-      as: "permissive",
-      for: "insert",
-      to: ["public"],
-    }),
-    pgPolicy("town_members_see_invitations", { as: "permissive", for: "select", to: ["public"] }),
     check(
       "invitation_status_check",
       sql`status = ANY (ARRAY['pending'::text, 'accepted'::text, 'expired'::text, 'cancelled'::text])`,
@@ -1609,21 +1401,7 @@ export const userAccount = pgTable(
       foreignColumns: [town.id],
       name: "user_account_town_id_fkey",
     }).onDelete("cascade"),
-    foreignKey({
-      columns: [table.authUserId],
-      foreignColumns: [usersInAuth.id],
-      name: "user_account_auth_user_id_fkey",
-    }).onDelete("set null"),
     unique("user_account_person_id_key").on(table.personId),
     unique("user_account_auth_user_id_key").on(table.authUserId),
-    pgPolicy("user_account_update_own", {
-      as: "permissive",
-      for: "update",
-      to: ["authenticated"],
-      using: sql`(person_id = auth.uid())`,
-    }),
-    pgPolicy("user_account_update", { as: "permissive", for: "update", to: ["public"] }),
-    pgPolicy("user_account_insert", { as: "permissive", for: "insert", to: ["public"] }),
-    pgPolicy("user_account_select", { as: "permissive", for: "select", to: ["public"] }),
   ],
 );
