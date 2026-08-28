@@ -41,7 +41,7 @@ async function buildApp(app: postgres.Sql) {
 
   const server = Fastify({ logger: false });
   await server.register(sensible);
-  await server.register(betterAuthPlugin, { auth, db });
+  await server.register(betterAuthPlugin, { auth, db, allowedOrigins: ["http://localhost:3000"] });
 
   // Stands in for the public portal: no session required, ever.
   //

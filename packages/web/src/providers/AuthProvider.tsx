@@ -57,6 +57,17 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** Town, role and permissions — `null` until resolved, or if signed out. */
   currentUser: CurrentUser | null;
+  /**
+   * Why the identity could not be read, if it could not.
+   *
+   * Load-bearing, not diagnostic. `currentUser === null` has two completely
+   * different meanings — "signed in, no town yet, go to the wizard" and
+   * "asking the server failed" — and `ProtectedRoute` acts on the first by
+   * navigating. Without this it acts on the second the same way, so a
+   * transient 500 or a dropped connection sends a fully onboarded
+   * administrator into the onboarding wizard. See `ProtectedRoute.tsx`.
+   */
+  currentUserError: Error | null;
   /** Re-read `GET /api/me`. Call after anything that changes the town link. */
   refreshCurrentUser: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -125,6 +136,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const {
     data: currentUser,
+    error: currentUserError,
     isPending: isIdentityPending,
     refetch: refetchCurrentUser,
   } = useQuery({
@@ -249,6 +261,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isLoading: isSessionPending || (isAuthenticated && isIdentityPending),
     isAuthenticated,
     currentUser: isAuthenticated ? (currentUser ?? null) : null,
+    currentUserError: isAuthenticated ? ((currentUserError as Error | null) ?? null) : null,
     refreshCurrentUser,
     signIn,
     signUp,

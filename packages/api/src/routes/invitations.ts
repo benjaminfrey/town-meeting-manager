@@ -451,11 +451,33 @@ export async function invitationRoutes(app: FastifyInstance) {
       // was never checked in this request, which is a different and much
       // sharper security question than the one this route is answering.
       const message = err instanceof Error ? err.message : String(err);
+      const code = (err as { body?: { code?: string } })?.body?.code ?? "";
+
+      // ─── A rejected password is the CALLER's problem, not an incident ──
+      //
+      // Better Auth enforces `minPasswordLength` (8) — which is, incidentally,
+      // the first server-side password policy this route has ever had; Task C1
+      // recorded that it had none. But a policy violation answered with 500
+      // and an error-level log tells the person nothing about what to change,
+      // and puts a routine validation failure in the same bucket an operator
+      // pages on. It gets a 400 that names the rule, and a warn.
+      if (code === "PASSWORD_TOO_SHORT" || code === "PASSWORD_TOO_LONG") {
+        app.log.warn(
+          { code, invitationId: inv.id },
+          "invitation acceptance rejected: password does not meet the policy",
+        );
+        return reply.badRequest(
+          code === "PASSWORD_TOO_SHORT"
+            ? "Your password must be at least 8 characters."
+            : "That password is too long.",
+        );
+      }
+
       app.log.error(
         { err, invitationId: inv.id },
         "sign-up failed during invitation acceptance; invitation NOT marked accepted",
       );
-      if (/exist/i.test(message)) {
+      if (code === "USER_ALREADY_EXISTS" || /exist/i.test(message)) {
         return reply.conflict(
           "An account already exists for this email address. Sign in with it, then " +
             "ask your town administrator to link it to this invitation.",
@@ -515,6 +537,17 @@ export async function invitationRoutes(app: FastifyInstance) {
         //
         // `RETURNING id` turns "matched nothing" into an exception, which
         // rolls the transaction back and leaves the invitation reusable.
+        //
+        // `auth_user_id IS NULL` is the other half, and it is not belt and
+        // braces. Without it, matching on `id` alone RE-LINKS an account that
+        // already has a login: two pending invitations for one `user_account`
+        // (a re-issue, or two administrators inviting the same person) and the
+        // second acceptance repoints `auth_user_id` at identity #2 — while
+        // identity #1 stays live and signable, and its `better_auth.user_tenant`
+        // row stays behind mapping it to the town. That identity then
+        // authenticates successfully and is refused by the tenant bridge on
+        // every request forever, which is precisely the state this rewrite
+        // exists to end. The row count below turns it into a rollback.
         const linked = toRows<{ id: string }>(
           await tx.execute(sql`
             UPDATE user_account
@@ -522,6 +555,7 @@ export async function invitationRoutes(app: FastifyInstance) {
                    email = ${email},
                    display_name = ${name}
              WHERE id = ${inv.user_account_id as string}::uuid
+               AND auth_user_id IS NULL
              RETURNING id
           `),
           (message) => new Error(`invitation acceptance: linking user_account: ${message}`),
@@ -530,8 +564,10 @@ export async function invitationRoutes(app: FastifyInstance) {
           throw new Error(
             `invitation acceptance: expected to link exactly 1 user_account, matched ${linked.length}. ` +
               `Invitation ${String(inv.id)} names user_account ${String(inv.user_account_id)} ` +
-              `in town ${String(inv.town_id)}; under row level security that row is not visible ` +
-              "from that town, so it is either missing or belongs to another town.",
+              `in town ${String(inv.town_id)}. Either that row is not visible from that town ` +
+              "under row level security (missing, or belonging to another town), or it already " +
+              "has a login — an account is linked once, and re-linking it would strand the " +
+              "identity already pointing at it.",
           );
         }
 

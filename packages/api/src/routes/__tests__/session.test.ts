@@ -45,7 +45,7 @@ async function buildApp(client: postgres.Sql) {
 
   const server = Fastify({ logger: false });
   await server.register(sensible);
-  await server.register(betterAuthPlugin, { auth, db });
+  await server.register(betterAuthPlugin, { auth, db, allowedOrigins: ["http://localhost:5173"] });
   await server.register(sessionRoutes, { prefix: "/api" });
   return { server, auth, db };
 }

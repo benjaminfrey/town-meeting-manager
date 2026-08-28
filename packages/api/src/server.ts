@@ -66,30 +66,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   // ─── Plugins ─────────────────────────────────────────────────────
   //
-  // CORS is registered BEFORE the Better Auth handler so its preflight
-  // handling is in place for any route that still needs it.
+  // ─── CORS: no wildcard subdomain, and no credentials for one ─────────
   //
-  // ─── Task C2: the dev-server origin is gone from this list ────────────
+  // This used to allow `/\.townmeetingmanager\.com$/` WITH credentials. Every
+  // town's public portal is a subdomain of that, the portal renders
+  // town-authored content raw, and a sibling subdomain is same-SITE — so
+  // `SameSite=Lax` does not stop it. A clerk of one town could therefore
+  // publish scripted minutes that drove this API as an administrator of
+  // another, with the session cookie attached by the browser. That composed
+  // only once sessions became cookies, which is this task's doing.
   //
-  // It used to read `process.env.CORS_ORIGIN ?? "http://localhost:5173"`,
-  // which made the Vite dev server a credentialed cross-origin caller — a
-  // second cookie topology alongside the same-origin one nginx serves in
-  // production, and the one shape guaranteed to produce a "works locally,
-  // fails in production" session bug. `packages/web/vite.config.ts` proxies
-  // `/api` to this process WITHOUT rewriting the Host header, so development
-  // is now same-origin exactly as `infrastructure/nginx/nginx.conf` makes it
-  // in production, and the browser needs no CORS allowance at all.
+  // Nothing legitimately needs a credentialed cross-origin allowance any
+  // more: the app reaches `/api/` same-origin through nginx in production and
+  // through the Vite proxy in development (see `web/src/lib/api-client.ts`).
+  // So the default is now NO cross-origin allowance at all, and `CORS_ORIGIN`
+  // is an exact origin an operator adds deliberately — never a pattern.
   //
-  // A developer who bypasses the proxy and points a page straight at
-  // `localhost:3001` now gets a CORS error. That is the intended, loud
-  // outcome: the session cookie would not have been sent anyway, and a silent
-  // half-working setup is what this removal exists to prevent.
+  // The complementary half, which does not rely on the browser enforcing
+  // anything, is the `Origin` guard in `auth/fastify.ts`: CORS decides who may
+  // READ a response, and a simple cross-origin request is sent and executed
+  // regardless.
   await app.register(cors, {
-    // Non-browser callers on the `api.` server block only. `CORS_ORIGIN` is
-    // still honoured so an operator can add one deliberately.
-    origin: process.env.CORS_ORIGIN
-      ? [process.env.CORS_ORIGIN, /\.townmeetingmanager\.com$/]
-      : [/\.townmeetingmanager\.com$/],
+    origin: process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : false,
     credentials: true,
   });
 
@@ -122,6 +120,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     );
   }
 
+  // One value, two consumers that must agree: Better Auth derives
+  // `trustedOrigins` from it, and the cross-origin guard refuses anything
+  // else. They describe the same fact — the origin the browser loads the app
+  // from — so they read it from the same place.
+  const appOrigin = process.env.BETTER_AUTH_URL ?? "http://localhost:5173";
+
   const { db, close } = createAppDb();
   const auth = createAuth({
     db,
@@ -134,11 +138,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // The development default is the Vite dev server, which proxies `/api` here
     // without rewriting `Host`; production is the `app.` host, which nginx
     // proxies the same way. Same value, same meaning, both environments.
-    baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:5173",
+    baseURL: appOrigin,
     sendAuthEmail: createPostmarkAuthEmailSender(),
   });
 
-  await app.register(betterAuthPlugin, { auth, db });
+  await app.register(betterAuthPlugin, {
+    auth,
+    db,
+    allowedOrigins: process.env.CORS_ORIGIN ? [appOrigin, process.env.CORS_ORIGIN] : [appOrigin],
+  });
   app.addHook("onClose", async () => close());
 
   // ─── Routes ──────────────────────────────────────────────────────

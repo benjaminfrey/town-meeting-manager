@@ -17,6 +17,7 @@ vi.mock("@/providers/AuthProvider", () => ({
     isLoading: false,
     user: null,
     currentUser: null,
+    currentUserError: null,
   })),
 }));
 
@@ -119,6 +120,7 @@ describe("LoginPage", () => {
       isLoading: false,
       user: { id: "auth-user-1", email: "admin@test.com", emailVerified: true },
       currentUser: null,
+      currentUserError: null,
     });
     vi.mocked(useCurrentUser).mockReturnValue({
       id: "user-account-1",

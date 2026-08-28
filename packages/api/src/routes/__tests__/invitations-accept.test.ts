@@ -372,6 +372,105 @@ describe("POST /api/invitations/accept", () => {
     });
   });
 
+  it("REFUSES a second invitation for an account that already has a login", async () => {
+    // Two pending invitations for one `user_account` — a re-issue, or two
+    // administrators inviting the same person. Without `auth_user_id IS NULL`
+    // the second acceptance repoints the account at a NEW identity while the
+    // first stays live and signable, with a stale `user_tenant` row still
+    // mapping it to the town. That identity authenticates and is then refused
+    // by the tenant bridge on every request forever — the exact state this
+    // whole rewrite exists to end.
+    await withTestDb(async (owner) => {
+      const client = await connectAsAppRole(owner);
+      try {
+        const fixture = await seed(client);
+        const secondToken = `tok-${randomUUID()}`;
+        await owner`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+                    VALUES (${randomUUID()}, ${fixture.townId}, ${fixture.personId},
+                            ${fixture.userAccountId}, ${secondToken}, 'pending',
+                            now() + interval '7 days', 'board_member', ${INVITEE_EMAIL})`;
+
+        const { server } = await buildApp(client, owner, []);
+        try {
+          const first = await server.inject({
+            method: "POST",
+            url: "/api/invitations/accept",
+            payload: { token: fixture.token, password: PASSWORD },
+          });
+          expect(first.statusCode).toBe(200);
+
+          const [linkedTo] = await owner<{ auth_user_id: string }[]>`
+            SELECT auth_user_id FROM user_account WHERE id = ${fixture.userAccountId}`;
+
+          // A different address, so sign-up cannot fail for the unrelated
+          // reason that the email is taken — the guard under test has to be
+          // the thing that refuses.
+          await owner`UPDATE person SET email = 'second@example.gov' WHERE id = ${fixture.personId}`;
+
+          const second = await server.inject({
+            method: "POST",
+            url: "/api/invitations/accept",
+            payload: { token: secondToken, password: PASSWORD },
+          });
+          expect(second.statusCode).toBe(500);
+
+          // The account still points at the FIRST identity…
+          const [after] = await owner<{ auth_user_id: string }[]>`
+            SELECT auth_user_id FROM user_account WHERE id = ${fixture.userAccountId}`;
+          expect(after!.auth_user_id).toBe(linkedTo!.auth_user_id);
+
+          // …exactly one mapping exists, not two…
+          const mappings = await owner<{ auth_user_id: string }[]>`
+            SELECT auth_user_id FROM better_auth.user_tenant`;
+          expect(mappings.map((m) => m.auth_user_id)).toEqual([linkedTo!.auth_user_id]);
+
+          // …and the second identity was rolled back rather than left live.
+          const orphans = await owner`
+            SELECT 1 FROM better_auth."user" WHERE email = 'second@example.gov'`;
+          expect(orphans.length).toBe(0);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        await client.end();
+      }
+    });
+  });
+
+  it("answers a too-short password with 400 naming the rule, not 500", async () => {
+    // Better Auth's `minPasswordLength` is the first server-side password
+    // policy this route has ever had. A 500 with an error-level log would tell
+    // the person nothing about what to change, and would file a routine
+    // validation failure alongside the things an operator is paged for.
+    await withTestDb(async (owner) => {
+      const client = await connectAsAppRole(owner);
+      try {
+        const fixture = await seed(client);
+        const { server } = await buildApp(client, owner, []);
+        try {
+          const res = await server.inject({
+            method: "POST",
+            url: "/api/invitations/accept",
+            payload: { token: fixture.token, password: "short" },
+          });
+
+          expect(res.statusCode).toBe(400);
+          expect(res.json().message).toMatch(/at least 8 characters/i);
+
+          // And nothing was consumed or created on the way to refusing.
+          const [invitation] = await owner<{ status: string }[]>`
+            SELECT status FROM invitation WHERE id = ${fixture.invitationId}`;
+          expect(invitation!.status).toBe("pending");
+          expect(await owner`SELECT 1 FROM better_auth."user"`).toHaveLength(0);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        await client.end();
+      }
+    });
+  });
+
   it("refuses an expired invitation without creating anything", async () => {
     await withTestDb(async (owner) => {
       const client = await connectAsAppRole(owner);

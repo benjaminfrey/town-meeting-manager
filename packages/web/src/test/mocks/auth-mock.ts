@@ -94,6 +94,7 @@ export function createBoardMemberUser(overrides: Partial<CurrentUser> = {}): Cur
 interface MockAuthContextValue {
   user: { id: string; email: string; emailVerified: boolean; name?: string } | null;
   currentUser: CurrentUser | null;
+  currentUserError: Error | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   refreshCurrentUser: ReturnType<typeof vi.fn>;
@@ -130,6 +131,7 @@ export function MockAuthProvider({
   const value: MockAuthContextValue = {
     user: user ? { id: user.authUserId, email: user.email, emailVerified: true } : null,
     currentUser: authenticated ? user : null,
+    currentUserError: null,
     isLoading,
     isAuthenticated: authenticated,
     refreshCurrentUser: vi.fn().mockResolvedValue(undefined),

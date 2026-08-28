@@ -178,6 +178,14 @@ export interface BetterAuthPluginOptions {
   db: TenantResolverDb;
   /** Path prefix Better Auth owns. Requests under it skip tenant resolution. */
   basePath?: string;
+  /**
+   * The origins a browser may drive this API from.
+   *
+   * The first entry is the app's own origin — the same value `baseURL` gets,
+   * because they describe the same thing. See the `Origin` guard below for why
+   * this exists at all when `@fastify/cors` is already configured.
+   */
+  allowedOrigins: readonly string[];
 }
 
 /** Node's `IncomingHttpHeaders` → the WHATWG `Headers` Better Auth expects. */
@@ -194,9 +202,28 @@ function toWebHeaders(request: FastifyRequest): Headers {
   return headers;
 }
 
+/**
+ * Canonicalise an `Origin` header for comparison.
+ *
+ * Returns `null` for an absent, empty or opaque (`"null"`) origin — which is
+ * how a non-browser caller presents, and is NOT a refusal. Returns the string
+ * unchanged only if it parses as a URL; anything else canonicalises to
+ * `"<unparseable>"`, which matches no allowed origin and is therefore refused.
+ */
+function normaliseOrigin(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) value = value[0];
+  if (!value || value === "null") return null;
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return "<unparseable>";
+  }
+}
+
 export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts) => {
   const { auth, db } = opts;
   const basePath = opts.basePath ?? "/api/auth";
+  const allowedOrigins = opts.allowedOrigins.map((o) => o.toLowerCase());
 
   fastify.decorate("auth", auth);
   fastify.decorate("tenantDb", db);
@@ -272,6 +299,56 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
     // as do the public portal, the invitation-acceptance routes, the
     // unsubscribe link and the Postmark webhook.
     if (isPublicRoute(request)) return;
+
+    // ─── The cross-origin guard (Task C2, review round 1) ────────────────
+    //
+    // Until this check existed, EXACTLY ONE route family in this API verified
+    // where a request came from: `/api/auth/*`, because Better Auth does its
+    // own origin check. Every other authenticated route accepted a request
+    // from anywhere, and the migration from a `localStorage` bearer token to a
+    // session cookie is what made that matter — a token had to be read and
+    // attached by script that the same-origin policy kept out; a cookie is
+    // attached by the browser automatically.
+    //
+    // What composed into a live cross-tenant escalation:
+    //
+    //   1. `@fastify/cors` allowed `/\.townmeetingmanager\.com$/` WITH
+    //      credentials, so any town's portal subdomain could both send the
+    //      cookie and read the response.
+    //   2. A sibling subdomain is same-SITE, so `SameSite=Lax` does not block
+    //      it. Lax stops cross-site; it says nothing about cross-origin.
+    //   3. The public portal renders town-authored content raw
+    //      (`portal/pages/MinutesView.tsx`, `SearchResults.tsx`), so a clerk
+    //      of town A publishing scripted minutes reaches an administrator of
+    //      town B, whose browser then drives the app API as them.
+    //
+    // The CORS list is narrowed in `server.ts`, and that alone closes the
+    // read. This is the half that does not depend on the browser enforcing
+    // anything: CORS is a rule about who may READ a response, and a simple
+    // cross-origin request is still SENT and still EXECUTED while its response
+    // is withheld. For a state-changing route "the attacker could not read the
+    // answer" is not a defence.
+    //
+    // An absent `Origin` is allowed, deliberately: that is what a non-browser
+    // caller looks like (curl, an orchestrator, `scripts/health-check.sh`),
+    // and a caller that sets no `Origin` is not a page acting on a user's
+    // behalf. Browsers send `Origin` on every cross-origin fetch and on
+    // form POSTs, which is the shape this guard exists for. `Referer` is
+    // deliberately not consulted — referrer policies strip it, so trusting it
+    // would refuse legitimate requests while adding no coverage.
+    const origin = normaliseOrigin(request.headers.origin);
+    if (origin !== null && !allowedOrigins.includes(origin)) {
+      request.log.warn(
+        { origin, method: request.method, url: request.url },
+        "refusing a cross-origin request to an authenticated route",
+      );
+      return reply.forbidden(
+        `Requests to this API must come from the application's own origin. ` +
+          `This one declared ${origin}. If you are adding a legitimate browser client on ` +
+          `another origin, add it to CORS_ORIGIN — a sibling subdomain does NOT qualify, ` +
+          `because it is same-site and would carry the session cookie automatically.`,
+      );
+    }
 
     const session = await auth.api.getSession({ headers: toWebHeaders(request) });
 

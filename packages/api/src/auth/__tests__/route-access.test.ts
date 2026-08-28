@@ -43,7 +43,7 @@ async function buildApp(app: postgres.Sql): Promise<FastifyInstance> {
 
   const server = Fastify({ logger: false });
   await server.register(sensible);
-  await server.register(betterAuthPlugin, { auth, db });
+  await server.register(betterAuthPlugin, { auth, db, allowedOrigins: ["http://localhost:3000"] });
   return server;
 }
 
@@ -181,7 +181,11 @@ describe("deny-by-default route access", () => {
         await server.register(sensible);
         // Registered FIRST — before the plugin that installs the hook.
         server.get("/api/registered-before-the-hook", async () => ({ ok: true }));
-        await server.register(betterAuthPlugin, { auth, db });
+        await server.register(betterAuthPlugin, {
+          auth,
+          db,
+          allowedOrigins: ["http://localhost:3000"],
+        });
 
         try {
           const res = await server.inject({
@@ -338,7 +342,11 @@ describe("identity on an authenticated request", () => {
 
         const server = Fastify({ logger: false });
         await server.register(sensible);
-        await server.register(betterAuthPlugin, { auth, db });
+        await server.register(betterAuthPlugin, {
+          auth,
+          db,
+          allowedOrigins: ["http://localhost:3000"],
+        });
         await server.register(authPlugin);
 
         // Routes that use the decorator the way the real route files do.

@@ -59,7 +59,7 @@ async function buildApp(client: postgres.Sql) {
 
   const server = Fastify({ logger: false, trustProxy: true });
   await server.register(sensible);
-  await server.register(betterAuthPlugin, { auth, db });
+  await server.register(betterAuthPlugin, { auth, db, allowedOrigins: [APP_ORIGIN] });
   return { server, auth, db };
 }
 
@@ -154,7 +154,7 @@ describe("the same-origin arrangement", () => {
         });
         const server = Fastify({ logger: false, trustProxy: true });
         await server.register(sensible);
-        await server.register(betterAuthPlugin, { auth, db });
+        await server.register(betterAuthPlugin, { auth, db, allowedOrigins: [APP_ORIGIN] });
 
         try {
           await seedVerifiedUser(client, auth);
