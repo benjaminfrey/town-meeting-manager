@@ -71,7 +71,12 @@ describe("UserAccountSchema", () => {
       global: {},
       board_overrides: [],
     },
-    auth_user_id: UUID,
+    // Better Auth's real id shape: 32 mixed-case alphanumeric characters, not
+    // a UUID (Stage 1, Task C1 — observed from the installed 1.7.2, not
+    // assumed). Feeding a UUID here would still pass under
+    // `z.string().min(1)`, which makes the assertion vacuous and hides the day
+    // someone tightens the schema back to `.uuid()`.
+    auth_user_id: "rCjrJTYB11yus7pbQLNGWl5ZKpvurRxN",
     created_at: NOW,
     archived_at: null,
   };
@@ -109,6 +114,16 @@ describe("UserAccountSchema", () => {
     expect(UserAccountSchema.safeParse({ ...validAccount, gov_title: "Town Clerk" }).success).toBe(
       true,
     );
+  });
+
+  it("accepts a null auth_user_id — deleting a login must not delete the account", () => {
+    expect(UserAccountSchema.safeParse({ ...validAccount, auth_user_id: null }).success).toBe(true);
+  });
+
+  it("rejects an empty auth_user_id", () => {
+    // The value four web dialogs currently send. It is not a valid identity
+    // and the database rejects it too (foreign key, SQLSTATE 23503).
+    expect(UserAccountSchema.safeParse({ ...validAccount, auth_user_id: "" }).success).toBe(false);
   });
 });
 

@@ -155,7 +155,11 @@ describe("the Better Auth Fastify plugin", () => {
           // whole task exists: without it the response is a cheerful 200 and an
           // empty list, which looks exactly like a town with no data.
           expect(res.statusCode).toBe(403);
-          expect(res.json().message).toMatch(/not associated with a town/i);
+          expect(res.json().message).toMatch(/not linked to a town/i);
+          // The remediation has to be actionable. "Sign out and sign in again"
+          // reproduces the same unmapped identity and sends the user in a loop.
+          expect(res.json().message).not.toMatch(/sign out/i);
+          expect(res.json().message).toMatch(/administrator|invitation/i);
         } finally {
           await server.close();
         }

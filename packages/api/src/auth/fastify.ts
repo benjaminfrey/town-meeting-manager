@@ -31,10 +31,25 @@
  *
  * So the hook resolves the tenant and hands the route a bound
  * `request.withTenant(fn)`, which opens a transaction per unit of work with
- * `app.town_id` already set. The guarantee that matters is preserved exactly:
- * this is the only database access a route is given, so there is no way to
- * query outside a tenant context — `request` carries no raw handle. What is
- * given up is one transaction per request, which was never a requirement.
+ * `app.town_id` already set. What is given up is one transaction per request,
+ * which was never a requirement.
+ *
+ * ─── What that does and does NOT guarantee, stated precisely ──────────────
+ *
+ * `request` carries no raw database handle, so nothing reached THROUGH THIS
+ * BRIDGE can query outside a tenant context.
+ *
+ * It is not yet true that a route has no other way to reach the database, and
+ * this comment should not be read as saying so. `plugins/supabase.ts`
+ * decorates the Fastify instance with a SERVICE-ROLE Supabase client, which
+ * bypasses RLS entirely, and it is reachable from any handler as
+ * `request.server.supabase` — all five existing route files use exactly that.
+ * `createAppDb()` is also exported and can be called again.
+ *
+ * Task D1 is what makes the strong statement true, by removing
+ * `supabasePlugin` once the routes that depend on it have moved onto
+ * `request.tenant`. Until then this is the tenant-safe path, not the only
+ * path, and the difference is worth more than the tidier sentence.
  *
  * ─── The three failure modes, and what each does ──────────────────────────
  *
@@ -62,9 +77,11 @@ declare module "fastify" {
     /** Present only on requests carrying a session that resolved to a town. */
     tenant?: ResolvedTenant;
     /**
-     * Run a unit of work scoped to this request's town. The only database
-     * access a route gets, so that querying outside a tenant context is not
-     * expressible rather than merely discouraged.
+     * Run a unit of work scoped to this request's town.
+     *
+     * The tenant-safe path — not, today, the only path: `request.server.supabase`
+     * is a service-role client that bypasses RLS, and Task D1 removes it. See
+     * this file's header.
      */
     withTenant?: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
   }
@@ -172,9 +189,15 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
           { err, authUserId: session.user.id },
           "authenticated session could not be resolved to a town; refusing the request",
         );
+        // Deliberately NOT "sign out and sign in again". Signing in again
+        // reproduces the same unmapped identity every time, so that advice
+        // sends the user round a loop and then to support anyway. The two
+        // things that actually resolve this are an administrator finishing
+        // the account setup, or a fresh invitation.
         return reply.forbidden(
-          "Your account is not associated with a town. Sign out and sign in again, " +
-            "or contact your town administrator.",
+          "Your account is not linked to a town yet, so there is nothing for it to open. " +
+            "Signing in again will not change this — ask your town administrator to " +
+            "finish setting up your account or to send you a new invitation.",
         );
       }
       throw err;

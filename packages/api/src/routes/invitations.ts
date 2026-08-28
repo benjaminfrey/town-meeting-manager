@@ -413,8 +413,37 @@ export async function invitationRoutes(app: FastifyInstance) {
     const authUserId = authData.user.id;
     const now = new Date().toISOString();
 
-    // Link auth user to user_account + set email/display_name
-    await supabase
+    // Link auth user to user_account + set email/display_name.
+    //
+    // ─── Why this result is checked, and what happened when it was not ────
+    //
+    // This write CURRENTLY FAILS, every time. Stage 1 Task C1 made
+    // `user_account.auth_user_id` a real foreign key to
+    // `better_auth."user"(id)`, and `authUserId` above is a GoTrue uuid, which
+    // by construction has no row there. The write is rejected with SQLSTATE
+    // 23503 on `user_account_auth_user_id_fkey`.
+    //
+    // Until this check existed, the rejection was DISCARDED — the result was
+    // never destructured — and execution fell straight through to marking the
+    // invitation `accepted`. The invitation was consumed, the account was
+    // never linked, no `better_auth.user_tenant` row was written, and nothing
+    // errored anywhere. The invited user then authenticated successfully and
+    // hit the tenant bridge's 403 on every request thereafter, with their
+    // one-time invitation already burnt and no way to reissue it except by
+    // hand in the database.
+    //
+    // That is the exact failure class the tenant bridge exists to refuse: a
+    // request that succeeds while doing nothing. So this fails LOUDLY instead,
+    // and — critically — BEFORE the invitation is marked accepted, so a failed
+    // acceptance leaves the invitation reusable.
+    //
+    // This is deliberately a guard, not a fix. Task C2 replaces
+    // `supabase.auth.admin.createUser` above with `auth.api.signUpEmail` and
+    // this update with the two-sided link in `auth/onboarding.ts` (the
+    // `user_account.auth_user_id` write plus the `better_auth.user_tenant`
+    // insert, in one transaction). Making the route work is C2's job; making
+    // it stop lying is this task's.
+    const { error: linkError } = await supabase
       .from("user_account")
       .update({
         auth_user_id: authUserId,
@@ -423,11 +452,31 @@ export async function invitationRoutes(app: FastifyInstance) {
       })
       .eq("id", inv.user_account_id as string);
 
-    // Mark invitation accepted
-    await supabase
+    if (linkError) {
+      app.log.error(
+        { linkError, invitationId: inv.id, userAccountId: inv.user_account_id },
+        "Failed to link auth user to user_account; invitation NOT marked accepted",
+      );
+      return reply.internalServerError(
+        "Could not link the new account to this invitation. The invitation has not been " +
+          "used and can be tried again once the underlying problem is fixed.",
+      );
+    }
+
+    // Mark invitation accepted. Also checked: an unrecorded acceptance leaves a
+    // live invitation token for an account that already exists.
+    const { error: acceptError } = await supabase
       .from("invitation")
       .update({ status: "accepted", accepted_at: now })
       .eq("id", inv.id as string);
+
+    if (acceptError) {
+      app.log.error(
+        { acceptError, invitationId: inv.id },
+        "Account was linked but the invitation could not be marked accepted; the token is still live",
+      );
+      return reply.internalServerError("Account created, but the invitation could not be closed.");
+    }
 
     return reply.status(200).send({
       ok: true,
