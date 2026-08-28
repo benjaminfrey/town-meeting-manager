@@ -40,6 +40,21 @@
 // one tenancy policy — so a new table without RLS fails the suite rather than
 // shipping open. Add the table here, add its policy to a new forward-only
 // migration in `packages/api/drizzle/`, and that test tells you if you forgot.
+//
+// ─── THE ONE THING THAT WOULD SILENTLY UNDO ALL OF THIS: `pnpm db:pull` ────
+//
+// `drizzle-kit pull` overwrites this file wholesale. Run against a
+// baseline-built database it regenerates the RLS policies as `pgPolicy()`
+// calls — dropping the USING/WITH CHECK clause from every policy after the
+// first on each table, which is the exact defect described above — and deletes
+// this banner in the same stroke, erasing the warning about what it just did.
+//
+// `pnpm db:pull` is therefore GUARDED: it refuses to run without
+// `ALLOW_DB_PULL=1` (see packages/api/scripts/db-pull.sh). If you do re-pull,
+// you must delete every `pgPolicy()` call and restore this banner by hand
+// before committing. The invariants test cannot catch this for you — it checks
+// the database, and a schema.ts that has grown policies back only does damage
+// at the next `drizzle-kit generate`.
 // ============================================================================
 
 import {

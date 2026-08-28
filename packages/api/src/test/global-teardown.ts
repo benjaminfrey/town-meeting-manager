@@ -41,6 +41,21 @@ const CLUSTER_ROLES = ["tmm_app"] as const;
 
 export async function teardown(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
+
+  // Only drop the role on a cluster this process actually provisioned test
+  // databases on. `tmm_app` is a production role: on a staging or production
+  // cluster it may hold a LOGIN attribute and a password set out of band, and
+  // if it happens to hold no grants there the DROP would SUCCEED and destroy
+  // them. pg_shdepend protects the common case and nothing protects that one.
+  //
+  // db-harness.ts refuses to run without a reachable DATABASE_URL, so a run
+  // that created anything worth cleaning up had one. Requiring it here costs a
+  // no-op teardown on a run that created nothing, and removes the only path by
+  // which this file can touch a cluster the tests never used.
+  if (!process.env.DATABASE_URL) {
+    return;
+  }
+
   const admin = postgres(databaseUrl, { max: 1, onnotice: () => {} });
 
   try {

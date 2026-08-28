@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
-    "db:pull": "drizzle-kit pull",
+    "db:pull": "./scripts/db-pull.sh",
     "db:generate": "drizzle-kit generate",
     "test": "vitest run",
     "test:watch": "vitest",

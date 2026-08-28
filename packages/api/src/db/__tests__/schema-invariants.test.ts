@@ -29,6 +29,39 @@ const EXTRA_POLICIES: Record<string, string> = {
     "that every town reads and no town may write. Read-only, SELECT only.",
 };
 
+// Every table the baseline creates, in `ORDER BY relname`. Deliberately
+// enumerated rather than counted: adding a table means adding it here, which is
+// the moment to ask whether it needs a tenancy policy. See the first test.
+const EXPECTED_TABLES = [
+  "agenda_item",
+  "agenda_item_transition",
+  "agenda_template",
+  "audit_log",
+  "board",
+  "board_member",
+  "executive_session",
+  "exhibit",
+  "future_item_queue",
+  "guest_speaker",
+  "invitation",
+  "meeting",
+  "meeting_attendance",
+  "minutes_addendum",
+  "minutes_document",
+  "minutes_section",
+  "motion",
+  "notification_delivery",
+  "notification_event",
+  "permission_template",
+  "person",
+  "push_subscription",
+  "subscriber_notification_preference",
+  "town",
+  "town_notification_config",
+  "user_account",
+  "vote_record",
+];
+
 describe("baseline schema invariants", () => {
   it("has RLS enabled AND forced on every table in public", async () => {
     await withTestDb(async (sql) => {
@@ -40,7 +73,11 @@ describe("baseline schema invariants", () => {
         ORDER BY c.relname
       `;
 
-      expect(rows.length).toBeGreaterThanOrEqual(27);
+      // The exact set, not `>= 27`. A count assertion cannot tell a dropped
+      // table from a renamed one, and cannot fail at all if a table disappears
+      // while another is added — and a table that vanishes from the schema is
+      // exactly as much a defect as one that arrives without RLS.
+      expect(rows.map((r) => r.relname)).toEqual(EXPECTED_TABLES);
 
       // ENABLE without FORCE is the dangerous middle state: policies exist, so
       // the schema reads as protected, but the table owner — which is the role
