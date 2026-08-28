@@ -27,7 +27,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Eye, FileText, GripVertical, Loader2, Play, Plus, ScrollText, Send } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.agenda";
-import { useAuth } from "@/providers/AuthProvider";
+import { apiJson } from "@/lib/api-client";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { AgendaSection } from "@/components/meetings/AgendaSection";
 import { AgendaStatusBar } from "@/components/meetings/AgendaStatusBar";
@@ -146,7 +146,6 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
-  const { session } = useAuth();
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -282,21 +281,11 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
 
   // ─── Document Generation ──────────────────────────────────────────
   const handleGeneratePacket = useCallback(async () => {
-    if (!session?.access_token) return;
     setGeneratingPacket(true);
     try {
-      const res = await fetch(`/api/meetings/${meetingId}/agenda-packet`, {
+      const data = await apiJson<{ url: string }>(`/api/meetings/${meetingId}/agenda-packet`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(body.message ?? `Error ${res.status}`);
-      }
-      const data = await res.json();
       // Invalidate meeting to pick up new packet URL
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       toast.success("Agenda packet generated", {
@@ -312,24 +301,14 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
     } finally {
       setGeneratingPacket(false);
     }
-  }, [meetingId, session?.access_token]);
+  }, [meetingId, queryClient]);
 
   const handleGenerateNotice = useCallback(async () => {
-    if (!session?.access_token) return;
     setGeneratingNotice(true);
     try {
-      const res = await fetch(`/api/meetings/${meetingId}/meeting-notice`, {
+      const data = await apiJson<{ url: string }>(`/api/meetings/${meetingId}/meeting-notice`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ message: res.statusText }));
-        throw new Error(body.message ?? `Error ${res.status}`);
-      }
-      const data = await res.json();
       // Invalidate meeting to pick up new notice URL
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
       toast.success("Meeting notice generated", {
@@ -345,7 +324,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
     } finally {
       setGeneratingNotice(false);
     }
-  }, [meetingId, session?.access_token]);
+  }, [meetingId, queryClient]);
 
   // ─── DnD for section reordering ─────────────────────────────────────
   const sensors = useSensors(

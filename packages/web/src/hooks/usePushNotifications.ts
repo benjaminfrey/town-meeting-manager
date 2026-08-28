@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/api-client";
 
 export type PushPermissionState = "default" | "granted" | "denied";
 
@@ -63,18 +63,13 @@ export function usePushNotifications(): UsePushNotificationsReturn {
 
       // Send to API
       const keys = subscription.toJSON().keys!;
-      const token = await getToken();
-      await fetch("/api/notifications/push/subscribe", {
+      await apiFetch("/api/notifications/push/subscribe", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+        json: {
           endpoint: subscription.endpoint,
           keys: { p256dh: keys.p256dh, auth: keys.auth },
           userAgent: navigator.userAgent,
-        }),
+        },
       });
 
       setIsSubscribed(true);
@@ -91,14 +86,9 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
         await subscription.unsubscribe();
-        const token = await getToken();
-        await fetch("/api/notifications/push/unsubscribe", {
+        await apiFetch("/api/notifications/push/unsubscribe", {
           method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ endpoint: subscription.endpoint }),
+          json: { endpoint: subscription.endpoint },
         });
         setIsSubscribed(false);
       }
@@ -121,11 +111,4 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
     outputArray[i] = rawData.charCodeAt(i);
   }
   return outputArray.buffer as ArrayBuffer;
-}
-
-async function getToken(): Promise<string> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.access_token ?? "";
 }

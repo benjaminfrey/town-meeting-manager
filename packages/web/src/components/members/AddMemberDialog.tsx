@@ -12,8 +12,8 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiFetch } from "@/lib/api-client";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -374,20 +374,9 @@ export function AddMemberDialog({
       if (invError) throw invError;
 
       // Fire invitation email (best-effort, non-blocking)
-      void (async () => {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          if (accessToken) {
-            await fetch(`${API_BASE}/api/invitations/${invId}/send`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${accessToken}` },
-            });
-          }
-        } catch {
-          // Non-critical — admin can resend from member roster
-        }
-      })();
+      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+        // Non-critical — admin can resend from member roster
+      });
 
       return selectedPerson.name;
     },
@@ -450,20 +439,9 @@ export function AddMemberDialog({
       if (invError) throw invError;
 
       // Fire invitation email (best-effort, non-blocking)
-      void (async () => {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          if (accessToken) {
-            await fetch(`${API_BASE}/api/invitations/${invId}/send`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${accessToken}` },
-            });
-          }
-        } catch {
-          // Non-critical — admin can resend from member roster
-        }
-      })();
+      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+        // Non-critical — admin can resend from member roster
+      });
 
       return selectedPerson.name;
     },

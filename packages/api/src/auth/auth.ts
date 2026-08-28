@@ -151,6 +151,30 @@ export function createAuth(options: CreateAuthOptions) {
       },
     },
 
+    advanced: {
+      // ─── Task C2: CSRF protection stops depending on NODE_ENV ─────────
+      //
+      // Better Auth's default is
+      //
+      //     skipOriginCheck: options.advanced?.disableOriginCheck ?? (isTest() ? true : false)
+      //
+      // and `isTest()` is `NODE_ENV === "test" || TEST`. So whether the origin
+      // check runs is decided by an environment variable, and it is decided in
+      // the permissive direction — which is the same shape as the
+      // `NODE_ENV !== "production"` guard Task G1 deleted a route over: it
+      // fails OPEN whenever the variable is unset, misspelled, or set to
+      // "test" by a harness nobody remembered. `NODE_ENV` is correct in this
+      // project's images today; the point is that it must not be load-bearing
+      // for CSRF.
+      //
+      // Stating `false` explicitly makes the check unconditional, in every
+      // environment, and makes it testable — which matters because a CSRF
+      // defence that is disabled in the only environment where tests run is a
+      // defence with no test. `__tests__/same-origin.test.ts` measures both
+      // directions, and could not have with the default.
+      disableOriginCheck: false,
+    },
+
     // No plugins. See the header for why the organization plugin in
     // particular is absent, and why that decision is test-enforced.
     plugins: [],

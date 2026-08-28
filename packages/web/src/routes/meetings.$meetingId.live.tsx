@@ -35,6 +35,7 @@ import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
 import { ConnectionStatusBarErrorBoundary } from "@/components/FeatureErrorBoundaries";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiFetch } from "@/lib/api-client";
 import { supabase as supabaseSingleton } from "@/lib/supabase";
 import { queryClient as sharedQueryClient } from "@/lib/queryClient";
 import { MeetingTimer } from "@/components/meeting/MeetingTimer";
@@ -167,8 +168,16 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const processedMotionIds = useRef<Set<string>>(new Set());
 
   // ─── Permission check ─────────────────────────────────────────
+  // `role` is `null` for an identity that has signed in but has no town yet
+  // (Task C2 — it comes from `user_account`, which only exists inside a town).
+  // `hasPermission` takes `undefined` for "no role known", and both mean deny.
   const canRunMeeting = currentUser
-    ? hasPermission(currentUser.permissions, "start_run_meeting", undefined, currentUser.role)
+    ? hasPermission(
+        currentUser.permissions,
+        "start_run_meeting",
+        undefined,
+        currentUser.role ?? undefined,
+      )
     : false;
 
   // ─── Reactive queries ─────────────────────────────────────────
@@ -732,24 +741,13 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             created_at: now,
           });
 
-          // Fire API call to regenerate PDF without DRAFT watermark (fire-and-forget)
-          try {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const accessToken = sessionData?.session?.access_token;
-            if (accessToken) {
-              const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-              await fetch(`${apiBase}/api/meetings/${meetingId}/minutes/render`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${accessToken}`,
-                },
-                body: JSON.stringify({ is_draft: false }),
-              });
-            }
-          } catch {
-            // Fire-and-forget — PDF regeneration failure is non-critical
-          }
+          // Regenerate the PDF without the DRAFT watermark (fire-and-forget).
+          await apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
+            method: "POST",
+            json: { is_draft: false },
+          }).catch(() => {
+            // Non-critical — the minutes screen can re-render on demand.
+          });
         })();
       }
     }

@@ -2,17 +2,23 @@
  * Login page — /login route
  *
  * Uses plain React state + Zod for validation, shadcn/ui for styling.
- * Authenticates via Supabase Auth. On success, redirects to /dashboard
- * or /setup depending on whether the user has a town_id claim in their JWT.
+ * Authenticates via Better Auth (Stage 1, Task C2). On success it redirects to
+ * /dashboard or /setup depending on whether the account belongs to a town.
+ *
+ * That question used to be answered by base64-decoding the fresh access token
+ * and reading a `town_id` claim, right here, because the claim was the only
+ * place the answer lived and `AuthProvider`'s state had not caught up yet.
+ * There is no token now: `GET /api/me` answers it, and the redirect below
+ * simply waits for `AuthProvider` to have it — which is the same wait the
+ * `Navigate` above already performs for an already-signed-in visitor.
  */
 
 import { type FormEvent, useState } from "react";
-import { Link, useNavigate, Navigate } from "react-router";
+import { Link, Navigate } from "react-router";
 import { z } from "zod";
 import { Loader2, Landmark } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,7 +49,6 @@ type FieldErrors = Partial<Record<keyof z.infer<typeof loginSchema>, string>>;
 export default function LoginPage() {
   const { signIn, isAuthenticated, isLoading: authLoading } = useAuth();
   const currentUser = useCurrentUser();
-  const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,25 +91,17 @@ export default function LoginPage() {
       return;
     }
 
-    // Success — determine redirect destination based on JWT claims.
-    // Read the fresh session to check for town_id before the auth
-    // state change propagates through React.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-    let hasTown = false;
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]!));
-        hasTown = !!(
-          payload.town_id ??
-          payload.app_metadata?.town_id ??
-          payload.user_metadata?.town_id
-        );
-      } catch {
-        // If JWT decode fails, default to setup
-      }
-    }
-    navigate(hasTown ? "/dashboard" : "/setup", { replace: true });
+    // Success. The redirect is NOT decided here any more.
+    //
+    // `AuthProvider` re-reads `GET /api/me` for the new session, and the
+    // `Navigate` at the top of this component sends the user to /dashboard or
+    // /setup once that answer arrives. Deciding it here as well would mean two
+    // places computing the same thing from different data, and the one here
+    // would be the one racing the fetch — which is how a fully onboarded user
+    // ends up looking at the setup wizard for a second.
+    //
+    // `isSubmitting` stays true so the button keeps its spinner until the
+    // redirect happens, rather than flashing back to "Sign in".
   };
 
   return (
