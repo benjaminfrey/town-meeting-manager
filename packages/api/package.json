@@ -20,10 +20,12 @@
     "@supabase/supabase-js": "^2.99.0",
     "@town-meeting/shared": "workspace:*",
     "@trpc/server": "11.18.0",
+    "drizzle-orm": "0.45.2",
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",
     "handlebars": "^4.7.8",
     "pdf-lib": "^1.17.1",
+    "pg": "8.23.0",
     "postgres": "3.4.9",
     "postmark": "^4.0.7",
     "puppeteer": "^24.39.0",
@@ -32,7 +34,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/web-push": "^3.6.4",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-zod": "0.8.3",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0"
   }

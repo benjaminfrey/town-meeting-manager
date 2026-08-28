@@ -1,0 +1,1733 @@
+import {
+  pgTable,
+  pgSchema,
+  uuid,
+  index,
+  foreignKey,
+  unique,
+  pgPolicy,
+  text,
+  date,
+  boolean,
+  timestamp,
+  integer,
+  jsonb,
+  time,
+  bigint,
+  check,
+  pgEnum,
+  customType,
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+
+// HAND-APPLIED FIX, not `pull` output (Task 4 / B1 hand-review, Step 5):
+// `drizzle-kit pull` emitted `unknown("search_vector")` for both tsvector
+// columns below. `unknown` is a TypeScript *type* exported by
+// drizzle-orm/pg-core, not a callable column builder — the generated code
+// does not compile (`error TS2693: 'unknown' only refers to a type, but is
+// being used as a value here`). drizzle-orm@0.45.2's pg-core has no
+// first-class `tsvector` column builder, so pull's fallback path emits an
+// invalid reference instead of degrading to something loadable. This
+// `customType` is the standard drizzle-orm workaround for a column type
+// the library doesn't model natively — it does not add or infer anything
+// pull didn't already know (the column's SQL type, `tsvector`, is exactly
+// what pull's own SQL migration output and every other tool agree it is).
+// Column existence, name, nullability, and the GIN indexes over these two
+// columns are unchanged from pull's output. See task-4-report.md.
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
+export const auth = pgSchema("auth");
+export const agendaItemStatus = pgEnum("agenda_item_status", [
+  "pending",
+  "active",
+  "completed",
+  "tabled",
+  "deferred",
+]);
+export const attendanceStatus = pgEnum("attendance_status", [
+  "present",
+  "absent",
+  "remote",
+  "excused",
+  "late_arrival",
+  "early_departure",
+]);
+export const boardMemberStatus = pgEnum("board_member_status", ["active", "archived"]);
+export const boardType = pgEnum("board_type", [
+  "select_board",
+  "planning_board",
+  "zoning_board",
+  "budget_committee",
+  "conservation_commission",
+  "parks_recreation",
+  "harbor_committee",
+  "shellfish_commission",
+  "cemetery_committee",
+  "road_committee",
+  "comp_plan_committee",
+  "broadband_committee",
+  "other",
+]);
+export const exhibitVisibility = pgEnum("exhibit_visibility", [
+  "public",
+  "board_only",
+  "admin_only",
+]);
+export const meetingFormality = pgEnum("meeting_formality", ["informal", "semi_formal", "formal"]);
+export const meetingStatus = pgEnum("meeting_status", [
+  "draft",
+  "noticed",
+  "open",
+  "adjourned",
+  "minutes_draft",
+  "approved",
+  "cancelled",
+]);
+export const minutesDocumentStatus = pgEnum("minutes_document_status", [
+  "draft",
+  "review",
+  "approved",
+  "published",
+]);
+export const minutesGeneratedBy = pgEnum("minutes_generated_by", ["manual", "ai", "hybrid"]);
+export const minutesStyle = pgEnum("minutes_style", ["action", "summary", "narrative"]);
+export const motionStatus = pgEnum("motion_status", [
+  "pending",
+  "seconded",
+  "in_vote",
+  "passed",
+  "failed",
+  "tabled",
+  "withdrawn",
+]);
+export const motionType = pgEnum("motion_type", [
+  "main",
+  "amendment",
+  "substitute",
+  "table",
+  "untable",
+  "postpone",
+  "reconsider",
+  "adjourn",
+]);
+export const municipalityType = pgEnum("municipality_type", ["town", "city", "plantation"]);
+export const notificationChannel = pgEnum("notification_channel", ["email", "sms"]);
+export const notificationStatus = pgEnum("notification_status", [
+  "pending",
+  "processing",
+  "sent",
+  "delivered",
+  "failed",
+  "bounced",
+  "completed",
+  "complained",
+]);
+export const userRole = pgEnum("user_role", ["sys_admin", "admin", "staff", "board_member"]);
+export const voteType = pgEnum("vote_type", ["yes", "no", "abstain", "recusal", "absent"]);
+
+export const usersInAuth = auth.table("users", {
+  id: uuid().defaultRandom().primaryKey().notNull(),
+});
+
+export const boardMember = pgTable(
+  "board_member",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    personId: uuid("person_id").notNull(),
+    boardId: uuid("board_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    seatTitle: text("seat_title"),
+    termStart: date("term_start").notNull(),
+    termEnd: date("term_end"),
+    status: boardMemberStatus().default("active").notNull(),
+    isDefaultRecSec: boolean("is_default_rec_sec").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_board_member_active")
+      .using(
+        "btree",
+        table.boardId.asc().nullsLast().op("uuid_ops"),
+        table.status.asc().nullsLast().op("uuid_ops"),
+      )
+      .where(sql`(status = 'active'::board_member_status)`),
+    index("idx_board_member_board_id").using(
+      "btree",
+      table.boardId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_board_member_person_id").using(
+      "btree",
+      table.personId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_board_member_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.personId],
+      foreignColumns: [person.id],
+      name: "board_member_person_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.boardId],
+      foreignColumns: [board.id],
+      name: "board_member_board_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "board_member_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("board_member_unique_active").on(table.boardId, table.personId, table.status),
+    pgPolicy("board_member_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("board_member_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("board_member_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const voteRecord = pgTable(
+  "vote_record",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    motionId: uuid("motion_id").notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    boardMemberId: uuid("board_member_id").notNull(),
+    vote: voteType().notNull(),
+    recusalReason: text("recusal_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_vote_record_board_member_id").using(
+      "btree",
+      table.boardMemberId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_vote_record_meeting_id").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_vote_record_motion_id").using(
+      "btree",
+      table.motionId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_vote_record_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.motionId],
+      foreignColumns: [motion.id],
+      name: "vote_record_motion_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "vote_record_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "vote_record_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.boardMemberId],
+      foreignColumns: [boardMember.id],
+      name: "vote_record_board_member_id_fkey",
+    }).onDelete("cascade"),
+    unique("vote_record_unique_per_motion").on(table.boardMemberId, table.motionId),
+    pgPolicy("vote_record_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('M3'::text))`,
+    }),
+    pgPolicy("vote_record_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("vote_record_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const meetingAttendance = pgTable(
+  "meeting_attendance",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    boardMemberId: uuid("board_member_id"),
+    personId: uuid("person_id").notNull(),
+    status: attendanceStatus().default("present").notNull(),
+    isRecordingSecretary: boolean("is_recording_secretary").default(false).notNull(),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true, mode: "string" }),
+    departedAt: timestamp("departed_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_attendance_board_member_id").using(
+      "btree",
+      table.boardMemberId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_attendance_meeting_id").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_attendance_person_id").using(
+      "btree",
+      table.personId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_attendance_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "meeting_attendance_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "meeting_attendance_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.boardMemberId],
+      foreignColumns: [boardMember.id],
+      name: "meeting_attendance_board_member_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.personId],
+      foreignColumns: [person.id],
+      name: "meeting_attendance_person_id_fkey",
+    }).onDelete("cascade"),
+    unique("attendance_unique_per_meeting").on(table.meetingId, table.personId),
+    pgPolicy("attendance_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('M2'::text))`,
+    }),
+    pgPolicy("attendance_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("attendance_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const minutesSection = pgTable(
+  "minutes_section",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    minutesDocumentId: uuid("minutes_document_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    sectionType: text("section_type").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    title: text(),
+    contentJson: jsonb("content_json").default({}).notNull(),
+    sourceAgendaItemId: uuid("source_agenda_item_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_minutes_section_doc_id").using(
+      "btree",
+      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_minutes_section_sort").using(
+      "btree",
+      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
+      table.sortOrder.asc().nullsLast().op("int4_ops"),
+    ),
+    index("idx_minutes_section_town_id").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.minutesDocumentId],
+      foreignColumns: [minutesDocument.id],
+      name: "minutes_section_minutes_document_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "minutes_section_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.sourceAgendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "minutes_section_source_agenda_item_id_fkey",
+    }),
+    pgPolicy("minutes_section_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('R1'::text))`,
+    }),
+    pgPolicy("minutes_section_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("minutes_section_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const agendaTemplate = pgTable(
+  "agenda_template",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    boardId: uuid("board_id"),
+    townId: uuid("town_id").notNull(),
+    name: text().notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    sections: jsonb().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_agenda_template_board_id").using(
+      "btree",
+      table.boardId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_agenda_template_town_id").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.boardId],
+      foreignColumns: [board.id],
+      name: "agenda_template_board_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "agenda_template_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("template_name_unique_per_board").on(table.boardId, table.name),
+    pgPolicy("agenda_template_delete", {
+      as: "permissive",
+      for: "delete",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("agenda_template_update", { as: "permissive", for: "update", to: ["public"] }),
+    pgPolicy("agenda_template_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("agenda_template_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const notificationEvent = pgTable(
+  "notification_event",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb().default({}).notNull(),
+    status: notificationStatus().default("pending").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_notification_event_status")
+      .using("btree", table.status.asc().nullsLast().op("enum_ops"))
+      .where(
+        sql`(status = ANY (ARRAY['pending'::notification_status, 'processing'::notification_status]))`,
+      ),
+    index("idx_notification_event_town_id").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_notification_event_type").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+      table.eventType.asc().nullsLast().op("text_ops"),
+    ),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "notification_event_town_id_fkey",
+    }).onDelete("cascade"),
+    pgPolicy("notification_event_insert", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+      withCheck: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("notification_event_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const subscriberNotificationPreference = pgTable(
+  "subscriber_notification_preference",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    personId: uuid("person_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    channel: notificationChannel().notNull(),
+    eventType: text("event_type").notNull(),
+    enabled: boolean().default(true).notNull(),
+    consentTimestamp: timestamp("consent_timestamp", { withTimezone: true, mode: "string" }),
+    consentMethod: text("consent_method"),
+    consentRecord: text("consent_record"),
+  },
+  (table) => [
+    index("idx_subscriber_pref_person").using(
+      "btree",
+      table.personId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_subscriber_pref_town").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.personId],
+      foreignColumns: [person.id],
+      name: "subscriber_notification_preference_person_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "subscriber_notification_preference_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("subscriber_pref_unique").on(table.channel, table.eventType, table.personId),
+    pgPolicy("subscriber_pref_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND ((person_id = get_current_person_id()) OR is_admin()))`,
+    }),
+    pgPolicy("subscriber_pref_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("subscriber_pref_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const townNotificationConfig = pgTable(
+  "town_notification_config",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id").notNull(),
+    postmarkServerTokenEncrypted: text("postmark_server_token_encrypted"),
+    postmarkSenderEmail: text("postmark_sender_email"),
+    postmarkSenderName: text("postmark_sender_name"),
+    twilioMessagingServiceSid: text("twilio_messaging_service_sid"),
+    twilioPhoneNumber: text("twilio_phone_number"),
+    smsQuietHoursStart: time("sms_quiet_hours_start").default("21:00:00"),
+    smsQuietHoursEnd: time("sms_quiet_hours_end").default("08:00:00"),
+    smsOptInMessage: text("sms_opt_in_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "town_notification_config_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("town_notification_config_town_id_key").on(table.townId),
+    pgPolicy("town_notification_config_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("town_notification_config_insert", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+    }),
+    pgPolicy("town_notification_config_select", {
+      as: "permissive",
+      for: "select",
+      to: ["public"],
+    }),
+  ],
+);
+
+export const permissionTemplate = pgTable(
+  "permission_template",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id"),
+    name: text().notNull(),
+    description: text(),
+    permissions: jsonb().default({}).notNull(),
+    isSystemDefault: boolean("is_system_default").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_permission_template_town").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "permission_template_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("template_name_unique").on(table.name, table.townId),
+    pgPolicy("permission_template_delete", {
+      as: "permissive",
+      for: "delete",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin() AND (is_system_default = false))`,
+    }),
+    pgPolicy("permission_template_update", { as: "permissive", for: "update", to: ["public"] }),
+    pgPolicy("permission_template_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("permission_template_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id").notNull(),
+    userAccountId: uuid("user_account_id"),
+    action: text().notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id"),
+    details: jsonb().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_audit_log_created").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+      table.createdAt.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_audit_log_entity").using(
+      "btree",
+      table.entityType.asc().nullsLast().op("uuid_ops"),
+      table.entityId.asc().nullsLast().op("text_ops"),
+    ),
+    index("idx_audit_log_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_audit_log_user").using(
+      "btree",
+      table.userAccountId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "audit_log_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userAccountId],
+      foreignColumns: [userAccount.id],
+      name: "audit_log_user_account_id_fkey",
+    }).onDelete("set null"),
+    pgPolicy("audit_log_insert", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+      withCheck: sql`(town_id = get_current_town_id())`,
+    }),
+    pgPolicy("audit_log_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const person = pgTable(
+  "person",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id").notNull(),
+    name: text().notNull(),
+    email: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_person_archived")
+      .using("btree", table.townId.asc().nullsLast().op("uuid_ops"))
+      .where(sql`(archived_at IS NULL)`),
+    index("idx_person_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
+    index("idx_person_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "person_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("person_email_unique_per_town").on(table.email, table.townId),
+    pgPolicy("person_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("person_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("person_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const exhibit = pgTable(
+  "exhibit",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    agendaItemId: uuid("agenda_item_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    title: text().notNull(),
+    fileStoragePath: text("file_storage_path").notNull(),
+    fileType: text("file_type").notNull(),
+    // You can use { mode: "bigint" } if numbers are exceeding js number limitations
+    fileSize: bigint("file_size", { mode: "number" }),
+    exhibitType: text("exhibit_type"),
+    uploadedBy: uuid("uploaded_by"),
+    visibility: exhibitVisibility().default("public").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    fileName: text("file_name"),
+  },
+  (table) => [
+    index("idx_exhibit_agenda_item_id").using(
+      "btree",
+      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_exhibit_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_exhibit_uploaded_by").using(
+      "btree",
+      table.uploadedBy.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.agendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "exhibit_agenda_item_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "exhibit_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.uploadedBy],
+      foreignColumns: [userAccount.id],
+      name: "exhibit_uploaded_by_fkey",
+    }),
+    pgPolicy("exhibit_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('A3'::text))`,
+    }),
+    pgPolicy("exhibit_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("exhibit_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const motion = pgTable(
+  "motion",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    agendaItemId: uuid("agenda_item_id").notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    motionText: text("motion_text").notNull(),
+    motionType: motionType("motion_type").default("main").notNull(),
+    movedBy: uuid("moved_by"),
+    secondedBy: uuid("seconded_by"),
+    status: motionStatus().default("pending").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    parentMotionId: uuid("parent_motion_id"),
+    voteSummary: jsonb("vote_summary"),
+  },
+  (table) => [
+    index("idx_motion_agenda_item_id").using(
+      "btree",
+      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_motion_meeting_id").using("btree", table.meetingId.asc().nullsLast().op("uuid_ops")),
+    index("idx_motion_moved_by").using("btree", table.movedBy.asc().nullsLast().op("uuid_ops")),
+    index("idx_motion_parent")
+      .using("btree", table.parentMotionId.asc().nullsLast().op("uuid_ops"))
+      .where(sql`(parent_motion_id IS NOT NULL)`),
+    index("idx_motion_status").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+      table.status.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_motion_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.agendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "motion_agenda_item_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "motion_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "motion_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.movedBy],
+      foreignColumns: [boardMember.id],
+      name: "motion_moved_by_fkey",
+    }),
+    foreignKey({
+      columns: [table.secondedBy],
+      foreignColumns: [boardMember.id],
+      name: "motion_seconded_by_fkey",
+    }),
+    foreignKey({
+      columns: [table.parentMotionId],
+      foreignColumns: [table.id],
+      name: "motion_parent_motion_id_fkey",
+    }),
+    pgPolicy("motion_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('M3'::text))`,
+    }),
+    pgPolicy("motion_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("motion_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const notificationDelivery = pgTable(
+  "notification_delivery",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    eventId: uuid("event_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    subscriberId: uuid("subscriber_id").notNull(),
+    channel: notificationChannel().notNull(),
+    status: notificationStatus().default("pending").notNull(),
+    externalId: text("external_id"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true, mode: "string" }),
+    postmarkMessageId: text("postmark_message_id"),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" }),
+    openedAt: timestamp("opened_at", { withTimezone: true, mode: "string" }),
+    retryCount: integer("retry_count").default(0).notNull(),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_notification_delivery_event_id").using(
+      "btree",
+      table.eventId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_notification_delivery_postmark")
+      .using("btree", table.postmarkMessageId.asc().nullsLast().op("text_ops"))
+      .where(sql`(postmark_message_id IS NOT NULL)`),
+    index("idx_notification_delivery_retry")
+      .using("btree", table.nextRetryAt.asc().nullsLast().op("timestamptz_ops"))
+      .where(
+        sql`((status = ANY (ARRAY['sent'::notification_status, 'failed'::notification_status])) AND (retry_count < 3) AND (next_retry_at IS NOT NULL))`,
+      ),
+    index("idx_notification_delivery_status")
+      .using("btree", table.status.asc().nullsLast().op("enum_ops"))
+      .where(
+        sql`(status = ANY (ARRAY['pending'::notification_status, 'processing'::notification_status]))`,
+      ),
+    index("idx_notification_delivery_subscriber").using(
+      "btree",
+      table.subscriberId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_notification_delivery_town_id").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.eventId],
+      foreignColumns: [notificationEvent.id],
+      name: "notification_delivery_event_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "notification_delivery_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.subscriberId],
+      foreignColumns: [person.id],
+      name: "notification_delivery_subscriber_id_fkey",
+    }).onDelete("cascade"),
+    pgPolicy("notification_delivery_insert", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+      withCheck: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("notification_delivery_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const guestSpeaker = pgTable(
+  "guest_speaker",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    agendaItemId: uuid("agenda_item_id"),
+    townId: uuid("town_id").notNull(),
+    name: text().notNull(),
+    address: text(),
+    topic: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_guest_speaker_meeting").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_guest_speaker_town").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "guest_speaker_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.agendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "guest_speaker_agenda_item_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "guest_speaker_town_id_fkey",
+    }).onDelete("cascade"),
+    pgPolicy("guest_speaker_delete", {
+      as: "permissive",
+      for: "delete",
+      to: ["public"],
+      using: sql`(town_id = get_current_town_id())`,
+    }),
+    pgPolicy("guest_speaker_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("guest_speaker_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const agendaItemTransition = pgTable(
+  "agenda_item_transition",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    agendaItemId: uuid("agenda_item_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_agenda_item_transition_item").using(
+      "btree",
+      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_agenda_item_transition_meeting").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_agenda_item_transition_town").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "agenda_item_transition_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.agendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "agenda_item_transition_agenda_item_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "agenda_item_transition_town_id_fkey",
+    }).onDelete("cascade"),
+    pgPolicy("transition_insert", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+      withCheck: sql`(town_id = get_current_town_id())`,
+    }),
+    pgPolicy("transition_select", { as: "permissive", for: "select", to: ["public"] }),
+    pgPolicy("transition_update", { as: "permissive", for: "update", to: ["public"] }),
+  ],
+);
+
+export const minutesDocument = pgTable(
+  "minutes_document",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    status: minutesDocumentStatus().default("draft").notNull(),
+    contentJson: jsonb("content_json").default({}).notNull(),
+    htmlRendered: text("html_rendered"),
+    pdfStoragePath: text("pdf_storage_path"),
+    generatedBy: minutesGeneratedBy("generated_by").default("manual").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true, mode: "string" }),
+    approvedByMotionId: uuid("approved_by_motion_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    boardId: uuid("board_id"),
+    minutesStyle: text("minutes_style").default("summary").notNull(),
+    submittedForReviewAt: timestamp("submitted_for_review_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+    createdBy: uuid("created_by"),
+    originalContentJson: jsonb("original_content_json"),
+    amendmentsHistory: jsonb("amendments_history").default([]),
+    approvedAsAmended: boolean("approved_as_amended").default(false).notNull(),
+    // TODO: failed to parse database type 'tsvector'
+    searchVector: tsvector("search_vector"),
+  },
+  (table) => [
+    index("idx_minutes_doc_meeting_id").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_minutes_doc_status").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+      table.status.asc().nullsLast().op("enum_ops"),
+    ),
+    index("idx_minutes_doc_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_minutes_document_board_id").using(
+      "btree",
+      table.boardId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_minutes_document_search").using(
+      "gin",
+      table.searchVector.asc().nullsLast().op("tsvector_ops"),
+    ),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "minutes_document_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "minutes_document_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.approvedByMotionId],
+      foreignColumns: [motion.id],
+      name: "minutes_document_approved_by_motion_id_fkey",
+    }),
+    foreignKey({
+      columns: [table.boardId],
+      foreignColumns: [board.id],
+      name: "minutes_document_board_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdBy],
+      foreignColumns: [userAccount.id],
+      name: "minutes_document_created_by_fkey",
+    }).onDelete("set null"),
+    unique("minutes_document_meeting_id_key").on(table.meetingId),
+    pgPolicy("minutes_document_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('R1'::text))`,
+    }),
+    pgPolicy("minutes_document_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("minutes_document_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const executiveSession = pgTable(
+  "executive_session",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    agendaItemId: uuid("agenda_item_id"),
+    townId: uuid("town_id").notNull(),
+    statutoryBasis: text("statutory_basis").notNull(),
+    enteredAt: timestamp("entered_at", { withTimezone: true, mode: "string" }),
+    exitedAt: timestamp("exited_at", { withTimezone: true, mode: "string" }),
+    entryMotionId: uuid("entry_motion_id"),
+    postSessionActionMotionIds: jsonb("post_session_action_motion_ids").default([]),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_executive_session_meeting").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_executive_session_town").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "executive_session_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.agendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "executive_session_agenda_item_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "executive_session_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.entryMotionId],
+      foreignColumns: [motion.id],
+      name: "executive_session_entry_motion_id_fkey",
+    }).onDelete("set null"),
+    pgPolicy("executive_session_delete", {
+      as: "permissive",
+      for: "delete",
+      to: ["public"],
+      using: sql`(town_id = ( SELECT ((((current_setting('request.jwt.claims'::text, true))::jsonb -> 'app_metadata'::text) ->> 'town_id'::text))::uuid AS uuid))`,
+    }),
+    pgPolicy("executive_session_update", { as: "permissive", for: "update", to: ["public"] }),
+    pgPolicy("executive_session_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("executive_session_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+// `: any` on this and `meeting` below is a HAND-APPLIED FIX, not `pull`
+// output (Step 5 hand-review). `agenda_item.meeting_id` references
+// `meeting.id` and `meeting.current_agenda_item_id` references
+// `agenda_item.id` — a genuine mutual type-inference cycle: TypeScript
+// cannot infer either table's type without first knowing the other's.
+// `AnyPgColumn` was imported by `pull` for exactly this kind of situation
+// (Drizzle's own documented pattern for circular/self-referencing tables)
+// but never actually applied anywhere — confirmed by tsc flagging it as
+// the file's only unused import. `: any` here is Drizzle's documented
+// escape hatch for this exact case; it does not change the runtime
+// columns, FK names, or onDelete behavior below (all pull output,
+// untouched) — it only widens these two tables' own compile-time type so
+// each can reference the other. Cost: property access on `agendaItem`/
+// `meeting` (their own column properties, not tables that reference them)
+// is not type-checked. Narrowing this further — e.g. `any` on only one
+// side — was tried and does not work: the cycle also reaches through
+// `motion` and `minutesDocument` (agenda_item -> minutesDocument ->
+// motion -> agenda_item/meeting), so both ends of the agendaItem<->meeting
+// edge need it to fully close the cycle.
+export const agendaItem: any = pgTable(
+  "agenda_item",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    meetingId: uuid("meeting_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    sectionType: text("section_type").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    title: text().notNull(),
+    description: text(),
+    presenter: text(),
+    estimatedDuration: integer("estimated_duration"),
+    parentItemId: uuid("parent_item_id"),
+    status: agendaItemStatus().default("pending").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    staffResource: text("staff_resource"),
+    background: text(),
+    recommendation: text(),
+    suggestedMotion: text("suggested_motion"),
+    operatorNotes: text("operator_notes"),
+    sourceMinutesDocumentId: uuid("source_minutes_document_id"),
+    // TODO: failed to parse database type 'tsvector'
+    searchVector: tsvector("search_vector"),
+  },
+  (table) => [
+    index("idx_agenda_item_meeting_id").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_agenda_item_parent").using(
+      "btree",
+      table.parentItemId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_agenda_item_search").using(
+      "gin",
+      table.searchVector.asc().nullsLast().op("tsvector_ops"),
+    ),
+    index("idx_agenda_item_sort").using(
+      "btree",
+      table.meetingId.asc().nullsLast().op("uuid_ops"),
+      table.sortOrder.asc().nullsLast().op("int4_ops"),
+    ),
+    index("idx_agenda_item_source_minutes_doc")
+      .using("btree", table.sourceMinutesDocumentId.asc().nullsLast().op("uuid_ops"))
+      .where(sql`(source_minutes_document_id IS NOT NULL)`),
+    index("idx_agenda_item_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.meetingId],
+      foreignColumns: [meeting.id],
+      name: "agenda_item_meeting_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "agenda_item_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.parentItemId],
+      foreignColumns: [table.id],
+      name: "agenda_item_parent_item_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.sourceMinutesDocumentId],
+      foreignColumns: [minutesDocument.id],
+      name: "agenda_item_source_minutes_document_id_fkey",
+    }).onDelete("set null"),
+    pgPolicy("agenda_item_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND has_permission('A2'::text))`,
+    }),
+    pgPolicy("agenda_item_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("agenda_item_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const futureItemQueue = pgTable(
+  "future_item_queue",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    boardId: uuid("board_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    sourceMeetingId: uuid("source_meeting_id"),
+    sourceAgendaItemId: uuid("source_agenda_item_id"),
+    title: text().notNull(),
+    description: text(),
+    source: text().notNull(),
+    status: text().default("pending").notNull(),
+    dismissedReason: text("dismissed_reason"),
+    placedAgendaItemId: uuid("placed_agenda_item_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_future_item_queue_board").using(
+      "btree",
+      table.boardId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_future_item_queue_source_meeting").using(
+      "btree",
+      table.sourceMeetingId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_future_item_queue_town").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.boardId],
+      foreignColumns: [board.id],
+      name: "future_item_queue_board_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "future_item_queue_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.sourceMeetingId],
+      foreignColumns: [meeting.id],
+      name: "future_item_queue_source_meeting_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.sourceAgendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "future_item_queue_source_agenda_item_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.placedAgendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "future_item_queue_placed_agenda_item_id_fkey",
+    }).onDelete("set null"),
+    pgPolicy("future_item_queue_delete", {
+      as: "permissive",
+      for: "delete",
+      to: ["public"],
+      using: sql`(town_id = ( SELECT ((((current_setting('request.jwt.claims'::text, true))::jsonb -> 'app_metadata'::text) ->> 'town_id'::text))::uuid AS uuid))`,
+    }),
+    pgPolicy("future_item_queue_update", { as: "permissive", for: "update", to: ["public"] }),
+    pgPolicy("future_item_queue_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("future_item_queue_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const board = pgTable(
+  "board",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    townId: uuid("town_id").notNull(),
+    name: text().notNull(),
+    boardType: boardType("board_type").default("other").notNull(),
+    memberCount: integer("member_count"),
+    electionMethod: text("election_method"),
+    officerElectionMethod: text("officer_election_method"),
+    districtBased: boolean("district_based").default(false).notNull(),
+    staggeredTerms: boolean("staggered_terms").default(false).notNull(),
+    isGoverningBoard: boolean("is_governing_board").default(false).notNull(),
+    meetingFormalityOverride: meetingFormality("meeting_formality_override"),
+    minutesStyleOverride: minutesStyle("minutes_style_override"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+    seatTitles: jsonb("seat_titles").default([]),
+    electedOrAppointed: text("elected_or_appointed").default("elected"),
+    quorumType: text("quorum_type").default("majority"),
+    quorumValue: integer("quorum_value"),
+    motionDisplayFormat: text("motion_display_format").default("formal"),
+    certificationFormat: text("certification_format").default("prepared_by").notNull(),
+    memberReferenceStyle: text("member_reference_style").default("title_and_last_name").notNull(),
+    noticeTemplateBlocks: jsonb("notice_template_blocks"),
+    minutesConsentAgenda: boolean("minutes_consent_agenda").default(false).notNull(),
+    minutesRequiresSecond: boolean("minutes_requires_second").default(true).notNull(),
+    r4BoardMemberDefault: boolean("r4_board_member_default").default(true).notNull(),
+    audioRetentionPolicyOverride: text("audio_retention_policy_override"),
+    autoPublishOnApprovalOverride: boolean("auto_publish_on_approval_override"),
+  },
+  (table) => [
+    index("idx_board_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_board_type").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+      table.boardType.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "board_town_id_fkey",
+    }).onDelete("cascade"),
+    unique("board_name_unique_per_town").on(table.name, table.townId),
+    pgPolicy("board_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("board_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("board_select", { as: "permissive", for: "select", to: ["public"] }),
+    check(
+      "board_audio_retention_policy_override_check",
+      sql`audio_retention_policy_override = ANY (ARRAY['purge_on_approval'::text, 'retain_30_days'::text, 'retain_90_days'::text, 'retain_indefinitely'::text])`,
+    ),
+  ],
+);
+
+// See the comment on `agendaItem` above — same mutual-cycle fix, other side.
+export const meeting: any = pgTable(
+  "meeting",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    boardId: uuid("board_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    title: text().notNull(),
+    scheduledDate: date("scheduled_date").notNull(),
+    scheduledTime: time("scheduled_time"),
+    location: text(),
+    status: meetingStatus().default("draft").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    meetingType: text("meeting_type").default("regular").notNull(),
+    formalityOverride: text("formality_override"),
+    agendaStatus: text("agenda_status").default("draft").notNull(),
+    agendaPacketUrl: text("agenda_packet_url"),
+    meetingNoticeUrl: text("meeting_notice_url"),
+    agendaPacketGeneratedAt: timestamp("agenda_packet_generated_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    meetingNoticeGeneratedAt: timestamp("meeting_notice_generated_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    currentAgendaItemId: uuid("current_agenda_item_id"),
+    presidingOfficerId: uuid("presiding_officer_id"),
+    recordingSecretaryId: uuid("recording_secretary_id"),
+    adjournment: jsonb(),
+    noticeGeneratedAt: timestamp("notice_generated_at", { withTimezone: true, mode: "string" }),
+    noticePdfStoragePath: text("notice_pdf_storage_path"),
+    noticePublishedAt: timestamp("notice_published_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_meeting_board_id").using("btree", table.boardId.asc().nullsLast().op("uuid_ops")),
+    index("idx_meeting_created_by").using(
+      "btree",
+      table.createdBy.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_meeting_date").using(
+      "btree",
+      table.townId.asc().nullsLast().op("date_ops"),
+      table.scheduledDate.asc().nullsLast().op("date_ops"),
+    ),
+    index("idx_meeting_status").using(
+      "btree",
+      table.townId.asc().nullsLast().op("enum_ops"),
+      table.status.asc().nullsLast().op("enum_ops"),
+    ),
+    index("idx_meeting_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.boardId],
+      foreignColumns: [board.id],
+      name: "meeting_board_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "meeting_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdBy],
+      foreignColumns: [userAccount.id],
+      name: "meeting_created_by_fkey",
+    }),
+    foreignKey({
+      columns: [table.currentAgendaItemId],
+      foreignColumns: [agendaItem.id],
+      name: "meeting_current_agenda_item_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.presidingOfficerId],
+      foreignColumns: [boardMember.id],
+      name: "meeting_presiding_officer_id_fkey",
+    }).onDelete("set null"),
+    pgPolicy("meeting_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((town_id = get_current_town_id()) AND (is_admin() OR has_board_permission('A1'::text, board_id) OR has_board_permission('M1'::text, board_id)))`,
+    }),
+    pgPolicy("meeting_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("meeting_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
+
+export const town = pgTable(
+  "town",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    name: text().notNull(),
+    state: text().default("ME").notNull(),
+    municipalityType: municipalityType("municipality_type").default("town").notNull(),
+    populationRange: text("population_range"),
+    contactName: text("contact_name"),
+    contactRole: text("contact_role"),
+    meetingFormality: meetingFormality("meeting_formality").default("semi_formal").notNull(),
+    minutesStyle: minutesStyle("minutes_style").default("action").notNull(),
+    presidingOfficerDefault: text("presiding_officer_default"),
+    minutesRecorderDefault: text("minutes_recorder_default"),
+    subdomain: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    staffRolesPresent: jsonb("staff_roles_present").default([]),
+    sealUrl: text("seal_url"),
+    retentionPolicyAcknowledgedAt: timestamp("retention_policy_acknowledged_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    audioRetentionPolicy: text("audio_retention_policy").default("retain_30_days").notNull(),
+    autoPublishOnApproval: boolean("auto_publish_on_approval").default(false).notNull(),
+    minutesReviewWindowDays: integer("minutes_review_window_days").default(7).notNull(),
+    minutesWorkflowConfiguredAt: timestamp("minutes_workflow_configured_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    unique("town_subdomain_key").on(table.subdomain),
+    pgPolicy("town_update", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`((id = get_current_town_id()) AND is_admin())`,
+    }),
+    pgPolicy("town_select", { as: "permissive", for: "select", to: ["public"] }),
+    check(
+      "town_audio_retention_policy_check",
+      sql`audio_retention_policy = ANY (ARRAY['purge_on_approval'::text, 'retain_30_days'::text, 'retain_90_days'::text, 'retain_indefinitely'::text])`,
+    ),
+  ],
+);
+
+export const minutesAddendum = pgTable(
+  "minutes_addendum",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    minutesDocumentId: uuid("minutes_document_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    adoptingMeetingId: uuid("adopting_meeting_id").notNull(),
+    adoptingMotionId: uuid("adopting_motion_id"),
+    contentJson: jsonb("content_json").notNull(),
+    htmlRendered: text("html_rendered"),
+    description: text().notNull(),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_minutes_addendum_document").using(
+      "btree",
+      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_minutes_addendum_town").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.minutesDocumentId],
+      foreignColumns: [minutesDocument.id],
+      name: "minutes_addendum_minutes_document_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "minutes_addendum_town_id_fkey",
+    }),
+    foreignKey({
+      columns: [table.adoptingMeetingId],
+      foreignColumns: [meeting.id],
+      name: "minutes_addendum_adopting_meeting_id_fkey",
+    }),
+    foreignKey({
+      columns: [table.adoptingMotionId],
+      foreignColumns: [motion.id],
+      name: "minutes_addendum_adopting_motion_id_fkey",
+    }),
+    foreignKey({
+      columns: [table.createdBy],
+      foreignColumns: [userAccount.id],
+      name: "minutes_addendum_created_by_fkey",
+    }),
+    pgPolicy("Authenticated users can update addenda for their town", {
+      as: "permissive",
+      for: "update",
+      to: ["authenticated"],
+      using: sql`(town_id IN ( SELECT ua.town_id
+   FROM user_account ua
+  WHERE (ua.id = auth.uid())))`,
+    }),
+    pgPolicy("Authenticated users can insert addenda for their town", {
+      as: "permissive",
+      for: "insert",
+      to: ["authenticated"],
+    }),
+    pgPolicy("Authenticated users can read addenda for their town", {
+      as: "permissive",
+      for: "select",
+      to: ["authenticated"],
+    }),
+  ],
+);
+
+export const pushSubscription = pgTable(
+  "push_subscription",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userAccountId: uuid("user_account_id").notNull(),
+    endpoint: text().notNull(),
+    p256Dh: text().notNull(),
+    auth: text().notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_push_subscription_user").using(
+      "btree",
+      table.userAccountId.asc().nullsLast().op("uuid_ops"),
+    ),
+    foreignKey({
+      columns: [table.userAccountId],
+      foreignColumns: [userAccount.id],
+      name: "push_subscription_user_account_id_fkey",
+    }).onDelete("cascade"),
+    unique("push_subscription_user_account_id_endpoint_key").on(
+      table.endpoint,
+      table.userAccountId,
+    ),
+  ],
+);
+
+export const invitation = pgTable(
+  "invitation",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    personId: uuid("person_id").notNull(),
+    userAccountId: uuid("user_account_id"),
+    townId: uuid("town_id").notNull(),
+    token: text().notNull(),
+    status: text().default("pending").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+    email: text(),
+    role: text(),
+    invitedBy: uuid("invited_by"),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_invitation_person_status").using(
+      "btree",
+      table.personId.asc().nullsLast().op("uuid_ops"),
+      table.status.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_invitation_token")
+      .using("btree", table.token.asc().nullsLast().op("text_ops"))
+      .where(sql`(status = 'pending'::text)`),
+    foreignKey({
+      columns: [table.personId],
+      foreignColumns: [person.id],
+      name: "invitation_person_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userAccountId],
+      foreignColumns: [userAccount.id],
+      name: "invitation_user_account_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "invitation_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.invitedBy],
+      foreignColumns: [userAccount.id],
+      name: "invitation_invited_by_fkey",
+    }).onDelete("set null"),
+    unique("invitation_token_key").on(table.token),
+    pgPolicy("town_members_update_invitations", {
+      as: "permissive",
+      for: "update",
+      to: ["public"],
+      using: sql`(town_id IN ( SELECT user_account.town_id
+   FROM user_account
+  WHERE (user_account.auth_user_id = auth.uid())))`,
+    }),
+    pgPolicy("town_members_insert_invitations", {
+      as: "permissive",
+      for: "insert",
+      to: ["public"],
+    }),
+    pgPolicy("town_members_see_invitations", { as: "permissive", for: "select", to: ["public"] }),
+    check(
+      "invitation_status_check",
+      sql`status = ANY (ARRAY['pending'::text, 'accepted'::text, 'expired'::text, 'cancelled'::text])`,
+    ),
+  ],
+);
+
+export const userAccount = pgTable(
+  "user_account",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    personId: uuid("person_id").notNull(),
+    townId: uuid("town_id").notNull(),
+    role: userRole().notNull(),
+    govTitle: text("gov_title"),
+    permissions: jsonb().default({ global: {}, board_overrides: [] }).notNull(),
+    authUserId: uuid("auth_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+    notificationPreferences: jsonb("notification_preferences").default({}),
+    email: text(),
+    displayName: text("display_name"),
+    emailBounced: boolean("email_bounced").default(false).notNull(),
+    emailBouncedAt: timestamp("email_bounced_at", { withTimezone: true, mode: "string" }),
+    emailComplained: boolean("email_complained").default(false).notNull(),
+    emailComplainedAt: timestamp("email_complained_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_user_account_auth_user_id").using(
+      "btree",
+      table.authUserId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_user_account_person_id").using(
+      "btree",
+      table.personId.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_user_account_role").using(
+      "btree",
+      table.townId.asc().nullsLast().op("uuid_ops"),
+      table.role.asc().nullsLast().op("uuid_ops"),
+    ),
+    index("idx_user_account_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    foreignKey({
+      columns: [table.personId],
+      foreignColumns: [person.id],
+      name: "user_account_person_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.townId],
+      foreignColumns: [town.id],
+      name: "user_account_town_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.authUserId],
+      foreignColumns: [usersInAuth.id],
+      name: "user_account_auth_user_id_fkey",
+    }).onDelete("set null"),
+    unique("user_account_person_id_key").on(table.personId),
+    unique("user_account_auth_user_id_key").on(table.authUserId),
+    pgPolicy("user_account_update_own", {
+      as: "permissive",
+      for: "update",
+      to: ["authenticated"],
+      using: sql`(person_id = auth.uid())`,
+    }),
+    pgPolicy("user_account_update", { as: "permissive", for: "update", to: ["public"] }),
+    pgPolicy("user_account_insert", { as: "permissive", for: "insert", to: ["public"] }),
+    pgPolicy("user_account_select", { as: "permissive", for: "select", to: ["public"] }),
+  ],
+);
