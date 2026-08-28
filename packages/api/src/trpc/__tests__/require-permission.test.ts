@@ -17,7 +17,14 @@ import { TRPCError } from "@trpc/server";
 import { sql } from "drizzle-orm";
 import { withTestDb } from "../../test/db-harness.js";
 import { toRows } from "../../db/rows.js";
-import { testDb, seedTown, seedActor, type TownFixture, type TestDb } from "./fixtures.js";
+import {
+  testDb,
+  seedTown,
+  seedActor,
+  seedActorWithRawMatrix,
+  type TownFixture,
+  type TestDb,
+} from "./fixtures.js";
 import { withTenant } from "../../db/with-tenant.js";
 import { loadActor } from "../authorization/actor.js";
 import {
@@ -30,6 +37,8 @@ import {
   protectedProcedure,
   publicProcedure,
   requirePermission,
+  requireBoardPermission,
+  boardIdFrom,
   createCallerFactory,
 } from "../trpc.js";
 import type { TrpcContext } from "../context.js";
@@ -79,12 +88,7 @@ const testRouter = router({
   // Board-scoped: A1 on meeting creation, board read from the input.
   scheduleMeeting: protectedProcedure
     .input(z.object({ boardId: z.string().uuid().optional() }))
-    .use(
-      requirePermission<{ boardId?: string }>("A1", {
-        board: (input) => input.boardId,
-        action: "to schedule a meeting",
-      }),
-    )
+    .use(requireBoardPermission("A1", boardIdFrom(), { action: "to schedule a meeting" }))
     .mutation(() => "scheduled" as const),
 
   // A procedure that reaches the database, to prove the handle works.
@@ -234,15 +238,65 @@ describe("the code/name translation", () => {
     expect(matrix.board_overrides[0]!.permissions.create_meeting).toBe(false);
   });
 
-  it("drops a key that is neither a known code nor a grant, rather than passing it through", async () => {
+  it("accepts a NAME-keyed matrix — which is what the product itself writes", async () => {
+    // `StaffAccountFlow.tsx` builds the matrix with
+    // `buildPermissionsFromTemplate()`, which returns
+    // `Record<PermissionAction, boolean>` — NAMES — and the dialogs persist it
+    // verbatim. An earlier version of this test asserted the name key was
+    // DROPPED, which locked in a layer that denied every staff account the
+    // product creates. Fail-closed, so never a disclosure; a total silent
+    // outage of staff functionality all the same.
     const matrix = toNameKeyedMatrix({
-      global: { A2: true, edit_agenda: true, NOPE: true } as never,
+      global: { edit_agenda: true, capture_motions_votes: false } as never,
     });
-    // `edit_agenda` arrived as a NAME in a code-keyed field. Accepting it
-    // would mean two spellings of one permission, and the wrong one winning
-    // depends on object key order.
-    expect(Object.keys(matrix.global)).toEqual(["edit_agenda"]);
     expect(matrix.global.edit_agenda).toBe(true);
+    expect(matrix.global.capture_motions_votes).toBe(false);
+  });
+
+  it("resolves a real name-keyed staff account through the whole stack", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const clerk = await seedActorWithRawMatrix(db, town, "staff", {
+        global: { edit_agenda: true, create_meeting: true },
+        board_overrides: [{ board_id: town.boardId, permissions: { create_meeting: false } }],
+      });
+
+      await expect(createCaller(contextFor(db, town, clerk)).editAgenda()).resolves.toBe("edited");
+
+      // The board override is honoured in the name spelling too: revoked on
+      // one board, still granted on the other.
+      const caller = createCaller(contextFor(db, town, clerk));
+      expect(
+        (await expectForbidden(() => caller.scheduleMeeting({ boardId: town.boardId }))).code,
+      ).toBe("FORBIDDEN");
+      await expect(caller.scheduleMeeting({ boardId: town.otherBoardId })).resolves.toBe(
+        "scheduled",
+      );
+    });
+  });
+
+  it("drops a key that is neither spelling, rather than passing it through", async () => {
+    const matrix = toNameKeyedMatrix({ global: { NOPE: true } as never });
+    expect(Object.keys(matrix.global)).toEqual([]);
+  });
+
+  it("refuses to BUILD a board-scoped check with no board", async () => {
+    // Thrown at module load, not per request — so `requirePermission("A1")`
+    // cannot be committed, let alone reach production doing a global check.
+    expect(() => requirePermission("A1")).toThrow(/board-scoped/);
+    expect(() => requirePermission("M1")).toThrow(/board-scoped/);
+    // A code that is not board-scoped is unaffected.
+    expect(() => requirePermission("A2")).not.toThrow();
+  });
+
+  it("boardIdFrom narrows at runtime instead of casting", async () => {
+    const read = boardIdFrom();
+    expect(read({ boardId: "b1" })).toBe("b1");
+    for (const junk of [null, undefined, 42, "b1", { boardId: 42 }, { boardId: "" }, {}]) {
+      expect(read(junk)).toBeUndefined();
+    }
+    expect(boardIdFrom("board")({ board: "b2" })).toBe("b2");
   });
 
   it("resolves sys_admin to no permission at all, on every one of the 30 codes", async () => {

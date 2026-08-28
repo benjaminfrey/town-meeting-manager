@@ -23,6 +23,7 @@ export {
 
 export {
   hasPermission,
+  normalisePermissionsMatrix,
   checkRoleMutualExclusivity,
   type RoleConflictResult,
 } from "./permissions.js";

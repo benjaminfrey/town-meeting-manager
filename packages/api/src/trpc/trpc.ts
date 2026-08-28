@@ -135,23 +135,53 @@ const requireTenant = t.middleware(async ({ ctx, next }) => {
 
 export const protectedProcedure = t.procedure.use(translateAuthorizationErrors).use(requireTenant);
 
-export interface RequirePermissionOptions<TInput> {
+/**
+ * Codes whose rules are board-scoped, so a GLOBAL check on one of them is a
+ * bug rather than a choice.
+ *
+ * `meeting` INSERT was `has_board_permission('A1', board_id)` and `meeting`
+ * UPDATE was `is_admin() OR has_board_permission('A1', …) OR
+ * has_board_permission('M1', …)`. Writing `requirePermission("A1")` with no
+ * board silently performs the global check, which ignores an override that
+ * grants (a board-specific clerk is wrongly refused) AND one that revokes (a
+ * barred clerk is wrongly ALLOWED). Across the seventy files Phase E migrates,
+ * "remember to pass the board" is not a control.
+ *
+ * So it is refused at MODULE LOAD, not per request: building such a procedure
+ * throws while the router is being imported, which is boot and test
+ * collection. A mistake that cannot be committed is better than one that is
+ * documented.
+ */
+export const BOARD_SCOPED_CODES: readonly PermissionCode[] = ["A1", "M1"];
+
+/**
+ * Read a board id out of a procedure's input by property name.
+ *
+ * Exists so no call site has to write `(i) => (i as {boardId: string}).boardId`
+ * — an unchecked cast repeated seventy times, where one input schema renaming
+ * its field turns into `undefined` and, without the refusal below, into a
+ * global check. This narrows at runtime and returns `undefined` on anything
+ * that is not a string, which the middleware then refuses.
+ */
+export function boardIdFrom(key = "boardId"): (input: unknown) => string | undefined {
+  return (input: unknown) => {
+    if (!input || typeof input !== "object") return undefined;
+    const value = (input as Record<string, unknown>)[key];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+}
+
+export interface RequirePermissionOptions {
   /**
    * Extract the board a board-scoped check applies to.
    *
-   * Supply this for every rule that was `has_board_permission(code, board_id)`
-   * — today, `meeting` INSERT and UPDATE. Omitting it performs the GLOBAL
-   * check, which is what the old `requirePermission` did everywhere, and that
-   * is not uniformly fail-closed: an override that grants is ignored (a
-   * board-specific clerk is wrongly refused) and an override that REVOKES is
-   * ignored too (a barred clerk is wrongly allowed).
-   *
-   * If the extractor returns `undefined`, the check REFUSES rather than
-   * falling back to the global grant. A board-scoped rule that cannot find its
-   * board has lost the thing it is scoped by, and quietly widening to the
-   * global answer is precisely the bug this option exists to fix.
+   * Use `boardIdFrom()` unless the board is somewhere unusual. If the
+   * extractor returns `undefined` the check REFUSES rather than falling back
+   * to the global grant: a board-scoped rule that cannot find its board has
+   * lost the thing it is scoped by, and quietly widening to the global answer
+   * is the bug this whole option exists to fix.
    */
-  board?: (input: TInput) => string | undefined;
+  board?: (input: unknown) => string | undefined;
   /** Human phrasing for the refusal message: "to schedule a meeting". */
   action?: string;
 }
@@ -164,13 +194,24 @@ export interface RequirePermissionOptions<TInput> {
  *
  *     protectedProcedure
  *       .input(z.object({ boardId: z.uuid() }))
- *       .use(requirePermission("A1", { board: (i) => i.boardId }))
+ *       .use(requireBoardPermission("A1", boardIdFrom()))
  *       .mutation(...)
+ *
+ * For a board-scoped code, prefer `requireBoardPermission` — this function
+ * throws for one anyway, but the named variant says what it is doing.
  */
-export function requirePermission<TInput = unknown>(
-  code: PermissionCode,
-  options: RequirePermissionOptions<TInput> = {},
-) {
+export function requirePermission(code: PermissionCode, options: RequirePermissionOptions = {}) {
+  if (!options.board && BOARD_SCOPED_CODES.includes(code)) {
+    // Thrown while the router module is being imported, so this never reaches
+    // a request. See BOARD_SCOPED_CODES.
+    throw new Error(
+      `requirePermission("${code}") has no board. ${code} is board-scoped — the policy it ` +
+        "restores was has_board_permission(code, board_id) — and a global check on it " +
+        "ignores an override that revokes it for one board, which ALLOWS a caller who " +
+        `should be refused. Use requireBoardPermission("${code}", boardIdFrom()).`,
+    );
+  }
+
   return middleware(async (opts) => {
     const ctx = opts.ctx;
     if (!ctx.actor) {
@@ -185,7 +226,7 @@ export function requirePermission<TInput = unknown>(
 
     let boardId: string | undefined;
     if (options.board) {
-      boardId = options.board(opts.input as TInput);
+      boardId = options.board(opts.input);
       if (!boardId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -201,4 +242,17 @@ export function requirePermission<TInput = unknown>(
     assertPermission(actor, code, { boardId, action: options.action });
     return opts.next();
   });
+}
+
+/**
+ * The board-scoped form. `board` is required, so it cannot be forgotten.
+ *
+ *     .use(requireBoardPermission("A1", boardIdFrom()))
+ */
+export function requireBoardPermission(
+  code: PermissionCode,
+  board: (input: unknown) => string | undefined,
+  options: { action?: string } = {},
+) {
+  return requirePermission(code, { ...options, board });
 }

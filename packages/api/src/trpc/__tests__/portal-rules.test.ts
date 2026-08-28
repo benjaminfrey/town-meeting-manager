@@ -60,10 +60,37 @@ describe("the public portal's read rules", () => {
     }
   });
 
-  it("serves only published agendas", () => {
-    expect(rules.portalCanSelectAgenda({ agendaStatus: "published" })).toBe(true);
-    expect(rules.portalCanSelectAgenda({ agendaStatus: "draft" })).toBe(false);
-    expect(rules.portalCanSelectAgenda({ agendaStatus: null })).toBe(false);
+  it("serves a published agenda only on a meeting it would also list", () => {
+    expect(
+      rules.portalCanSelectAgenda({ agendaStatus: "published", meetingStatus: "scheduled" }),
+    ).toBe(true);
+    expect(rules.portalCanSelectAgenda({ agendaStatus: "draft", meetingStatus: "scheduled" })).toBe(
+      false,
+    );
+    expect(rules.portalCanSelectAgenda({ agendaStatus: null, meetingStatus: "scheduled" })).toBe(
+      false,
+    );
+
+    // The live inconsistency this encodes away: `routes/portal.ts:282` checks
+    // `agenda_status` alone, so a cancelled meeting whose agenda was published
+    // before cancellation is still served by that one route while its sibling
+    // routes hide the meeting entirely.
+    expect(
+      rules.portalCanSelectAgenda({ agendaStatus: "published", meetingStatus: "cancelled" }),
+    ).toBe(false);
+    expect(rules.portalCanSelectAgenda({ agendaStatus: "published", meetingStatus: "draft" })).toBe(
+      false,
+    );
+  });
+
+  it("lists boards that are not archived, and only active seats", () => {
+    expect(rules.portalCanSelectBoard({ archivedAt: null })).toBe(true);
+    expect(rules.portalCanSelectBoard({ archivedAt: "2026-01-01T00:00:00Z" })).toBe(false);
+
+    // The only personal data on the portal surface. A term that has ended must
+    // drop off the page by rule, not by someone remembering to filter.
+    expect(rules.portalCanSelectBoardMember({ status: "active" })).toBe(true);
+    expect(rules.portalCanSelectBoardMember({ status: "archived" })).toBe(false);
   });
 
   it("refuses the anonymous actor every one of the signed-in rules", () => {

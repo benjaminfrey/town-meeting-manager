@@ -407,20 +407,69 @@ export function assertCanInsertUserAccount(actor: Actor): void {
 }
 
 /**
- * Admin, OR the account's own holder.
+ * Columns on `user_account` that only an administrator may write.
  *
- * The self branch restores `user_account_update_own`, a policy Phase B dropped
- * whole. Its predicate was `person_id = auth.uid()`, which was latently wrong:
- * it compared a PERSON id to an IDENTITY id and only ever matched because
- * onboarding reused one uuid for the person, the account and the auth user.
- * Restored against the account id, which is what "your own row" actually means.
+ * `role` and `permissions` are the escalation pair: a self-update that can
+ * write either is self-promotion to administrator. `town_id` and `person_id`
+ * re-point the account at a different tenant or a different human.
+ * `archived_at` is how an account is deactivated. `gov_title` is a governance
+ * field the People screens own; there is no self-service profile editor today,
+ * so denying it costs nothing and is the safe reading.
  */
-export function assertCanUpdateUserAccount(actor: Actor, subject: { userAccountId: string }): void {
+export const ADMIN_ONLY_USER_ACCOUNT_COLUMNS: readonly string[] = [
+  "role",
+  "permissions",
+  "town_id",
+  "person_id",
+  "archived_at",
+  "gov_title",
+];
+
+/**
+ * Admin, OR the account's own holder — but the self branch authorizes the ROW,
+ * not the COLUMNS, so it must be told which columns are being written.
+ *
+ * ─── Why `columns` is required and not optional ───────────────────────────
+ *
+ * The policy this restores, `user_account_update_own`, was
+ * `FOR UPDATE USING (person_id = auth.uid())` — row-level, with no column
+ * list, and that was safe in Postgres only because nothing exposed a
+ * column-level write API on top of it: an UPDATE still had to get past
+ * whatever the application chose to send. Lift the same predicate into
+ * TypeScript, put a mutation behind it in Phase E, and "you may update your
+ * own row" becomes "you may write `role: 'admin'` onto your own row".
+ * TypeScript has no column privileges, so the guard has to carry them.
+ *
+ * Required rather than optional for the same reason `BoardScope` is: an
+ * optional column list defaults to *something*, and whichever default is
+ * chosen is wrong half the time. Omitting it is a type error instead.
+ *
+ * Its predicate was also latently wrong — `person_id = auth.uid()` compared a
+ * PERSON id to an IDENTITY id, and only ever matched because onboarding reused
+ * one uuid for the person, the account and the auth user. Restored against the
+ * account id, which is what "your own row" actually means.
+ */
+export function assertCanUpdateUserAccount(
+  actor: Actor,
+  subject: { userAccountId: string; columns: readonly string[] },
+): void {
   if (isAdmin(actor)) return;
-  if (actor.userAccountId !== null && subject.userAccountId === actor.userAccountId) return;
-  throw new AuthorizationError(
-    "Only a town administrator can change another account. You may change your own.",
-  );
+
+  const isOwnRow = actor.userAccountId !== null && subject.userAccountId === actor.userAccountId;
+  if (!isOwnRow) {
+    throw new AuthorizationError(
+      "Only a town administrator can change another account. You may change your own.",
+    );
+  }
+
+  const restricted = subject.columns.filter((c) => ADMIN_ONLY_USER_ACCOUNT_COLUMNS.includes(c));
+  if (restricted.length > 0) {
+    throw new AuthorizationError(
+      `You may change your own account, but not ${restricted.join(", ")}. ` +
+        "Only a town administrator can change an account's role, permissions or " +
+        "town — otherwise any account could promote itself.",
+    );
+  }
 }
 
 export function assertCanInsertBoard(actor: Actor): void {
@@ -598,7 +647,46 @@ export function portalCanSelectMeeting(row: { status: string }): boolean {
   return !PORTAL_HIDDEN_MEETING_STATUSES.includes(row.status);
 }
 
-/** Agendas the portal may read: published only. */
-export function portalCanSelectAgenda(row: { agendaStatus: string | null }): boolean {
+/**
+ * Agendas the portal may read: published, ON a meeting the portal may list.
+ *
+ * BOTH conditions, and the second one is a fix rather than a transcription.
+ * `routes/portal.ts:282` gates the agenda route on `agenda_status` alone and
+ * does not apply the draft/cancelled meeting exclusion its sibling routes
+ * apply, so a cancelled meeting whose agenda was published before cancellation
+ * is still served. That is precisely the "whichever copy its author happened
+ * to read" divergence this lift exists to eliminate; encoding both here means
+ * D1b cannot reproduce it by migrating the route faithfully.
+ */
+export function portalCanSelectAgenda(row: {
+  agendaStatus: string | null;
+  meetingStatus: string;
+}): boolean {
+  if (!portalCanSelectMeeting({ status: row.meetingStatus })) return false;
   return row.agendaStatus === "published";
+}
+
+/**
+ * Boards the portal may list: not archived (`routes/portal.ts:497`, `:521`).
+ *
+ * Lifted for the same reason as the rest: it is a publication decision
+ * expressed as an `.is("archived_at", null)` in two handlers, and a third
+ * handler is one omission away from listing a town's disbanded committees.
+ */
+export function portalCanSelectBoard(row: { archivedAt: string | Date | null }): boolean {
+  return row.archivedAt === null || row.archivedAt === undefined;
+}
+
+/**
+ * Board members the portal may name: active seats only
+ * (`routes/portal.ts:534`).
+ *
+ * This is the one piece of personal data on the portal surface — name, seat
+ * title and term dates — and Phase C's G1 review flagged it for the owner. An
+ * expired seat is not public record of who currently serves, so a former
+ * member must drop off the page when their term ends rather than when someone
+ * remembers to filter.
+ */
+export function portalCanSelectBoardMember(row: { status: string }): boolean {
+  return row.status === "active";
 }

@@ -144,14 +144,25 @@ describe("§4b — self-scoping", () => {
       const me = await seedActor(db, town, { role: "staff", global: [] });
       const other = await seedActor(db, town, { role: "staff", global: [] });
 
+      const profile = ["email", "display_name", "notification_preferences"];
+
       expect(() =>
-        rules.assertCanUpdateUserAccount(me.actor, { userAccountId: me.userAccountId }),
+        rules.assertCanUpdateUserAccount(me.actor, {
+          userAccountId: me.userAccountId,
+          columns: profile,
+        }),
       ).not.toThrow();
       expect(() =>
-        rules.assertCanUpdateUserAccount(admin.actor, { userAccountId: me.userAccountId }),
+        rules.assertCanUpdateUserAccount(admin.actor, {
+          userAccountId: me.userAccountId,
+          columns: profile,
+        }),
       ).not.toThrow();
       await expectRefusal(() =>
-        rules.assertCanUpdateUserAccount(me.actor, { userAccountId: other.userAccountId }),
+        rules.assertCanUpdateUserAccount(me.actor, {
+          userAccountId: other.userAccountId,
+          columns: profile,
+        }),
       );
 
       // The policy this replaces compared `person_id` to `auth.uid()`, which
@@ -159,7 +170,49 @@ describe("§4b — self-scoping", () => {
       // the account and the identity. Passing a person id here must NOT open
       // the gate.
       await expectRefusal(() =>
-        rules.assertCanUpdateUserAccount(me.actor, { userAccountId: me.personId }),
+        rules.assertCanUpdateUserAccount(me.actor, {
+          userAccountId: me.personId,
+          columns: profile,
+        }),
+      );
+    });
+  });
+
+  it("refuses SELF-PROMOTION: the self branch authorizes the row, not the columns", async () => {
+    // The database policy was row-level and that was safe there, because
+    // nothing exposed a column-level write API on top of it. A tRPC mutation
+    // in Phase E is exactly such an API, and "you may update your own row"
+    // would become "you may write role: 'admin' onto your own row".
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const admin = await seedActor(db, town, { role: "admin" });
+      const me = await seedActor(db, town, { role: "staff", global: [] });
+
+      for (const column of rules.ADMIN_ONLY_USER_ACCOUNT_COLUMNS) {
+        const err = await expectRefusal(() =>
+          rules.assertCanUpdateUserAccount(me.actor, {
+            userAccountId: me.userAccountId,
+            columns: [column],
+          }),
+        );
+        expect(err.message, column).toContain(column);
+
+        // An administrator is unrestricted — this is their job (T2, T4).
+        expect(() =>
+          rules.assertCanUpdateUserAccount(admin.actor, {
+            userAccountId: me.userAccountId,
+            columns: [column],
+          }),
+        ).not.toThrow();
+      }
+
+      // A restricted column hidden among permitted ones is still refused.
+      await expectRefusal(() =>
+        rules.assertCanUpdateUserAccount(me.actor, {
+          userAccountId: me.userAccountId,
+          columns: ["email", "display_name", "permissions"],
+        }),
       );
     });
   });

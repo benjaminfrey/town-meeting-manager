@@ -38,6 +38,13 @@ RULES = API / "src" / "trpc" / "authorization" / "rules.ts"
 # function, which is the realistic failure, not a syntax error.
 ALLOW = "  /* MUTATED: check removed */"
 TRUE = "  return true;"
+# Rule 4b.user_account_update as it was BEFORE the column restriction: the
+# faithful row-level restoration, which authorizes self-promotion to admin.
+SELF_ROW_ONLY = (
+    "  if (isAdmin(actor)) return;\n"
+    "  if (actor.userAccountId !== null && subject.userAccountId === actor.userAccountId) return;\n"
+    "  throw new AuthorizationError('refused');"
+)
 
 MUTATIONS: list[tuple[str, str, str]] = [
     ("1", "assertCanInsertAgendaItem", ALLOW),
@@ -67,6 +74,7 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ("4b.person_update", "assertCanUpdatePerson", ALLOW),
     ("4b.user_account_insert", "assertCanInsertUserAccount", ALLOW),
     ("4b.user_account_update", "assertCanUpdateUserAccount", ALLOW),
+    ("4b.user_account_self_promotion", "assertCanUpdateUserAccount", SELF_ROW_ONLY),
     ("4b.board_insert", "assertCanInsertBoard", ALLOW),
     ("4b.board_update", "assertCanUpdateBoard", ALLOW),
     ("4b.board_member_insert", "assertCanInsertBoardMember", ALLOW),
@@ -93,7 +101,21 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ("portal.exhibit", "portalCanSelectExhibit", TRUE),
     ("portal.meeting", "portalCanSelectMeeting", TRUE),
     ("portal.agenda", "portalCanSelectAgenda", TRUE),
+    ("portal.board", "portalCanSelectBoard", TRUE),
+    ("portal.board_member", "portalCanSelectBoardMember", TRUE),
 ]
+
+
+def declaration_span(source: str, start: int) -> int:
+    """
+    Index at which this declaration ends — the next top-level `export`, or EOF.
+
+    Bounds every search below. Without it, a scan that fails to find what it is
+    looking for runs forward into the NEXT function and mutates that instead,
+    silently, while still reporting a kill.
+    """
+    nxt = re.search(r"^export ", source[start:], re.MULTILINE)
+    return start + nxt.start() if nxt else len(source)
 
 
 def find_body_brace(source: str, start: int, name: str) -> int:
@@ -106,18 +128,31 @@ def find_body_brace(source: str, start: int, name: str) -> int:
     version of this script did exactly that, and the result was seven mutants
     that "survived": the guards whose signatures contain a brace, and only
     those. They looked like seven unprotected rules and were in fact one broken
-    mutator. Recorded here because a mutation harness that silently mutates the
-    wrong thing produces false confidence in both directions — it can report a
-    rule as unprotected when it is fine, and it can report a mutant as killed
-    when the kill came from a syntax error rather than from the rule.
+    mutator.
 
-    So: step over the parameter list by paren depth first, then take the first
-    `{` that is the last thing on its line, which is what a body brace is and
-    an inline type brace is not.
+    That was fixed with a second heuristic — "the first `{` that is the last
+    thing on its line" — and a heuristic is not a check. Review found two more
+    shapes it gets wrong, neither of which exists in `rules.ts` today:
+
+      1. a multi-line object RETURN type mutates the type, leaving the body
+         intact. The file then fails to parse, the whole suite goes red, and
+         the mutant is reported "killed" while the rule was never removed;
+      2. an empty body (`): void {}`, which Prettier emits) has no
+         last-on-its-line `{`, so the scan runs past the end of the
+         declaration and mutates the NEXT function.
+
+    A mutation harness that silently mutates the wrong thing produces false
+    confidence in both directions. So the heuristic stays, and `replace_body`
+    now VERIFIES what it selected: the span bound below catches (2), and the
+    "does the replaced region look like a body" check catches (1). Both refuse
+    loudly instead of mutating.
     """
+    end = declaration_span(source, start)
+
+    # Step over the parameter list by paren depth.
     i = source.index("(", start)
     depth = 0
-    while i < len(source):
+    while i < end:
         if source[i] == "(":
             depth += 1
         elif source[i] == ")":
@@ -129,11 +164,21 @@ def find_body_brace(source: str, start: int, name: str) -> int:
         raise SystemExit(f"mutate: unbalanced parentheses in {name}'s parameter list")
 
     while True:
-        i = source.index("{", i)
-        end_of_line = source.index("\n", i)
-        if source[i + 1 : end_of_line].strip() == "":
-            return i
-        i += 1
+        brace = source.find("{", i)
+        if brace == -1 or brace >= end:
+            raise SystemExit(
+                f"mutate: could not find a body brace for {name} within its own "
+                "declaration. Refusing rather than scanning into the next function — "
+                "an empty body `{}` on the signature line is the known shape that "
+                "does this."
+            )
+        end_of_line = source.index("\n", brace)
+        if source[brace + 1 : end_of_line].strip() == "":
+            return brace
+        i = brace + 1
+
+
+BODY_MARKERS = ("return", "throw", "assert", "if ", "for ", "switch")
 
 
 def replace_body(source: str, name: str, body: str) -> str:
@@ -144,6 +189,7 @@ def replace_body(source: str, name: str, body: str) -> str:
     if not match:
         raise SystemExit(f"mutate: no function named {name} in {RULES}")
 
+    end = declaration_span(source, match.end())
     open_brace = find_body_brace(source, match.end(), name)
     depth = 0
     i = open_brace
@@ -158,7 +204,71 @@ def replace_body(source: str, name: str, body: str) -> str:
     else:  # pragma: no cover
         raise SystemExit(f"mutate: unbalanced braces around {name}")
 
+    # ─── The checks, not more heuristics ──────────────────────────────────
+    #
+    # Everything replaced must lie inside THIS declaration. A region running
+    # past it means the locator lost its place and is about to delete a
+    # different function's body — which would still make the suite fail, and
+    # would still be reported as a kill.
+    if i > end:
+        raise SystemExit(
+            f"mutate: the region selected for {name} runs past the end of its own "
+            f"declaration. Refusing."
+        )
+
+    # And it must look like a BODY, not a type. A multi-line object return
+    # type is brace-balanced and passes every structural check; what it does
+    # not contain is control flow. Getting this wrong yields a syntax error,
+    # a red suite, and a "killed" verdict for a rule that was never removed.
+    region = source[open_brace + 1 : i]
+    if not any(marker in region for marker in BODY_MARKERS):
+        raise SystemExit(
+            f"mutate: the region selected for {name} contains no control flow "
+            f"({', '.join(BODY_MARKERS)}), so it is probably a type annotation and "
+            "not the function body. Refusing rather than producing a syntax error "
+            "that would look like a killed mutant."
+        )
+
     return source[: open_brace + 1] + "\n" + body + "\n" + source[i:]
+
+
+def self_test() -> int:
+    """
+    Prove the locator refuses the two shapes it used to get wrong.
+
+    Neither shape is in `rules.ts` today, which is exactly why this is a test
+    and not a comment: the next guard someone writes may have one, and the
+    failure is silent.
+    """
+    cases = [
+        (
+            "multi-line object return type",
+            "export function f(a: string): {\n  x: string;\n} {\n  return { x: a };\n}\n"
+            "export function g(): void {\n  throw new Error('g');\n}\n",
+            "f",
+        ),
+        (
+            "empty body on the signature line",
+            "export function f(): void {}\n\nexport function g(): void {\n  throw new Error('g');\n}\n",
+            "f",
+        ),
+    ]
+    failures = 0
+    for label, source, name in cases:
+        try:
+            mutated = replace_body(source, name, ALLOW)
+        except SystemExit as err:
+            print(f"  refused ({label}): {str(err).splitlines()[0][:80]}…")
+            continue
+        # If it did not refuse, it must at least not have touched `g`.
+        if "throw new Error('g')" not in mutated:
+            print(f"  MIS-MUTATED ({label}): the neighbouring function was destroyed")
+            failures += 1
+        else:
+            print(f"  MUTATED WITHOUT REFUSING ({label}) — check this shape by hand")
+            failures += 1
+    print("self-test: " + ("PASS" if failures == 0 else f"{failures} FAILED"))
+    return failures
 
 
 def run_suite() -> tuple[bool, list[str]]:
@@ -187,7 +297,15 @@ def run_suite() -> tuple[bool, list[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--only")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return 1 if self_test() else 0
+
+    if self_test():
+        print("refusing to run: the mutator mis-handles a known shape", file=sys.stderr)
+        return 2
 
     original = RULES.read_text()
     digest = hashlib.sha256(original.encode()).hexdigest()

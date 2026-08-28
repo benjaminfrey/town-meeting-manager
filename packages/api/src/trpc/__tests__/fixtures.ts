@@ -6,14 +6,26 @@
  * deliberate, and it is why tests of what are mostly pure functions still pay
  * for the database harness.
  *
- * The defect this phase exists to fix was a SHAPE mismatch: the database
- * stores the permissions matrix keyed by action CODE (`{"global":{"A2":true}}`
- * — what `supabase/seed.sql` writes and what the permissions UI saves), while
- * the shared `hasPermission()` resolves by action NAME (`edit_agenda`).
- * Hand-constructing an actor in a test lets the test author pick whichever
- * shape makes the assertion pass, which is exactly how a suite ends up green
- * against an authorization layer that never fires. Going through the database
- * and through the real loader means the code-keyed JSONB is the input to every
+ * The defect this phase exists to fix was a SHAPE mismatch, and the shape is
+ * not one shape. `user_account.permissions` holds action keys in TWO spellings,
+ * written by different parts of this product:
+ *
+ *   - `supabase/seed.sql:116` writes CODES — `{"global": {"A2": true}}`
+ *   - `StaffAccountFlow.tsx:86,104` builds the matrix with
+ *     `buildPermissionsFromTemplate()`, which returns
+ *     `Record<PermissionAction, boolean>` — NAMES — and
+ *     `AddPersonDialog.tsx:117` / `AddMemberDialog.tsx:423` persist it
+ *     verbatim, so every staff account created through the product is
+ *     name-keyed.
+ *
+ * A reader that speaks one spelling denies everyone written in the other,
+ * silently. `seedActor` below writes CODES and `seedActorWithRawMatrix` writes
+ * whatever you give it, so both halves of the real data are exercised.
+ *
+ * Hand-constructing an actor in a test lets the author pick whichever shape
+ * makes the assertion pass, which is exactly how a suite ends up green against
+ * an authorization layer that never fires. Going through the database and
+ * through the real loader means the stored JSONB is the input to every
  * assertion in this directory.
  *
  * Everything here runs through `withTenant()` — the same function the request
@@ -122,6 +134,41 @@ export async function seedActor(
       personId,
       userAccountId,
     });
+  });
+
+  return { actor, personId, userAccountId };
+}
+
+/**
+ * Insert an account with a matrix written EXACTLY as given — no code
+ * translation, no shape help.
+ *
+ * For tests that need the name-keyed spelling the product actually writes, or
+ * a deliberately malformed matrix. `seedActor` is the convenience form and
+ * writes codes; this is the honest form and writes bytes.
+ */
+export async function seedActorWithRawMatrix(
+  db: TestDb,
+  town: TownFixture,
+  role: ActorSpec["role"],
+  matrix: unknown,
+): Promise<SeededActor> {
+  const personId = randomUUID();
+  const userAccountId = randomUUID();
+  const permissions = JSON.stringify(matrix);
+
+  const actor = await withTenant(db, { townId: town.townId }, async (tx) => {
+    await tx.execute(sql`
+      INSERT INTO person (id, town_id, name, email)
+      VALUES (${personId}, ${town.townId}, ${`raw-${personId.slice(0, 8)}`},
+              ${`${personId.slice(0, 8)}@example.test`})
+    `);
+    await tx.execute(sql`
+      INSERT INTO user_account (id, person_id, town_id, role, permissions)
+      VALUES (${userAccountId}, ${personId}, ${town.townId},
+              ${role}::user_role, ${permissions}::jsonb)
+    `);
+    return loadActor(tx, { townId: town.townId, personId, userAccountId });
   });
 
   return { actor, personId, userAccountId };

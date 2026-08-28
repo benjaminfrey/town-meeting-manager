@@ -1,26 +1,41 @@
 /**
  * Stage 1, Task D1 — permission resolution, keyed on ACTION CODES.
  *
- * ─── Why codes, and why that is the whole bug ─────────────────────────────
+ * ─── Two spellings, and why that was the whole bug ───────────────────────
  *
- * There are two representations of the same thirty governable actions:
+ * The same thirty governable actions are written two ways:
  *
- *   the CODE   `A2`          — what the database stores
- *   the NAME   `edit_agenda` — what the shared TypeScript resolves
+ *   the CODE   `A2`
+ *   the NAME   `edit_agenda`
  *
- * `supabase/seed.sql` writes `{"global": {"A1": true, "A2": true, …}}`, and so
- * does the permissions UI. `packages/shared/src/utils/permissions.ts` takes a
- * `PermissionAction`, which is the NAME. Feed a code-keyed matrix to a
- * name-keyed lookup and every answer is `false` — or, if a caller "fixes" it
- * by passing the name through to a code-keyed matrix, every answer is `false`
- * again. Authorization that always says no looks like authorization that
- * works, right up until someone notices nothing is ever allowed and removes
- * the check.
+ * BOTH are in the database, written by different parts of this product:
  *
- * The removed RLS helpers (`supabase/migrations/20260308000027_…`) were
- * code-keyed and correct. So this module is code-keyed too, and the
- * translation to the shared resolver happens in exactly one place —
- * `toNameKeyedMatrix` below — with a test on it.
+ *   - `supabase/seed.sql:116` writes CODES.
+ *   - `StaffAccountFlow.tsx:86,104` builds the matrix with
+ *     `buildPermissionsFromTemplate()`, which returns
+ *     `Record<PermissionAction, boolean>` — NAMES — and
+ *     `AddPersonDialog.tsx:117` / `AddMemberDialog.tsx:423` persist it
+ *     verbatim. Every staff account created through the product is
+ *     name-keyed. The shared `PermissionsMatrix` type declares names too.
+ *
+ * A reader that speaks one spelling resolves the other to an empty matrix and
+ * denies everything. That is fail-closed and so never a disclosure — but it is
+ * a silent, total outage of whichever half of the data it does not speak, and
+ * this codebase has now shipped it in BOTH directions. The removed
+ * `has_permission()` SQL was code-only. D1'''s first authorization layer was
+ * code-only too, on the strength of the seed file alone, and would have denied
+ * every staff account the product itself creates.
+ *
+ * So the reader accepts both, in ONE place — `normalisePermissionsMatrix` in
+ * `packages/shared` — which both this module and the web client use. A matrix
+ * carrying both spellings of one action in disagreement resolves to DENY,
+ * because the alternative makes the answer depend on JSON key order. See that
+ * function'''s own comment.
+ *
+ * Storage should eventually converge on one spelling; that is a data migration
+ * plus a change to the writers, and it is deliberately not this task. Until it
+ * happens, converging the READER is what keeps the two halves of the system
+ * from disagreeing about who may do what.
  *
  * ─── Why it delegates to the shared resolver instead of reimplementing ────
  *
@@ -60,6 +75,7 @@ import {
   type PermissionAction,
   type PermissionsMatrix,
   hasPermission,
+  normalisePermissionsMatrix,
 } from "@town-meeting/shared";
 import type { Actor, PermissionMatrixByCode } from "./actor.js";
 
@@ -111,36 +127,17 @@ export function isBoardMember(actor: Actor): boolean {
 }
 
 /**
- * Translate a code-keyed matrix into the name-keyed shape the shared resolver
- * expects.
+ * Normalise the stored matrix into the name-keyed shape the shared resolver
+ * takes, accepting either spelling.
  *
- * Unknown keys are DROPPED rather than passed through. A matrix that already
- * contained names, or that contained a typo, would otherwise arrive at the
- * shared resolver looking authoritative; dropping means the answer is `false`,
- * which is the safe direction and is also what the database did with an
- * unrecognised code.
+ * A thin delegation on purpose: the mapping between the two spellings is a
+ * fact about the product'''s data, not about this API, and the web client needs
+ * exactly the same translation before it calls `hasPermission` to decide which
+ * controls to render. Two copies would drift, and the drift shows up as a
+ * control the UI hides that the API would have allowed.
  */
 export function toNameKeyedMatrix(matrix: PermissionMatrixByCode): PermissionsMatrix {
-  const translate = (
-    source: Record<string, boolean | null | undefined> | undefined,
-  ): Record<PermissionAction, boolean> => {
-    const out = {} as Record<PermissionAction, boolean>;
-    if (!source) return out;
-    for (const [code, value] of Object.entries(source)) {
-      const name = PERMISSIONS[code as PermissionCode] as PermissionAction | undefined;
-      if (!name) continue;
-      out[name] = value === true;
-    }
-    return out;
-  };
-
-  return {
-    global: translate(matrix.global),
-    board_overrides: (matrix.board_overrides ?? []).map((override) => ({
-      board_id: String(override.board_id),
-      permissions: translate(override.permissions),
-    })),
-  };
+  return normalisePermissionsMatrix(matrix);
 }
 
 /**
@@ -164,11 +161,22 @@ export function resolvePermission(actor: Actor, code: PermissionCode, boardId?: 
   // keeps a future edit to the shared function from silently changing it.
   if (actor.role === "sys_admin") return false;
 
-  // Board members hold three codes by role and nothing by configuration. The
-  // database fell through to the (normally empty) matrix here; resolving from
-  // the role instead is both what the product means and the narrower of the
-  // two, since a board member with a stray staff grant in their JSONB is
-  // refused rather than allowed.
+  // Board members hold three codes by role and nothing by configuration.
+  //
+  // This is NOT uniformly narrower than the database, and the earlier comment
+  // here wrongly said it was. `has_permission()` fell through to the (normally
+  // empty) matrix for a board member, so it returned false for all thirty
+  // codes. For the other twenty-seven this branch is indeed narrower — a board
+  // member with a stray staff grant in their JSONB is refused rather than
+  // allowed. For A4, A7 and M8 it is WIDER: the database said no, this says
+  // yes, matching `BOARD_MEMBER_ALWAYS_ACTIONS` and the product'''s stated
+  // design that those three come with the seat.
+  //
+  // Nothing among the 21 rules consults A4, A7 or M8 — the policies that
+  // needed them tested `get_current_role() = 'board_member'` directly, and so
+  // do rules 14 and 15 — so the widening changes no current answer. It is
+  // recorded rather than left implied because "wider than the thing you are
+  // restoring" is exactly the claim that should never be silent.
   if (actor.role === "board_member") {
     return BOARD_MEMBER_ALWAYS_CODES.includes(code);
   }
