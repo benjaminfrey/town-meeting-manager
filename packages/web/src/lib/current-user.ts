@@ -80,13 +80,18 @@ const VALID_ROLES = new Set<UserRole>(["sys_admin", "admin", "staff", "board_mem
 /**
  * Read the current identity from the API.
  *
- * Returns `null` when there is no session — a 401 is the expected answer for a
- * signed-out visitor, not an error worth surfacing. Everything else throws,
- * because a 403 or a 500 here means something is wrong that the user needs to
- * be told about rather than silently treated as "signed out", which would send
- * them round the login page in a loop.
+ * Throws `ApiError` on any non-2xx, including 401. It is NOT called without a
+ * session — `AuthProvider` gates it on one — so a 401 here means the cookie
+ * disappeared between the session check and this call, which is a real event
+ * the caller should see rather than something to translate into "signed out"
+ * and swallow.
+ *
+ * A signed-in identity that belongs to no town is NOT an error: `GET /api/me`
+ * answers 200 with `townId: null`, and that is what routes the user to the
+ * onboarding wizard. See `routes/session.ts` for why that is data rather than
+ * a 403.
  */
-export async function fetchCurrentUser(): Promise<CurrentUser | null> {
+export async function fetchCurrentUser(): Promise<CurrentUser> {
   const response = await apiJson<MeResponse>("/api/me");
 
   const role = response.role;
