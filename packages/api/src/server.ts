@@ -22,6 +22,9 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { sessionRoutes } from "./routes/session.js";
 import { NotificationService } from "./services/notification-service.js";
+import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import { appRouter } from "./trpc/router.js";
+import { createTrpcContext } from "./trpc/context.js";
 
 export interface BuildServerOptions {
   /**
@@ -175,6 +178,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
       database,
     });
   });
+  // ─── tRPC (Stage 1, Task D1) ─────────────────────────────────────
+  //
+  // Mounted WITHOUT a `PUBLIC_ROUTE` marking, which is the point: the
+  // deny-by-default gate in `auth/fastify.ts` runs on `/api/trpc/*` like any
+  // other route, so a procedure cannot be reached without a session and a
+  // resolved tenant no matter what it is built on. `publicProcedure` relaxes
+  // the tRPC-level requirement only; it is not a way past the HTTP gate.
+  //
+  // The context is built from the request the gate has already processed —
+  // see `trpc/context.ts`. It carries `withTenant` and nothing else that can
+  // reach the database.
+  await app.register(fastifyTRPCPlugin, {
+    prefix: "/api/trpc",
+    trpcOptions: {
+      router: appRouter,
+      createContext: createTrpcContext,
+      onError({ path, error }: { path?: string; error: Error }) {
+        app.log.error({ err: error, path }, "tRPC procedure failed");
+      },
+    },
+  });
+
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });
