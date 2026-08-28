@@ -92,22 +92,32 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
+    // ─── Stage 1, Task C2: development is same-origin, like production ────
+    //
+    // Every API call in this app is now a relative `/api/...` URL built by
+    // `src/lib/api-client.ts`, and the session is a cookie rather than a
+    // bearer token. That only works if the browser considers the API to be the
+    // same origin as the page — which is exactly what
+    // `infrastructure/nginx/nginx.conf` arranges in production, by proxying
+    // `/api/` on the `app.` server block to the API process.
+    //
+    // This proxy is the development half of that arrangement. Without it the
+    // dev server would be cross-origin against the API, which needs
+    // `SameSite=None` cookies plus CORS with credentials — the complexity
+    // Task C1 chose same-origin to eliminate, and a different cookie topology
+    // from the one that ships. Two topologies is how "works locally, fails in
+    // production" is manufactured.
+    //
+    // `changeOrigin` is deliberately FALSE. nginx forwards `Host $host`, so
+    // the API sees the app's host in production; `changeOrigin: true` would
+    // rewrite it to `localhost:3001` here, and Better Auth reconstructs the
+    // request URL from `request.host` and compares its origin to `baseURL`.
+    // Leaving the header alone makes development match production on the one
+    // header auth actually reads.
     proxy: {
-      "/auth": {
-        target: "http://localhost:54321",
-        changeOrigin: true,
-      },
-      "/rest": {
-        target: "http://localhost:54321",
-        changeOrigin: true,
-      },
-      "/storage": {
-        target: "http://localhost:54321",
-        changeOrigin: true,
-      },
       "/api": {
         target: "http://localhost:3001",
-        changeOrigin: true,
+        changeOrigin: false,
       },
     },
   },

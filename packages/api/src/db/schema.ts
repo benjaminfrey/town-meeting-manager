@@ -1384,7 +1384,13 @@ export const userAccount = pgTable(
     role: userRole().notNull(),
     govTitle: text("gov_title"),
     permissions: jsonb().default({ global: {}, board_overrides: [] }).notNull(),
-    authUserId: uuid("auth_user_id"),
+    // `text`, not `uuid`: Better Auth generates its user ids in application
+    // code as 32-character alphanumeric strings. Retyped by
+    // drizzle/0001_better_auth_and_tenant_bridge.sql, which also adds the real
+    // foreign key to better_auth."user"(id) ON DELETE SET NULL. The reference
+    // is not declared here because that table lives in `auth/schema.ts` and
+    // importing it would make this pulled schema depend on the auth layer.
+    authUserId: text("auth_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),

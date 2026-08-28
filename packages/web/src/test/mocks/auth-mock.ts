@@ -14,9 +14,14 @@ import { buildPermissionsFromTemplate, DEFAULT_PERMISSION_TEMPLATES } from "@tow
 // ─── Mock user factories ────────────────────────────────────────────
 
 const DEFAULT_MOCK_USER: CurrentUser = {
+  // `id` is `user_account.id` as of Stage 1, Task C2 — it used to be the auth
+  // provider's user id, which four call sites were already treating as a
+  // `user_account` id. `authUserId` is the identity, kept separate.
   id: "user-1",
+  authUserId: "auth-user-1",
   personId: "person-1",
   email: "admin@test.com",
+  emailVerified: true,
   townId: "town-1",
   role: "admin" as UserRole,
   govTitle: null,
@@ -77,12 +82,24 @@ export function createBoardMemberUser(overrides: Partial<CurrentUser> = {}): Cur
 
 // ─── Mock AuthProvider ──────────────────────────────────────────────
 
+/**
+ * Mirrors the real `AuthContextValue`.
+ *
+ * Stage 1, Task C2: `session` is gone — the Better Auth session is an
+ * HTTP-only cookie, so there is no token object for a component to hold, and a
+ * mock that still offered one would let a test pass against an interface the
+ * application no longer has. `currentUser` is here instead, because identity
+ * now lives on this context rather than being decoded from a token.
+ */
 interface MockAuthContextValue {
-  user: { id: string; email?: string } | null;
-  session: { access_token: string } | null;
+  user: { id: string; email: string; emailVerified: boolean; name?: string } | null;
+  currentUser: CurrentUser | null;
+  currentUserError: Error | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  refreshCurrentUser: ReturnType<typeof vi.fn>;
   signIn: ReturnType<typeof vi.fn>;
+  signUp: ReturnType<typeof vi.fn>;
   signOut: ReturnType<typeof vi.fn>;
   resetPassword: ReturnType<typeof vi.fn>;
 }
@@ -112,11 +129,14 @@ export function MockAuthProvider({
   const authenticated = isAuthenticated ?? user !== null;
 
   const value: MockAuthContextValue = {
-    user: user ? { id: user.id, email: user.email } : null,
-    session: authenticated ? { access_token: "mock-jwt-token" } : null,
+    user: user ? { id: user.authUserId, email: user.email, emailVerified: true } : null,
+    currentUser: authenticated ? user : null,
+    currentUserError: null,
     isLoading,
     isAuthenticated: authenticated,
+    refreshCurrentUser: vi.fn().mockResolvedValue(undefined),
     signIn: vi.fn().mockResolvedValue({ error: null }),
+    signUp: vi.fn().mockResolvedValue({ error: null, confirmEmail: true }),
     signOut: vi.fn().mockResolvedValue(undefined),
     resetPassword: vi.fn().mockResolvedValue({ error: null }),
   };

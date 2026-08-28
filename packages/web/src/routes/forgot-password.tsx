@@ -1,9 +1,12 @@
 /**
  * Forgot Password page — /forgot-password route
  *
- * Sends a password reset link via Supabase Auth. Always shows the
- * generic success message regardless of whether the email exists
- * (security best practice — don't leak registered emails).
+ * Sends a password reset link via Better Auth (Stage 1, Task C2). Always shows
+ * the generic success message regardless of whether the email exists — and so
+ * does the server, which additionally simulates the token generation and
+ * database lookup so the response TIME does not leak registration either.
+ *
+ * The link lands on `routes/reset-password.tsx`.
  */
 
 import { type FormEvent, useState } from "react";

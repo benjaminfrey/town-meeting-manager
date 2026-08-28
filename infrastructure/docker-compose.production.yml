@@ -322,6 +322,19 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?set VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?set VAPID_PRIVATE_KEY}
       VAPID_CONTACT_EMAIL: ${VAPID_CONTACT_EMAIL:-mailto:admin@townmeetingmanager.com}
+      # ── Better Auth (Stage 1, Task C1) ──
+      # Signs session cookies and verification tokens. The API refuses to boot
+      # without it: an unsigned session is a forgeable one.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET (openssl rand -base64 32)}
+      # Same origin as the SPA — nginx's app. block proxies /api/ here, which is
+      # what lets the session cookie stay SameSite=Lax.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-${SITE_URL}}
+      # MUST be the tmm_app role, never the schema owner: owners bypass row
+      # level security unless FORCEd, and every tenancy guarantee assumes a
+      # non-owner connection. Create it once per cluster as a superuser:
+      #   CREATE ROLE tmm_app LOGIN PASSWORD '...';
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (must use the tmm_app role, not the owner)}
+      POSTMARK_AUTH_FROM_EMAIL: ${POSTMARK_AUTH_FROM_EMAIL:?set POSTMARK_AUTH_FROM_EMAIL}
 
   # ─── Nginx (the only host-published service) ───────────────────────
   nginx:

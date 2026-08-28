@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiJson } from "@/lib/api-client";
 import { Plus, Star, Archive, ArrowRightLeft, Pencil, Mail, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +23,6 @@ import { AddMemberDialog } from "@/components/members/AddMemberDialog";
 import { MemberArchiveDialog } from "@/components/members/MemberArchiveDialog";
 import { MemberTransitionDialog } from "@/components/members/MemberTransitionDialog";
 import { EditGovTitleDialog } from "@/components/members/EditGovTitleDialog";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -204,19 +203,9 @@ export function MemberRoster({
   // ─── Send / resend invite ──────────────────────────────────────────
   const sendInviteMutation = useMutation({
     mutationFn: async (invitationId: string) => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
-      const res = await fetch(`${API_BASE}/api/invitations/${invitationId}/send`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Failed to send invitation");
-      }
+      // The session travels as a cookie, attached by `apiJson`. There is no
+      // token for this component to fetch, forward, or get wrong.
+      await apiJson(`/api/invitations/${invitationId}/send`, { method: "POST" });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invitations.byTown(townId) });
@@ -229,19 +218,9 @@ export function MemberRoster({
 
   const resendInviteMutation = useMutation({
     mutationFn: async (invitationId: string) => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
-      const res = await fetch(`${API_BASE}/api/invitations/${invitationId}/resend`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Failed to resend invitation");
-      }
+      // The session travels as a cookie, attached by `apiJson`. There is no
+      // token for this component to fetch, forward, or get wrong.
+      await apiJson(`/api/invitations/${invitationId}/resend`, { method: "POST" });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.invitations.byTown(townId) });

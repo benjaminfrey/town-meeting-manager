@@ -6,6 +6,10 @@ export default [
     route("login", "routes/login.tsx"),
     route("signup", "routes/signup.tsx"),
     route("forgot-password", "routes/forgot-password.tsx"),
+    // Where the emailed reset link lands. Task C2: `forgot-password.tsx` has
+    // always pointed `redirectTo` here, and until now nothing was registered
+    // at this path — the link 404'd, silently, in every environment.
+    route("reset-password", "routes/reset-password.tsx"),
   ]),
 
   // Onboarding wizard — standalone, full-screen

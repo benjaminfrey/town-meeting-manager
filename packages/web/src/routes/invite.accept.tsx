@@ -17,9 +17,8 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/lib/supabase";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+import { apiJson, ApiError } from "@/lib/api-client";
+import { authClient } from "@/lib/auth-client";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -94,21 +93,24 @@ export default function InviteAcceptPage() {
 
     void (async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/api/invitations/validate?token=${encodeURIComponent(token)}`,
+        // Public by design: the acceptance page has to render before any
+        // account exists, so the token is the credential. `apiJson` still
+        // sends credentials — harmless here, and the alternative is a second
+        // way of calling this API that someone will copy for a route where it
+        // is not harmless.
+        const data = await apiJson<InvitationDetails>(
+          `/api/invitations/validate?token=${encodeURIComponent(token)}`,
         );
-        if (!res.ok) {
-          setInvitation({ valid: false, reason: "not_found" });
-          return;
-        }
-        const data = (await res.json()) as InvitationDetails;
         setInvitation(data);
         // Pre-fill display name
         if (data.valid && data.person_name) {
           setValue("display_name", data.person_name);
         }
-      } catch {
-        setInvitation({ valid: false, reason: "error" });
+      } catch (err) {
+        setInvitation({
+          valid: false,
+          reason: err instanceof ApiError && err.status === 404 ? "not_found" : "error",
+        });
       } finally {
         setLoading(false);
       }
@@ -118,25 +120,20 @@ export default function InviteAcceptPage() {
   const onSubmit = async (formData: AcceptFormData) => {
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/invitations/accept`, {
+      const result = await apiJson<{ email: string }>("/api/invitations/accept", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        json: {
           token,
           password: formData.password,
           display_name: formData.display_name,
-        }),
+        },
       });
 
-      if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errData.message ?? `Account setup failed (${res.status})`);
-      }
-
-      const result = (await res.json()) as { email: string };
-
-      // Sign in automatically
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      // Sign in automatically. This works without a verification click because
+      // acceptance recorded the address as verified — the invitation token was
+      // delivered to it, which proves possession at least as well as a click
+      // does. `requireEmailVerification` is untouched.
+      const { error: signInError } = await authClient.signIn.email({
         email: result.email,
         password: formData.password,
       });

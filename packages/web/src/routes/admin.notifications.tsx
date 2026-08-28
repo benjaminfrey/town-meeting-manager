@@ -11,10 +11,7 @@ import { Mail, CheckCircle, AlertTriangle, XCircle, ChevronLeft } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-
-// ─── API base URL ──────────────────────────────────────────────────────────
-
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+import { apiJson } from "@/lib/api-client";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -76,34 +73,23 @@ interface BounceEntry {
 // ─── Fetch helpers ─────────────────────────────────────────────────────────
 
 async function fetchSummary(): Promise<NotificationSummary> {
-  const res = await fetch(`${API_URL}/api/admin/notifications/summary`);
-  if (!res.ok) throw new Error("Failed to fetch summary");
-  return res.json() as Promise<NotificationSummary>;
+  return apiJson<NotificationSummary>("/api/admin/notifications/summary");
 }
 
 async function fetchEvents(): Promise<NotificationEvent[]> {
-  const res = await fetch(`${API_URL}/api/admin/notifications/events`);
-  if (!res.ok) throw new Error("Failed to fetch events");
-  return res.json() as Promise<NotificationEvent[]>;
+  return apiJson<NotificationEvent[]>("/api/admin/notifications/events");
 }
 
 async function fetchDeliveries(eventId: string): Promise<DeliveryDetail[]> {
-  const res = await fetch(`${API_URL}/api/admin/notifications/events/${eventId}/deliveries`);
-  if (!res.ok) throw new Error("Failed to fetch deliveries");
-  return res.json() as Promise<DeliveryDetail[]>;
+  return apiJson<DeliveryDetail[]>(`/api/admin/notifications/events/${eventId}/deliveries`);
 }
 
 async function fetchBounces(): Promise<BounceEntry[]> {
-  const res = await fetch(`${API_URL}/api/admin/notifications/bounces`);
-  if (!res.ok) throw new Error("Failed to fetch bounces");
-  return res.json() as Promise<BounceEntry[]>;
+  return apiJson<BounceEntry[]>("/api/admin/notifications/bounces");
 }
 
 async function clearBounce(userId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/api/admin/notifications/bounces/${userId}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) throw new Error("Failed to clear bounce");
+  await apiJson(`/api/admin/notifications/bounces/${userId}`, { method: "DELETE" });
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

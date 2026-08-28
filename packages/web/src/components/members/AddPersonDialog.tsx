@@ -17,6 +17,7 @@ import { Loader2, ChevronLeft, IdCard, UserCog } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiFetch } from "@/lib/api-client";
 import {
   Dialog,
   DialogContent,
@@ -30,8 +31,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { StaffAccountFlow, type StaffAccountResult } from "./StaffAccountFlow";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
 const NewPersonSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(100),
@@ -116,7 +115,11 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
         role: "staff",
         gov_title: staffResult.gov_title || null,
         permissions: staffResult.permissions,
-        auth_user_id: "",
+        // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
+        // foreign key to `better_auth."user"(id)`, so an empty string is
+        // rejected with SQLSTATE 23503 and the whole insert fails. The
+        // column is nullable by design: a `user_account` exists before any
+        // login does, and invitation acceptance is what fills it in.
         created_at: now,
       });
       if (uaErr) throw uaErr;
@@ -135,20 +138,9 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
       if (invErr) throw invErr;
 
       // Best-effort invitation email (non-blocking; admin can resend from a board roster).
-      void (async () => {
-        try {
-          const { data } = await supabase.auth.getSession();
-          const accessToken = data?.session?.access_token;
-          if (accessToken) {
-            await fetch(`${API_BASE}/api/invitations/${invId}/send`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${accessToken}` },
-            });
-          }
-        } catch {
-          /* non-critical */
-        }
-      })();
+      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+        /* non-critical — an admin can resend from a board roster */
+      });
 
       return name;
     },

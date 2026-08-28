@@ -86,7 +86,28 @@ export function renderEmailTemplate(
   // Render the content partial
   const contentHtml = contentTemplate(variables);
 
-  // Inject into layout
+  // Inject into layout.
+  //
+  // ─── `content` MUST stay after the spread. This line is a security
+  // boundary. ─────────────────────────────────────────────────────────────
+  //
+  // `layout.hbs` renders `{{{content}}}` — a triple-stash, unescaped, and
+  // correctly so: what it receives is the rendered output of a trusted `.hbs`
+  // partial, and escaping it would emit the email's own markup as visible
+  // text.
+  //
+  // What makes that safe is ONLY the key order below. `variables` is
+  // `{ ...payload, … }` (see `notification-service.ts`), and `payload` is
+  // caller-supplied — it reaches this function from the body of
+  // POST /api/notifications/events. A payload carrying its own `content` key
+  // is overwritten here because `content:` comes second. Swap these two, or
+  // rewrite this as `{ content: contentHtml, ...variables }`, and arbitrary
+  // attacker HTML is emitted unescaped into mail sent from a town's own
+  // DKIM-signed domain — the same hole that `admin-alert.hbs`'s
+  // `{{{alertMessage}}}` was, arrived at by a formatting change rather than a
+  // template edit.
+  //
+  // `__tests__/email-template-escaping.test.ts` fails if this order changes.
   const html = layout({ ...variables, content: contentHtml });
   const text = htmlToPlainText(html);
 

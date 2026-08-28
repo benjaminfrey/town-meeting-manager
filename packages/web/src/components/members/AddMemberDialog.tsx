@@ -12,8 +12,8 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiFetch } from "@/lib/api-client";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -318,7 +318,11 @@ export function AddMemberDialog({
           role: "board_member",
           gov_title: bmConfig.gov_title.trim() || null,
           permissions: emptyPerms,
-          auth_user_id: "",
+          // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
+          // foreign key to `better_auth."user"(id)`, so an empty string is
+          // rejected with SQLSTATE 23503 and the whole insert fails. The
+          // column is nullable by design: a `user_account` exists before any
+          // login does, and invitation acceptance is what fills it in.
           created_at: now,
         });
         if (error) throw error;
@@ -374,20 +378,9 @@ export function AddMemberDialog({
       if (invError) throw invError;
 
       // Fire invitation email (best-effort, non-blocking)
-      void (async () => {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          if (accessToken) {
-            await fetch(`${API_BASE}/api/invitations/${invId}/send`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${accessToken}` },
-            });
-          }
-        } catch {
-          // Non-critical — admin can resend from member roster
-        }
-      })();
+      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+        // Non-critical — admin can resend from member roster
+      });
 
       return selectedPerson.name;
     },
@@ -428,7 +421,11 @@ export function AddMemberDialog({
         role: "staff",
         gov_title: staffResult.gov_title || null,
         permissions: staffResult.permissions,
-        auth_user_id: "",
+        // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
+        // foreign key to `better_auth."user"(id)`, so an empty string is
+        // rejected with SQLSTATE 23503 and the whole insert fails. The
+        // column is nullable by design: a `user_account` exists before any
+        // login does, and invitation acceptance is what fills it in.
         created_at: now,
       });
       if (uaError) throw uaError;
@@ -450,20 +447,9 @@ export function AddMemberDialog({
       if (invError) throw invError;
 
       // Fire invitation email (best-effort, non-blocking)
-      void (async () => {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          if (accessToken) {
-            await fetch(`${API_BASE}/api/invitations/${invId}/send`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${accessToken}` },
-            });
-          }
-        } catch {
-          // Non-critical — admin can resend from member roster
-        }
-      })();
+      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+        // Non-critical — admin can resend from member roster
+      });
 
       return selectedPerson.name;
     },

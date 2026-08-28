@@ -61,6 +61,7 @@ import {
   type StructuredMeetingRecordInput,
 } from "@/lib/meeting/buildStructuredMeetingRecord";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiJson } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
 
@@ -87,8 +88,6 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 }
 
 // ─── Component ────────────────────────────────────────────────────
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
 const MINUTES_STYLE_LABELS: Record<string, string> = {
   action: "Action Minutes",
@@ -477,38 +476,16 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       setGenerateError(null);
 
       const endpoint = isRegenerate
-        ? `${API_BASE}/api/meetings/${meetingId}/minutes/regenerate`
-        : `${API_BASE}/api/meetings/${meetingId}/minutes/generate`;
+        ? `/api/meetings/${meetingId}/minutes/regenerate`
+        : `/api/meetings/${meetingId}/minutes/generate`;
 
       try {
-        // Get the session token from Supabase auth
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData?.session?.access_token;
-
-        if (!accessToken) {
-          setGenerateError("Not authenticated. Please sign in again.");
-          setGenerating(false);
-          return;
-        }
-
         const body: Record<string, string> = {};
         if (styleOverride && styleOverride !== effectiveMinutesStyle) {
           body.minutes_style_override = styleOverride;
         }
 
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-          throw new Error((errData.message as string) ?? `Generation failed (${res.status})`);
-        }
+        await apiJson(endpoint, { method: "POST", json: body });
 
         // Success — close dialogs and invalidate minutes query
         setGenerateDialogOpen(false);
@@ -525,7 +502,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         setGenerating(false);
       }
     },
-    [meetingId, styleOverride, effectiveMinutesStyle],
+    [meetingId, styleOverride, effectiveMinutesStyle, queryClient],
   );
 
   // ─── Export handler ────────────────────────────────────────────

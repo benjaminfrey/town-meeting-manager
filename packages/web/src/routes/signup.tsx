@@ -1,9 +1,15 @@
 /**
  * Signup page — /signup route
  *
- * Creates a new Supabase Auth account. In dev mode (auto-confirm enabled),
- * the user is signed in immediately and redirected to /setup to create
- * their town. In prod mode, shows a "check your email" confirmation screen.
+ * Creates a Better Auth account (Stage 1, Task C2).
+ *
+ * There is no "dev mode" branch any more. `requireEmailVerification` is on and
+ * non-negotiable — it is what closes GHSA-fmh4-wcc4-5jm3 — so sign-up NEVER
+ * returns a session, in any environment, and the confirmation screen is always
+ * what follows. The old code branched on an undocumented Supabase response
+ * shape that meant "already signed in" wherever auto-confirm was enabled,
+ * which is exactly the kind of environment-dependent path that works in
+ * development and does something else in production.
  */
 
 import { type FormEvent, useState } from "react";
@@ -97,13 +103,10 @@ export default function SignupPage() {
       return;
     }
 
-    if (confirmEmail) {
-      // Prod mode — email confirmation required
-      setShowConfirmation(true);
-    } else {
-      // Dev mode — auto-confirmed, user is now signed in
-      navigate("/setup", { replace: true });
-    }
+    // Always true — see this file's header. Kept as a value rather than
+    // hard-coded here so the provider stays the single place that knows.
+    if (confirmEmail) setShowConfirmation(true);
+    else navigate("/setup", { replace: true });
   };
 
   // ─── Email confirmation screen ──────────────────────────────────────

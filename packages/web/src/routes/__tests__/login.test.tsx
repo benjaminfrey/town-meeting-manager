@@ -11,25 +11,18 @@ vi.mock("@/providers/AuthProvider", () => ({
     signIn: mockSignIn,
     signOut: vi.fn(),
     resetPassword: vi.fn(),
+    signUp: vi.fn(),
+    refreshCurrentUser: vi.fn(),
     isAuthenticated: false,
     isLoading: false,
     user: null,
-    session: null,
+    currentUser: null,
+    currentUserError: null,
   })),
 }));
 
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: vi.fn(() => null),
-}));
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    auth: {
-      getSession: vi.fn().mockResolvedValue({
-        data: { session: null },
-      }),
-    },
-  },
 }));
 
 vi.mock("react-router", async () => {
@@ -122,15 +115,19 @@ describe("LoginPage", () => {
       signUp: vi.fn(),
       signOut: vi.fn(),
       resetPassword: vi.fn(),
+      refreshCurrentUser: vi.fn(),
       isAuthenticated: true,
       isLoading: false,
-      user: { id: "user-1" } as any,
-      session: { access_token: "token" } as any,
+      user: { id: "auth-user-1", email: "admin@test.com", emailVerified: true },
+      currentUser: null,
+      currentUserError: null,
     });
     vi.mocked(useCurrentUser).mockReturnValue({
-      id: "user-1",
+      id: "user-account-1",
+      authUserId: "auth-user-1",
       personId: "person-1",
       email: "admin@test.com",
+      emailVerified: true,
       townId: "town-1",
       role: "admin" as any,
       govTitle: null,

@@ -16,7 +16,6 @@ import { useCallback, useRef, useState } from "react";
 import { Navigate } from "react-router";
 import { useAuth } from "@/providers/AuthProvider";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useSupabase } from "@/hooks/useSupabase";
 import { WizardProvider, useWizard } from "@/providers/WizardProvider";
 import { WizardLayout } from "@/components/wizard/WizardLayout";
 import { WizardNavBlocker } from "@/components/wizard/WizardNavBlocker";
@@ -33,7 +32,6 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 function WizardContent() {
   const { state, updateStage, markStageComplete, goNext, goBack, getWizardData } = useWizard();
   const { currentStage } = state;
-  const supabase = useSupabase();
 
   // Track form validity from the current stage
   const [isStageValid, setIsStageValid] = useState(false);
@@ -98,20 +96,24 @@ function WizardContent() {
 
       // Collect all wizard data and submit
       const wizardData = getWizardData();
-      await completeWizard(wizardData, supabase);
+      await completeWizard(wizardData);
 
-      // Refresh session so the JWT picks up the new town_id claim
-      await supabase.auth.refreshSession();
-
-      // Full page reload so the new JWT claims (town_id) take effect
-      // across all providers before navigating to the dashboard.
+      // A full page reload, still — but for a different reason than before.
+      //
+      // It used to be here because the town arrived as a JWT claim, so the
+      // token had to be refreshed and every provider re-read it. There is no
+      // token now; the town comes from `GET /api/me`, and `refreshCurrentUser`
+      // would be enough. The reload is kept because onboarding changes what
+      // EVERY cached query can see — the whole application was running with no
+      // tenant a moment ago — and a clean slate is more trustworthy than
+      // remembering which of several dozen query keys to invalidate.
       window.location.href = "/dashboard?welcome=true";
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setIsSubmitting(false);
     }
-  }, [getWizardData, supabase, updateStage, markStageComplete]);
+  }, [getWizardData, updateStage, markStageComplete]);
 
   const handleComplete = useCallback(() => {
     void submitWizard();

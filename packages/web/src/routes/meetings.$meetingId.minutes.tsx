@@ -55,6 +55,7 @@ import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
 import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { apiFetch, apiJson } from "@/lib/api-client";
 
 // ─── Route Loader ─────────────────────────────────────────────────
 
@@ -63,8 +64,6 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 }
 
 // ─── Constants ────────────────────────────────────────────────────
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
 type MinutesStatus = "draft" | "review" | "approved" | "published";
 
@@ -275,23 +274,12 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         .eq("id", docId)
         .throwOnError();
 
-      // Fire API call to re-render HTML/PDF
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData?.session?.access_token;
-        if (accessToken) {
-          await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/render`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({ is_draft: true }),
-          });
-        }
-      } catch {
-        // Non-critical — local changes are saved, server render may fail
-      }
+      // Re-render HTML/PDF server-side. Non-critical: the content itself is
+      // already saved, and the render can be retried from the toolbar.
+      await apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
+        method: "POST",
+        json: { is_draft: true },
+      }).catch(() => {});
     },
     onSuccess: () => {
       invalidateMinutes();
@@ -348,22 +336,11 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
           .throwOnError();
       }
 
-      // Call submit API: sets status="review" + fires minutes_review notification
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-        if (token) {
-          await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/submit`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        }
-      } catch {
-        // Non-critical — Supabase update already succeeded
-      }
+      // Sets status="review" and fires the minutes_review notification.
+      // Non-critical: the status change above already committed.
+      await apiFetch(`/api/meetings/${meetingId}/minutes/submit`, { method: "POST" }).catch(
+        () => {},
+      );
     },
     onSuccess: () => {
       invalidateMinutes();
@@ -374,22 +351,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
 
   const approveMutation = useMutation({
     mutationFn: async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Not authenticated");
-
-      const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/approve`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errData.message ?? `Approval failed (${res.status})`);
-      }
+      await apiJson(`/api/meetings/${meetingId}/minutes/approve`, { method: "POST" });
     },
     onSuccess: () => {
       invalidateMinutes();
@@ -413,31 +375,23 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         .eq("id", docId)
         .throwOnError();
 
-      // Fire minutes_published notification via API (best effort)
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-        if (token) {
-          await fetch(`${API_BASE}/api/notifications/events`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              event_type: "minutes_published",
-              town_id: townId,
-              payload: {
-                meeting_id: meetingId,
-                board_id: boardId,
-                minutes_document_id: docId,
-              },
-            }),
-          });
-        }
-      } catch {
-        // Non-critical
-      }
+      // Fire the minutes_published notification (best effort).
+      //
+      // `town_id` is still sent, but the API no longer trusts it: since Task
+      // G1 a value that disagrees with the caller's own town is a 403 rather
+      // than a silent cross-town fan-out.
+      await apiFetch("/api/notifications/events", {
+        method: "POST",
+        json: {
+          event_type: "minutes_published",
+          town_id: townId,
+          payload: {
+            meeting_id: meetingId,
+            board_id: boardId,
+            minutes_document_id: docId,
+          },
+        },
+      }).catch(() => {});
     },
     onSuccess: () => {
       invalidateMinutes();
@@ -525,25 +479,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) {
-        toast.error("Not authenticated. Please sign in again.");
-        return;
-      }
-
-      const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/minutes/regenerate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        throw new Error((errData.message as string) ?? `Regeneration failed (${res.status})`);
-      }
+      await apiJson(`/api/meetings/${meetingId}/minutes/regenerate`, { method: "POST" });
 
       toast.success("Minutes regeneration started");
       invalidateMinutes();

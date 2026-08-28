@@ -8,10 +8,34 @@
  * GET  /api/unsubscribe               — public: unsubscribe from email type
  * PUT  /api/notifications/preferences — update email notification preferences
  * GET  /api/notifications/preferences — get current user's preferences
+ *
+ * ─── Task G1: the three public routes here, and why each has to be ────────
+ *
+ * Under deny-by-default (`auth/route-access.ts`) these are marked public
+ * deliberately rather than being unmarked by accident, which is what they were
+ * before:
+ *
+ *   GET  /api/invitations/validate — the acceptance page renders from this
+ *        before any account exists. The token is the credential; a wrong one
+ *        returns 404 and a used or expired one returns `{valid:false}`.
+ *   POST /api/invitations/accept   — THE reason a session cannot be required.
+ *        This is the request that creates the account. Requiring a session
+ *        here would mean an invited user must already have the thing the
+ *        invitation exists to give them.
+ *   GET  /api/unsubscribe          — reached from a link in an email, by
+ *        someone who may have no account at all (subscribers are `person`
+ *        rows, not `user_account` rows). Authenticated by an HMAC over
+ *        `person:eventType` with a timing-safe comparison, above.
+ *
+ * The other four routes in this file take a session.
  */
 
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { sql } from "drizzle-orm";
+import { PUBLIC_ROUTE } from "../auth/route-access.js";
+import { withTenant } from "../db/with-tenant.js";
+import { toRows } from "../db/rows.js";
 import { renderEmailTemplate, EmailSenderService } from "../services/email-sender.js";
 import { getDefaultPostmarkClient } from "../lib/postmark.js";
 
@@ -301,50 +325,54 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/invitations/validate ────────────────────────────────
   // Public: validate token, return details for acceptance page
 
-  app.get<{ Querystring: { token: string } }>("/invitations/validate", async (request, reply) => {
-    const { token } = request.query;
-    if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { token: string } }>(
+    "/invitations/validate",
+    { config: { ...PUBLIC_ROUTE } },
+    async (request, reply) => {
+      const { token } = request.query;
+      if (!token) return reply.badRequest("token required");
 
-    const { data: inv } = await supabase
-      .from("invitation")
-      .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
-      .eq("token", token)
-      .single();
+      const { data: inv } = await supabase
+        .from("invitation")
+        .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
+        .eq("token", token)
+        .single();
 
-    if (!inv) return reply.notFound("Invitation not found or already used");
+      if (!inv) return reply.notFound("Invitation not found or already used");
 
-    if ((inv.status as string) === "accepted") {
-      return reply.send({ valid: false, reason: "already_accepted" });
-    }
+      if ((inv.status as string) === "accepted") {
+        return reply.send({ valid: false, reason: "already_accepted" });
+      }
 
-    if (new Date(inv.expires_at as string) < new Date()) {
-      return reply.send({ valid: false, reason: "expired" });
-    }
+      if (new Date(inv.expires_at as string) < new Date()) {
+        return reply.send({ valid: false, reason: "expired" });
+      }
 
-    // Get person info
-    const { data: person } = await supabase
-      .from("person")
-      .select("name, email")
-      .eq("id", inv.person_id as string)
-      .single();
+      // Get person info
+      const { data: person } = await supabase
+        .from("person")
+        .select("name, email")
+        .eq("id", inv.person_id as string)
+        .single();
 
-    // Get town info
-    const { data: town } = await supabase
-      .from("town")
-      .select("name")
-      .eq("id", inv.town_id as string)
-      .single();
+      // Get town info
+      const { data: town } = await supabase
+        .from("town")
+        .select("name")
+        .eq("id", inv.town_id as string)
+        .single();
 
-    return reply.send({
-      valid: true,
-      invitation_id: inv.id,
-      person_name: person?.name ?? null,
-      person_email: person?.email ?? null,
-      town_name: town?.name ?? null,
-      role: inv.role ?? "board_member",
-      expires_at: inv.expires_at,
-    });
-  });
+      return reply.send({
+        valid: true,
+        invitation_id: inv.id,
+        person_name: person?.name ?? null,
+        person_email: person?.email ?? null,
+        town_name: town?.name ?? null,
+        role: inv.role ?? "board_member",
+        expires_at: inv.expires_at,
+      });
+    },
+  );
 
   // ── POST /api/invitations/accept ─────────────────────────────────
   // Public: accept invitation — creates auth user + links account
@@ -355,7 +383,7 @@ export async function invitationRoutes(app: FastifyInstance) {
       password: string;
       display_name?: string;
     };
-  }>("/invitations/accept", async (request, reply) => {
+  }>("/invitations/accept", { config: { ...PUBLIC_ROUTE } }, async (request, reply) => {
     const { token, password, display_name } = request.body;
 
     if (!token || !password) {
@@ -391,43 +419,210 @@ export async function invitationRoutes(app: FastifyInstance) {
     const email = person.email as string;
     const name = display_name ?? (person.name as string) ?? email;
 
-    // Create Supabase auth user
-    // Note: This uses the service_role key to create a user server-side.
-    // In production, supabase.auth.admin methods require service_role key.
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // auto-confirm since they accepted via invitation
-      user_metadata: {
-        display_name: name,
-        town_id: inv.town_id as string,
-        role: (inv.role as string) ?? "board_member",
-      },
-    });
+    // ─── Creating the login ────────────────────────────────────────────
+    //
+    // Task C2 replaced `supabase.auth.admin.createUser` here. That call used
+    // the Supabase SERVICE-ROLE key to mint a GoTrue user out of band — a
+    // privileged side door around the normal sign-up path. Better Auth has no
+    // equivalent, deliberately, and none is built: an account is created by
+    // the same endpoint a person's own sign-up uses, with the same password
+    // hashing and the same validation. The only privilege this route holds is
+    // the invitation token the caller presented.
+    //
+    // `signUpEmail` also sends a verification email (see `auth/auth.ts`), and
+    // that send is awaited inside it. With Postmark's manual setup still
+    // outstanding, the sender throws and this route answers 500 — the same
+    // state ordinary sign-up is in. That is reported rather than worked
+    // around: a "skip the email in development" switch is an account-takeover
+    // primitive that would also ship.
+    let authUserId: string;
+    try {
+      const created = await app.auth.api.signUpEmail({
+        body: { email, password, name },
+      });
+      authUserId = created.user.id;
+    } catch (err) {
+      // Better Auth returns a 422 for a duplicate email. Answering 409 with a
+      // sentence is better than surfacing its code, because the person reading
+      // it is a board member who has just clicked a link in an email.
+      //
+      // Deliberately NOT auto-linking to the pre-existing identity. That would
+      // attach this invitation's `user_account` to an account whose password
+      // was never checked in this request, which is a different and much
+      // sharper security question than the one this route is answering.
+      const message = err instanceof Error ? err.message : String(err);
+      const code = (err as { body?: { code?: string } })?.body?.code ?? "";
 
-    if (authError || !authData.user) {
-      app.log.error({ authError }, "Failed to create auth user for invitation acceptance");
-      return reply.internalServerError(authError?.message ?? "Failed to create account");
+      // ─── A rejected password is the CALLER's problem, not an incident ──
+      //
+      // Better Auth enforces `minPasswordLength` (8) — which is, incidentally,
+      // the first server-side password policy this route has ever had; Task C1
+      // recorded that it had none. But a policy violation answered with 500
+      // and an error-level log tells the person nothing about what to change,
+      // and puts a routine validation failure in the same bucket an operator
+      // pages on. It gets a 400 that names the rule, and a warn.
+      if (code === "PASSWORD_TOO_SHORT" || code === "PASSWORD_TOO_LONG") {
+        app.log.warn(
+          { code, invitationId: inv.id },
+          "invitation acceptance rejected: password does not meet the policy",
+        );
+        return reply.badRequest(
+          code === "PASSWORD_TOO_SHORT"
+            ? "Your password must be at least 8 characters."
+            : "That password is too long.",
+        );
+      }
+
+      app.log.error(
+        { err, invitationId: inv.id },
+        "sign-up failed during invitation acceptance; invitation NOT marked accepted",
+      );
+      if (code === "USER_ALREADY_EXISTS" || /exist/i.test(message)) {
+        return reply.conflict(
+          "An account already exists for this email address. Sign in with it, then " +
+            "ask your town administrator to link it to this invitation.",
+        );
+      }
+      return reply.internalServerError(
+        "Could not create the account for this invitation. The invitation has not " +
+          "been used and can be tried again.",
+      );
     }
 
-    const authUserId = authData.user.id;
     const now = new Date().toISOString();
 
-    // Link auth user to user_account + set email/display_name
-    await supabase
-      .from("user_account")
-      .update({
-        auth_user_id: authUserId,
-        email,
-        display_name: name,
-      })
-      .eq("id", inv.user_account_id as string);
+    // ─── The link, and why it is one transaction ───────────────────────
+    //
+    // Four writes have to happen together or not at all:
+    //
+    //   1. `better_auth."user"."emailVerified" = true`
+    //   2. `user_account.auth_user_id` — the real foreign key Task C1 added,
+    //      and what `resolveTenant` verifies against.
+    //   3. `better_auth.user_tenant` — the hint that lets tenant resolution
+    //      START. Before this task, invitation acceptance never wrote it, so
+    //      an invited user authenticated successfully and then hit the
+    //      bridge's 403 on EVERY request, invitation already burnt.
+    //   4. `invitation.status = 'accepted'`.
+    //
+    // Any subset of these is unrecoverable without database surgery. Writing
+    // them one at a time through PostgREST — which is what this route did —
+    // cannot be atomic; `withTenant` opens one transaction with `app.town_id`
+    // set, and every write inside it is subject to the same row level security
+    // policies as the rest of the application.
+    //
+    // On (1): the invitation token was emailed to `person.email` and the
+    // caller presented it, so possession of that address is already proven —
+    // more directly than a verification click proves it. Marking the address
+    // verified here is that proof being recorded, not a bypass of it. The
+    // redundant verification email `signUpEmail` sends becomes a no-op the
+    // recipient can ignore.
+    try {
+      await withTenant(app.tenantDb, { townId: inv.town_id as string }, async (tx) => {
+        await tx.execute(
+          sql`UPDATE better_auth."user" SET "emailVerified" = true WHERE id = ${authUserId}`,
+        );
 
-    // Mark invitation accepted
-    await supabase
-      .from("invitation")
-      .update({ status: "accepted", accepted_at: now })
-      .eq("id", inv.id as string);
+        // ─── Why both UPDATEs use RETURNING and count the rows ──────────
+        //
+        // These run under row level security, and an UPDATE whose WHERE
+        // matches nothing is not an error — it is a successful statement that
+        // changed nothing. So an invitation naming a `user_account` that
+        // belongs to a DIFFERENT town than `invitation.town_id`, or one that
+        // was deleted since the invitation was issued, would sail through
+        // here: the account would stay unlinked, `user_tenant` would still be
+        // written, and the caller would get 200. The invited user would then
+        // authenticate and hit the tenant bridge's 403 forever, invitation
+        // consumed — which is precisely the failure this rewrite exists to
+        // end, reappearing one layer down.
+        //
+        // `RETURNING id` turns "matched nothing" into an exception, which
+        // rolls the transaction back and leaves the invitation reusable.
+        //
+        // `auth_user_id IS NULL` is the other half, and it is not belt and
+        // braces. Without it, matching on `id` alone RE-LINKS an account that
+        // already has a login: two pending invitations for one `user_account`
+        // (a re-issue, or two administrators inviting the same person) and the
+        // second acceptance repoints `auth_user_id` at identity #2 — while
+        // identity #1 stays live and signable, and its `better_auth.user_tenant`
+        // row stays behind mapping it to the town. That identity then
+        // authenticates successfully and is refused by the tenant bridge on
+        // every request forever, which is precisely the state this rewrite
+        // exists to end. The row count below turns it into a rollback.
+        const linked = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE user_account
+               SET auth_user_id = ${authUserId},
+                   email = ${email},
+                   display_name = ${name}
+             WHERE id = ${inv.user_account_id as string}::uuid
+               AND auth_user_id IS NULL
+             RETURNING id
+          `),
+          (message) => new Error(`invitation acceptance: linking user_account: ${message}`),
+        );
+        if (linked.length !== 1) {
+          throw new Error(
+            `invitation acceptance: expected to link exactly 1 user_account, matched ${linked.length}. ` +
+              `Invitation ${String(inv.id)} names user_account ${String(inv.user_account_id)} ` +
+              `in town ${String(inv.town_id)}. Either that row is not visible from that town ` +
+              "under row level security (missing, or belonging to another town), or it already " +
+              "has a login — an account is linked once, and re-linking it would strand the " +
+              "identity already pointing at it.",
+          );
+        }
+
+        await tx.execute(sql`
+          INSERT INTO better_auth.user_tenant (auth_user_id, town_id)
+          VALUES (${authUserId}, ${inv.town_id as string}::uuid)
+        `);
+
+        const accepted = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE invitation
+               SET status = 'accepted', accepted_at = ${now}::timestamptz
+             WHERE id = ${inv.id as string}::uuid
+             RETURNING id
+          `),
+          (message) => new Error(`invitation acceptance: closing the invitation: ${message}`),
+        );
+        if (accepted.length !== 1) {
+          throw new Error(
+            `invitation acceptance: expected to close exactly 1 invitation, matched ${accepted.length}. ` +
+              "Leaving a live token for an account that now exists is worse than refusing.",
+          );
+        }
+      });
+    } catch (err) {
+      // ─── The compensating delete ─────────────────────────────────────
+      //
+      // The transaction rolled back, so the invitation is untouched and can be
+      // retried. But the Better Auth user created above is OUTSIDE it and
+      // survives — and on the retry its email is taken, so the caller would
+      // meet the 409 above forever with no way out but manual surgery.
+      //
+      // Deleting it puts the world back where it was. It is safe precisely
+      // because it is unreachable: nothing links to it (that is what just
+      // failed), it has never been signed into, and `user_account.auth_user_id`
+      // is ON DELETE SET NULL so no historical record could be taken with it.
+      await app.tenantDb
+        .execute(sql`DELETE FROM better_auth."user" WHERE id = ${authUserId}`)
+        .catch((cleanupErr: unknown) => {
+          app.log.error(
+            { cleanupErr, authUserId, invitationId: inv.id },
+            "could not remove the orphaned identity after a failed invitation link; " +
+              "a retry will report the email as already registered until it is deleted by hand",
+          );
+        });
+
+      app.log.error(
+        { err, invitationId: inv.id, userAccountId: inv.user_account_id },
+        "linking the new account to this invitation failed; invitation NOT marked accepted",
+      );
+      return reply.internalServerError(
+        "Could not link the new account to this invitation. The invitation has not been " +
+          "used and can be tried again once the underlying problem is fixed.",
+      );
+    }
 
     return reply.status(200).send({
       ok: true,
@@ -440,47 +635,50 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/unsubscribe ─────────────────────────────────────────
   // Public: unsubscribe from a specific email type via signed token
 
-  app.get<{ Querystring: { t: string } }>("/unsubscribe", async (request, reply) => {
-    const { t: token } = request.query;
-    if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { t: string } }>(
+    "/unsubscribe",
+    { config: { ...PUBLIC_ROUTE } },
+    async (request, reply) => {
+      const { t: token } = request.query;
+      if (!token) return reply.badRequest("token required");
 
-    const parsed = validateUnsubscribeToken(token);
-    if (!parsed) {
-      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
-    }
+      const parsed = validateUnsubscribeToken(token);
+      if (!parsed) {
+        return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+      }
 
-    const { personId, eventType } = parsed;
+      const { personId, eventType } = parsed;
 
-    // subscriber_notification_preference.town_id is NOT NULL — this route
-    // is unauthenticated (reached via a signed link, not a session), so
-    // town_id has to be looked up from the person rather than read off a
-    // request.user. subscriber_notification_preference also carries no
-    // created_at/updated_at columns (that's the ported shape, not the
-    // canonical one — see the migration's header comment), so none is set here.
-    const { data: person } = await supabase
-      .from("person")
-      .select("town_id")
-      .eq("id", personId)
-      .single();
+      // subscriber_notification_preference.town_id is NOT NULL — this route
+      // is unauthenticated (reached via a signed link, not a session), so
+      // town_id has to be looked up from the person rather than read off a
+      // request.user. subscriber_notification_preference also carries no
+      // created_at/updated_at columns (that's the ported shape, not the
+      // canonical one — see the migration's header comment), so none is set here.
+      const { data: person } = await supabase
+        .from("person")
+        .select("town_id")
+        .eq("id", personId)
+        .single();
 
-    if (!person) {
-      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
-    }
+      if (!person) {
+        return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+      }
 
-    // Upsert preference: enabled = false
-    await supabase.from("subscriber_notification_preference").upsert(
-      {
-        person_id: personId,
-        town_id: (person as { town_id: string }).town_id,
-        event_type: eventType,
-        channel: "email",
-        enabled: false,
-      },
-      { onConflict: "person_id,channel,event_type" },
-    );
+      // Upsert preference: enabled = false
+      await supabase.from("subscriber_notification_preference").upsert(
+        {
+          person_id: personId,
+          town_id: (person as { town_id: string }).town_id,
+          event_type: eventType,
+          channel: "email",
+          enabled: false,
+        },
+        { onConflict: "person_id,channel,event_type" },
+      );
 
-    // Return a simple HTML confirmation
-    return reply.header("Content-Type", "text/html").status(200).send(`<!DOCTYPE html>
+      // Return a simple HTML confirmation
+      return reply.header("Content-Type", "text/html").status(200).send(`<!DOCTYPE html>
 <html>
 <head><title>Unsubscribed</title>
 <style>body{font-family:Arial,sans-serif;max-width:600px;margin:60px auto;text-align:center;color:#374151;}
@@ -491,7 +689,8 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
 <p>You can <a href="${APP_URL}/settings/notifications">manage all your notification preferences</a> at any time.</p>
 </body>
 </html>`);
-  });
+    },
+  );
 
   // ── GET /api/notifications/preferences ──────────────────────────
   // Authenticated: get current user's email preferences

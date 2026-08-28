@@ -1,20 +1,49 @@
 /**
  * Notification routes.
  *
- * POST /api/webhooks/postmark          — Postmark delivery callbacks
- * GET  /api/admin/notifications/summary    — 30-day summary stats
- * GET  /api/admin/notifications/events     — recent events with delivery counts
- * GET  /api/admin/notifications/events/:id/deliveries — per-event deliveries
- * GET  /api/admin/notifications/bounces    — bounced/complained addresses
- * DELETE /api/admin/notifications/bounces/:userId  — clear bounce flag
- * POST /api/admin/notifications/events    — create a notification event (internal)
+ * POST   /api/webhooks/postmark                       — public, Basic-auth verified
+ * GET    /api/admin/notifications/summary             — C2
+ * GET    /api/admin/notifications/events              — C2
+ * GET    /api/admin/notifications/events/:id/deliveries — C2
+ * GET    /api/admin/notifications/bounces             — C2
+ * DELETE /api/admin/notifications/bounces/:userId     — C2
+ * POST   /api/notifications/push/subscribe            — session
+ * DELETE /api/notifications/push/unsubscribe          — session
+ * POST   /api/notifications/events                    — C2
+ *
+ * ─── Task G1 ──────────────────────────────────────────────────────────────
+ *
+ * Every route in this file was reachable without authentication. The webhook
+ * legitimately has to be — Postmark calls it, and Postmark has no session —
+ * so it is marked public and verified by HTTP Basic credentials instead (see
+ * `auth/postmark-webhook-auth.ts`; Postmark does not sign its webhooks). The
+ * rest are administrative and now carry `verifyAuth` plus the
+ * `manage_notification_settings` permission.
+ *
+ * Three of them (`push/subscribe`, `push/unsubscribe`, `test/push`) DID call
+ * `app.verifyAuth` — from inside the handler body rather than as a preHandler,
+ * which is why a preHandler count read zero. That form works but is easy to
+ * read past, and its `if (!request.user) return;` line silently returns an
+ * empty 200 body on failure. They are preHandlers now like everything else.
+ *
+ * `POST /test/push` was deleted rather than authenticated. It was guarded by
+ * `process.env.NODE_ENV !== "production"`, which is a guard that fails OPEN:
+ * the route exists whenever the variable is unset or misspelled, which is
+ * exactly what a hand-rolled container or a systemd unit gets wrong. It sent
+ * an arbitrary title and body to a signed-in user's registered devices, and
+ * nothing in the product needed it — push can be exercised end to end through
+ * a real notification event. `git show` has it if it is ever wanted back.
  */
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { NotificationService } from "../services/notification-service.js";
-import { dispatchPushToUser } from "../lib/push.js";
-import type { NotificationEventType } from "@town-meeting/shared";
+// `dispatchPushToUser` is no longer imported here — it was only used by the
+// deleted `/test/push` route. `lib/push.ts` keeps it for the real event path.
+import { PUBLIC_ROUTE } from "../auth/route-access.js";
+import { verifyPostmarkWebhook } from "../auth/postmark-webhook-auth.js";
+import { requirePermission } from "../plugins/auth.js";
+import { PERMISSIONS, type NotificationEventType } from "@town-meeting/shared";
 
 // ─── Postmark webhook body types ─────────────────────────────────────
 
@@ -39,11 +68,27 @@ interface PostmarkWebhookBody {
 export async function notificationRoutes(app: FastifyInstance) {
   const supabase = app.supabase;
 
+  /**
+   * Managing a town's notification machinery — reading delivery telemetry,
+   * clearing a bounce flag, firing an event — is `manage_notification_settings`
+   * (C2). Delegable to staff on purpose: this is the town clerk's job, and
+   * routing it through the admin role would mean an administrator has to clear
+   * every bounced address personally.
+   */
+  const notificationAdmin = [app.verifyAuth, requirePermission(PERMISSIONS.C2)];
+
   // ── Postmark Webhook ───────────────────────────────────────────────
+  // Public by necessity — Postmark has no session — and therefore verified by
+  // the Basic credentials Postmark sends. `verifyPostmarkWebhook` REFUSES when
+  // those are unconfigured; see its header for why that is not negotiable.
+  //
+  // (The former `config: { rawBody: true }` is gone. Nothing registers a
+  // raw-body parser in this process, so it was inert, and it existed to
+  // support a signature check Postmark does not offer.)
 
   app.post<{ Body: PostmarkWebhookBody }>(
     "/webhooks/postmark",
-    { config: { rawBody: true } },
+    { config: { ...PUBLIC_ROUTE }, preHandler: [verifyPostmarkWebhook()] },
     async (request, reply) => {
       // Acknowledge immediately — process async
       reply.status(200).send({ ok: true });
@@ -168,60 +213,76 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   // ── Admin: Summary Stats (last 30 days) ────────────────────────────
 
-  app.get("/admin/notifications/summary", async (_request, reply) => {
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Every read below is scoped by `town_id` in the query rather than by the
+  // database. `app.supabase` is the service-role client and bypasses RLS, so
+  // without these filters a clerk in one town would be reading every town's
+  // delivery telemetry and bounced addresses. Task D1 removes that client and
+  // makes the scoping structural; these filters are what holds until it does.
+  app.get(
+    "/admin/notifications/summary",
+    { preHandler: notificationAdmin },
+    async (request, reply) => {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: deliveries } = await supabase
-      .from("notification_delivery")
-      .select("status, created_at")
-      .gte("created_at", since);
+      const { data: deliveries } = await supabase
+        .from("notification_delivery")
+        .select("status, created_at")
+        .eq("town_id", request.user!.townId)
+        .gte("created_at", since);
 
-    const rows = (deliveries ?? []) as { status: string }[];
-    const total = rows.length;
-    const sent = rows.filter((r) => r.status !== "pending").length;
-    const delivered = rows.filter((r) => r.status === "delivered").length;
-    const bounced = rows.filter((r) => r.status === "bounced").length;
-    const complained = rows.filter((r) => r.status === "complained").length;
+      const rows = (deliveries ?? []) as { status: string }[];
+      const total = rows.length;
+      const sent = rows.filter((r) => r.status !== "pending").length;
+      const delivered = rows.filter((r) => r.status === "delivered").length;
+      const bounced = rows.filter((r) => r.status === "bounced").length;
+      const complained = rows.filter((r) => r.status === "complained").length;
 
-    return reply.send({
-      total,
-      sent,
-      delivered,
-      bounced,
-      complained,
-      deliveryRate: sent > 0 ? Math.round((delivered / sent) * 100) : 0,
-      bounceRate: sent > 0 ? Math.round((bounced / sent) * 100) : 0,
-      complaintRate: sent > 0 ? Math.round((complained / sent) * 100) : 0,
-    });
-  });
+      return reply.send({
+        total,
+        sent,
+        delivered,
+        bounced,
+        complained,
+        deliveryRate: sent > 0 ? Math.round((delivered / sent) * 100) : 0,
+        bounceRate: sent > 0 ? Math.round((bounced / sent) * 100) : 0,
+        complaintRate: sent > 0 ? Math.round((complained / sent) * 100) : 0,
+      });
+    },
+  );
 
   // ── Admin: Recent Events ───────────────────────────────────────────
 
-  app.get("/admin/notifications/events", async (_request, reply) => {
-    const { data: events } = await supabase
-      .from("notification_event")
-      .select("id, event_type, payload, status, created_at, processed_at")
-      .order("created_at", { ascending: false })
-      .limit(50);
+  app.get(
+    "/admin/notifications/events",
+    { preHandler: notificationAdmin },
+    async (request, reply) => {
+      const { data: events } = await supabase
+        .from("notification_event")
+        .select("id, event_type, payload, status, created_at, processed_at")
+        .eq("town_id", request.user!.townId)
+        .order("created_at", { ascending: false })
+        .limit(50);
 
-    if (!events) return reply.send([]);
+      if (!events) return reply.send([]);
 
-    // Attach delivery counts to each event
-    const enriched = await Promise.all(
-      (events as EventRow[]).map(async (evt) => {
-        const service = new NotificationService(supabase);
-        const summary = await service.getDeliverySummary(evt.id);
-        return { ...evt, delivery: summary };
-      }),
-    );
+      // Attach delivery counts to each event
+      const enriched = await Promise.all(
+        (events as EventRow[]).map(async (evt) => {
+          const service = new NotificationService(supabase);
+          const summary = await service.getDeliverySummary(evt.id);
+          return { ...evt, delivery: summary };
+        }),
+      );
 
-    return reply.send(enriched);
-  });
+      return reply.send(enriched);
+    },
+  );
 
   // ── Admin: Delivery Detail for an Event ───────────────────────────
 
   app.get<{ Params: { eventId: string } }>(
     "/admin/notifications/events/:eventId/deliveries",
+    { preHandler: notificationAdmin },
     async (request, reply) => {
       const { eventId } = request.params;
 
@@ -235,6 +296,7 @@ export async function notificationRoutes(app: FastifyInstance) {
         `,
         )
         .eq("event_id", eventId)
+        .eq("town_id", request.user!.townId)
         .order("created_at", { ascending: true });
 
       return reply.send(data ?? []);
@@ -243,24 +305,36 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   // ── Admin: Bounced / Complained Addresses ─────────────────────────
 
-  app.get("/admin/notifications/bounces", async (_request, reply) => {
-    const { data } = await supabase
-      .from("user_account")
-      .select(
-        "id, email, display_name, email_bounced, email_bounced_at, email_complained, email_complained_at",
-      )
-      .or("email_bounced.eq.true,email_complained.eq.true")
-      .order("email_bounced_at", { ascending: false });
+  app.get(
+    "/admin/notifications/bounces",
+    { preHandler: notificationAdmin },
+    async (request, reply) => {
+      const { data } = await supabase
+        .from("user_account")
+        .select(
+          "id, email, display_name, email_bounced, email_bounced_at, email_complained, email_complained_at",
+        )
+        .eq("town_id", request.user!.townId)
+        .or("email_bounced.eq.true,email_complained.eq.true")
+        .order("email_bounced_at", { ascending: false });
 
-    return reply.send(data ?? []);
-  });
+      return reply.send(data ?? []);
+    },
+  );
 
   // ── Admin: Clear Bounce Flag ──────────────────────────────────────
 
   app.delete<{ Params: { userId: string } }>(
     "/admin/notifications/bounces/:userId",
+    { preHandler: notificationAdmin },
     async (request, reply) => {
       const { userId } = request.params;
+      // `supabase` here is the SERVICE-ROLE client, which bypasses RLS — so
+      // this update is not scoped to a town by the database. Scoping it here
+      // by the caller's town keeps one town's administrator from clearing
+      // another town's bounce flag by guessing a uuid. Task D1 removes the
+      // service-role client entirely and makes that structural; until then it
+      // is this line.
       await supabase
         .from("user_account")
         .update({
@@ -269,7 +343,8 @@ export async function notificationRoutes(app: FastifyInstance) {
           email_complained: false,
           email_complained_at: null,
         })
-        .eq("id", userId);
+        .eq("id", userId)
+        .eq("town_id", request.user!.townId);
 
       return reply.send({ ok: true });
     },
@@ -288,10 +363,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.post<{
     Body: { endpoint: string; keys: { p256dh: string; auth: string }; userAgent?: string };
-  }>("/notifications/push/subscribe", async (request, reply) => {
-    await app.verifyAuth(request, reply);
-    if (!request.user) return;
-
+  }>("/notifications/push/subscribe", { preHandler: [app.verifyAuth] }, async (request, reply) => {
     const parsed = pushSubscriptionSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.badRequest("Invalid push subscription data");
@@ -301,7 +373,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
     const { error } = await supabase.from("push_subscription").upsert(
       {
-        user_account_id: request.user.id,
+        user_account_id: request.user!.id,
         endpoint,
         p256dh: keys.p256dh,
         auth: keys.auth,
@@ -323,54 +395,58 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.delete<{
     Body: { endpoint: string };
-  }>("/notifications/push/unsubscribe", async (request, reply) => {
-    await app.verifyAuth(request, reply);
-    if (!request.user) return;
+  }>(
+    "/notifications/push/unsubscribe",
+    { preHandler: [app.verifyAuth] },
+    async (request, reply) => {
+      const { endpoint } = request.body ?? {};
+      if (!endpoint) {
+        return reply.badRequest("Missing endpoint");
+      }
 
-    const { endpoint } = request.body ?? {};
-    if (!endpoint) {
-      return reply.badRequest("Missing endpoint");
-    }
+      await supabase
+        .from("push_subscription")
+        .delete()
+        .eq("user_account_id", request.user!.id)
+        .eq("endpoint", endpoint);
 
-    await supabase
-      .from("push_subscription")
-      .delete()
-      .eq("user_account_id", request.user.id)
-      .eq("endpoint", endpoint);
+      return reply.code(204).send();
+    },
+  );
 
-    return reply.code(204).send();
-  });
-
-  // ── Push Test Endpoint (dev only) ───────────────────────────────
-
-  if (process.env.NODE_ENV !== "production") {
-    app.post("/test/push", async (request, reply) => {
-      await app.verifyAuth(request, reply);
-      if (!request.user) return;
-
-      const body = request.body as { title?: string; body?: string } | undefined;
-      await dispatchPushToUser(supabase, request.user.id, {
-        title: body?.title ?? "Test Notification",
-        body: body?.body ?? "This is a test push notification from Town Meeting Manager.",
-        url: "/dashboard",
-      });
-
-      return reply.send({ ok: true });
-    });
-  }
-
-  // ── Internal: Create Notification Event ──────────────────────────
+  // ── Create Notification Event ────────────────────────────────────
+  //
+  // This is the fan-out trigger: it queues an event that
+  // `NotificationService` turns into email to every subscriber of a town, from
+  // that town's own sending domain. It was unauthenticated, and it took
+  // `town_id` from the request body — so an anonymous caller could name any
+  // town and any payload. The payload becomes the template variables (see
+  // `notification-service.ts`, `variables = { ...payload, … }`), which is the
+  // other half of the `admin-alert.hbs` triple-stash this task also closed.
+  //
+  // `town_id` in the body is now checked against the caller's town rather than
+  // trusted. Rejecting a mismatch rather than silently overriding it means a
+  // caller that believes it is addressing another town finds out.
 
   app.post<{
     Body: {
       event_type: NotificationEventType;
-      town_id: string;
+      town_id?: string;
       payload: Record<string, unknown>;
     };
-  }>("/notifications/events", async (request, reply) => {
-    const { event_type, town_id, payload } = request.body;
+  }>("/notifications/events", { preHandler: notificationAdmin }, async (request, reply) => {
+    const { event_type, town_id, payload } = request.body ?? {};
+    const callerTownId = request.user!.townId;
+
+    if (town_id && town_id !== callerTownId) {
+      return reply.forbidden("Cannot create a notification event for another town");
+    }
+    if (!event_type) {
+      return reply.badRequest("event_type is required");
+    }
+
     const service = new NotificationService(supabase);
-    const eventId = await service.createNotificationEvent(event_type, town_id, payload);
+    const eventId = await service.createNotificationEvent(event_type, callerTownId, payload ?? {});
     return reply.status(201).send({ event_id: eventId });
   });
 }

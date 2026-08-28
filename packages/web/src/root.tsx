@@ -51,16 +51,21 @@ export default function App() {
     return <PortalApp subdomain={subdomain} />;
   }
 
+  // QueryProvider is OUTSIDE AuthProvider as of Stage 1, Task C2. Identity is
+  // no longer decoded from a JWT the browser holds — it is read from
+  // `GET /api/me`, so AuthProvider now performs a query and must sit inside a
+  // QueryClientProvider. The nesting is the only thing that changed; nothing
+  // in QueryProvider depends on auth.
   return (
-    <AuthProvider>
-      <QueryProvider>
+    <QueryProvider>
+      <AuthProvider>
         <Outlet />
         <Toaster position="top-right" richColors closeButton />
         <UpdateNotification />
         <InstallBanner />
         <NotificationPermissionPrompt />
-      </QueryProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </QueryProvider>
   );
 }
 

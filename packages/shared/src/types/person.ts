@@ -19,7 +19,8 @@ export interface UserAccount {
   role: UserRole;
   gov_title: string | null;
   permissions: PermissionsMatrix;
-  auth_user_id: string;
+  /** Better Auth user id (text, not a UUID). Null once the login is deleted. */
+  auth_user_id: string | null;
   created_at: string;
   archived_at: string | null;
 }
