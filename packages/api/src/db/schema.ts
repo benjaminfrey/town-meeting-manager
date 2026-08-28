@@ -1,3 +1,24 @@
+// ============================================================================
+// DO NOT RUN `drizzle-kit generate` FROM THIS FILE AGAINST A REAL DATABASE
+// UNTIL TASK 5 RESOLVES THE ITEM BELOW.
+//
+// 53 of this file's 79 `pgPolicy()` calls (Task 4 / B1 hand-review, Step 5;
+// see task-4-report.md §2.1) are missing the `using`/`withCheck` clause
+// that the live database actually enforces for that policy — `pull`
+// dropped them, and they were deliberately left dropped here rather than
+// hand-patched, so this file stays an honest, reproducible mirror of what
+// `pull` produced. The consequence: `drizzle-kit generate` run today
+// against this schema emits 79 `CREATE POLICY` statements, of which those
+// same 53 carry no `USING`/`WITH CHECK` at all — i.e. unconditionally
+// permissive, including on core tenant-isolation checks like
+// `town_id = get_current_town_id()`. This is not hypothetical; it is
+// `generate`'s default output right now, verified directly.
+//
+// Task 5 owns the fix (hand-write all 53 predicates into `pgPolicy`, or
+// drop the `pgPolicy` calls and keep RLS defined in hand-written SQL
+// instead) — do not attempt it here.
+// ============================================================================
+
 import {
   pgTable,
   pgSchema,
@@ -14,6 +35,7 @@ import {
   jsonb,
   time,
   bigint,
+  type AnyPgColumn,
   check,
   pgEnum,
   customType,
@@ -151,21 +173,11 @@ export const boardMember = pgTable(
   },
   (table) => [
     index("idx_board_member_active")
-      .using(
-        "btree",
-        table.boardId.asc().nullsLast().op("uuid_ops"),
-        table.status.asc().nullsLast().op("uuid_ops"),
-      )
+      .using("btree", table.boardId.asc().nullsLast(), table.status.asc().nullsLast())
       .where(sql`(status = 'active'::board_member_status)`),
-    index("idx_board_member_board_id").using(
-      "btree",
-      table.boardId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_board_member_person_id").using(
-      "btree",
-      table.personId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_board_member_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_board_member_board_id").using("btree", table.boardId.asc().nullsLast()),
+    index("idx_board_member_person_id").using("btree", table.personId.asc().nullsLast()),
+    index("idx_board_member_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.personId],
       foreignColumns: [person.id],
@@ -181,7 +193,7 @@ export const boardMember = pgTable(
       foreignColumns: [town.id],
       name: "board_member_town_id_fkey",
     }).onDelete("cascade"),
-    unique("board_member_unique_active").on(table.boardId, table.personId, table.status),
+    unique("board_member_unique_active").on(table.personId, table.boardId, table.status),
     pgPolicy("board_member_update", {
       as: "permissive",
       for: "update",
@@ -208,19 +220,10 @@ export const voteRecord = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_vote_record_board_member_id").using(
-      "btree",
-      table.boardMemberId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_vote_record_meeting_id").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_vote_record_motion_id").using(
-      "btree",
-      table.motionId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_vote_record_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_vote_record_board_member_id").using("btree", table.boardMemberId.asc().nullsLast()),
+    index("idx_vote_record_meeting_id").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_vote_record_motion_id").using("btree", table.motionId.asc().nullsLast()),
+    index("idx_vote_record_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.motionId],
       foreignColumns: [motion.id],
@@ -241,7 +244,7 @@ export const voteRecord = pgTable(
       foreignColumns: [boardMember.id],
       name: "vote_record_board_member_id_fkey",
     }).onDelete("cascade"),
-    unique("vote_record_unique_per_motion").on(table.boardMemberId, table.motionId),
+    unique("vote_record_unique_per_motion").on(table.motionId, table.boardMemberId),
     pgPolicy("vote_record_update", {
       as: "permissive",
       for: "update",
@@ -267,19 +270,10 @@ export const meetingAttendance = pgTable(
     departedAt: timestamp("departed_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    index("idx_attendance_board_member_id").using(
-      "btree",
-      table.boardMemberId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_attendance_meeting_id").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_attendance_person_id").using(
-      "btree",
-      table.personId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_attendance_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_attendance_board_member_id").using("btree", table.boardMemberId.asc().nullsLast()),
+    index("idx_attendance_meeting_id").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_attendance_person_id").using("btree", table.personId.asc().nullsLast()),
+    index("idx_attendance_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
       foreignColumns: [meeting.id],
@@ -331,19 +325,13 @@ export const minutesSection = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_minutes_section_doc_id").using(
-      "btree",
-      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_minutes_section_doc_id").using("btree", table.minutesDocumentId.asc().nullsLast()),
     index("idx_minutes_section_sort").using(
       "btree",
-      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
-      table.sortOrder.asc().nullsLast().op("int4_ops"),
+      table.minutesDocumentId.asc().nullsLast(),
+      table.sortOrder.asc().nullsLast(),
     ),
-    index("idx_minutes_section_town_id").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_minutes_section_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.minutesDocumentId],
       foreignColumns: [minutesDocument.id],
@@ -387,14 +375,8 @@ export const agendaTemplate = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_agenda_template_board_id").using(
-      "btree",
-      table.boardId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_agenda_template_town_id").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_agenda_template_board_id").using("btree", table.boardId.asc().nullsLast()),
+    index("idx_agenda_template_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.boardId],
       foreignColumns: [board.id],
@@ -433,18 +415,15 @@ export const notificationEvent = pgTable(
   },
   (table) => [
     index("idx_notification_event_status")
-      .using("btree", table.status.asc().nullsLast().op("enum_ops"))
+      .using("btree", table.status.asc().nullsLast())
       .where(
         sql`(status = ANY (ARRAY['pending'::notification_status, 'processing'::notification_status]))`,
       ),
-    index("idx_notification_event_town_id").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_notification_event_town_id").using("btree", table.townId.asc().nullsLast()),
     index("idx_notification_event_type").using(
       "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-      table.eventType.asc().nullsLast().op("text_ops"),
+      table.townId.asc().nullsLast(),
+      table.eventType.asc().nullsLast(),
     ),
     foreignKey({
       columns: [table.townId],
@@ -475,11 +454,8 @@ export const subscriberNotificationPreference = pgTable(
     consentRecord: text("consent_record"),
   },
   (table) => [
-    index("idx_subscriber_pref_person").using(
-      "btree",
-      table.personId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_subscriber_pref_town").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_subscriber_pref_person").using("btree", table.personId.asc().nullsLast()),
+    index("idx_subscriber_pref_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.personId],
       foreignColumns: [person.id],
@@ -490,7 +466,7 @@ export const subscriberNotificationPreference = pgTable(
       foreignColumns: [town.id],
       name: "subscriber_notification_preference_town_id_fkey",
     }).onDelete("cascade"),
-    unique("subscriber_pref_unique").on(table.channel, table.eventType, table.personId),
+    unique("subscriber_pref_unique").on(table.personId, table.channel, table.eventType),
     pgPolicy("subscriber_pref_update", {
       as: "permissive",
       for: "update",
@@ -562,16 +538,13 @@ export const permissionTemplate = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_permission_template_town").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_permission_template_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.townId],
       foreignColumns: [town.id],
       name: "permission_template_town_id_fkey",
     }).onDelete("cascade"),
-    unique("template_name_unique").on(table.name, table.townId),
+    unique("template_name_unique").on(table.townId, table.name),
     pgPolicy("permission_template_delete", {
       as: "permissive",
       for: "delete",
@@ -601,19 +574,16 @@ export const auditLog = pgTable(
   (table) => [
     index("idx_audit_log_created").using(
       "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-      table.createdAt.asc().nullsLast().op("uuid_ops"),
+      table.townId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
     ),
     index("idx_audit_log_entity").using(
       "btree",
-      table.entityType.asc().nullsLast().op("uuid_ops"),
-      table.entityId.asc().nullsLast().op("text_ops"),
+      table.entityType.asc().nullsLast(),
+      table.entityId.asc().nullsLast(),
     ),
-    index("idx_audit_log_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
-    index("idx_audit_log_user").using(
-      "btree",
-      table.userAccountId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_audit_log_town_id").using("btree", table.townId.asc().nullsLast()),
+    index("idx_audit_log_user").using("btree", table.userAccountId.asc().nullsLast()),
     foreignKey({
       columns: [table.townId],
       foreignColumns: [town.id],
@@ -648,16 +618,16 @@ export const person = pgTable(
   },
   (table) => [
     index("idx_person_archived")
-      .using("btree", table.townId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.townId.asc().nullsLast())
       .where(sql`(archived_at IS NULL)`),
-    index("idx_person_email").using("btree", table.email.asc().nullsLast().op("text_ops")),
-    index("idx_person_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_person_email").using("btree", table.email.asc().nullsLast()),
+    index("idx_person_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.townId],
       foreignColumns: [town.id],
       name: "person_town_id_fkey",
     }).onDelete("cascade"),
-    unique("person_email_unique_per_town").on(table.email, table.townId),
+    unique("person_email_unique_per_town").on(table.townId, table.email),
     pgPolicy("person_update", {
       as: "permissive",
       for: "update",
@@ -690,15 +660,9 @@ export const exhibit = pgTable(
     fileName: text("file_name"),
   },
   (table) => [
-    index("idx_exhibit_agenda_item_id").using(
-      "btree",
-      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_exhibit_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
-    index("idx_exhibit_uploaded_by").using(
-      "btree",
-      table.uploadedBy.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_exhibit_agenda_item_id").using("btree", table.agendaItemId.asc().nullsLast()),
+    index("idx_exhibit_town_id").using("btree", table.townId.asc().nullsLast()),
+    index("idx_exhibit_uploaded_by").using("btree", table.uploadedBy.asc().nullsLast()),
     foreignKey({
       columns: [table.agendaItemId],
       foreignColumns: [agendaItem.id],
@@ -744,21 +708,18 @@ export const motion = pgTable(
     voteSummary: jsonb("vote_summary"),
   },
   (table) => [
-    index("idx_motion_agenda_item_id").using(
-      "btree",
-      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_motion_meeting_id").using("btree", table.meetingId.asc().nullsLast().op("uuid_ops")),
-    index("idx_motion_moved_by").using("btree", table.movedBy.asc().nullsLast().op("uuid_ops")),
+    index("idx_motion_agenda_item_id").using("btree", table.agendaItemId.asc().nullsLast()),
+    index("idx_motion_meeting_id").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_motion_moved_by").using("btree", table.movedBy.asc().nullsLast()),
     index("idx_motion_parent")
-      .using("btree", table.parentMotionId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.parentMotionId.asc().nullsLast())
       .where(sql`(parent_motion_id IS NOT NULL)`),
     index("idx_motion_status").using(
       "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-      table.status.asc().nullsLast().op("uuid_ops"),
+      table.meetingId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
     ),
-    index("idx_motion_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_motion_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.agendaItemId],
       foreignColumns: [agendaItem.id],
@@ -822,31 +783,25 @@ export const notificationDelivery = pgTable(
     nextRetryAt: timestamp("next_retry_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    index("idx_notification_delivery_event_id").using(
-      "btree",
-      table.eventId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_notification_delivery_event_id").using("btree", table.eventId.asc().nullsLast()),
     index("idx_notification_delivery_postmark")
-      .using("btree", table.postmarkMessageId.asc().nullsLast().op("text_ops"))
+      .using("btree", table.postmarkMessageId.asc().nullsLast())
       .where(sql`(postmark_message_id IS NOT NULL)`),
     index("idx_notification_delivery_retry")
-      .using("btree", table.nextRetryAt.asc().nullsLast().op("timestamptz_ops"))
+      .using("btree", table.nextRetryAt.asc().nullsLast())
       .where(
         sql`((status = ANY (ARRAY['sent'::notification_status, 'failed'::notification_status])) AND (retry_count < 3) AND (next_retry_at IS NOT NULL))`,
       ),
     index("idx_notification_delivery_status")
-      .using("btree", table.status.asc().nullsLast().op("enum_ops"))
+      .using("btree", table.status.asc().nullsLast())
       .where(
         sql`(status = ANY (ARRAY['pending'::notification_status, 'processing'::notification_status]))`,
       ),
     index("idx_notification_delivery_subscriber").using(
       "btree",
-      table.subscriberId.asc().nullsLast().op("uuid_ops"),
+      table.subscriberId.asc().nullsLast(),
     ),
-    index("idx_notification_delivery_town_id").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_notification_delivery_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.eventId],
       foreignColumns: [notificationEvent.id],
@@ -887,11 +842,8 @@ export const guestSpeaker = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_guest_speaker_meeting").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_guest_speaker_town").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_guest_speaker_meeting").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_guest_speaker_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
       foreignColumns: [meeting.id],
@@ -931,18 +883,9 @@ export const agendaItemTransition = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    index("idx_agenda_item_transition_item").using(
-      "btree",
-      table.agendaItemId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_agenda_item_transition_meeting").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_agenda_item_transition_town").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_agenda_item_transition_item").using("btree", table.agendaItemId.asc().nullsLast()),
+    index("idx_agenda_item_transition_meeting").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_agenda_item_transition_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
       foreignColumns: [meeting.id],
@@ -1003,24 +946,15 @@ export const minutesDocument = pgTable(
     searchVector: tsvector("search_vector"),
   },
   (table) => [
-    index("idx_minutes_doc_meeting_id").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_minutes_doc_meeting_id").using("btree", table.meetingId.asc().nullsLast()),
     index("idx_minutes_doc_status").using(
       "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-      table.status.asc().nullsLast().op("enum_ops"),
+      table.townId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
     ),
-    index("idx_minutes_doc_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
-    index("idx_minutes_document_board_id").using(
-      "btree",
-      table.boardId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_minutes_document_search").using(
-      "gin",
-      table.searchVector.asc().nullsLast().op("tsvector_ops"),
-    ),
+    index("idx_minutes_doc_town_id").using("btree", table.townId.asc().nullsLast()),
+    index("idx_minutes_document_board_id").using("btree", table.boardId.asc().nullsLast()),
+    index("idx_minutes_document_search").using("gin", table.searchVector.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
       foreignColumns: [meeting.id],
@@ -1075,14 +1009,8 @@ export const executiveSession = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_executive_session_meeting").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_executive_session_town").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_executive_session_meeting").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_executive_session_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
       foreignColumns: [meeting.id],
@@ -1115,26 +1043,25 @@ export const executiveSession = pgTable(
   ],
 );
 
-// `: any` on this and `meeting` below is a HAND-APPLIED FIX, not `pull`
-// output (Step 5 hand-review). `agenda_item.meeting_id` references
-// `meeting.id` and `meeting.current_agenda_item_id` references
-// `agenda_item.id` — a genuine mutual type-inference cycle: TypeScript
-// cannot infer either table's type without first knowing the other's.
-// `AnyPgColumn` was imported by `pull` for exactly this kind of situation
-// (Drizzle's own documented pattern for circular/self-referencing tables)
-// but never actually applied anywhere — confirmed by tsc flagging it as
-// the file's only unused import. `: any` here is Drizzle's documented
-// escape hatch for this exact case; it does not change the runtime
-// columns, FK names, or onDelete behavior below (all pull output,
-// untouched) — it only widens these two tables' own compile-time type so
-// each can reference the other. Cost: property access on `agendaItem`/
-// `meeting` (their own column properties, not tables that reference them)
-// is not type-checked. Narrowing this further — e.g. `any` on only one
-// side — was tried and does not work: the cycle also reaches through
-// `motion` and `minutesDocument` (agenda_item -> minutesDocument ->
-// motion -> agenda_item/meeting), so both ends of the agendaItem<->meeting
-// edge need it to fully close the cycle.
-export const agendaItem: any = pgTable(
+// HAND-APPLIED FIX, not `pull` output (Step 5 hand-review). The FK graph
+// among `agendaItem`, `meeting`, `motion`, and `minutesDocument` forms one
+// strongly connected component (each reachable from each), so TypeScript
+// cannot infer any of their types without first knowing another's.
+// `AnyPgColumn` was imported by `pull` for exactly this situation — it's
+// Drizzle's own documented mechanism for circular/self-referencing tables
+// — but never actually applied anywhere in the file (confirmed by tsc
+// flagging it as the sole unused import). A minimum feedback-arc set for
+// this cycle is the two edges below, both out-edges of `agendaItem`: wrap
+// each forward reference in a thunk with an explicit `AnyPgColumn` return
+// type, which defers inference instead of requiring it up front. Same
+// runtime columns, FK names, and onDelete behavior as pull's output —
+// only the *type-checking path* to them changes. Cutting just these two
+// edges is sufficient to break the whole SCC; `meeting`'s own FK back to
+// `agendaItem.id` (below) does not need to change.
+const meetingIdRef = (): AnyPgColumn => meeting.id;
+const minutesDocumentIdRef = (): AnyPgColumn => minutesDocument.id;
+
+export const agendaItem = pgTable(
   "agenda_item",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
@@ -1164,30 +1091,21 @@ export const agendaItem: any = pgTable(
     searchVector: tsvector("search_vector"),
   },
   (table) => [
-    index("idx_agenda_item_meeting_id").using(
-      "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_agenda_item_parent").using(
-      "btree",
-      table.parentItemId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_agenda_item_search").using(
-      "gin",
-      table.searchVector.asc().nullsLast().op("tsvector_ops"),
-    ),
+    index("idx_agenda_item_meeting_id").using("btree", table.meetingId.asc().nullsLast()),
+    index("idx_agenda_item_parent").using("btree", table.parentItemId.asc().nullsLast()),
+    index("idx_agenda_item_search").using("gin", table.searchVector.asc().nullsLast()),
     index("idx_agenda_item_sort").using(
       "btree",
-      table.meetingId.asc().nullsLast().op("uuid_ops"),
-      table.sortOrder.asc().nullsLast().op("int4_ops"),
+      table.meetingId.asc().nullsLast(),
+      table.sortOrder.asc().nullsLast(),
     ),
     index("idx_agenda_item_source_minutes_doc")
-      .using("btree", table.sourceMinutesDocumentId.asc().nullsLast().op("uuid_ops"))
+      .using("btree", table.sourceMinutesDocumentId.asc().nullsLast())
       .where(sql`(source_minutes_document_id IS NOT NULL)`),
-    index("idx_agenda_item_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_agenda_item_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.meetingId],
-      foreignColumns: [meeting.id],
+      foreignColumns: [meetingIdRef()],
       name: "agenda_item_meeting_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
@@ -1202,7 +1120,7 @@ export const agendaItem: any = pgTable(
     }).onDelete("cascade"),
     foreignKey({
       columns: [table.sourceMinutesDocumentId],
-      foreignColumns: [minutesDocument.id],
+      foreignColumns: [minutesDocumentIdRef()],
       name: "agenda_item_source_minutes_document_id_fkey",
     }).onDelete("set null"),
     pgPolicy("agenda_item_update", {
@@ -1235,18 +1153,12 @@ export const futureItemQueue = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_future_item_queue_board").using(
-      "btree",
-      table.boardId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_future_item_queue_board").using("btree", table.boardId.asc().nullsLast()),
     index("idx_future_item_queue_source_meeting").using(
       "btree",
-      table.sourceMeetingId.asc().nullsLast().op("uuid_ops"),
+      table.sourceMeetingId.asc().nullsLast(),
     ),
-    index("idx_future_item_queue_town").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_future_item_queue_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.boardId],
       foreignColumns: [board.id],
@@ -1318,18 +1230,18 @@ export const board = pgTable(
     autoPublishOnApprovalOverride: boolean("auto_publish_on_approval_override"),
   },
   (table) => [
-    index("idx_board_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_board_town_id").using("btree", table.townId.asc().nullsLast()),
     index("idx_board_type").using(
       "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-      table.boardType.asc().nullsLast().op("uuid_ops"),
+      table.townId.asc().nullsLast(),
+      table.boardType.asc().nullsLast(),
     ),
     foreignKey({
       columns: [table.townId],
       foreignColumns: [town.id],
       name: "board_town_id_fkey",
     }).onDelete("cascade"),
-    unique("board_name_unique_per_town").on(table.name, table.townId),
+    unique("board_name_unique_per_town").on(table.townId, table.name),
     pgPolicy("board_update", {
       as: "permissive",
       for: "update",
@@ -1345,8 +1257,7 @@ export const board = pgTable(
   ],
 );
 
-// See the comment on `agendaItem` above — same mutual-cycle fix, other side.
-export const meeting: any = pgTable(
+export const meeting = pgTable(
   "meeting",
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
@@ -1388,22 +1299,19 @@ export const meeting: any = pgTable(
     noticePublishedAt: timestamp("notice_published_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    index("idx_meeting_board_id").using("btree", table.boardId.asc().nullsLast().op("uuid_ops")),
-    index("idx_meeting_created_by").using(
-      "btree",
-      table.createdBy.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_meeting_board_id").using("btree", table.boardId.asc().nullsLast()),
+    index("idx_meeting_created_by").using("btree", table.createdBy.asc().nullsLast()),
     index("idx_meeting_date").using(
       "btree",
-      table.townId.asc().nullsLast().op("date_ops"),
-      table.scheduledDate.asc().nullsLast().op("date_ops"),
+      table.townId.asc().nullsLast(),
+      table.scheduledDate.asc().nullsLast(),
     ),
     index("idx_meeting_status").using(
       "btree",
-      table.townId.asc().nullsLast().op("enum_ops"),
-      table.status.asc().nullsLast().op("enum_ops"),
+      table.townId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
     ),
-    index("idx_meeting_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_meeting_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.boardId],
       foreignColumns: [board.id],
@@ -1511,12 +1419,9 @@ export const minutesAddendum = pgTable(
   (table) => [
     index("idx_minutes_addendum_document").using(
       "btree",
-      table.minutesDocumentId.asc().nullsLast().op("uuid_ops"),
+      table.minutesDocumentId.asc().nullsLast(),
     ),
-    index("idx_minutes_addendum_town").using(
-      "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_minutes_addendum_town").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.minutesDocumentId],
       foreignColumns: [minutesDocument.id],
@@ -1569,7 +1474,7 @@ export const pushSubscription = pgTable(
     id: uuid().defaultRandom().primaryKey().notNull(),
     userAccountId: uuid("user_account_id").notNull(),
     endpoint: text().notNull(),
-    p256Dh: text().notNull(),
+    p256Dh: text("p256dh").notNull(),
     auth: text().notNull(),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
@@ -1580,18 +1485,15 @@ export const pushSubscription = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_push_subscription_user").using(
-      "btree",
-      table.userAccountId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_push_subscription_user").using("btree", table.userAccountId.asc().nullsLast()),
     foreignKey({
       columns: [table.userAccountId],
       foreignColumns: [userAccount.id],
       name: "push_subscription_user_account_id_fkey",
     }).onDelete("cascade"),
     unique("push_subscription_user_account_id_endpoint_key").on(
-      table.endpoint,
       table.userAccountId,
+      table.endpoint,
     ),
   ],
 );
@@ -1618,11 +1520,11 @@ export const invitation = pgTable(
   (table) => [
     index("idx_invitation_person_status").using(
       "btree",
-      table.personId.asc().nullsLast().op("uuid_ops"),
-      table.status.asc().nullsLast().op("uuid_ops"),
+      table.personId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
     ),
     index("idx_invitation_token")
-      .using("btree", table.token.asc().nullsLast().op("text_ops"))
+      .using("btree", table.token.asc().nullsLast())
       .where(sql`(status = 'pending'::text)`),
     foreignKey({
       columns: [table.personId],
@@ -1689,20 +1591,14 @@ export const userAccount = pgTable(
     emailComplainedAt: timestamp("email_complained_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    index("idx_user_account_auth_user_id").using(
-      "btree",
-      table.authUserId.asc().nullsLast().op("uuid_ops"),
-    ),
-    index("idx_user_account_person_id").using(
-      "btree",
-      table.personId.asc().nullsLast().op("uuid_ops"),
-    ),
+    index("idx_user_account_auth_user_id").using("btree", table.authUserId.asc().nullsLast()),
+    index("idx_user_account_person_id").using("btree", table.personId.asc().nullsLast()),
     index("idx_user_account_role").using(
       "btree",
-      table.townId.asc().nullsLast().op("uuid_ops"),
-      table.role.asc().nullsLast().op("uuid_ops"),
+      table.townId.asc().nullsLast(),
+      table.role.asc().nullsLast(),
     ),
-    index("idx_user_account_town_id").using("btree", table.townId.asc().nullsLast().op("uuid_ops")),
+    index("idx_user_account_town_id").using("btree", table.townId.asc().nullsLast()),
     foreignKey({
       columns: [table.personId],
       foreignColumns: [person.id],

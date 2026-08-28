@@ -9,6 +9,8 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
+    "db:pull": "drizzle-kit pull",
+    "db:generate": "drizzle-kit generate",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

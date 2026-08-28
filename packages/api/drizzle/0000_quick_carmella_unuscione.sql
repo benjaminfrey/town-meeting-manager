@@ -1,3 +1,23 @@
+-- ============================================================================
+-- DO NOT UNCOMMENT AND APPLY THIS FILE.
+--
+-- This is drizzle-kit pull's ORIGINAL raw output (Task 4 / B1), predating
+-- the hand-fixes since applied to ../src/db/schema.ts (see that file's own
+-- top-of-file warning and task-4-report.md). It is comment-wrapped and
+-- inert as shipped by pull, but meta/_journal.json still records it as
+-- migration entry idx: 0 — a tool that reads the journal, not this file's
+-- content, could still treat it as applyable.
+--
+-- More importantly: even the CURRENT, hand-fixed schema.ts is not safe to
+-- `generate` against a real database yet. 53 of its 79 pgPolicy() calls
+-- are missing the USING/WITH CHECK clause the live database actually
+-- enforces (pull dropped them; deliberately left dropped, not papered
+-- over — see task-4-report.md). The next `drizzle-kit generate` emits 79
+-- live, uncommented CREATE POLICY statements, 53 of them unconditionally
+-- permissive. Task 5 resolves this before any migration from this schema
+-- is meant to run.
+-- ============================================================================
+
 -- Current sql file was generated after introspecting the database
 -- If you want to run this migration please uncomment this code before executing migrations
 /*
