@@ -56,10 +56,10 @@ interface DeliveryDetail {
   error_message: string | null;
   retry_count: number;
   created_at: string;
-  user_account: {
+  person: {
     id: string;
     email: string;
-    display_name: string | null;
+    name: string | null;
   } | null;
 }
 
@@ -191,8 +191,8 @@ function DeliveryDetailView({ event, onBack }: { event: NotificationEvent; onBac
               {(deliveries ?? []).map((d) => (
                 <tr key={d.id} className="hover:bg-muted/20">
                   <td className="px-3 py-2">
-                    <div className="font-medium">{d.user_account?.display_name ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground">{d.user_account?.email}</div>
+                    <div className="font-medium">{d.person?.name ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground">{d.person?.email}</div>
                   </td>
                   <td className="px-3 py-2">
                     <StatusBadge status={d.status} />

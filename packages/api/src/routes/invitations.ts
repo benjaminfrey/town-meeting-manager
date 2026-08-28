@@ -19,29 +19,31 @@ const APP_URL = process.env.APP_URL ?? "https://app.townmeetingmanager.com";
 const APP_SECRET = process.env.APP_SECRET ?? "default-secret-change-in-production";
 
 // ─── HMAC-based unsubscribe tokens ───────────────────────────────────
+// Encodes a PERSON id (notification subscribers are person, not
+// user_account — see supabase/migrations/20260827000001_canonicalize_notifications.sql).
 
-function generateUnsubscribeToken(userId: string, eventType: string): string {
-  const data = `${userId}:${eventType}`;
+function generateUnsubscribeToken(personId: string, eventType: string): string {
+  const data = `${personId}:${eventType}`;
   const hmac = crypto.createHmac("sha256", APP_SECRET).update(data).digest("hex");
-  return Buffer.from(`${userId}:${eventType}:${hmac}`).toString("base64url");
+  return Buffer.from(`${personId}:${eventType}:${hmac}`).toString("base64url");
 }
 
-function validateUnsubscribeToken(token: string): { userId: string; eventType: string } | null {
+function validateUnsubscribeToken(token: string): { personId: string; eventType: string } | null {
   try {
     const decoded = Buffer.from(token, "base64url").toString("utf-8");
     const parts = decoded.split(":");
     if (parts.length < 3) return null;
-    const [userId, eventType, ...hmacParts] = parts;
+    const [personId, eventType, ...hmacParts] = parts;
     const hmac = hmacParts.join(":");
-    if (!userId || !eventType || !hmac) return null;
+    if (!personId || !eventType || !hmac) return null;
     const expected = crypto
       .createHmac("sha256", APP_SECRET)
-      .update(`${userId}:${eventType}`)
+      .update(`${personId}:${eventType}`)
       .digest("hex");
     if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(expected, "hex"))) {
       return null;
     }
-    return { userId, eventType };
+    return { personId, eventType };
   } catch {
     return null;
   }
@@ -447,18 +449,34 @@ export async function invitationRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
     }
 
-    const { userId, eventType } = parsed;
+    const { personId, eventType } = parsed;
+
+    // subscriber_notification_preference.town_id is NOT NULL — this route
+    // is unauthenticated (reached via a signed link, not a session), so
+    // town_id has to be looked up from the person rather than read off a
+    // request.user. subscriber_notification_preference also carries no
+    // created_at/updated_at columns (that's the ported shape, not the
+    // canonical one — see the migration's header comment), so none is set here.
+    const { data: person } = await supabase
+      .from("person")
+      .select("town_id")
+      .eq("id", personId)
+      .single();
+
+    if (!person) {
+      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+    }
 
     // Upsert preference: enabled = false
     await supabase.from("subscriber_notification_preference").upsert(
       {
-        subscriber_id: userId,
+        person_id: personId,
+        town_id: (person as { town_id: string }).town_id,
         event_type: eventType,
         channel: "email",
         enabled: false,
-        updated_at: new Date().toISOString(),
       },
-      { onConflict: "subscriber_id,event_type,channel" },
+      { onConflict: "person_id,channel,event_type" },
     );
 
     // Return a simple HTML confirmation
@@ -483,11 +501,12 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
     { preHandler: [app.verifyAuth] },
     async (request, reply) => {
       const user = request.user!;
+      if (!user.personId) return reply.send([]);
 
       const { data } = await supabase
         .from("subscriber_notification_preference")
         .select("event_type, channel, enabled")
-        .eq("subscriber_id", user.id);
+        .eq("person_id", user.personId);
 
       return reply.send(data ?? []);
     },
@@ -504,17 +523,20 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
     };
   }>("/notifications/preferences", { preHandler: [app.verifyAuth] }, async (request, reply) => {
     const user = request.user!;
+    if (!user.personId || !user.townId) {
+      return reply.badRequest("No person/town associated with this account");
+    }
     const { event_type, channel = "email", enabled } = request.body;
 
     await supabase.from("subscriber_notification_preference").upsert(
       {
-        subscriber_id: user.id,
+        person_id: user.personId,
+        town_id: user.townId,
         event_type,
         channel,
         enabled,
-        updated_at: new Date().toISOString(),
       },
-      { onConflict: "subscriber_id,event_type,channel" },
+      { onConflict: "person_id,channel,event_type" },
     );
 
     return reply.send({ ok: true });

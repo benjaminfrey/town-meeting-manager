@@ -29,10 +29,80 @@ const RETRY_DELAYS_SECONDS = [
 const MAX_RETRIES = 3;
 
 // ─── Subscriber query helpers ─────────────────────────────────────────
+//
+// Subscribers are PERSON records, not user_account records (decided
+// 2026-08-27 — see the header comment of
+// supabase/migrations/20260827000001_canonicalize_notifications.sql).
+// A person can exist with no user_account ("directory-only" people —
+// see AddPersonDialog), and notification_delivery.subscriber_id /
+// subscriber_notification_preference.person_id both reference
+// person(id). Bounce/complaint flags still live on user_account (out
+// of scope for this task to relocate), so an account-less person is
+// treated as never-bounced — there's nothing to have bounced yet.
+
+interface RawPersonSubscriberRow {
+  id: string;
+  name: string | null;
+  email: string | null;
+  user_account:
+    | { email_bounced: boolean; email_complained: boolean }
+    | Array<{
+        email_bounced: boolean;
+        email_complained: boolean;
+      }>
+    | null;
+}
 
 /**
- * Returns user_account rows for all members and staff associated with a board,
- * skipping hard-bounced/complained addresses.
+ * Normalizes one person(+optional user_account) row into a SubscriberRow,
+ * or null if the person can't currently receive an email (no address on
+ * file, or the linked account has bounced/complained).
+ *
+ * PostgREST embeds a to-one relation as either an object or an
+ * array-of-one depending on the client's relationship inference, so this
+ * treats both forms defensively (same pattern used elsewhere in this
+ * codebase for embedded to-one relations — see CommandPalette.tsx).
+ */
+function toSubscriberRow(row: RawPersonSubscriberRow): SubscriberRow | null {
+  if (!row.email) return null;
+
+  const account = Array.isArray(row.user_account) ? row.user_account[0] : row.user_account;
+  const emailBounced = account?.email_bounced ?? false;
+  const emailComplained = account?.email_complained ?? false;
+  if (emailBounced || emailComplained) return null;
+
+  return {
+    id: row.id,
+    email: row.email,
+    display_name: row.name,
+    email_bounced: emailBounced,
+    email_complained: emailComplained,
+  };
+}
+
+async function getSubscribersForPersonIds(
+  supabase: SupabaseClient,
+  personIds: string[],
+  townId: string,
+): Promise<SubscriberRow[]> {
+  if (personIds.length === 0) return [];
+
+  const { data } = await supabase
+    .from("person")
+    .select("id, name, email, user_account(email_bounced, email_complained)")
+    .eq("town_id", townId)
+    .in("id", personIds);
+
+  return ((data as RawPersonSubscriberRow[] | null) ?? [])
+    .map(toSubscriberRow)
+    .filter((row): row is SubscriberRow => row !== null);
+}
+
+/**
+ * Returns notifiable people for all active members of a board — resolved
+ * through board_member.person_id (board_member has no user_account_id
+ * column; membership links to a person, who may or may not have a
+ * login).
  */
 async function getBoardSubscribers(
   supabase: SupabaseClient,
@@ -42,48 +112,68 @@ async function getBoardSubscribers(
   // Fetch board member IDs first — Supabase JS v2 does not support subqueries in .in()
   const { data: members } = await supabase
     .from("board_member")
-    .select("user_account_id")
+    .select("person_id")
     .eq("board_id", boardId)
     .eq("status", "active");
 
-  const memberIds = (members ?? []).map((m: { user_account_id: string }) => m.user_account_id);
+  const personIds = (members ?? []).map((m: { person_id: string }) => m.person_id);
 
-  if (memberIds.length === 0) return [];
-
-  const { data } = await supabase
-    .from("user_account")
-    .select("id, email, display_name, email_bounced, email_complained")
-    .eq("town_id", townId)
-    .eq("email_bounced", false)
-    .eq("email_complained", false)
-    .in("id", memberIds);
-  return (data as SubscriberRow[]) ?? [];
+  return getSubscribersForPersonIds(supabase, personIds, townId);
 }
 
 async function getAdminSubscribers(
   supabase: SupabaseClient,
   townId: string,
 ): Promise<SubscriberRow[]> {
+  // Admin/sys_admin is a user_account-level role, so this starts from
+  // user_account (unlike getBoardSubscribers), but still resolves to the
+  // linked person for the actual subscriber identity.
   const { data } = await supabase
     .from("user_account")
-    .select("id, email, display_name, email_bounced, email_complained")
+    .select("person_id, email_bounced, email_complained, person(id, name, email)")
     .eq("town_id", townId)
-    .in("role", ["admin", "sys_admin"])
-    .eq("email_bounced", false)
-    .eq("email_complained", false);
-  return (data as SubscriberRow[]) ?? [];
+    .in("role", ["admin", "sys_admin"]);
+
+  type AdminRow = {
+    person_id: string;
+    email_bounced: boolean;
+    email_complained: boolean;
+    person:
+      | { id: string; name: string | null; email: string | null }
+      | Array<{
+          id: string;
+          name: string | null;
+          email: string | null;
+        }>
+      | null;
+  };
+
+  return ((data as AdminRow[] | null) ?? [])
+    .map((row) => {
+      const person = Array.isArray(row.person) ? row.person[0] : row.person;
+      if (!person) return null;
+      return toSubscriberRow({
+        id: person.id,
+        name: person.name,
+        email: person.email,
+        user_account: { email_bounced: row.email_bounced, email_complained: row.email_complained },
+      });
+    })
+    .filter((row): row is SubscriberRow => row !== null);
 }
 
 async function getSingleSubscriber(
   supabase: SupabaseClient,
-  userId: string,
+  personId: string,
 ): Promise<SubscriberRow[]> {
   const { data } = await supabase
-    .from("user_account")
-    .select("id, email, display_name, email_bounced, email_complained")
-    .eq("id", userId)
+    .from("person")
+    .select("id, name, email, user_account(email_bounced, email_complained)")
+    .eq("id", personId)
     .single();
-  return data ? [data as SubscriberRow] : [];
+  if (!data) return [];
+  const row = toSubscriberRow(data as RawPersonSubscriberRow);
+  return row ? [row] : [];
 }
 
 interface SubscriberRow {
@@ -95,22 +185,23 @@ interface SubscriberRow {
 }
 
 /**
- * Returns subscriber IDs who have explicitly disabled this notification.
+ * Returns subscriber (person) IDs who have explicitly disabled this
+ * notification.
  */
 async function getDisabledSubscriberIds(
   supabase: SupabaseClient,
-  subscriberIds: string[],
+  personIds: string[],
   eventType: NotificationEventType,
 ): Promise<Set<string>> {
-  if (subscriberIds.length === 0) return new Set();
+  if (personIds.length === 0) return new Set();
   const { data } = await supabase
     .from("subscriber_notification_preference")
-    .select("subscriber_id")
-    .in("subscriber_id", subscriberIds)
+    .select("person_id")
+    .in("person_id", personIds)
     .eq("event_type", eventType)
     .eq("channel", "email")
     .eq("enabled", false);
-  return new Set((data ?? []).map((r: { subscriber_id: string }) => r.subscriber_id));
+  return new Set((data ?? []).map((r: { person_id: string }) => r.person_id));
 }
 
 // ─── Sender config ────────────────────────────────────────────────────
@@ -263,6 +354,7 @@ export class NotificationService {
           .from("notification_delivery")
           .insert({
             event_id: eventId,
+            town_id: townId,
             subscriber_id: subscriber.id,
             channel: "email",
             status: "pending",
@@ -410,13 +502,13 @@ export class NotificationService {
     };
   }
 
-  async getSubscriberDeliveryHistory(userId: string, limit = 20): Promise<DeliveryHistoryRow[]> {
+  async getSubscriberDeliveryHistory(personId: string, limit = 20): Promise<DeliveryHistoryRow[]> {
     const { data } = await this.supabase
       .from("notification_delivery")
       .select(
         "id, event_id, status, sent_at, delivered_at, created_at, notification_event(event_type, payload)",
       )
-      .eq("subscriber_id", userId)
+      .eq("subscriber_id", personId)
       .order("created_at", { ascending: false })
       .limit(limit);
     // Supabase returns joined tables as arrays — cast through unknown
@@ -456,14 +548,18 @@ export class NotificationService {
       .eq("id", delivery.event_id)
       .single();
 
-    const { data: subscriber } = await this.supabase
-      .from("user_account")
-      .select("id, email, display_name, email_bounced, email_complained")
+    const { data: subscriberData } = await this.supabase
+      .from("person")
+      .select("id, name, email, user_account(email_bounced, email_complained)")
       .eq("id", delivery.subscriber_id)
       .single();
 
+    const subscriber = subscriberData
+      ? toSubscriberRow(subscriberData as RawPersonSubscriberRow)
+      : null;
+
     if (!event || !subscriber) return;
-    if ((subscriber as SubscriberRow).email_bounced) return;
+    if (subscriber.email_bounced) return;
 
     const eventType = event.event_type as NotificationEventType;
     const townId = event.town_id as string;
@@ -480,8 +576,7 @@ export class NotificationService {
 
       const variables = {
         ...payload,
-        recipientName:
-          (subscriber as SubscriberRow).display_name ?? (subscriber as SubscriberRow).email,
+        recipientName: subscriber.display_name ?? subscriber.email,
         isBroadcast,
         preferencesUrl: `${process.env.APP_URL ?? "https://app.townmeetingmanager.com"}/settings/notifications`,
       };
@@ -490,7 +585,7 @@ export class NotificationService {
       const from = `${senderConfig.senderName} <${senderConfig.senderEmail}>`;
 
       const result = await emailSender.sendEmail({
-        to: (subscriber as SubscriberRow).email,
+        to: subscriber.email,
         from,
         subject,
         htmlBody: html,

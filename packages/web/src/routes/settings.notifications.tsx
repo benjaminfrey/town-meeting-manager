@@ -91,19 +91,22 @@ export default function NotificationPreferencesPage() {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
 
-  // Fetch existing preferences
+  // Fetch existing preferences. Subscribers are PERSON records, not
+  // user_account records (see supabase/migrations/20260827000001_canonicalize_notifications.sql) —
+  // so this keys on currentUser.personId, not currentUser.id (the auth
+  // user id).
   const { data: prefs = [] } = useQuery({
     queryKey: queryKeys.notificationPreferences.mine,
     queryFn: async () => {
-      if (!currentUser?.id) return [];
+      if (!currentUser?.personId) return [];
       const { data, error } = await supabase
         .from("subscriber_notification_preference")
         .select("event_type, channel, enabled")
-        .eq("subscriber_id", currentUser.id);
+        .eq("person_id", currentUser.personId);
       if (error) throw error;
       return data as Array<{ event_type: string; channel: string; enabled: boolean }>;
     },
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.personId,
   });
 
   // Build a lookup map: eventType → enabled
@@ -120,16 +123,16 @@ export default function NotificationPreferencesPage() {
   // Mutation: toggle a preference
   const toggleMutation = useMutation({
     mutationFn: async ({ eventType, enabled }: { eventType: string; enabled: boolean }) => {
-      if (!currentUser?.id) throw new Error("Not authenticated");
+      if (!currentUser?.personId || !currentUser.townId) throw new Error("Not authenticated");
       const { error } = await supabase.from("subscriber_notification_preference").upsert(
         {
-          subscriber_id: currentUser.id,
+          person_id: currentUser.personId,
+          town_id: currentUser.townId,
           event_type: eventType,
           channel: "email",
           enabled,
-          updated_at: new Date().toISOString(),
         },
-        { onConflict: "subscriber_id,event_type,channel" },
+        { onConflict: "person_id,channel,event_type" },
       );
       if (error) throw error;
     },
