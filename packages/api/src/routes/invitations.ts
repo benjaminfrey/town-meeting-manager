@@ -8,10 +8,31 @@
  * GET  /api/unsubscribe               — public: unsubscribe from email type
  * PUT  /api/notifications/preferences — update email notification preferences
  * GET  /api/notifications/preferences — get current user's preferences
+ *
+ * ─── Task G1: the three public routes here, and why each has to be ────────
+ *
+ * Under deny-by-default (`auth/route-access.ts`) these are marked public
+ * deliberately rather than being unmarked by accident, which is what they were
+ * before:
+ *
+ *   GET  /api/invitations/validate — the acceptance page renders from this
+ *        before any account exists. The token is the credential; a wrong one
+ *        returns 404 and a used or expired one returns `{valid:false}`.
+ *   POST /api/invitations/accept   — THE reason a session cannot be required.
+ *        This is the request that creates the account. Requiring a session
+ *        here would mean an invited user must already have the thing the
+ *        invitation exists to give them.
+ *   GET  /api/unsubscribe          — reached from a link in an email, by
+ *        someone who may have no account at all (subscribers are `person`
+ *        rows, not `user_account` rows). Authenticated by an HMAC over
+ *        `person:eventType` with a timing-safe comparison, above.
+ *
+ * The other four routes in this file take a session.
  */
 
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { PUBLIC_ROUTE } from "../auth/route-access.js";
 import { renderEmailTemplate, EmailSenderService } from "../services/email-sender.js";
 import { getDefaultPostmarkClient } from "../lib/postmark.js";
 
@@ -301,50 +322,54 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/invitations/validate ────────────────────────────────
   // Public: validate token, return details for acceptance page
 
-  app.get<{ Querystring: { token: string } }>("/invitations/validate", async (request, reply) => {
-    const { token } = request.query;
-    if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { token: string } }>(
+    "/invitations/validate",
+    { config: { ...PUBLIC_ROUTE } },
+    async (request, reply) => {
+      const { token } = request.query;
+      if (!token) return reply.badRequest("token required");
 
-    const { data: inv } = await supabase
-      .from("invitation")
-      .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
-      .eq("token", token)
-      .single();
+      const { data: inv } = await supabase
+        .from("invitation")
+        .select("id, person_id, user_account_id, town_id, token, expires_at, status, role")
+        .eq("token", token)
+        .single();
 
-    if (!inv) return reply.notFound("Invitation not found or already used");
+      if (!inv) return reply.notFound("Invitation not found or already used");
 
-    if ((inv.status as string) === "accepted") {
-      return reply.send({ valid: false, reason: "already_accepted" });
-    }
+      if ((inv.status as string) === "accepted") {
+        return reply.send({ valid: false, reason: "already_accepted" });
+      }
 
-    if (new Date(inv.expires_at as string) < new Date()) {
-      return reply.send({ valid: false, reason: "expired" });
-    }
+      if (new Date(inv.expires_at as string) < new Date()) {
+        return reply.send({ valid: false, reason: "expired" });
+      }
 
-    // Get person info
-    const { data: person } = await supabase
-      .from("person")
-      .select("name, email")
-      .eq("id", inv.person_id as string)
-      .single();
+      // Get person info
+      const { data: person } = await supabase
+        .from("person")
+        .select("name, email")
+        .eq("id", inv.person_id as string)
+        .single();
 
-    // Get town info
-    const { data: town } = await supabase
-      .from("town")
-      .select("name")
-      .eq("id", inv.town_id as string)
-      .single();
+      // Get town info
+      const { data: town } = await supabase
+        .from("town")
+        .select("name")
+        .eq("id", inv.town_id as string)
+        .single();
 
-    return reply.send({
-      valid: true,
-      invitation_id: inv.id,
-      person_name: person?.name ?? null,
-      person_email: person?.email ?? null,
-      town_name: town?.name ?? null,
-      role: inv.role ?? "board_member",
-      expires_at: inv.expires_at,
-    });
-  });
+      return reply.send({
+        valid: true,
+        invitation_id: inv.id,
+        person_name: person?.name ?? null,
+        person_email: person?.email ?? null,
+        town_name: town?.name ?? null,
+        role: inv.role ?? "board_member",
+        expires_at: inv.expires_at,
+      });
+    },
+  );
 
   // ── POST /api/invitations/accept ─────────────────────────────────
   // Public: accept invitation — creates auth user + links account
@@ -355,7 +380,7 @@ export async function invitationRoutes(app: FastifyInstance) {
       password: string;
       display_name?: string;
     };
-  }>("/invitations/accept", async (request, reply) => {
+  }>("/invitations/accept", { config: { ...PUBLIC_ROUTE } }, async (request, reply) => {
     const { token, password, display_name } = request.body;
 
     if (!token || !password) {
@@ -489,47 +514,50 @@ export async function invitationRoutes(app: FastifyInstance) {
   // ── GET /api/unsubscribe ─────────────────────────────────────────
   // Public: unsubscribe from a specific email type via signed token
 
-  app.get<{ Querystring: { t: string } }>("/unsubscribe", async (request, reply) => {
-    const { t: token } = request.query;
-    if (!token) return reply.badRequest("token required");
+  app.get<{ Querystring: { t: string } }>(
+    "/unsubscribe",
+    { config: { ...PUBLIC_ROUTE } },
+    async (request, reply) => {
+      const { t: token } = request.query;
+      if (!token) return reply.badRequest("token required");
 
-    const parsed = validateUnsubscribeToken(token);
-    if (!parsed) {
-      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
-    }
+      const parsed = validateUnsubscribeToken(token);
+      if (!parsed) {
+        return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+      }
 
-    const { personId, eventType } = parsed;
+      const { personId, eventType } = parsed;
 
-    // subscriber_notification_preference.town_id is NOT NULL — this route
-    // is unauthenticated (reached via a signed link, not a session), so
-    // town_id has to be looked up from the person rather than read off a
-    // request.user. subscriber_notification_preference also carries no
-    // created_at/updated_at columns (that's the ported shape, not the
-    // canonical one — see the migration's header comment), so none is set here.
-    const { data: person } = await supabase
-      .from("person")
-      .select("town_id")
-      .eq("id", personId)
-      .single();
+      // subscriber_notification_preference.town_id is NOT NULL — this route
+      // is unauthenticated (reached via a signed link, not a session), so
+      // town_id has to be looked up from the person rather than read off a
+      // request.user. subscriber_notification_preference also carries no
+      // created_at/updated_at columns (that's the ported shape, not the
+      // canonical one — see the migration's header comment), so none is set here.
+      const { data: person } = await supabase
+        .from("person")
+        .select("town_id")
+        .eq("id", personId)
+        .single();
 
-    if (!person) {
-      return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
-    }
+      if (!person) {
+        return reply.status(400).send({ error: "Invalid or expired unsubscribe link" });
+      }
 
-    // Upsert preference: enabled = false
-    await supabase.from("subscriber_notification_preference").upsert(
-      {
-        person_id: personId,
-        town_id: (person as { town_id: string }).town_id,
-        event_type: eventType,
-        channel: "email",
-        enabled: false,
-      },
-      { onConflict: "person_id,channel,event_type" },
-    );
+      // Upsert preference: enabled = false
+      await supabase.from("subscriber_notification_preference").upsert(
+        {
+          person_id: personId,
+          town_id: (person as { town_id: string }).town_id,
+          event_type: eventType,
+          channel: "email",
+          enabled: false,
+        },
+        { onConflict: "person_id,channel,event_type" },
+      );
 
-    // Return a simple HTML confirmation
-    return reply.header("Content-Type", "text/html").status(200).send(`<!DOCTYPE html>
+      // Return a simple HTML confirmation
+      return reply.header("Content-Type", "text/html").status(200).send(`<!DOCTYPE html>
 <html>
 <head><title>Unsubscribed</title>
 <style>body{font-family:Arial,sans-serif;max-width:600px;margin:60px auto;text-align:center;color:#374151;}
@@ -540,7 +568,8 @@ h1{color:#1a3a6b;}a{color:#1a3a6b;}</style></head>
 <p>You can <a href="${APP_URL}/settings/notifications">manage all your notification preferences</a> at any time.</p>
 </body>
 </html>`);
-  });
+    },
+  );
 
   // ── GET /api/notifications/preferences ──────────────────────────
   // Authenticated: get current user's email preferences

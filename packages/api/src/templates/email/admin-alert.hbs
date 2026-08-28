@@ -10,8 +10,17 @@
 </p>
 
 <div style="background-color:#fefce8;border-left:4px solid #ca8a04;padding:16px 20px;margin:0 0 24px;border-radius:0 4px 4px 0;">
+  {{! Task G1: this was `{{{alertMessage}}}` — a triple-stash, which emits the }}
+  {{! value unescaped. `alertMessage` comes from the notification event payload }}
+  {{! (`notification-service.ts` builds template variables as `{...payload}`), }}
+  {{! and that payload arrives in the body of POST /api/notifications/events,  }}
+  {{! which until this task was unauthenticated. Any HTML put there — a link,  }}
+  {{! a fake sign-in form — was rendered into mail sent from the town's own    }}
+  {{! DKIM-signed domain, which is a phishing platform with municipal          }}
+  {{! letterhead. Double-stash escapes it. If a genuinely rich alert body is   }}
+  {{! ever needed, it needs a sanitiser, not a third brace.                    }}
   <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;">
-    {{{alertMessage}}}
+    {{alertMessage}}
   </p>
 </div>
 

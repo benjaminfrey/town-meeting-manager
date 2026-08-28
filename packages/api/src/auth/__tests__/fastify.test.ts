@@ -26,6 +26,7 @@ import { withTestDb, connectAsAppRole } from "../../test/db-harness.js";
 import { createAuth } from "../auth.js";
 import { completeOnboarding } from "../onboarding.js";
 import { betterAuthPlugin } from "../fastify.js";
+import { PUBLIC_ROUTE } from "../route-access.js";
 
 const PASSWORD = "correct-horse-battery-staple";
 
@@ -43,7 +44,12 @@ async function buildApp(app: postgres.Sql) {
   await server.register(betterAuthPlugin, { auth, db });
 
   // Stands in for the public portal: no session required, ever.
-  server.get("/api/portal/meetings", async () => ({ ok: true }));
+  //
+  // Task G1 added the marking. Before it, an unmarked route was served to
+  // anyone, so this stand-in needed nothing; now "public" is something a route
+  // says, and this one has to say it — which is the point. `route-access.test.ts`
+  // owns the other half: that a route WITHOUT the marking is refused.
+  server.get("/api/portal/meetings", { config: { ...PUBLIC_ROUTE } }, async () => ({ ok: true }));
 
   // Stands in for an authenticated route, and proves the tenant context the
   // preHandler installs actually scopes a query.

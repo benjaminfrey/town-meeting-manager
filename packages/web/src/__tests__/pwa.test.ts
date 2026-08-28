@@ -326,8 +326,29 @@ describe("Push notification API routes (packages/api/src/routes/notifications.ts
     expect(routeSource).toContain("z.");
   });
 
-  it("has a test push endpoint (dev-only)", () => {
-    expect(routeSource).toContain("test/push");
+  it("has NO test push endpoint — it was deleted in Stage 1, Task G1", () => {
+    // This test used to assert the opposite. `POST /api/test/push` existed
+    // behind `process.env.NODE_ENV !== "production"`, which is a guard that
+    // fails OPEN: the route is registered whenever that variable is unset or
+    // misspelled, which is what a hand-rolled container or systemd unit gets
+    // wrong. It pushed an arbitrary title and body to a signed-in user's
+    // registered devices. Nothing in the product used it, and push is
+    // exercisable end to end through a real notification event.
+    //
+    // Matched against a route REGISTRATION rather than the bare string: the
+    // file explains the deletion in its header, and a substring check would be
+    // failed by the explanation. `packages/api` has the authoritative version
+    // of this — `routes/__tests__/public-route-inventory.test.ts` asserts on
+    // the registered route table rather than on source text.
+    expect(routeSource).not.toMatch(/app\.(post|get|put|delete)[^(]*\(\s*"\/test\//);
+  });
+
+  it("requires authentication on both push subscription routes", () => {
+    // The subscribe/unsubscribe routes did authenticate — by calling
+    // `app.verifyAuth` inside the handler body, which is why an audit counting
+    // preHandlers read this file as having none. They are preHandlers now, so
+    // the deny-by-default policy and the route's own guard agree.
+    expect(routeSource).toContain("preHandler: [app.verifyAuth]");
   });
 });
 

@@ -12,7 +12,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { requirePermission } from "../plugins/auth.js";
+import { requirePermission, requireAdmin } from "../plugins/auth.js";
 import { triggerMinutesReview, triggerMinutesApproved } from "../services/notification-triggers.js";
 import { assembleMinutesJson } from "../services/minutes-assembler.js";
 import { formatMinutes } from "../services/minutes-formatters.js";
@@ -650,7 +650,16 @@ export async function minutesRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: MeetingParams }>(
     "/meetings/:meetingId/minutes/approve",
     {
-      preHandler: [fastify.verifyAuth, requirePermission("approve_minutes")],
+      // Was `requirePermission("approve_minutes")`. There is no such governable
+      // action — the thirty are in `shared/constants/permissions.ts` — so the
+      // matrix lookup could never return true and only the admin short-circuit
+      // inside `requirePermission` ever let anyone through. This is therefore
+      // BEHAVIOUR-IDENTICAL, and says what the route has always actually done.
+      // Whether minutes approval should instead be delegable (R5,
+      // `publish_approved_minutes`, is the nearest existing action) is a
+      // product decision for the owner, not a change to make while closing an
+      // auth hole. Flagged in the G1 report.
+      preHandler: [fastify.verifyAuth, requireAdmin("approving minutes")],
     },
     async (request, reply) => {
       const { meetingId } = request.params;

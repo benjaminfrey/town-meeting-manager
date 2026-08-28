@@ -14,6 +14,7 @@ import { createAppDb } from "./auth/db.js";
 import { createAuth } from "./auth/auth.js";
 import { createPostmarkAuthEmailSender } from "./auth/email.js";
 import { betterAuthPlugin } from "./auth/fastify.js";
+import { PUBLIC_ROUTE } from "./auth/route-access.js";
 import { documentRoutes } from "./routes/documents.js";
 import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
@@ -95,7 +96,12 @@ export async function buildServer() {
   // Health check — verifies database connectivity so orchestrators and the
   // monitoring script can detect a degraded API. Returns 503 if the DB is
   // unreachable.
-  app.get("/api/health", async (_request, reply) => {
+  // Public: an orchestrator's liveness probe and `scripts/health-check.sh`
+  // have no session and must not need one — a health endpoint that returns 401
+  // when auth is misconfigured reports "unhealthy" for the wrong reason, or
+  // (worse) reports healthy because the probe treats any response as up. It
+  // discloses only up/degraded and a process uptime.
+  app.get("/api/health", { config: { ...PUBLIC_ROUTE } }, async (_request, reply) => {
     let database: "connected" | "disconnected" = "disconnected";
     try {
       const { error } = await app.supabase

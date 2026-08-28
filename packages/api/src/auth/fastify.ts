@@ -51,18 +51,40 @@
  * `request.tenant`. Until then this is the tenant-safe path, not the only
  * path, and the difference is worth more than the tidier sentence.
  *
- * ─── The three failure modes, and what each does ──────────────────────────
+ * ─── The failure modes, and what each does ────────────────────────────────
  *
- *   No session               → continue. The public portal is unauthenticated
- *                              and must keep working; a global reject here
- *                              would take it down.
+ *   Route marked public      → serve, without even looking for a session.
+ *   No session, unmarked     → 401. See below — this is Task G1's inversion.
  *   Session, no town         → 403 and an error-level log. NEVER continue.
  *   Session, account deleted → 403 and an error-level log. NEVER continue.
  *
- * The second and third are the reason this file exists. Continuing with no
- * tenant context does not fail — it succeeds, quietly, returning zero rows
- * from every table, which is indistinguishable from a town that has no data.
- * See `tenant-context.ts`.
+ * The last two are the reason this file exists. Continuing with no tenant
+ * context does not fail — it succeeds, quietly, returning zero rows from every
+ * table, which is indistinguishable from a town that has no data. See
+ * `tenant-context.ts`.
+ *
+ * ─── Task G1: the second line used to read "continue" ─────────────────────
+ *
+ * C1 shipped this hook with `if (!session?.user?.id) return;` — a sessionless
+ * request was served, because the public portal is unauthenticated and a blunt
+ * global reject would have taken it offline. That was correct for C1 and is
+ * the reason G1 was queued behind it: it made "no session" the default answer
+ * for every route in the process, including ten in `routes/notifications.ts`
+ * that nobody intended to expose.
+ *
+ * The inversion is one line plus a marker. A sessionless request is now
+ * refused unless the matched route carries `config: { ...PUBLIC_ROUTE }`, so
+ * the portal keeps working because each of its routes says so, and a route
+ * added tomorrow with no marking is refused rather than served. See
+ * `route-access.ts` for why the default sits here rather than in each route,
+ * and `__tests__/route-access.test.ts` for the test that keeps it true.
+ *
+ * A public route skips session resolution entirely rather than resolving it
+ * and ignoring failures. Resolving would put two round trips on every
+ * anonymous portal page view, and — worse — would let an authenticated user
+ * whose account is mid-migration get a 403 from a page that is supposed to
+ * work for people with no account at all. No public route reads
+ * `request.tenant`; a future one that wants to must ask for it explicitly.
  */
 
 import fp from "fastify-plugin";
@@ -70,6 +92,7 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { withTenant, type TenantTx } from "../db/with-tenant.js";
 import { resolveTenant, TenantResolutionError, type ResolvedTenant } from "./tenant-context.js";
 import type { TenantResolverDb } from "./tenant-context.js";
+import { PUBLIC_ROUTE, isPublicRoute } from "./route-access.js";
 import type { Auth } from "./auth.js";
 
 declare module "fastify" {
@@ -133,6 +156,13 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
     scope.route({
       method: ["GET", "POST"],
       url: `${basePath}/*`,
+      // Sign-in, sign-up and password reset are how a session comes into
+      // existence; requiring one here would be a closed loop. Marked with the
+      // same mechanism as every other public route rather than special-cased
+      // by URL prefix in the hook, so there is exactly one way a route becomes
+      // reachable without a session — and so a path that merely looks like
+      // this one cannot inherit the exemption.
+      config: { ...PUBLIC_ROUTE },
       handler: async (request, reply) => {
         const url = new URL(request.url, `${request.protocol}://${request.host}`);
         const hasBody = request.method !== "GET" && request.method !== "HEAD";
@@ -166,15 +196,26 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
 
   // ─── 2. The tenant preHandler ──────────────────────────────────────────
   fastify.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
-    // Better Auth's own endpoints establish sessions; they cannot require one.
-    if (request.url.startsWith(`${basePath}/`)) return;
+    // The ONLY exemption, and it comes from the matched route's own config —
+    // never from the request's path. Better Auth's handler above carries it,
+    // as do the public portal, the invitation-acceptance routes, the
+    // unsubscribe link and the Postmark webhook.
+    if (isPublicRoute(request)) return;
 
     const session = await auth.api.getSession({ headers: toWebHeaders(request) });
 
-    // No session is not an error here. The public portal is unauthenticated,
-    // and rejecting sessionless requests globally would take it offline. Routes
-    // that need a tenant check `request.tenant` themselves.
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      // Task G1's inversion. Before this, an unmarked route was served to
+      // anyone; the ten unauthenticated routes in `routes/notifications.ts`
+      // existed because nothing here said otherwise.
+      return reply.unauthorized(
+        "This endpoint requires a signed-in session. If you are building against " +
+          "this API, sign in at /api/auth/sign-in/email and send the session cookie. " +
+          "If you are adding a route that is genuinely meant to be reachable " +
+          "without one, mark it with `config: { ...PUBLIC_ROUTE }` — see " +
+          "src/auth/route-access.ts.",
+      );
+    }
 
     let tenant: ResolvedTenant;
     try {

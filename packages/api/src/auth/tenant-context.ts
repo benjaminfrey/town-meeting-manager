@@ -53,6 +53,7 @@
 
 import { sql, type SQL } from "drizzle-orm";
 import { withTenant, type TenantContext, type TenantTx } from "../db/with-tenant.js";
+import { toRows as normaliseRows } from "../db/rows.js";
 
 /** What a resolved session is allowed to touch. */
 export interface ResolvedTenant extends TenantContext {
@@ -103,23 +104,13 @@ interface AccountRow {
 /**
  * Normalise a driver result into rows.
  *
- * `drizzle-orm/postgres-js` returns an array-like `RowList`; `node-postgres`
- * returns `{ rows: [...] }`. This module does not care which driver Task D1
- * settles on, and a wrong-shape result must not be mistaken for "no rows" —
- * that would turn a driver swap into a silent authentication failure, which is
- * precisely the class of bug this file exists to prevent. Anything that is
- * neither shape is an error, not an empty array.
+ * The implementation moved to `db/rows.ts` in Task G1, because `plugins/auth.ts`
+ * now performs the same kind of read and must not be mistaken for "no rows"
+ * for the same reasons. See that file for the invariant; the only thing local
+ * to this module is which error type a wrong shape raises.
  */
 function toRows<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && Array.isArray((result as { rows?: unknown }).rows)) {
-    return (result as { rows: T[] }).rows;
-  }
-  throw new TenantResolutionError(
-    `tenant resolution got an unrecognised query result of type ${typeof result}. ` +
-      "Expected an array (postgres.js) or { rows: [...] } (node-postgres). " +
-      "Treating this as 'no rows' would silently deny every session.",
-  );
+  return normaliseRows<T>(result, (message) => new TenantResolutionError(message));
 }
 
 /**
