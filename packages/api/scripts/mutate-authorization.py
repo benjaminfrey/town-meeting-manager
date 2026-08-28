@@ -86,6 +86,13 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ("4b.audit_log_insert", "assertCanInsertAuditLog", ALLOW),
     ("4b.subscriber_pref_insert", "assertCanInsertSubscriberPreference", ALLOW),
     ("4b.subscriber_pref_update", "assertCanUpdateSubscriberPreference", ALLOW),
+    # The public portal's read rules. Once the portal runs inside a tenant
+    # context these are the only thing between the public and a town's drafts,
+    # so they are mutated alongside the rest.
+    ("portal.minutes", "portalCanSelectMinutesDocument", TRUE),
+    ("portal.exhibit", "portalCanSelectExhibit", TRUE),
+    ("portal.meeting", "portalCanSelectMeeting", TRUE),
+    ("portal.agenda", "portalCanSelectAgenda", TRUE),
 ]
 
 

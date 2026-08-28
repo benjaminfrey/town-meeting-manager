@@ -164,6 +164,16 @@ const ADOPTED_MINUTES_STATUSES: readonly MinutesStatus[] = ["approved", "publish
  * document this product holds.
  */
 export function canSelectMinutesDocument(actor: Actor, row: { status: MinutesStatus }): boolean {
+  // Deliberately STRICTER than the policy this restores, which read
+  // `has_permission('R4') OR status IN ('approved','published')` — no actor
+  // term at all in the second branch, because a policy only ever evaluated
+  // inside an authenticated town context. The portal is about to get a tenant
+  // context too, and then that second branch would hand the public a town's
+  // APPROVED-but-unpublished minutes: adopted by the board, not yet put on the
+  // website. Requiring a signed-in actor closes that, changes nothing for any
+  // signed-in caller, and forces the portal to go through
+  // `portalCanSelectMinutesDocument` below, which is `published` only.
+  if (actor.kind !== "user") return false;
   if (ADOPTED_MINUTES_STATUSES.includes(row.status)) return true;
   return resolvePermission(actor, "R4");
 }

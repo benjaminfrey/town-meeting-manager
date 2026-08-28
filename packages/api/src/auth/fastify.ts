@@ -47,10 +47,26 @@
  * `request.server.supabase` — all five existing route files use exactly that.
  * `createAppDb()` is also exported and can be called again.
  *
- * Task D1 is what makes the strong statement true, by removing
- * `supabasePlugin` once the routes that depend on it have moved onto
- * `request.tenant`. Until then this is the tenant-safe path, not the only
- * path, and the difference is worth more than the tidier sentence.
+ * ─── What Task D1 changed, and what it deliberately did not ───────────────
+ *
+ * D1 built the tRPC surface (`src/trpc/`) on top of this bridge and nothing
+ * else: `trpc/context.ts` carries `withTenant` and no other database handle,
+ * so a tRPC procedure has no bypass available to it even today. Every
+ * procedure Task 2 and Phase E add inherits that by construction.
+ *
+ * It did NOT delete `supabasePlugin`, and the reason is worth stating rather
+ * than leaving as an omission. Doing so requires rewriting the five route
+ * files and six services that use it — roughly 5,100 lines of PostgREST-idiom
+ * data access, with no route-level test coverage over most of it — and it
+ * additionally deletes the only path to Supabase STORAGE, which holds every
+ * generated PDF (agenda packets, meeting notices, minutes) and which nothing
+ * in this repository replaces. That is a rewrite plus an unmade
+ * infrastructure decision, not a deletion, and doing it in the same change as
+ * the authorization layer would have buried the security work in it. See
+ * `.superpowers/sdd/2026-08-28-stage-1-phase-d-trpc/task-1-report.md` § "Step 7".
+ *
+ * So this remains the tenant-safe path rather than the only path, and the
+ * difference is still worth more than the tidier sentence.
  *
  * ─── The failure modes, and what each does ────────────────────────────────
  *
@@ -166,8 +182,9 @@ declare module "fastify" {
      * Run a unit of work scoped to this request's town.
      *
      * The tenant-safe path — not, today, the only path: `request.server.supabase`
-     * is a service-role client that bypasses RLS, and Task D1 removes it. See
-     * this file's header.
+     * is a service-role client that bypasses RLS. It is the ONLY path for a
+     * tRPC procedure (see `trpc/context.ts`); the five legacy route files still
+     * use the bypass, and removing it is its own task. See this file's header.
      */
     withTenant?: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
   }
