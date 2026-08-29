@@ -17,7 +17,7 @@
  *      strictly worse than the service-role client this replaced. The
  *      `portalCanSelect*` predicates are what decide it, and each of the
  *      disclosure cases below fails if its predicate is reverted (that is what
- *      `scripts/mutate-authorization.py` checks; these are the tests it needs
+ *      `packages/api/scripts/mutate-authorization.py` checks; these are the tests it needs
  *      to find).
  *
  * Everything runs as `tmm_app` rather than the database owner. The owner is a

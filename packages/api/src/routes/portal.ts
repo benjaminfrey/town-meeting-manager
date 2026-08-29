@@ -43,7 +43,7 @@
  *
  * The filtering is deliberately NOT also written into the SQL. A duplicated
  * `WHERE status <> 'draft'` would keep the routes correct while making the
- * predicate untestable — `scripts/mutate-authorization.py` replaces each
+ * predicate untestable — `packages/api/scripts/mutate-authorization.py` replaces each
  * predicate's body with `return true` and expects a test to go red, and a
  * belt-and-braces SQL filter would keep those tests green against a rule that
  * no longer decides anything. One owner per rule, and the tests prove it is
