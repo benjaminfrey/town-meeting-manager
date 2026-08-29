@@ -8,7 +8,6 @@ import Fastify, { type onRouteHookHandler } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import sensible from "@fastify/sensible";
-import { supabasePlugin } from "./plugins/supabase.js";
 import { authPlugin } from "./plugins/auth.js";
 import { createAppDb } from "./auth/db.js";
 import { createAuth } from "./auth/auth.js";
@@ -16,12 +15,18 @@ import { createPostmarkAuthEmailSender } from "./auth/email.js";
 import { betterAuthPlugin } from "./auth/fastify.js";
 import { PUBLIC_ROUTE } from "./auth/route-access.js";
 import { documentRoutes } from "./routes/documents.js";
+import { fileRoutes } from "./routes/files.js";
 import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { sessionRoutes } from "./routes/session.js";
 import { NotificationService } from "./services/notification-service.js";
+import { listJobTenants, tenantJob } from "./jobs/tenant-job.js";
+import { sql } from "drizzle-orm";
+import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import { appRouter } from "./trpc/router.js";
+import { createTrpcContext } from "./trpc/context.js";
 
 export interface BuildServerOptions {
   /**
@@ -96,16 +101,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   await app.register(sensible);
-  await app.register(supabasePlugin);
   await app.register(authPlugin);
 
   // ─── Better Auth and the tenant bridge (Stage 1, Task C1) ────────
   //
-  // `plugins/auth.ts` above is the Supabase-era JWT verifier, still in place
-  // because the routes registered below use `verifyAuth`. Task C2 and Phase D
-  // move those onto `request.tenant`; deleting it here would break them all in
-  // one commit for no security gain, since it is only reachable on routes
-  // that opt into it.
+  // `plugins/auth.ts` above is what remains of the Supabase-era route
+  // decorators: `verifyAuth` (which now reads `request.tenant` and loads the
+  // account through RLS), plus `requirePermission` and `requireAdmin`, which
+  // `notifications.ts`, `invitations.ts` and `minutes.ts`'s approve route
+  // still use. Task D1f removed the last of the routes that needed a
+  // BOARD-scoped decision from it — a preHandler cannot resolve a board — so
+  // what is left is the town-scoped and admin-only half, which it decides
+  // correctly.
+  //
+  // `plugins/supabase.ts` is GONE as of Task D1f. It created a service-role
+  // client that bypassed row level security outright, and it was the last one
+  // in this codebase. Nothing here can reach the database except through
+  // `request.withTenant` or a `TenantJob`, both of which set `app.town_id`
+  // inside a transaction.
   //
   // What is registered here is the replacement: Better Auth's handler at
   // `/api/auth/*`, plus the preHandler that resolves a session to a town and
@@ -158,23 +171,52 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // when auth is misconfigured reports "unhealthy" for the wrong reason, or
   // (worse) reports healthy because the probe treats any response as up. It
   // discloses only up/degraded and a process uptime.
+  //
+  // The probe is `SELECT 1` on the application pool, not a read of `town`
+  // through the service-role client. A liveness probe has no tenant and needs
+  // none: it is asking whether this process can reach Postgres, and any query
+  // that returns rows is asking a second question it cannot answer without one
+  // — under RLS `SELECT id FROM town` with no `app.town_id` returns zero rows
+  // and no error, which the old check could not distinguish from a healthy
+  // empty result.
   app.get("/api/health", { config: { ...PUBLIC_ROUTE } }, async (_request, reply) => {
-    let database: "connected" | "disconnected" = "disconnected";
-    try {
-      const { error } = await app.supabase
-        .from("town")
-        .select("id", { head: true, count: "exact" })
-        .limit(1);
-      if (!error) database = "connected";
-    } catch {
-      database = "disconnected";
-    }
+    const database = await app.tenantDb
+      .execute(sql`SELECT 1`)
+      .then(() => "connected" as const)
+      .catch(() => "disconnected" as const);
+
     return reply.code(database === "connected" ? 200 : 503).send({
       status: database === "connected" ? "ok" : "degraded",
       uptime: Math.round(process.uptime()),
       database,
     });
   });
+  // ─── tRPC (Stage 1, Task D1) ─────────────────────────────────────
+  //
+  // Mounted WITHOUT a `PUBLIC_ROUTE` marking, which is the point: the
+  // deny-by-default gate in `auth/fastify.ts` runs on `/api/trpc/*` like any
+  // other route, so a procedure cannot be reached without a session and a
+  // resolved tenant no matter what it is built on. `publicProcedure` relaxes
+  // the tRPC-level requirement only; it is not a way past the HTTP gate.
+  //
+  // The context is built from the request the gate has already processed —
+  // see `trpc/context.ts`. It carries `withTenant` and nothing else that can
+  // reach the database.
+  await app.register(fastifyTRPCPlugin, {
+    prefix: "/api/trpc",
+    trpcOptions: {
+      router: appRouter,
+      createContext: createTrpcContext,
+      onError({ path, error }: { path?: string; error: Error }) {
+        app.log.error({ err: error, path }, "tRPC procedure failed");
+      },
+    },
+  });
+
+  // Stage 1, Task D1e — seals and exhibits, on the two storage roots. No
+  // PUBLIC_ROUTE marking: the deny-by-default gate applies, and every document
+  // these routes serve is authorized before nginx is told to send it.
+  await app.register(fileRoutes, { prefix: "/api" });
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });
@@ -182,15 +224,62 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(invitationRoutes, { prefix: "/api" });
   await app.register(sessionRoutes, { prefix: "/api" });
 
-  // ─── Retry processor — runs every 60 seconds ─────────────────────
-  const retryInterval = setInterval(() => {
-    const service = new NotificationService(app.supabase);
-    service.processRetries().catch((err) => {
-      app.log.error({ err }, "Notification retry processor error");
-    });
+  // ─── The notification sweep — runs every 60 seconds ───────────────
+  //
+  // ─── Task D1c: one job per town, not one query across all of them ───────
+  //
+  // This used to be `new NotificationService(app.supabase).processRetries()` —
+  // one unscoped query over `notification_delivery` with the service-role
+  // client, reading every town's rows and sending every town's mail from one
+  // pass. There is no session here to resolve a tenant from, so the tenant has
+  // to be named, and naming it means naming one at a time: `listJobTenants`
+  // returns the roster and each town gets its own `TenantJob`, which cannot be
+  // constructed without a town id (see `jobs/tenant-job.ts`).
+  //
+  // Two kinds of work, both per town:
+  //
+  //   processPendingEvents — events left `pending` because the process that
+  //        queued them died before delivering them. Task D1c also needed this
+  //        for `services/notification-triggers.ts`, which could not schedule
+  //        its own delivery while it had no tenant; D1f gave it one, so that
+  //        is no longer the case and this is a crash-recovery sweep rather
+  //        than the normal delivery path.
+  //   processRetries — deliveries past their `next_retry_at`.
+  //
+  // Sequential rather than `Promise.all`: the pool is shared with live
+  // requests, and a fan-out over every town would take a connection each.
+  //
+  // A town whose sweep throws is logged and the loop continues — one town's
+  // misconfigured Postmark token must not stop every other town's mail.
+  let sweeping = false;
+  const sweepInterval = setInterval(() => {
+    // A sweep that outruns the interval would otherwise start a second pass
+    // over the same rows. `processNotificationEvent` claims its row and
+    // `processRetries` is idempotent enough to survive it, but overlapping
+    // sweeps mean overlapping connections for no benefit.
+    if (sweeping) return;
+    sweeping = true;
+
+    void (async () => {
+      try {
+        for (const townId of await listJobTenants(app.tenantDb)) {
+          const service = new NotificationService(tenantJob(app.tenantDb, townId));
+          try {
+            await service.processPendingEvents();
+            await service.processRetries();
+          } catch (err) {
+            app.log.error({ err, townId }, "Notification sweep failed for one town");
+          }
+        }
+      } catch (err) {
+        app.log.error({ err }, "Notification sweep could not list tenants");
+      } finally {
+        sweeping = false;
+      }
+    })();
   }, 60_000);
 
-  app.addHook("onClose", async () => clearInterval(retryInterval));
+  app.addHook("onClose", async () => clearInterval(sweepInterval));
 
   return app;
 }

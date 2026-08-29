@@ -9,11 +9,32 @@ import type {
   PortalCalendarEvent,
   PortalSearchResponse,
 } from "@town-meeting/shared";
+import { detectPortalSubdomain } from "./portal";
 
 const BASE = "/api/portal";
 
+/**
+ * Stage 1, Task D1b — why every request from here carries the subdomain.
+ *
+ * The API no longer takes the portal's town from the `:townId` in the URL. It
+ * resolves `X-Town-Subdomain` into a tenant context, runs every query inside
+ * it under row level security, and refuses a request whose `:townId` names a
+ * different town (see `packages/api/src/auth/portal-tenant.ts`).
+ *
+ * In production nginx sets that header itself, from the hostname the request
+ * arrived on, and `proxy_set_header` REPLACES whatever a client sent — so on a
+ * real portal host this value is nginx's, not ours, and a page served from one
+ * town's portal cannot ask for another's. Sending it here is what makes the
+ * same code work in development, where the portal is reached as
+ * `localhost:5173/?portal=<subdomain>` and there is no proxy to set it.
+ */
+function portalHeaders(): HeadersInit {
+  const subdomain = detectPortalSubdomain(window.location.hostname);
+  return subdomain ? { "X-Town-Subdomain": subdomain } : {};
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: portalHeaders() });
   if (!res.ok) {
     throw new PortalApiError(res.status, res.statusText);
   }
@@ -30,8 +51,18 @@ export class PortalApiError extends Error {
   }
 }
 
-export async function resolveSubdomain(subdomain: string): Promise<PortalTownInfo> {
-  return fetchJson(`${BASE}/resolve?subdomain=${encodeURIComponent(subdomain)}`);
+/**
+ * Which town is this portal?
+ *
+ * The `subdomain` argument is no longer sent as a query parameter — the API
+ * reads it from `X-Town-Subdomain`, which `portalHeaders()` sets from the same
+ * hostname and which nginx overwrites in production. It is kept in the
+ * signature because `PortalProvider` has it and passing it makes the call
+ * site's intent legible; a caller that could pass a DIFFERENT subdomain here
+ * and get that town back is precisely what this change removed.
+ */
+export async function resolveSubdomain(_subdomain: string): Promise<PortalTownInfo> {
+  return fetchJson(`${BASE}/resolve`);
 }
 
 export async function fetchMeetings(

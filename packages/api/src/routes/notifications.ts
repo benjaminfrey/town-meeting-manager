@@ -20,26 +20,33 @@
  * rest are administrative and now carry `verifyAuth` plus the
  * `manage_notification_settings` permission.
  *
- * Three of them (`push/subscribe`, `push/unsubscribe`, `test/push`) DID call
- * `app.verifyAuth` — from inside the handler body rather than as a preHandler,
- * which is why a preHandler count read zero. That form works but is easy to
- * read past, and its `if (!request.user) return;` line silently returns an
- * empty 200 body on failure. They are preHandlers now like everything else.
- *
  * `POST /test/push` was deleted rather than authenticated. It was guarded by
- * `process.env.NODE_ENV !== "production"`, which is a guard that fails OPEN:
- * the route exists whenever the variable is unset or misspelled, which is
- * exactly what a hand-rolled container or a systemd unit gets wrong. It sent
- * an arbitrary title and body to a signed-in user's registered devices, and
- * nothing in the product needed it — push can be exercised end to end through
- * a real notification event. `git show` has it if it is ever wanted back.
+ * `process.env.NODE_ENV !== "production"`, which is a guard that fails OPEN.
+ * `git show` has it if it is ever wanted back.
+ *
+ * ─── Task D1c: nothing here reaches the database through Supabase ─────────
+ *
+ * The comments this file used to carry — "`app.supabase` is the service-role
+ * client and bypasses RLS, so without these filters a clerk in one town would
+ * be reading every town's delivery telemetry", "Task D1 removes that client
+ * and makes the scoping structural" — described hand-written `.eq("town_id",
+ * request.user!.townId)` filters holding the line. Those filters are gone,
+ * along with the client. Every authenticated route below runs its queries
+ * through `request.withTenant`, so tenancy is decided by row level security
+ * and a forgotten filter is no longer a cross-tenant read.
+ *
+ * The webhook is the one route with no session, and therefore the one that
+ * cannot get its tenant that way. See its handler for how it gets one and why
+ * that is safe.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import { NotificationService } from "../services/notification-service.js";
-// `dispatchPushToUser` is no longer imported here — it was only used by the
-// deleted `/test/push` route. `lib/push.ts` keeps it for the real event path.
+import { withTenant, type TenantTx } from "../db/with-tenant.js";
+import { tenantJob } from "../jobs/tenant-job.js";
+import { toRows } from "../db/rows.js";
 import { PUBLIC_ROUTE } from "../auth/route-access.js";
 import { verifyPostmarkWebhook } from "../auth/postmark-webhook-auth.js";
 import { requirePermission } from "../plugins/auth.js";
@@ -65,9 +72,34 @@ interface PostmarkWebhookBody {
   OriginalLink?: string;
 }
 
-export async function notificationRoutes(app: FastifyInstance) {
-  const supabase = app.supabase;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function rows<T>(result: unknown, what: string): T[] {
+  return toRows<T>(result, (message) => new Error(`${what}: ${message}`));
+}
+
+/**
+ * The tenant-scoped runner for an authenticated request.
+ *
+ * `auth/fastify.ts` sets `request.withTenant` on every non-public route before
+ * any preHandler runs, so on the routes below it is always present. The throw
+ * is not defensive noise — it is what keeps the `!` off the call sites, so a
+ * future route added to this file without a session fails loudly here rather
+ * than crashing inside a handler.
+ */
+function tenantOf(request: FastifyRequest): <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T> {
+  const run = request.withTenant;
+  if (!run) {
+    throw new Error(
+      "notification routes: no tenant context on an authenticated route. Every route " +
+        "in this file except the Postmark webhook requires a session; the webhook " +
+        "resolves its town from the delivery metadata instead.",
+    );
+  }
+  return run;
+}
+
+export async function notificationRoutes(app: FastifyInstance) {
   /**
    * Managing a town's notification machinery — reading delivery telemetry,
    * clearing a bounce flag, firing an event — is `manage_notification_settings`
@@ -78,13 +110,28 @@ export async function notificationRoutes(app: FastifyInstance) {
   const notificationAdmin = [app.verifyAuth, requirePermission(PERMISSIONS.C2)];
 
   // ── Postmark Webhook ───────────────────────────────────────────────
+  //
   // Public by necessity — Postmark has no session — and therefore verified by
   // the Basic credentials Postmark sends. `verifyPostmarkWebhook` REFUSES when
   // those are unconfigured; see its header for why that is not negotiable.
   //
-  // (The former `config: { rawBody: true }` is gone. Nothing registers a
-  // raw-body parser in this process, so it was inert, and it existed to
-  // support a signature check Postmark does not offer.)
+  // ─── Where its tenant comes from (Task D1c) ─────────────────────────────
+  //
+  // From `Metadata.town_id`, which this API set on the outbound message
+  // (`notification-service.ts`, `metadata: { town_id, event_id, delivery_id }`)
+  // and which Postmark echoes back. That is a value arriving in a request
+  // body, so it is treated as a HINT and never as an authorisation — exactly
+  // the way `better_auth.user_tenant` is a hint in `auth/tenant-context.ts`.
+  //
+  // What makes it safe is that the hint is USED, not trusted: every statement
+  // below runs inside `withTenant(hint)` and matches on `delivery_id`. A
+  // caller who named the wrong town updates ZERO rows, because the delivery is
+  // not visible from there — so the worst a forged pairing achieves is to do
+  // nothing, which is logged. There is no shape of it that writes another
+  // town's row.
+  //
+  // Without a usable hint the webhook is acknowledged and dropped. Postmark
+  // retries on a non-2xx and this is not a condition a retry fixes.
 
   app.post<{ Body: PostmarkWebhookBody }>(
     "/webhooks/postmark",
@@ -96,112 +143,117 @@ export async function notificationRoutes(app: FastifyInstance) {
       const body = request.body;
       const meta = body.Metadata ?? {};
       const deliveryId = meta.delivery_id;
+      const townId = meta.town_id;
 
-      if (!deliveryId) return;
+      if (!deliveryId || !UUID_RE.test(deliveryId)) return;
+      if (!townId || !UUID_RE.test(townId)) {
+        app.log.warn(
+          { deliveryId, recordType: body.RecordType },
+          "Postmark webhook carried no usable town_id in Metadata; nothing to scope the " +
+            "update to, so it is dropped rather than applied without a tenant",
+        );
+        return;
+      }
 
       try {
-        switch (body.RecordType) {
-          case "Delivery": {
-            await supabase
-              .from("notification_delivery")
-              .update({
-                status: "delivered",
-                delivered_at: body.DeliveredAt ?? new Date().toISOString(),
-              })
-              .eq("id", deliveryId);
-            break;
-          }
-
-          case "Bounce": {
-            const isHardBounce = body.Type === "HardBounce";
-            await supabase
-              .from("notification_delivery")
-              .update({
-                status: "bounced",
-                error_message: body.Description ?? body.Type ?? "Bounce",
-              })
-              .eq("id", deliveryId);
-
-            if (isHardBounce && meta.delivery_id) {
-              // Flag the subscriber to prevent future sends. subscriber_id
-              // is a person id — the bounce flag itself still lives on
-              // user_account, so this reaches it via person_id (an
-              // account-less person has no account row to flag, and
-              // therefore nothing that can bounce).
-              const { data: delivery } = await supabase
-                .from("notification_delivery")
-                .select("subscriber_id")
-                .eq("id", deliveryId)
-                .single();
-
-              if (delivery) {
-                await supabase
-                  .from("user_account")
-                  .update({
-                    email_bounced: true,
-                    email_bounced_at: new Date().toISOString(),
-                  })
-                  .eq("person_id", (delivery as { subscriber_id: string }).subscriber_id);
-              }
-            } else if (!isHardBounce) {
-              // Soft bounce — schedule retry
-              const { data: delivery } = await supabase
-                .from("notification_delivery")
-                .select("retry_count")
-                .eq("id", deliveryId)
-                .single();
-
-              const retryCount = (delivery as { retry_count: number } | null)?.retry_count ?? 0;
-              if (retryCount < 3) {
-                const nextRetryMs = retryCount === 0 ? 5 * 60 * 1000 : 30 * 60 * 1000;
-                await supabase
-                  .from("notification_delivery")
-                  .update({
-                    status: "failed",
-                    next_retry_at: new Date(Date.now() + nextRetryMs).toISOString(),
-                  })
-                  .eq("id", deliveryId);
-              }
+        await withTenant(app.tenantDb, { townId }, async (tx) => {
+          switch (body.RecordType) {
+            case "Delivery": {
+              await tx.execute(sql`
+                UPDATE notification_delivery
+                   SET status = 'delivered',
+                       delivered_at = ${body.DeliveredAt ?? new Date().toISOString()}::timestamptz
+                 WHERE id = ${deliveryId}::uuid
+              `);
+              break;
             }
-            break;
-          }
 
-          case "SpamComplaint": {
-            await supabase
-              .from("notification_delivery")
-              .update({ status: "complained" })
-              .eq("id", deliveryId);
+            case "Bounce": {
+              const isHardBounce = body.Type === "HardBounce";
+              const updated = rows<{ subscriber_id: string; retry_count: number }>(
+                await tx.execute(sql`
+                  UPDATE notification_delivery
+                     SET status = 'bounced',
+                         error_message = ${body.Description ?? body.Type ?? "Bounce"}
+                   WHERE id = ${deliveryId}::uuid
+                  RETURNING subscriber_id, retry_count
+                `),
+                "postmark webhook",
+              );
 
-            const { data: delivery } = await supabase
-              .from("notification_delivery")
-              .select("subscriber_id")
-              .eq("id", deliveryId)
-              .single();
+              const delivery = updated[0];
+              if (!delivery) {
+                app.log.warn(
+                  { deliveryId, townId },
+                  "Postmark webhook named a delivery that is not visible from the town its " +
+                    "metadata claims; no row was changed",
+                );
+                break;
+              }
 
-            if (delivery) {
+              if (isHardBounce) {
+                // Flag the subscriber to prevent future sends. `subscriber_id`
+                // is a person id — the bounce flag itself still lives on
+                // user_account, so this reaches it via person_id (an
+                // account-less person has no account row to flag, and
+                // therefore nothing that can bounce).
+                await tx.execute(sql`
+                  UPDATE user_account
+                     SET email_bounced = true, email_bounced_at = now()
+                   WHERE person_id = ${String(delivery.subscriber_id)}::uuid
+                `);
+              } else {
+                // Soft bounce — schedule retry
+                const retryCount = Number(delivery.retry_count ?? 0);
+                if (retryCount < 3) {
+                  const nextRetryMs = retryCount === 0 ? 5 * 60 * 1000 : 30 * 60 * 1000;
+                  await tx.execute(sql`
+                    UPDATE notification_delivery
+                       SET status = 'failed',
+                           next_retry_at = ${new Date(Date.now() + nextRetryMs).toISOString()}::timestamptz
+                     WHERE id = ${deliveryId}::uuid
+                  `);
+                }
+              }
+              break;
+            }
+
+            case "SpamComplaint": {
+              const updated = rows<{ subscriber_id: string }>(
+                await tx.execute(sql`
+                  UPDATE notification_delivery
+                     SET status = 'complained'
+                   WHERE id = ${deliveryId}::uuid
+                  RETURNING subscriber_id
+                `),
+                "postmark webhook",
+              );
+
+              const delivery = updated[0];
+              if (!delivery) break;
+
               // subscriber_id is a person id — see the hard-bounce branch above.
-              await supabase
-                .from("user_account")
-                .update({
-                  email_complained: true,
-                  email_complained_at: new Date().toISOString(),
-                })
-                .eq("person_id", (delivery as { subscriber_id: string }).subscriber_id);
+              await tx.execute(sql`
+                UPDATE user_account
+                   SET email_complained = true, email_complained_at = now()
+                 WHERE person_id = ${String(delivery.subscriber_id)}::uuid
+              `);
+              break;
             }
-            break;
-          }
 
-          case "Open": {
-            await supabase
-              .from("notification_delivery")
-              .update({ opened_at: body.ReceivedAt ?? new Date().toISOString() })
-              .eq("id", deliveryId);
-            break;
-          }
+            case "Open": {
+              await tx.execute(sql`
+                UPDATE notification_delivery
+                   SET opened_at = ${body.ReceivedAt ?? new Date().toISOString()}::timestamptz
+                 WHERE id = ${deliveryId}::uuid
+              `);
+              break;
+            }
 
-          default:
-            break;
-        }
+            default:
+              break;
+          }
+        });
       } catch (err) {
         app.log.error(
           { err, deliveryId, recordType: body.RecordType },
@@ -213,29 +265,25 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   // ── Admin: Summary Stats (last 30 days) ────────────────────────────
 
-  // Every read below is scoped by `town_id` in the query rather than by the
-  // database. `app.supabase` is the service-role client and bypasses RLS, so
-  // without these filters a clerk in one town would be reading every town's
-  // delivery telemetry and bounced addresses. Task D1 removes that client and
-  // makes the scoping structural; these filters are what holds until it does.
   app.get(
     "/admin/notifications/summary",
     { preHandler: notificationAdmin },
     async (request, reply) => {
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const result = await tenantOf(request)(async (tx) =>
+        rows<{ status: string }>(
+          await tx.execute(sql`
+            SELECT status FROM notification_delivery
+             WHERE created_at >= now() - interval '30 days'
+          `),
+          "notifications summary",
+        ),
+      );
 
-      const { data: deliveries } = await supabase
-        .from("notification_delivery")
-        .select("status, created_at")
-        .eq("town_id", request.user!.townId)
-        .gte("created_at", since);
-
-      const rows = (deliveries ?? []) as { status: string }[];
-      const total = rows.length;
-      const sent = rows.filter((r) => r.status !== "pending").length;
-      const delivered = rows.filter((r) => r.status === "delivered").length;
-      const bounced = rows.filter((r) => r.status === "bounced").length;
-      const complained = rows.filter((r) => r.status === "complained").length;
+      const total = result.length;
+      const sent = result.filter((r) => r.status !== "pending").length;
+      const delivered = result.filter((r) => r.status === "delivered").length;
+      const bounced = result.filter((r) => r.status === "bounced").length;
+      const complained = result.filter((r) => r.status === "complained").length;
 
       return reply.send({
         total,
@@ -251,30 +299,39 @@ export async function notificationRoutes(app: FastifyInstance) {
   );
 
   // ── Admin: Recent Events ───────────────────────────────────────────
+  //
+  // Events and their delivery counts in ONE query. The previous version read
+  // the events and then ran a `getDeliverySummary` per event — 51 round trips
+  // for a page of 50 — which was affordable only because none of it was
+  // transactional. It is one aggregate now.
 
   app.get(
     "/admin/notifications/events",
     { preHandler: notificationAdmin },
     async (request, reply) => {
-      const { data: events } = await supabase
-        .from("notification_event")
-        .select("id, event_type, payload, status, created_at, processed_at")
-        .eq("town_id", request.user!.townId)
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      if (!events) return reply.send([]);
-
-      // Attach delivery counts to each event
-      const enriched = await Promise.all(
-        (events as EventRow[]).map(async (evt) => {
-          const service = new NotificationService(supabase);
-          const summary = await service.getDeliverySummary(evt.id);
-          return { ...evt, delivery: summary };
-        }),
+      const events = await tenantOf(request)(async (tx) =>
+        rows<EventRow>(
+          await tx.execute(sql`
+            SELECT e.id, e.event_type, e.payload, e.status, e.created_at, e.processed_at,
+                   jsonb_build_object(
+                     'total',     count(d.id),
+                     'pending',   count(*) FILTER (WHERE d.status = 'pending'),
+                     'sent',      count(*) FILTER (WHERE d.status = 'sent'),
+                     'delivered', count(*) FILTER (WHERE d.status = 'delivered'),
+                     'bounced',   count(*) FILTER (WHERE d.status = 'bounced'),
+                     'failed',    count(*) FILTER (WHERE d.status = 'failed')
+                   ) AS delivery
+              FROM notification_event e
+              LEFT JOIN notification_delivery d ON d.event_id = e.id
+             GROUP BY e.id
+             ORDER BY e.created_at DESC
+             LIMIT 50
+          `),
+          "notification events",
+        ),
       );
 
-      return reply.send(enriched);
+      return reply.send(events);
     },
   );
 
@@ -285,21 +342,24 @@ export async function notificationRoutes(app: FastifyInstance) {
     { preHandler: notificationAdmin },
     async (request, reply) => {
       const { eventId } = request.params;
+      if (!UUID_RE.test(eventId)) return reply.badRequest("eventId must be a uuid");
 
-      const { data } = await supabase
-        .from("notification_delivery")
-        .select(
-          `
-          id, status, postmark_message_id, sent_at, delivered_at, opened_at,
-          error_message, retry_count, created_at,
-          person:subscriber_id (id, name, email)
-        `,
-        )
-        .eq("event_id", eventId)
-        .eq("town_id", request.user!.townId)
-        .order("created_at", { ascending: true });
+      const deliveries = await tenantOf(request)(async (tx) =>
+        rows(
+          await tx.execute(sql`
+            SELECT d.id, d.status, d.postmark_message_id, d.sent_at, d.delivered_at, d.opened_at,
+                   d.error_message, d.retry_count, d.created_at,
+                   jsonb_build_object('id', p.id, 'name', p.name, 'email', p.email) AS person
+              FROM notification_delivery d
+              LEFT JOIN person p ON p.id = d.subscriber_id
+             WHERE d.event_id = ${eventId}::uuid
+             ORDER BY d.created_at ASC
+          `),
+          "event deliveries",
+        ),
+      );
 
-      return reply.send(data ?? []);
+      return reply.send(deliveries);
     },
   );
 
@@ -309,16 +369,20 @@ export async function notificationRoutes(app: FastifyInstance) {
     "/admin/notifications/bounces",
     { preHandler: notificationAdmin },
     async (request, reply) => {
-      const { data } = await supabase
-        .from("user_account")
-        .select(
-          "id, email, display_name, email_bounced, email_bounced_at, email_complained, email_complained_at",
-        )
-        .eq("town_id", request.user!.townId)
-        .or("email_bounced.eq.true,email_complained.eq.true")
-        .order("email_bounced_at", { ascending: false });
+      const bounces = await tenantOf(request)(async (tx) =>
+        rows(
+          await tx.execute(sql`
+            SELECT id, email, display_name, email_bounced, email_bounced_at,
+                   email_complained, email_complained_at
+              FROM user_account
+             WHERE email_bounced = true OR email_complained = true
+             ORDER BY email_bounced_at DESC NULLS LAST
+          `),
+          "bounced addresses",
+        ),
+      );
 
-      return reply.send(data ?? []);
+      return reply.send(bounces);
     },
   );
 
@@ -329,22 +393,21 @@ export async function notificationRoutes(app: FastifyInstance) {
     { preHandler: notificationAdmin },
     async (request, reply) => {
       const { userId } = request.params;
-      // `supabase` here is the SERVICE-ROLE client, which bypasses RLS — so
-      // this update is not scoped to a town by the database. Scoping it here
-      // by the caller's town keeps one town's administrator from clearing
-      // another town's bounce flag by guessing a uuid. Task D1 removes the
-      // service-role client entirely and makes that structural; until then it
-      // is this line.
-      await supabase
-        .from("user_account")
-        .update({
-          email_bounced: false,
-          email_bounced_at: null,
-          email_complained: false,
-          email_complained_at: null,
-        })
-        .eq("id", userId)
-        .eq("town_id", request.user!.townId);
+      if (!UUID_RE.test(userId)) return reply.badRequest("userId must be a uuid");
+
+      // No `.eq("town_id", …)` any more. `app.town_id` is set for the length
+      // of this transaction, so an id belonging to another town matches
+      // nothing — one town's administrator cannot clear another's bounce flag
+      // by guessing a uuid, and that is now the database's guarantee rather
+      // than this line's.
+      await tenantOf(request)(async (tx) => {
+        await tx.execute(sql`
+          UPDATE user_account
+             SET email_bounced = false, email_bounced_at = NULL,
+                 email_complained = false, email_complained_at = NULL
+           WHERE id = ${userId}::uuid
+        `);
+      });
 
       return reply.send({ ok: true });
     },
@@ -371,20 +434,22 @@ export async function notificationRoutes(app: FastifyInstance) {
 
     const { endpoint, keys, userAgent } = parsed.data;
 
-    const { error } = await supabase.from("push_subscription").upsert(
-      {
-        user_account_id: request.user!.id,
-        endpoint,
-        p256dh: keys.p256dh,
-        auth: keys.auth,
-        user_agent: userAgent ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_account_id,endpoint" },
-    );
-
-    if (error) {
-      app.log.error({ error }, "Failed to save push subscription");
+    try {
+      await tenantOf(request)(async (tx) => {
+        await tx.execute(sql`
+          INSERT INTO push_subscription
+                 (user_account_id, endpoint, p256dh, auth, user_agent, updated_at)
+          VALUES (${request.user!.id}::uuid, ${endpoint}, ${keys.p256dh}, ${keys.auth},
+                  ${userAgent ?? null}, now())
+          ON CONFLICT (user_account_id, endpoint)
+          DO UPDATE SET p256dh = EXCLUDED.p256dh,
+                        auth = EXCLUDED.auth,
+                        user_agent = EXCLUDED.user_agent,
+                        updated_at = now()
+        `);
+      });
+    } catch (err) {
+      app.log.error({ err }, "Failed to save push subscription");
       return reply.internalServerError("Failed to save subscription");
     }
 
@@ -404,11 +469,13 @@ export async function notificationRoutes(app: FastifyInstance) {
         return reply.badRequest("Missing endpoint");
       }
 
-      await supabase
-        .from("push_subscription")
-        .delete()
-        .eq("user_account_id", request.user!.id)
-        .eq("endpoint", endpoint);
+      await tenantOf(request)(async (tx) => {
+        await tx.execute(sql`
+          DELETE FROM push_subscription
+           WHERE user_account_id = ${request.user!.id}::uuid
+             AND endpoint = ${endpoint}
+        `);
+      });
 
       return reply.code(204).send();
     },
@@ -420,13 +487,14 @@ export async function notificationRoutes(app: FastifyInstance) {
   // `NotificationService` turns into email to every subscriber of a town, from
   // that town's own sending domain. It was unauthenticated, and it took
   // `town_id` from the request body — so an anonymous caller could name any
-  // town and any payload. The payload becomes the template variables (see
-  // `notification-service.ts`, `variables = { ...payload, … }`), which is the
-  // other half of the `admin-alert.hbs` triple-stash this task also closed.
+  // town and any payload.
   //
-  // `town_id` in the body is now checked against the caller's town rather than
-  // trusted. Rejecting a mismatch rather than silently overriding it means a
-  // caller that believes it is addressing another town finds out.
+  // Task D1c removed the parameter rather than checking it. The service is
+  // constructed from a `TenantJob` built out of the resolved session, so there
+  // is no second place to state the town and therefore nothing for a body
+  // field to disagree with. A body that still names one is refused rather than
+  // silently overridden, so a caller that believes it is addressing another
+  // town finds out.
 
   app.post<{
     Body: {
@@ -436,7 +504,7 @@ export async function notificationRoutes(app: FastifyInstance) {
     };
   }>("/notifications/events", { preHandler: notificationAdmin }, async (request, reply) => {
     const { event_type, town_id, payload } = request.body ?? {};
-    const callerTownId = request.user!.townId;
+    const callerTownId = request.tenant!.townId;
 
     if (town_id && town_id !== callerTownId) {
       return reply.forbidden("Cannot create a notification event for another town");
@@ -445,8 +513,8 @@ export async function notificationRoutes(app: FastifyInstance) {
       return reply.badRequest("event_type is required");
     }
 
-    const service = new NotificationService(supabase);
-    const eventId = await service.createNotificationEvent(event_type, callerTownId, payload ?? {});
+    const service = new NotificationService(tenantJob(app.tenantDb, callerTownId));
+    const eventId = await service.createNotificationEvent(event_type, payload ?? {});
     return reply.status(201).send({ event_id: eventId });
   });
 }

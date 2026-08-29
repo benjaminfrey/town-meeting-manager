@@ -99,7 +99,22 @@ export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlo
   };
 
   // ─── Step 3: Apply board-specific permissions ───────────────────────
+  //
+  // The value is computed ONCE and both stored and handed on. It used to queue
+  // `setPermissions(prev => ({...prev, board_overrides}))` and then call
+  // `onComplete({ permissions })` reading the CURRENT render's state — which
+  // does not contain the overrides just computed, because a state update
+  // queued in an event handler is not visible until the next render. So every
+  // account created from a `designated_boards` template was persisted with
+  // global all-false AND an empty `board_overrides`: the grants were built,
+  // queued, and thrown away. That is half of why those two templates have
+  // never worked (the other half was the API resolving their codes globally),
+  // and it has been live since 7d3aad6, 2026-03-10.
+  //
+  // `setPermissions` is kept so the component's own state stays truthful if
+  // the user steps back; it is `onComplete` that must not read state back.
   const handleBoardSelectionComplete = () => {
+    let result = permissions;
     if (selectedTemplate?.scope === "designated_boards") {
       const templatePerms = buildPermissionsFromTemplate(selectedTemplate);
       const overrides = selectedBoardIds.map((boardId) => ({
@@ -111,9 +126,10 @@ export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlo
             {} as Partial<Record<PermissionAction, boolean>>,
           ),
       }));
-      setPermissions((prev) => ({ ...prev, board_overrides: overrides }));
+      result = { ...permissions, board_overrides: overrides };
+      setPermissions(result);
     }
-    onComplete({ permissions, gov_title: govTitle.trim() });
+    onComplete({ permissions: result, gov_title: govTitle.trim() });
   };
 
   // ─── Step 2 complete ───────────────────────────────────────────────

@@ -40,17 +40,27 @@
  * `request` carries no raw database handle, so nothing reached THROUGH THIS
  * BRIDGE can query outside a tenant context.
  *
- * It is not yet true that a route has no other way to reach the database, and
- * this comment should not be read as saying so. `plugins/supabase.ts`
- * decorates the Fastify instance with a SERVICE-ROLE Supabase client, which
- * bypasses RLS entirely, and it is reachable from any handler as
- * `request.server.supabase` — all five existing route files use exactly that.
- * `createAppDb()` is also exported and can be called again.
+ * ─── As of Task D1f it is also the ONLY path ──────────────────────────────
  *
- * Task D1 is what makes the strong statement true, by removing
- * `supabasePlugin` once the routes that depend on it have moved onto
- * `request.tenant`. Until then this is the tenant-safe path, not the only
- * path, and the difference is worth more than the tidier sentence.
+ * This paragraph used to say the opposite, and said it deliberately:
+ * `plugins/supabase.ts` decorated the Fastify instance with a SERVICE-ROLE
+ * Supabase client that bypassed RLS entirely, reachable from any handler as
+ * `request.server.supabase`, and all five legacy route files used exactly
+ * that. D1 declined to remove it because doing so meant rewriting those files
+ * AND replacing Supabase Storage, which held every generated PDF and which
+ * nothing in the repository could then replace.
+ *
+ * Both halves are done. D1e built the two storage roots
+ * (`src/storage/`), and D1b, D1c and D1f moved every route and service onto
+ * `withTenant` or a `TenantJob`. `plugins/supabase.ts` is deleted, and
+ * `@supabase/supabase-js` is imported nowhere in `src/` outside tests.
+ *
+ * What remains true and worth stating: `createAppDb()` is still exported and
+ * can be called again, so "no handler can obtain a raw handle" is a property
+ * of the code as written rather than one the type system enforces. What the
+ * types DO enforce is that nothing is HANDED one — not `request`, not
+ * `trpc/context.ts`, and not `TenantJob`, which carries a town and a `run` and
+ * nothing else.
  *
  * ─── The failure modes, and what each does ────────────────────────────────
  *
@@ -95,6 +105,21 @@
  * whose account is mid-migration get a 403 from a page that is supposed to
  * work for people with no account at all. No public route reads
  * `request.tenant`; a future one that wants to must ask for it explicitly.
+ *
+ * ─── Task D1b: one public route family DOES establish a tenant ────────────
+ *
+ * `routes/portal.ts` installs an `onRequest` hook in its own encapsulated
+ * scope that resolves `X-Town-Subdomain` to a town and binds
+ * `request.withTenant` — so the public portal's queries run under RLS instead
+ * of on the service-role client. It sets `request.portalTenant`, deliberately
+ * NOT `request.tenant`: the portal's town is chosen by the caller, and code
+ * meaning "the caller's own town" must not silently accept "a town the caller
+ * named". `auth/portal-tenant.ts` states that boundary and the constraint it
+ * imposes — a route may use that binding only if every row it can return is
+ * gated by a `portalCanSelect*` publication predicate.
+ *
+ * That hook lives in the portal's scope rather than here, so it cannot reach a
+ * route in any other file, and this gate is unchanged by it.
  *
  * ─── Why the gate is an `onRequest` hook and not a `preHandler` ───────────
  *
@@ -165,9 +190,11 @@ declare module "fastify" {
     /**
      * Run a unit of work scoped to this request's town.
      *
-     * The tenant-safe path — not, today, the only path: `request.server.supabase`
-     * is a service-role client that bypasses RLS, and Task D1 removes it. See
-     * this file's header.
+     * Since Task D1f this is how every route reaches the database. The
+     * service-role bypass it used to share the job with (`request.server.supabase`)
+     * is gone with `plugins/supabase.ts`. Background work, which has no
+     * request to hang this on, uses `TenantJob` instead — same guarantee,
+     * different entry point. See this file's header.
      */
     withTenant?: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
   }

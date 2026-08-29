@@ -108,6 +108,16 @@ async function errorFrom(response: Response): Promise<ApiError> {
 export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
   /** Serialised as JSON with the matching content type. */
   json?: unknown;
+  /**
+   * A multipart body — file uploads (Stage 1, Task D1e: town seals, exhibits).
+   *
+   * Deliberately NOT a general `body`. A `FormData` is the only non-JSON body
+   * this application sends, and the `Content-Type` header is deliberately left
+   * unset for it: the browser has to add the multipart boundary itself, and a
+   * hand-set `multipart/form-data` without one produces a body the server
+   * cannot parse. Naming the case here means no call site has to know that.
+   */
+  formData?: FormData;
 }
 
 /**
@@ -118,13 +128,16 @@ export interface ApiFetchOptions extends Omit<RequestInit, "body"> {
  * call site has to remember to.
  */
 export async function apiFetch(path: string, options: ApiFetchOptions = {}): Promise<Response> {
-  const { json, headers, ...rest } = options;
+  const { json, formData, headers, ...rest } = options;
 
   const finalHeaders = new Headers(headers);
   let body: BodyInit | undefined;
   if (json !== undefined) {
     body = JSON.stringify(json);
     if (!finalHeaders.has("Content-Type")) finalHeaders.set("Content-Type", "application/json");
+  } else if (formData !== undefined) {
+    body = formData;
+    // No Content-Type: see `ApiFetchOptions.formData`.
   }
 
   return fetch(apiUrl(path), {

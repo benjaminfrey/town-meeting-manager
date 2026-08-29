@@ -43,8 +43,13 @@ docker/volumes/db/data/
 docker/volumes/storage/
 docker/.env
 
-# Claude Code
-.claude/
+# Claude Code. Note this excludes the CONTENTS, not the directory itself:
+# `.claude/` would stop git descending at all, and a negation cannot re-include
+# a file whose parent directory was excluded.
+.claude/*
+# ...except workflow definitions, which are project tooling and must be tracked.
+# They have to live under .claude/workflows/ to stay invocable by name.
+!.claude/workflows/
 
 # Misc
 *.tgz

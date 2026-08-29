@@ -29,12 +29,27 @@
 import { describe, it, expect } from "vitest";
 import { withTestDb } from "../../test/db-harness.js";
 
-// The single policy in the schema that is not a `<table>_tenant_isolation`
-// policy, and why it is allowed to exist. Anything else must fail.
+// The policies in the schema that are not a `<table>_tenant_isolation` policy,
+// and why each is allowed to exist. Anything else must fail.
+//
+// This registry is the whole point of the check: an extra policy is how a
+// tenancy model is widened without anyone noticing, so adding one has to mean
+// writing down here what it opens and to whom. A reviewer reads this list, not
+// the migrations.
 const EXTRA_POLICIES: Record<string, string> = {
   permission_template_system_defaults_readable:
     "permission_template holds five system-default rows with town_id IS NULL " +
     "that every town reads and no town may write. Read-only, SELECT only.",
+  town_portal_subdomain_lookup:
+    "Task D1b. SELECT only, on `town`. Lets a SESSIONLESS public-portal " +
+    "request turn a subdomain into a town id before any tenant context " +
+    "exists — the same circularity better_auth.user_tenant breaks for " +
+    "identities. Reaches exactly one row (town_subdomain_key is unique), only " +
+    "in a transaction that set app.portal_subdomain with SET LOCAL, and never " +
+    "a town whose subdomain is NULL. The row it exposes is the address of the " +
+    "town's public website. Everything behind the tenant context it produces " +
+    "is filtered to published rows by the portalCanSelect* predicates; see " +
+    "drizzle/0003_portal_tenant.sql § 1 and src/auth/portal-tenant.ts.",
 };
 
 // Every table the baseline creates, in `ORDER BY relname`. Deliberately
