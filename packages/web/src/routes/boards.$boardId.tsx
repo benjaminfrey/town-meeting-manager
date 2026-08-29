@@ -273,7 +273,12 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
         />
       )}
       {archiveOpen && (
-        <ArchiveBoardDialog board={board} open={archiveOpen} onOpenChange={setArchiveOpen} />
+        <ArchiveBoardDialog
+          board={board}
+          townId={townId ?? ""}
+          open={archiveOpen}
+          onOpenChange={setArchiveOpen}
+        />
       )}
 
       {/* Breadcrumb */}

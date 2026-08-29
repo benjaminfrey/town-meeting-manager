@@ -11,8 +11,22 @@
  */
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
 import { queryClient } from "./queryClient";
+
+/**
+ * The server's real output shapes, for props and locals that used to be
+ * `Record<string, unknown>` because they came from `select("*")`.
+ *
+ * That escape hatch is what let Task 4's `ArchiveBoardDialog` regression
+ * through: `board.town_id` compiled fine against `Record<string, unknown>`
+ * even after `board.detail`'s explicit column list stopped selecting
+ * `town_id`, so the bug only showed up at runtime (an empty-string town id
+ * silently invalidating the wrong cache entry). `RouterOutputs["board"]["detail"]`
+ * has no `town_id` key at all — the same mistake is a compile error now.
+ */
+export type RouterOutputs = inferRouterOutputs<AppRouter>;
 
 export const trpcClient = createTRPCClient<AppRouter>({
   links: [

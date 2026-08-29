@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import type { RouterOutputs } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 import { BoardListSkeleton } from "@/components/skeletons";
 
@@ -129,7 +130,15 @@ export default function BoardListPage(_props: Route.ComponentProps) {
         <EditBoardDialog
           townId={townId}
           town={town}
-          board={editBoard}
+          // This page still reads `board` off Supabase's untyped client
+          // (`select("*")`, not `board.detail`), so there is no router type
+          // to infer the object from here the way boards.$boardId.tsx now
+          // can — hence the explicit cast rather than a plain
+          // `Record<string, unknown>` prop. Not a widening of the dialog's
+          // contract: every field the dialog reads really is present in a
+          // `select("*")` row, including `town_id` if ArchiveBoardDialog
+          // below ever needed it again.
+          board={editBoard as RouterOutputs["board"]["detail"]}
           open={!!editBoard}
           onOpenChange={(open) => {
             if (!open) setEditBoard(null);
@@ -138,7 +147,8 @@ export default function BoardListPage(_props: Route.ComponentProps) {
       )}
       {archiveBoard && (
         <ArchiveBoardDialog
-          board={archiveBoard}
+          board={archiveBoard as RouterOutputs["board"]["detail"]}
+          townId={townId}
           open={!!archiveBoard}
           onOpenChange={(open) => {
             if (!open) setArchiveBoard(null);

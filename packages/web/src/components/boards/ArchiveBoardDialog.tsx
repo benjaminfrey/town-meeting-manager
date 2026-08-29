@@ -10,6 +10,7 @@ import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -25,20 +26,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 interface ArchiveBoardDialogProps {
-  board: Record<string, unknown>;
+  board: RouterOutputs["board"]["detail"];
+  /**
+   * The caller's own town id — NOT read off `board`. `board.detail`'s
+   * explicit column list does not select `town_id` (see its doc comment),
+   * so a board-shaped `town_id` read silently produced `""` here before this
+   * prop existed, which invalidated `["boards","byTown",""]` instead of the
+   * real list key and made a freshly archived board keep appearing on
+   * `/boards` for up to a minute. The caller already has this value from
+   * `useCurrentUser()`.
+   */
+  townId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function ArchiveBoardDialog({ board, open, onOpenChange }: ArchiveBoardDialogProps) {
+export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: ArchiveBoardDialogProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState("");
 
-  const boardId = String(board.id);
-  const boardName = String(board.name ?? "");
-  const townId = String(board.town_id ?? "");
+  const boardId = board.id;
+  const boardName = board.name;
   const isConfirmed = confirmation === boardName;
 
   const archiveMutation = useMutation({
@@ -67,6 +77,12 @@ export function ArchiveBoardDialog({ board, open, onOpenChange }: ArchiveBoardDi
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      // `queryKeys.boards.detail` no longer reaches BoardDetailPage's read —
+      // that screen's board.detail/stats query keys are tRPC's own now.
+      // Both invalidations stay: unmigrated screens can still be keyed off
+      // the legacy factory, and the writer should not need to know which of
+      // `board`'s procedures a given screen happens to call.
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       onOpenChange(false);
       setConfirmation("");
       void navigate("/boards");
