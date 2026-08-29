@@ -403,12 +403,30 @@ output are inferred from the procedure. Both halves verified by mutation:
 | `name:` → `nayme:` in the payload | `TS2322: Property 'name' is missing ...`                                               |
 | `"board.stats"` → `"board.statz"` | `TS2353: '"board.statz"' does not exist in type 'Partial<{ ... "board.detail" ... }>'` |
 
+**The binding is not total, and the gap runs one way.** A missing or misspelled field is rejected;
+an **extra** one is not. This compiles clean:
+
+```ts
+"board.stats": () => ({ active_members: 3, meetings: 7, bogus: 1 }),
+```
+
+Excess-property freshness is lost through the `Partial<>` and conditional mapping `TestHandlers` is
+built from. So read a green typecheck as **"nothing the procedure returns is missing"**, not "this
+payload is exactly the procedure's shape".
+
+Left as-is deliberately, and the reasoning is here so it does not get re-litigated: closing it
+would cost either the `Partial<>` (every file would then have to supply a handler for every
+procedure on the router) or the inference itself. And the failure mode is benign — a component
+reads its fields through `queryOptions()`, whose type is the real `inferProcedureOutput`, not the
+mock's shape. An extra key in a handler is invisible to the component and cannot make a failing
+assertion pass.
+
 Because the real proxy runs, the query keys are real, and the assertion that was impossible before
 is now routine:
 
 ```tsx
+// `stub` and `server` come from the module-scope install shown above.
 it("refetches when a writer invalidates trpc.board.pathFilter()", async () => {
-  const stub = installStub();
   renderRoute("b1");
   expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
   const before = stub.countFor("board.detail");
