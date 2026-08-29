@@ -561,10 +561,17 @@ A screen that fails silently is the condition this phase exists to end.
 Run: `cd packages/web && npx vitest run src/routes/__tests__/boards.\$boardId.test.tsx`
 Expected: PASS, both cases.
 
-- [ ] **Step 5: Confirm the screen no longer references Supabase**
+- [ ] **Step 5: Confirm only the two deliberately-kept Supabase reads remain**
 
 Run: `grep -n supabase packages/web/src/routes/boards.\$boardId.tsx`
-Expected: no output.
+Expected: NOT zero output. This screen keeps two Supabase reads on purpose — town settings (the
+Overview "effective settings" rows, and the defaults passed to `EditBoardDialog` /
+`MinutesWorkflowEditor`) and the agenda template count — because no `town.detail` or
+`agendaTemplate` router exists yet. Confirm each surviving reference is one of those two, and that
+a `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard` marker sits above them
+(conventions item 11) so a completeness sweep can find the gap by grep rather than reading the
+file. `board.detail` / `board.stats` / `board.recentMeetings` — the three reads this task migrates
+— must be gone; only the town and agenda-template reads may remain.
 
 - [ ] **Step 6: Run every gate and commit**
 
@@ -660,5 +667,5 @@ git commit -m "Write down the conventions the rest of Phase E copies"
 ## Self-review notes
 
 - **Spec coverage.** This plan covers the spec's unit 0 only. Waves 1–6, the SSE transport, the 8 `hasPermission` display fixes, and the definition-of-done removal of `lib/supabase.ts` are **not** covered here by design — the spec requires unit 0 be reviewed before they start, and detailing 80 files against an unproven template would be planning against a shape that does not exist. Each wave gets its own plan, written after this one lands.
-- **Known gap, deliberate.** `boards.$boardId.tsx` has tabs (Overview, Members, Meetings, Templates, Settings) whose other tabs make their own calls. This unit migrates the Overview data only; the remaining tabs belong to wave 2. The screen will import `trpc` and, briefly, nothing else — verify no `supabase` import survives in this file even though sibling files still have theirs.
+- **Known gap, deliberate.** `boards.$boardId.tsx` has tabs (Overview, Members, Meetings, Templates, Settings) whose other tabs make their own calls. This unit migrates the Overview data only; the remaining tabs belong to wave 2. The screen imports both `trpc` and `@/lib/supabase` — dropping the town-settings and agenda-template-count reads instead of migrating them would be a feature regression (see Task 4 step 5), so those two stay on Supabase, each marked `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard`, until wave 2 adds the routers they need.
 - **Prerequisite.** D1f must land first. It is migrating `routes/minutes.ts`, `routes/documents.ts` and `services/minutes-assembler.ts` and deletes `plugins/supabase.ts`; starting unit 0 against a moving API is avoidable churn.

@@ -466,12 +466,12 @@ export function NoticeTemplateEditor({
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
       // The legacy key above no longer reaches BoardDetailPage's tRPC-backed
       // board.detail read (see ArchiveBoardDialog's matching comment) —
       // without this, saving here and navigating back to the board within
       // the 60s staleTime window would show the pre-save blocks again.
-      queryClient.invalidateQueries(trpc.board.pathFilter());
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       setDirty(false);
     },
   });

@@ -35,8 +35,8 @@ export type AppRouter = typeof appRouter;
 ```
 
 **Never `SELECT *`.** List the columns the screen reads, and say in the doc comment where you
-checked. `board.detail` names its 20 columns and cites the two line ranges of the screen it was
-derived from:
+checked — **by symbol or tab, never by line number.** `board.detail` names its 20 columns and, as
+written today, cites the tab and the mapping it was checked against:
 
 ```ts
 // packages/api/src/trpc/routers/board.ts
@@ -63,6 +63,15 @@ An explicit list means a schema change that drops a column this screen depends o
 query, not as `undefined` deep inside a settings form. It also makes omissions deliberate and
 documented — `board.detail` leaves out `board_type` because nothing on that screen reads it, and
 says so. Add it back the day something does.
+
+**Do not cite a line range.** `board.detail` and `board.recentMeetings` both did, at
+`boards.$boardId.tsx:215-228`/`:603-616` and `:163-167`. By the time this was reviewed, Task 4 had
+already rewritten that screen once and both citations pointed at the wrong code — one at an
+unrelated Supabase query, the other split across a loading branch and an unrelated mapping. A line
+range is correct only until the cited file's next edit, and this document exists because every one
+of ~80 wave migrations edits the file it cites. Point at a symbol (`const b = { ... }`, a component
+name) or a tab (`activeTab === "meetings"`) instead — either survives a rewrite that a line number
+cannot.
 
 Casts in SQL are load-bearing and belong in a comment. `postgres.js` returns `count(*)` as the
 **string** `"0"`, so `board.stats` casts `::int` — and its test asserts `typeof`, not just the
@@ -261,15 +270,16 @@ expect(procedures).toEqual(
     "board.detail",
     "board.recentMeetings",
     "board.stats",
+    "permissions",
     "town.portalAddress",
+    "town.setPortalAddress",
     "whoami",
     /* yours */
   ]),
 );
 ```
 
-Note `arrayContaining` pins only what it names: `permissions` and `town.setPortalAddress` are
-real router surface and currently unpinned. Grow the list as you add procedures.
+Note `arrayContaining` pins only what it names. Grow the list as you add procedures.
 
 ---
 
@@ -459,8 +469,16 @@ await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).
 ```
 
 Verified by mutation: deleting `ArchiveBoardDialog`'s `pathFilter()` line turns this red.
-`EditBoardDialog`, `NoticeTemplateEditor` and `MinutesWorkflowEditor` still have **no such pin** —
-whichever wave migrates each one owns writing it.
+`EditBoardDialog`, `NoticeTemplateEditor` and `MinutesWorkflowEditor` now have the same pin, in
+`__tests__/EditBoardDialog.test.tsx`, `__tests__/NoticeTemplateEditor.test.tsx` and
+`__tests__/MinutesWorkflowEditor.test.tsx` — all three verified the same way: delete the
+`pathFilter()` line, watch the new test go red, restore it.
+
+**Write the pin the same commit a writer's `pathFilter()` call lands, not on a later wave.** These
+four calls already exist and already serve an already-migrated screen; deferring the pin to
+"whichever wave migrates \[the screen]" is what let a reviewer delete one and get 947 green tests
+in the meantime. A wave that adds a new writer against an already-migrated read owes it the pin in
+the same commit, for the identical reason.
 
 ### The floor
 
@@ -530,11 +548,31 @@ publishes its own `AuthContext`, created in `test/mocks/auth-mock.ts`. `useCurre
 `useAuth()` from `@/providers/AuthProvider`, which reads a **different** context object. Passing
 `user:` configures a context the component under test never reads.
 
-This is not a hypothesis. Of the 14 files that call `renderWithProviders`, not one reaches
-`useCurrentUser` through `MockAuthProvider`: the files that depend on identity mock the hook
-(9 repo-wide), and the 3 that also mock `@/providers/AuthProvider` return a literal from `useAuth`
-rather than routing to `useMockAuth`. `useMockAuth` has **zero callers** outside its own module.
-`MockAuthProvider` is inert everywhere it is used.
+This is not a hypothesis. Quoting the greps rather than the bare numbers, because the bare numbers
+are exactly what drifted here — twice, in two different documents, disagreeing with each other and
+with the tree:
+
+```
+$ grep -rl "renderWithProviders(" packages/web/src | grep -v test/render.ts | wc -l
+17
+$ grep -rl 'vi.mock("@/hooks/useCurrentUser"' packages/web/src | grep -v test/render.ts | wc -l
+8
+$ grep -rl 'vi.mock("@/hooks/useCurrentUser"' packages/web/src | grep -v test/render.ts \
+    | xargs grep -l 'vi.mock("@/providers/AuthProvider"' | wc -l
+3
+```
+
+The second grep, run unfiltered against `test/render.ts`, answers 9 — that file's own doc comment
+above quotes the `vi.mock` call as prose, and a bare grep cannot tell a comment from code. Exclude
+it. (The first grep needs the same exclusion for the same reason: `render.ts` also quotes
+`renderWithProviders(...)` in its own doc comments and defines the function itself, so it matches
+without being a caller.)
+
+Of the 17 files that call `renderWithProviders`, not one reaches `useCurrentUser` through
+`MockAuthProvider`: the files that depend on identity mock the hook directly (8 repo-wide), and the
+3 that also mock `@/providers/AuthProvider` return a literal from `useAuth` rather than routing to
+`useMockAuth`. `useMockAuth` has **zero callers** outside its own module. `MockAuthProvider` is
+inert everywhere it is used — see the Known gaps entry below for what "everywhere" is countable as.
 
 The rule for Phase E is therefore one mechanism, the one that works:
 
@@ -544,8 +582,7 @@ vi.mock("@/hooks/useCurrentUser", () => ({
 }));
 ```
 
-Do not add a second. (Retiring `MockAuthProvider` entirely is worth doing, but it touches 13 files
-across five waves' territory and was not done here.)
+Do not add a second. (Retiring `MockAuthProvider` entirely is worth doing, and was not done here.)
 
 ---
 
@@ -690,12 +727,19 @@ runs.
 
 ## Known gaps this document does not close
 
-- `EditBoardDialog`, `NoticeTemplateEditor` and `MinutesWorkflowEditor` have their `pathFilter()`
-  calls but no test pinning them. Deleting any of those three lines is still green. The wave that
-  migrates each screen writes the pin.
 - The board-scoped authorization form in item 2 is transcribed from `rules.ts` and `trpc.ts`, not
   exercised — no procedure calls `requireBoardPermission` yet.
 - `TestHandlers` rejects a missing field but accepts an extra one (item 8).
-- `MockAuthProvider` remains inert in 13 files. Item 9 rules on which mechanism to use; it does
-  not remove the other one.
+- `MockAuthProvider` is directly named in 4 files (`grep -rl "MockAuthProvider" packages/web/src`:
+  `test/render.ts` and `test/mocks/auth-mock.ts`, where it is defined and wraps every render, plus
+  `PermissionGate.test.tsx` and `boards.$boardId.test.tsx`, the two tests that reach it by name). It
+  is inert in all of them per item 9. The other `renderWithProviders` callers receive it too, just
+  implicitly — `render.ts` wraps every render in it unconditionally — so retiring it touches every
+  caller, not only the 4 that name it.
 - `router-wiring.test.ts` pins only the procedure names it lists.
+- `boards.$boardId.tsx` still reads two things through `@/lib/supabase` because no procedure exists
+  for them yet: town settings (the Overview "effective settings" rows, and the defaults passed to
+  `EditBoardDialog`/`MinutesWorkflowEditor`) and the agenda template count. Both are marked with
+  `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard` in that file (item 11) — the
+  screen still owes a `town.detail` router and an `agendaTemplate` router before the last two
+  Supabase reads leave it.

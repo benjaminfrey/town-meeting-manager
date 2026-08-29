@@ -43,10 +43,15 @@ export const boardRouter = router({
   /**
    * Every column `packages/web/src/routes/boards.$boardId.tsx` reads off a
    * board row, once Task 4 replaces its `select("*")` with this procedure —
-   * checked at `:215-228` (overview) and `:603-616` (settings tab). Not
-   * `SELECT *`: an explicit list means a schema change that removes a column
-   * this screen depends on fails here, at the query, instead of silently
-   * producing `undefined` deep inside a settings form.
+   * checked against the `const b = { ... }` mapping (Overview tab) and the
+   * `<NoticeTemplateEditor>` / `<MinutesWorkflowEditor>` props built in the
+   * `activeTab === "settings"` block. Cited by symbol and tab, not line
+   * number: Task 4 already rewrote this screen once since this comment was
+   * first written, which is exactly why a line-range citation does not
+   * survive — see conventions item 1. Not `SELECT *`: an explicit list means
+   * a schema change that removes a column this screen depends on fails here,
+   * at the query, instead of silently producing `undefined` deep inside a
+   * settings form.
    *
    * `board_type` is deliberately excluded: it is a real column, but nothing
    * in that screen reads it today. Add it back the day something does.
@@ -120,14 +125,14 @@ export const boardRouter = router({
     }),
 
   /**
-   * Mirrors `packages/web/src/routes/boards.$boardId.tsx:163-167`'s query,
-   * which is a specification even though the screen currently renders
-   * nothing with it: `.neq("status", "cancelled")`, ordered by
-   * `scheduled_date` descending, capped at 5. `scheduled_time` is selected
-   * there but never rendered, so it is dropped from the SELECT list here —
-   * but NOT from the ORDER BY: `scheduled_date` is a DATE, so two meetings on
-   * the same day would otherwise come back in an arbitrary, unstable order.
-   * `id` breaks any remaining tie deterministically.
+   * The query behind the "Meetings" tab (`activeTab === "meetings"`) in
+   * `packages/web/src/routes/boards.$boardId.tsx`: excludes
+   * `status = 'cancelled'`, ordered by `scheduled_date` descending, capped at
+   * 5. `scheduled_time` is not in the SELECT list — the screen never renders
+   * it — but it stays in the ORDER BY: `scheduled_date` is a DATE, so two
+   * meetings on the same day would otherwise come back in an arbitrary,
+   * unstable order. `id` breaks any remaining tie deterministically. Cited by
+   * tab, not line number — see conventions item 1.
    */
   recentMeetings: protectedProcedure
     .input(
