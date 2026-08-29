@@ -33,3 +33,12 @@ export {
   type MeetingCreationValidation,
   type MeetingValidationError,
 } from "./meeting-validation.js";
+
+export {
+  checkSubdomain,
+  normaliseSubdomain,
+  RESERVED_SUBDOMAINS,
+  SUBDOMAIN_MAX_LENGTH,
+  type SubdomainCheck,
+  type SubdomainRejection,
+} from "./subdomain.js";

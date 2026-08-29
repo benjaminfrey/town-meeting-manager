@@ -1,44 +1,86 @@
 /**
  * Public portal routes — no authentication required.
  *
- * These endpoints serve the public-facing portal for towns,
- * providing access to meetings, agendas, minutes, boards, and calendars.
+ * These endpoints serve the public-facing portal for towns, providing access
+ * to meetings, agendas, minutes, boards and calendars.
  *
- * All queries enforce town_id filtering for multi-tenant isolation.
+ * ─── Task G1: why every route here says `PUBLIC` out loud ─────────────────
  *
- * ─── Task G1: why every route here now says so out loud ───────────────────
- *
- * These fifteen routes were unauthenticated because nothing required them to
- * be authenticated, which is the same reason ten routes in
+ * These routes were unauthenticated because nothing required them to be
+ * authenticated, which is the same reason ten routes in
  * `routes/notifications.ts` were — and those were a hole. Under
- * deny-by-default (see `auth/route-access.ts`) the two cases stop looking
- * alike: this file's routes are public because each one says
- * `config: { ...PUBLIC }`, and a route that says nothing is refused.
+ * deny-by-default (`auth/route-access.ts`) the two cases stop looking alike:
+ * this file's routes are public because each one says `config: { ...PUBLIC }`,
+ * and a route that says nothing is refused.
  *
- * All fifteen were re-read against that bar rather than inherited. Each is a
- * GET; none mutates anything; each is scoped to a `:townId` from the path (or
- * to a subdomain lookup) and returns only material a town is publishing to
- * residents: meetings excluding `draft` and `cancelled`, agendas only when
- * `agenda_status = 'published'`, minutes only when `status = 'published'`,
- * public-visibility exhibits only, and boards that are not archived. Two —
- * `/resolve`, `/sitemap`, `/robots` — carry no town in the path and resolve
- * one from a subdomain instead.
+ * ─── Task D1b: what changed, and why both halves were needed ──────────────
  *
- * The two that hand out signed storage URLs (`…/minutes/pdf`, `…/agenda/pdf`)
- * are the ones worth naming: they mint a one-hour signed URL, so the
- * publication check in front of them is doing real work, and both perform it
- * before signing.
+ * Until D1b every route in this file ran on `fastify.supabase` — the
+ * SERVICE-ROLE client, which bypasses row level security entirely. Tenancy was
+ * a hand-written `.eq("town_id", townId)` on each query, against a `townId`
+ * taken from the URL, and publication was a second hand-written filter next to
+ * it. Fifteen routes, roughly forty queries, and every one of them one
+ * forgotten `.eq()` away from publishing another town's rows or this town's
+ * drafts. `/:townId/meetings/:meetingId/agenda` had already lost one: it
+ * checked `agenda_status = 'published'` and never excluded `draft` or
+ * `cancelled` meetings the way its siblings did, so a cancelled meeting's
+ * agenda was still served.
  *
- * One is worth a second look by the owner rather than by this task:
- * `/:townId/boards/:boardId` returns every active member's name, seat title
- * and term dates. That is public record for an elected or appointed municipal
- * board in Maine and is the same list a town prints on its website — but it is
- * the only personal data on this surface, and if a town ever wants it
- * withheld, this is the route to gate.
+ * Two separate things now hold, and NEITHER is sufficient alone:
+ *
+ *   1. **Tenancy is RLS.** An `onRequest` hook in this file's own encapsulated
+ *      scope resolves `X-Town-Subdomain` to exactly one town and binds
+ *      `request.withTenant`, so every query below runs inside a transaction
+ *      with `app.town_id` set. A row of another town is not filtered out — it
+ *      is not visible. See `auth/portal-tenant.ts`, including its statement of
+ *      what the header is and is not trusted to be.
+ *
+ *   2. **Publication is the `portalCanSelect*` predicates.** RLS says nothing
+ *      about drafts: within one town it would hand the public every
+ *      unpublished agenda and every unadopted set of minutes. So the rules in
+ *      `trpc/authorization/rules.ts` do that filtering, in TypeScript, in one
+ *      place, and this file calls them.
+ *
+ * The filtering is deliberately NOT also written into the SQL. A duplicated
+ * `WHERE status <> 'draft'` would keep the routes correct while making the
+ * predicate untestable — `scripts/mutate-authorization.py` replaces each
+ * predicate's body with `return true` and expects a test to go red, and a
+ * belt-and-braces SQL filter would keep those tests green against a rule that
+ * no longer decides anything. One owner per rule, and the tests prove it is
+ * the owner.
+ *
+ * ─── What did NOT move, and why ───────────────────────────────────────────
+ *
+ * The two PDF routes (`…/minutes/pdf`, `…/agenda/pdf`) still reach
+ * `fastify.supabase` for ONE call each: `storage.from("minutes")
+ * .createSignedUrl(...)`. Their database reads moved with everything else, so
+ * no read here bypasses RLS; the storage call did not, because nothing in this
+ * repository replaces Supabase Storage yet and a concurrent task owns that
+ * decision.
+ *
+ * Both routes are, in any case, already dead: there has never been a
+ * `"minutes"` storage bucket, so `createSignedUrl` fails and both answer 500
+ * on every input that gets past their publication check. That is stated here
+ * rather than fixed, and nothing in this change pretends otherwise.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { sql } from "drizzle-orm";
 import { PUBLIC_ROUTE as PUBLIC } from "../auth/route-access.js";
+import { bindPortalTenant, portalTownIdFrom } from "../auth/portal-tenant.js";
+import type { TenantTx } from "../db/with-tenant.js";
+import { toRows as normaliseRows } from "../db/rows.js";
+import {
+  PORTAL_HIDDEN_MEETING_STATUSES,
+  portalCanSelectAgenda,
+  portalCanSelectBoard,
+  portalCanSelectBoardMember,
+  portalCanSelectMeeting,
+  portalCanSelectMinutesDocument,
+  portalVisibleExhibits,
+  type ExhibitVisibility,
+  type MinutesStatus,
+} from "../trpc/authorization/rules.js";
 
 /** Every route in this file is public; see the header for the review. */
 const publicRoute = { config: { ...PUBLIC } };
@@ -55,10 +97,6 @@ interface MeetingParams extends TownParams {
 
 interface BoardParams extends TownParams {
   boardId: string;
-}
-
-interface ResolveQuery {
-  subdomain: string;
 }
 
 interface MeetingsQuery {
@@ -80,30 +118,115 @@ interface SearchQuery {
   page?: string;
 }
 
-const EXCLUDED_STATUSES = ["draft", "cancelled"];
 const PAGE_SIZE = 20;
+
+function rows<T>(result: unknown, where: string): T[] {
+  return normaliseRows<T>(result, (message) => new Error(`portal ${where}: ${message}`));
+}
+
+/** A meeting as every route here reads it. `status` drives the portal rules. */
+interface MeetingRow {
+  id: string;
+  title: string;
+  board_id: string;
+  board_name: string | null;
+  scheduled_date: string;
+  scheduled_time: string | null;
+  location: string | null;
+  meeting_type: string;
+  status: string;
+  agenda_status: string | null;
+}
+
+const MEETING_COLUMNS = sql`
+  m.id, m.title, m.board_id, b.name AS board_name, m.scheduled_date,
+  m.scheduled_time, m.location, m.meeting_type, m.status, m.agenda_status
+`;
+
+/** What a handler is given once the tenant hook and the `:townId` check agree. */
+interface PortalScope {
+  townId: string;
+  withTenant: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
+}
+
+/**
+ * Resolve the scope for a `:townId` route, or answer 404.
+ *
+ * Two failures collapse into one answer: no resolvable subdomain (which the
+ * hook has already refused, so this is belt and braces), and a `:townId` in
+ * the URL that names a different town from the host it was requested through.
+ * Both mean "there is nothing at this address for you", and neither should
+ * tell the caller which.
+ */
+function scopeFor(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  paramTownId: string | undefined,
+): PortalScope | null {
+  const townId = portalTownIdFrom(request, paramTownId);
+  const withTenant = request.withTenant;
+  if (townId === null || !withTenant) {
+    reply.notFound("No town is published at this address.");
+    return null;
+  }
+  return { townId, withTenant };
+}
 
 // ─── Route Registration ─────────────────────────────────────────
 
 export async function portalRoutes(fastify: FastifyInstance) {
-  // ─── GET /resolve?subdomain=X ──────────────────────────────────
-  fastify.get<{ Querystring: ResolveQuery }>("/resolve", publicRoute, async (request, reply) => {
-    const { subdomain } = request.query;
+  // ─── The portal's tenant gate ────────────────────────────────────────
+  //
+  // Registered on THIS instance, which `server.ts` creates as an encapsulated
+  // child (`register(portalRoutes, { prefix: "/api/portal" })`). So it runs for
+  // every route in this file and for nothing else — the binding cannot leak
+  // onto an authenticated route by someone adding a file next door.
+  //
+  // It runs AFTER the root gate in `auth/fastify.ts`, which returns early for
+  // a public route without looking for a session. Fastify runs parent hooks
+  // before child hooks, so the ordering is structural rather than a matter of
+  // registration order in `server.ts`.
+  //
+  // The hook RETURNS what `bindPortalTenant` returns. In an async Fastify
+  // hook, sending a reply is not by itself enough to stop the request — the
+  // reply object has to be returned, or the router carries on to the handler
+  // with a response already sent. Every refusal in this file depends on that
+  // one `return`.
+  fastify.addHook("onRequest", async (request, reply) =>
+    bindPortalTenant(fastify.tenantDb, request, reply),
+  );
 
-    if (!subdomain) {
-      return reply.badRequest("subdomain query parameter is required");
-    }
+  // ─── GET /resolve ──────────────────────────────────────────────
+  //
+  // The subdomain comes from the header the hook already resolved, NOT from
+  // the query parameter this route used to read. A route whose whole job is
+  // "which town is this?" answering from a value the caller typed is how the
+  // rest of the portal ended up trusting a `:townId` in a URL.
+  fastify.get("/resolve", publicRoute, async (request, reply) => {
+    const scope = scopeFor(request, reply, undefined);
+    if (!scope) return;
 
-    const { data: town, error } = await fastify.supabase
-      .from("town")
-      .select("id, name, state, municipality_type, seal_url, contact_name, contact_role, subdomain")
-      .eq("subdomain", subdomain)
-      .single();
+    const [town] = await scope.withTenant(async (tx) =>
+      rows<{
+        id: string;
+        name: string;
+        state: string;
+        municipality_type: string;
+        seal_url: string | null;
+        contact_name: string | null;
+        contact_role: string | null;
+        subdomain: string | null;
+      }>(
+        await tx.execute(sql`
+          SELECT id, name, state, municipality_type, seal_url,
+                 contact_name, contact_role, subdomain
+          FROM town WHERE id = ${scope.townId}
+        `),
+        "resolve",
+      ),
+    );
 
-    if (error || !town) {
-      return reply.notFound("Town not found");
-    }
-
+    if (!town) return reply.notFound("Town not found");
     return town;
   });
 
@@ -111,104 +234,57 @@ export async function portalRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: TownParams; Querystring: MeetingsQuery }>(
     "/:townId/meetings",
     publicRoute,
-    async (request, _reply) => {
-      const { townId } = request.params;
+    async (request, reply) => {
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+
       const boardId = request.query.board;
       const page = Math.max(1, parseInt(request.query.page ?? "1", 10) || 1);
       const offset = (page - 1) * PAGE_SIZE;
+      const today = new Date().toISOString().split("T")[0]!;
 
-      // Get today's date for sorting
-      const today = new Date().toISOString().split("T")[0];
+      const { all, published } = await scope.withTenant(async (tx) => {
+        // Upcoming ascending, then past descending — the order the portal
+        // renders. Sorting in SQL and slicing in JS is what this route always
+        // did; the publication filter is what moved.
+        const all = rows<MeetingRow>(
+          await tx.execute(sql`
+            SELECT ${MEETING_COLUMNS}
+            FROM meeting m
+            LEFT JOIN board b ON b.id = m.board_id
+            WHERE ${boardId ? sql`m.board_id = ${boardId}` : sql`true`}
+            ORDER BY
+              (m.scheduled_date < ${today}) ASC,
+              CASE WHEN m.scheduled_date >= ${today} THEN m.scheduled_date END ASC,
+              CASE WHEN m.scheduled_date <  ${today} THEN m.scheduled_date END DESC
+          `),
+          "meetings",
+        );
 
-      // Build base query for total count
-      let countQuery = fastify.supabase
-        .from("meeting")
-        .select("id", { count: "exact", head: true })
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`);
+        const published = rows<{ meeting_id: string; status: MinutesStatus }>(
+          await tx.execute(sql`SELECT meeting_id, status FROM minutes_document`),
+          "meetings.minutes",
+        );
 
-      if (boardId) {
-        countQuery = countQuery.eq("board_id", boardId);
-      }
+        return { all, published };
+      });
 
-      const { count: total } = await countQuery;
+      const visible = all.filter((m) => portalCanSelectMeeting({ status: m.status }));
+      const publishedMinutes = new Set(
+        published
+          .filter((d) => portalCanSelectMinutesDocument({ status: d.status }))
+          .map((d) => String(d.meeting_id)),
+      );
 
-      // Fetch upcoming meetings (scheduled_date >= today), ascending
-      let upcomingQuery = fastify.supabase
-        .from("meeting")
-        .select(
-          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
-        )
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .gte("scheduled_date", today)
-        .order("scheduled_date", { ascending: true });
-
-      if (boardId) {
-        upcomingQuery = upcomingQuery.eq("board_id", boardId);
-      }
-
-      const { data: upcoming } = await upcomingQuery;
-
-      // Fetch past meetings (scheduled_date < today), descending
-      let pastQuery = fastify.supabase
-        .from("meeting")
-        .select(
-          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
-        )
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .lt("scheduled_date", today)
-        .order("scheduled_date", { ascending: false });
-
-      if (boardId) {
-        pastQuery = pastQuery.eq("board_id", boardId);
-      }
-
-      const { data: past } = await pastQuery;
-
-      // Combine: upcoming first, then past
-      const allMeetings = [...(upcoming ?? []), ...(past ?? [])];
-      const paginated = allMeetings.slice(offset, offset + PAGE_SIZE);
-
-      // Batch-fetch board names for unique board_ids
-      const uniqueBoardIds = [...new Set(paginated.map((m) => m.board_id))];
-      const boardNameMap: Record<string, string> = {};
-
-      if (uniqueBoardIds.length > 0) {
-        const { data: boards } = await fastify.supabase
-          .from("board")
-          .select("id, name")
-          .in("id", uniqueBoardIds);
-
-        for (const b of boards ?? []) {
-          boardNameMap[b.id] = b.name;
-        }
-      }
-
-      // Check which meetings have published minutes
-      const meetingIds = paginated.map((m) => m.id);
-      const publishedMinutesSet = new Set<string>();
-
-      if (meetingIds.length > 0) {
-        const { data: minutesDocs } = await fastify.supabase
-          .from("minutes_document")
-          .select("meeting_id")
-          .in("meeting_id", meetingIds)
-          .eq("status", "published");
-
-        for (const doc of minutesDocs ?? []) {
-          publishedMinutesSet.add(doc.meeting_id);
-        }
-      }
-
-      const meetings = paginated.map((m) => ({
+      const meetings = visible.slice(offset, offset + PAGE_SIZE).map((m) => ({
         ...m,
-        board_name: boardNameMap[m.board_id] ?? null,
-        has_published_minutes: publishedMinutesSet.has(m.id),
+        has_published_minutes: publishedMinutes.has(m.id),
       }));
 
-      return { meetings, total: total ?? 0, page };
+      // The total counts what the PUBLIC can see, not what the table holds.
+      // Paginating over a total that includes hidden rows leaks their
+      // existence and hands the client empty pages.
+      return { meetings, total: visible.length, page };
     },
   );
 
@@ -217,43 +293,43 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/meetings/:meetingId",
     publicRoute,
     async (request, reply) => {
-      const { townId, meetingId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { meetingId } = request.params;
 
-      const { data: meeting, error } = await fastify.supabase
-        .from("meeting")
-        .select(
-          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, status, agenda_status",
-        )
-        .eq("id", meetingId)
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .single();
+      const result = await scope.withTenant(async (tx) => {
+        const [meeting] = rows<MeetingRow>(
+          await tx.execute(sql`
+            SELECT ${MEETING_COLUMNS}
+            FROM meeting m
+            LEFT JOIN board b ON b.id = m.board_id
+            WHERE m.id = ${meetingId}
+          `),
+          "meeting",
+        );
+        if (!meeting) return null;
 
-      if (error || !meeting) {
+        const minutes = rows<{ status: MinutesStatus }>(
+          await tx.execute(
+            sql`SELECT status FROM minutes_document WHERE meeting_id = ${meetingId}`,
+          ),
+          "meeting.minutes",
+        );
+        return { meeting, minutes };
+      });
+
+      if (!result || !portalCanSelectMeeting({ status: result.meeting.status })) {
         return reply.notFound("Meeting not found");
       }
 
-      // Fetch board name
-      const { data: board } = await fastify.supabase
-        .from("board")
-        .select("name")
-        .eq("id", meeting.board_id)
-        .single();
-
-      // Check for published minutes
-      const { data: minutesDoc } = await fastify.supabase
-        .from("minutes_document")
-        .select("id")
-        .eq("meeting_id", meetingId)
-        .eq("town_id", townId)
-        .eq("status", "published")
-        .maybeSingle();
-
+      const { meeting, minutes } = result;
       return {
         ...meeting,
-        board_name: board?.name ?? null,
-        has_published_agenda: meeting.agenda_status === "published",
-        has_published_minutes: !!minutesDoc,
+        has_published_agenda: portalCanSelectAgenda({
+          agendaStatus: meeting.agenda_status,
+          meetingStatus: meeting.status,
+        }),
+        has_published_minutes: minutes.some((d) => portalCanSelectMinutesDocument(d)),
       };
     },
   );
@@ -263,98 +339,140 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/meetings/:meetingId/agenda",
     publicRoute,
     async (request, reply) => {
-      const { townId, meetingId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { meetingId } = request.params;
 
-      // Verify meeting exists and agenda is published
-      const { data: meeting, error } = await fastify.supabase
-        .from("meeting")
-        .select(
-          "id, title, board_id, scheduled_date, scheduled_time, location, meeting_type, agenda_status",
-        )
-        .eq("id", meetingId)
-        .eq("town_id", townId)
-        .single();
+      const result = await scope.withTenant(async (tx) => {
+        const [meeting] = rows<MeetingRow>(
+          await tx.execute(sql`
+            SELECT ${MEETING_COLUMNS}
+            FROM meeting m
+            LEFT JOIN board b ON b.id = m.board_id
+            WHERE m.id = ${meetingId}
+          `),
+          "agenda.meeting",
+        );
+        if (!meeting) return null;
 
-      if (error || !meeting) {
-        return reply.notFound("Meeting not found");
-      }
+        const items = rows<{
+          id: string;
+          title: string;
+          description: string | null;
+          section_type: string;
+          sort_order: number;
+          parent_item_id: string | null;
+          estimated_duration: number | null;
+          presenter: string | null;
+        }>(
+          await tx.execute(sql`
+            SELECT id, title, description, section_type, sort_order,
+                   parent_item_id, estimated_duration, presenter
+            FROM agenda_item
+            WHERE meeting_id = ${meetingId}
+            ORDER BY sort_order ASC
+          `),
+          "agenda.items",
+        );
 
-      if (meeting.agenda_status !== "published") {
+        // `file_storage_path`, not `file_url`. This route used to select
+        // `file_url`, `item_type` and `duration_minutes` — three columns that
+        // do not exist on this schema, so PostgREST answered with an error the
+        // handler discarded and the agenda came back with no exhibits at all,
+        // silently, on every meeting. Reading through Drizzle means a wrong
+        // column name is a failed query rather than an empty list.
+        const exhibits = rows<{
+          id: string;
+          title: string;
+          file_storage_path: string;
+          file_type: string;
+          file_size: string | number | null;
+          exhibit_type: string | null;
+          visibility: ExhibitVisibility;
+          agenda_item_id: string | null;
+        }>(
+          await tx.execute(sql`
+            SELECT e.id, e.title, e.file_storage_path, e.file_type, e.file_size,
+                   e.exhibit_type, e.visibility, e.agenda_item_id
+            FROM exhibit e
+            JOIN agenda_item ai ON ai.id = e.agenda_item_id
+            WHERE ai.meeting_id = ${meetingId}
+            ORDER BY e.sort_order ASC
+          `),
+          "agenda.exhibits",
+        );
+
+        return { meeting, items, exhibits };
+      });
+
+      if (!result) return reply.notFound("Meeting not found");
+
+      const { meeting, items, exhibits } = result;
+
+      // BOTH conditions — the agenda is published AND the meeting is one the
+      // portal may list. The second half is the fix: this route used to check
+      // `agenda_status` alone, so a cancelled meeting whose agenda had been
+      // published stayed readable after the cancellation.
+      if (
+        !portalCanSelectAgenda({
+          agendaStatus: meeting.agenda_status,
+          meetingStatus: meeting.status,
+        })
+      ) {
         return reply.notFound("Agenda is not published");
       }
 
-      // Fetch board name
-      const { data: board } = await fastify.supabase
-        .from("board")
-        .select("name")
-        .eq("id", meeting.board_id)
-        .single();
-
-      // Fetch agenda items ordered by sort_order
-      const { data: items } = await fastify.supabase
-        .from("agenda_item")
-        .select(
-          "id, title, description, item_type, sort_order, parent_item_id, duration_minutes, presenter",
-        )
-        .eq("meeting_id", meetingId)
-        .eq("town_id", townId)
-        .order("sort_order", { ascending: true });
-
-      const allItems = items ?? [];
-
-      // Fetch public exhibits for all agenda items
-      const itemIds = allItems.map((i) => i.id);
+      // No `download_url`. `PortalExhibit` in `@town-meeting/shared` declares
+      // one and `portal/pages/AgendaView.tsx` renders it as an `href`, but
+      // there has never been a route that produces it — the storage decision
+      // this repository has not made yet. Emitting the raw storage path under
+      // its own name says that plainly, rather than shipping a field named
+      // `download_url` that nothing can download.
       const exhibitMap: Record<
         string,
-        Array<{ id: string; title: string; file_url: string; file_type: string }>
+        Array<{
+          id: string;
+          title: string;
+          file_type: string;
+          file_size: string | number | null;
+          exhibit_type: string | null;
+          file_storage_path: string;
+        }>
       > = {};
-
-      if (itemIds.length > 0) {
-        const { data: exhibits } = await fastify.supabase
-          .from("exhibit")
-          .select("id, title, file_url, file_type, agenda_item_id")
-          .in("agenda_item_id", itemIds)
-          .eq("visibility", "public");
-
-        for (const ex of exhibits ?? []) {
-          const key = ex.agenda_item_id as string;
-          if (!exhibitMap[key]) exhibitMap[key] = [];
-          exhibitMap[key].push({
-            id: ex.id,
-            title: ex.title,
-            file_url: ex.file_url,
-            file_type: ex.file_type,
-          });
-        }
+      for (const ex of portalVisibleExhibits(exhibits)) {
+        const key = ex.agenda_item_id;
+        if (key === null) continue;
+        (exhibitMap[key] ??= []).push({
+          id: ex.id,
+          title: ex.title,
+          file_type: ex.file_type,
+          file_size: ex.file_size,
+          exhibit_type: ex.exhibit_type,
+          file_storage_path: ex.file_storage_path,
+        });
       }
 
-      // Build hierarchy: parent items with nested children
-      const parentItems = allItems.filter((i) => !i.parent_item_id);
-      const childrenByParent: Record<string, typeof allItems> = {};
-
-      for (const item of allItems) {
-        if (item.parent_item_id) {
-          if (!childrenByParent[item.parent_item_id]) {
-            childrenByParent[item.parent_item_id] = [];
-          }
-          childrenByParent[item.parent_item_id]!.push(item);
-        }
+      const childrenByParent: Record<string, typeof items> = {};
+      for (const item of items) {
+        if (item.parent_item_id) (childrenByParent[item.parent_item_id] ??= []).push(item);
       }
 
-      const sections = parentItems.map((parent) => ({
-        ...parent,
-        exhibits: exhibitMap[parent.id] ?? [],
-        children: (childrenByParent[parent.id] ?? []).map((child) => ({
-          ...child,
-          exhibits: exhibitMap[child.id] ?? [],
-        })),
-      }));
+      const sections = items
+        .filter((i) => !i.parent_item_id)
+        .map((parent) => ({
+          ...parent,
+          exhibits: exhibitMap[parent.id] ?? [],
+          children: (childrenByParent[parent.id] ?? []).map((child) => ({
+            ...child,
+            exhibits: exhibitMap[child.id] ?? [],
+          })),
+        }));
 
       return {
         meeting: {
           id: meeting.id,
           title: meeting.title,
-          board_name: board?.name ?? null,
+          board_name: meeting.board_name,
           scheduled_date: meeting.scheduled_date,
           scheduled_time: meeting.scheduled_time,
           location: meeting.location,
@@ -370,73 +488,100 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/meetings/:meetingId/minutes",
     publicRoute,
     async (request, reply) => {
-      const { townId, meetingId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { meetingId } = request.params;
 
-      const { data: minutesDoc, error } = await fastify.supabase
-        .from("minutes_document")
-        .select("id, html_rendered, approved_at, published_at, pdf_storage_path")
-        .eq("meeting_id", meetingId)
-        .eq("town_id", townId)
-        .eq("status", "published")
-        .maybeSingle();
+      const result = await scope.withTenant(async (tx) => {
+        const [meeting] = rows<MeetingRow>(
+          await tx.execute(sql`
+            SELECT ${MEETING_COLUMNS}
+            FROM meeting m
+            LEFT JOIN board b ON b.id = m.board_id
+            WHERE m.id = ${meetingId}
+          `),
+          "minutes.meeting",
+        );
+        if (!meeting) return null;
 
-      if (error || !minutesDoc) {
+        const docs = rows<{
+          status: MinutesStatus;
+          html_rendered: string | null;
+          approved_at: string | null;
+          published_at: string | null;
+          pdf_storage_path: string | null;
+        }>(
+          await tx.execute(sql`
+            SELECT status, html_rendered, approved_at, published_at, pdf_storage_path
+            FROM minutes_document WHERE meeting_id = ${meetingId}
+          `),
+          "minutes",
+        );
+        return { meeting, docs };
+      });
+
+      // The meeting rule first: minutes attached to a meeting the portal does
+      // not list are not published records of anything the public was told
+      // about.
+      if (!result || !portalCanSelectMeeting({ status: result.meeting.status })) {
         return reply.notFound("Published minutes not found");
       }
 
-      // Fetch meeting date and board name
-      const { data: meeting } = await fastify.supabase
-        .from("meeting")
-        .select("scheduled_date, board_id")
-        .eq("id", meetingId)
-        .eq("town_id", townId)
-        .single();
-
-      let boardName: string | null = null;
-      if (meeting?.board_id) {
-        const { data: board } = await fastify.supabase
-          .from("board")
-          .select("name")
-          .eq("id", meeting.board_id)
-          .single();
-        boardName = board?.name ?? null;
-      }
+      const doc = result.docs.find((d) => portalCanSelectMinutesDocument(d));
+      if (!doc) return reply.notFound("Published minutes not found");
 
       reply.header("Cache-Control", "public, max-age=3600");
-
       return {
-        html_rendered: minutesDoc.html_rendered,
-        approved_at: minutesDoc.approved_at,
-        published_at: minutesDoc.published_at,
-        meeting_date: meeting?.scheduled_date ?? null,
-        board_name: boardName,
-        pdf_storage_path: minutesDoc.pdf_storage_path,
+        html_rendered: doc.html_rendered,
+        approved_at: doc.approved_at,
+        published_at: doc.published_at,
+        meeting_date: result.meeting.scheduled_date,
+        board_name: result.meeting.board_name,
+        pdf_storage_path: doc.pdf_storage_path,
       };
     },
   );
 
   // ─── GET /:townId/meetings/:meetingId/minutes/pdf ──────────────
+  //
+  // DEAD, and left dead deliberately. `storage.from("minutes")` names a bucket
+  // that has never existed in this project, so `createSignedUrl` errors and
+  // this route answers 500 for every meeting whose minutes ARE published. The
+  // read below moved onto the tenant path with everything else, so nothing
+  // here bypasses RLS; replacing the storage call is a concurrent task's, and
+  // guessing at it would only make a broken route look fixed.
   fastify.get<{ Params: MeetingParams }>(
     "/:townId/meetings/:meetingId/minutes/pdf",
     publicRoute,
     async (request, reply) => {
-      const { townId, meetingId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { meetingId } = request.params;
 
-      const { data: minutesDoc, error } = await fastify.supabase
-        .from("minutes_document")
-        .select("pdf_storage_path")
-        .eq("meeting_id", meetingId)
-        .eq("town_id", townId)
-        .eq("status", "published")
-        .maybeSingle();
+      const result = await scope.withTenant(async (tx) => {
+        const [meeting] = rows<{ status: string }>(
+          await tx.execute(sql`SELECT status FROM meeting WHERE id = ${meetingId}`),
+          "minutes-pdf.meeting",
+        );
+        if (!meeting) return null;
+        const docs = rows<{ status: MinutesStatus; pdf_storage_path: string | null }>(
+          await tx.execute(
+            sql`SELECT status, pdf_storage_path FROM minutes_document WHERE meeting_id = ${meetingId}`,
+          ),
+          "minutes-pdf",
+        );
+        return { meeting, docs };
+      });
 
-      if (error || !minutesDoc?.pdf_storage_path) {
+      if (!result || !portalCanSelectMeeting({ status: result.meeting.status })) {
         return reply.notFound("Published minutes PDF not found");
       }
+      const doc = result.docs.find((d) => portalCanSelectMinutesDocument(d) && d.pdf_storage_path);
+      if (!doc?.pdf_storage_path) return reply.notFound("Published minutes PDF not found");
 
       const { data: signedUrlData, error: signError } = await fastify.supabase.storage
         .from("minutes")
-        .createSignedUrl(minutesDoc.pdf_storage_path, 3600);
+        .createSignedUrl(doc.pdf_storage_path, 3600);
 
       if (signError || !signedUrlData?.signedUrl) {
         return reply.internalServerError("Failed to generate PDF URL");
@@ -448,30 +593,35 @@ export async function portalRoutes(fastify: FastifyInstance) {
   );
 
   // ─── GET /:townId/meetings/:meetingId/agenda/pdf ───────────────
+  //
+  // Dead for the same reason as the route above — same nonexistent bucket.
   fastify.get<{ Params: MeetingParams }>(
     "/:townId/meetings/:meetingId/agenda/pdf",
     publicRoute,
     async (request, reply) => {
-      const { townId, meetingId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { meetingId } = request.params;
 
-      const { data: meeting, error } = await fastify.supabase
-        .from("meeting")
-        .select("agenda_packet_url, agenda_status")
-        .eq("id", meetingId)
-        .eq("town_id", townId)
-        .single();
+      const [meeting] = await scope.withTenant(async (tx) =>
+        rows<{ agenda_packet_url: string | null; agenda_status: string | null; status: string }>(
+          await tx.execute(sql`
+            SELECT agenda_packet_url, agenda_status, status FROM meeting WHERE id = ${meetingId}
+          `),
+          "agenda-pdf",
+        ),
+      );
 
-      if (error || !meeting) {
-        return reply.notFound("Meeting not found");
-      }
-
-      if (meeting.agenda_status !== "published") {
+      if (!meeting) return reply.notFound("Meeting not found");
+      if (
+        !portalCanSelectAgenda({
+          agendaStatus: meeting.agenda_status,
+          meetingStatus: meeting.status,
+        })
+      ) {
         return reply.notFound("Agenda is not published");
       }
-
-      if (!meeting.agenda_packet_url) {
-        return reply.notFound("Agenda PDF not available");
-      }
+      if (!meeting.agenda_packet_url) return reply.notFound("Agenda PDF not available");
 
       const { data: signedUrlData, error: signError } = await fastify.supabase.storage
         .from("minutes")
@@ -488,20 +638,29 @@ export async function portalRoutes(fastify: FastifyInstance) {
 
   // ─── GET /:townId/boards ───────────────────────────────────────
   fastify.get<{ Params: TownParams }>("/:townId/boards", publicRoute, async (request, reply) => {
-    const { townId } = request.params;
+    const scope = scopeFor(request, reply, request.params.townId);
+    if (!scope) return;
 
-    const { data: boards, error } = await fastify.supabase
-      .from("board")
-      .select("id, name, board_type, elected_or_appointed, member_count")
-      .eq("town_id", townId)
-      .is("archived_at", null)
-      .order("name", { ascending: true });
+    const boards = await scope.withTenant(async (tx) =>
+      rows<{
+        id: string;
+        name: string;
+        board_type: string;
+        elected_or_appointed: string | null;
+        member_count: number | null;
+        archived_at: string | null;
+      }>(
+        await tx.execute(sql`
+          SELECT id, name, board_type, elected_or_appointed, member_count, archived_at
+          FROM board ORDER BY name ASC
+        `),
+        "boards",
+      ),
+    );
 
-    if (error) {
-      return reply.internalServerError("Failed to fetch boards");
-    }
-
-    return boards ?? [];
+    return boards
+      .filter((b) => portalCanSelectBoard({ archivedAt: b.archived_at }))
+      .map(({ archived_at: _archived, ...b }) => b);
   });
 
   // ─── GET /:townId/boards/:boardId ──────────────────────────────
@@ -509,55 +668,70 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/boards/:boardId",
     publicRoute,
     async (request, reply) => {
-      const { townId, boardId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
+      const { boardId } = request.params;
 
-      const { data: board, error } = await fastify.supabase
-        .from("board")
-        .select(
-          "id, name, board_type, elected_or_appointed, member_count, meeting_schedule, quorum_type, quorum_custom_value",
-        )
-        .eq("id", boardId)
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .single();
+      const result = await scope.withTenant(async (tx) => {
+        const [board] = rows<{
+          id: string;
+          name: string;
+          board_type: string;
+          elected_or_appointed: string | null;
+          member_count: number | null;
+          quorum_type: string | null;
+          quorum_value: number | null;
+          archived_at: string | null;
+        }>(
+          // `quorum_value`, and no `meeting_schedule`. This route used to ask
+          // PostgREST for `meeting_schedule` and `quorum_custom_value`, neither
+          // of which is a column on `board`; the request errored and the
+          // handler's `if (error || !board)` turned that into "Board not
+          // found", so every board detail page on the portal was a 404.
+          await tx.execute(sql`
+            SELECT id, name, board_type, elected_or_appointed, member_count,
+                   quorum_type, quorum_value, archived_at
+            FROM board WHERE id = ${boardId}
+          `),
+          "board",
+        );
+        if (!board) return null;
 
-      if (error || !board) {
+        const members = rows<{
+          status: string;
+          name: string;
+          seat_title: string | null;
+          term_start: string | null;
+          term_end: string | null;
+        }>(
+          await tx.execute(sql`
+            SELECT bm.status, p.name, bm.seat_title, bm.term_start, bm.term_end
+            FROM board_member bm
+            JOIN person p ON p.id = bm.person_id
+            WHERE bm.board_id = ${boardId}
+          `),
+          "board.members",
+        );
+
+        return { board, members };
+      });
+
+      if (!result || !portalCanSelectBoard({ archivedAt: result.board.archived_at })) {
         return reply.notFound("Board not found");
       }
 
-      // Fetch active members
-      const { data: members } = await fastify.supabase
-        .from("board_member")
-        .select("id, person_id, seat_title, term_start, term_end")
-        .eq("board_id", boardId)
-        .eq("town_id", townId)
-        .eq("status", "active");
-
-      // Fetch person names for members
-      const personIds = (members ?? []).map((m) => m.person_id).filter(Boolean);
-      const personNameMap: Record<string, string> = {};
-
-      if (personIds.length > 0) {
-        const { data: persons } = await fastify.supabase
-          .from("person")
-          .select("id, first_name, last_name")
-          .in("id", personIds);
-
-        for (const p of persons ?? []) {
-          personNameMap[p.id] = `${p.first_name} ${p.last_name}`;
-        }
-      }
-
-      const memberList = (members ?? []).map((m) => ({
-        name: personNameMap[m.person_id] ?? "Unknown",
-        seat_title: m.seat_title,
-        term_start: m.term_start,
-        term_end: m.term_end,
-      }));
-
+      const { archived_at: _archived, ...board } = result.board;
       return {
         ...board,
-        members: memberList,
+        // The one piece of personal data on this surface. An expired or
+        // resigned seat is not a public record of who currently serves, so a
+        // former member drops off when their seat does.
+        members: result.members.filter(portalCanSelectBoardMember).map((m) => ({
+          name: m.name,
+          seat_title: m.seat_title,
+          term_start: m.term_start,
+          term_end: m.term_end,
+        })),
       };
     },
   );
@@ -567,66 +741,63 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/calendar",
     publicRoute,
     async (request, reply) => {
-      const { townId } = request.params;
-      const { start, end } = request.query;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
 
+      const { start, end } = request.query;
       if (!start || !end) {
         return reply.badRequest("start and end query parameters are required");
       }
 
-      const { data: meetings, error } = await fastify.supabase
-        .from("meeting")
-        .select("id, title, board_id, scheduled_date, scheduled_time, location, meeting_type")
-        .eq("town_id", townId)
-        .gte("scheduled_date", start)
-        .lte("scheduled_date", end)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .order("scheduled_date", { ascending: true });
+      const meetings = await scope.withTenant(async (tx) =>
+        rows<MeetingRow>(
+          await tx.execute(sql`
+            SELECT ${MEETING_COLUMNS}
+            FROM meeting m
+            LEFT JOIN board b ON b.id = m.board_id
+            WHERE m.scheduled_date >= ${start} AND m.scheduled_date <= ${end}
+            ORDER BY m.scheduled_date ASC
+          `),
+          "calendar",
+        ),
+      );
 
-      if (error) {
-        return reply.internalServerError("Failed to fetch calendar");
-      }
-
-      // Batch-fetch board names
-      const uniqueBoardIds = [...new Set((meetings ?? []).map((m) => m.board_id))];
-      const boardNameMap: Record<string, string> = {};
-
-      if (uniqueBoardIds.length > 0) {
-        const { data: boards } = await fastify.supabase
-          .from("board")
-          .select("id, name")
-          .in("id", uniqueBoardIds);
-
-        for (const b of boards ?? []) {
-          boardNameMap[b.id] = b.name;
-        }
-      }
-
-      return (meetings ?? []).map((m) => ({
-        id: m.id,
-        title: m.title,
-        board_name: boardNameMap[m.board_id] ?? null,
-        board_id: m.board_id,
-        scheduled_date: m.scheduled_date,
-        scheduled_time: m.scheduled_time,
-        location: m.location,
-        meeting_type: m.meeting_type,
-      }));
+      return meetings
+        .filter((m) => portalCanSelectMeeting({ status: m.status }))
+        .map((m) => ({
+          id: m.id,
+          title: m.title,
+          board_name: m.board_name,
+          board_id: m.board_id,
+          scheduled_date: m.scheduled_date,
+          scheduled_time: m.scheduled_time,
+          location: m.location,
+          meeting_type: m.meeting_type,
+        }));
     },
   );
 
   // ─── GET /:townId/search?q=X&type=&board=&from=&to=&page= ────
+  //
+  // The one portal read whose publication filtering is NOT applied in
+  // TypeScript, because it cannot be: `portal_search` returns a windowed
+  // `total_count`, and filtering its rows afterwards would report a total that
+  // does not match what was returned and hand out short pages. So the
+  // exclusion is inside the function — but as a PARAMETER, passed from
+  // `PORTAL_HIDDEN_MEETING_STATUSES`, so `portalCanSelectMeeting` and search
+  // still read the same list. See `drizzle/0003_portal_tenant.sql` § 2 for
+  // what the unparameterised version disclosed.
   fastify.get<{ Params: TownParams; Querystring: SearchQuery }>(
     "/:townId/search",
     publicRoute,
     async (request, reply) => {
-      const { townId } = request.params;
-      const { q, type, board, from, to, page: pageStr } = request.query;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
 
+      const { q, type, board, from, to, page: pageStr } = request.query;
       if (!q || q.trim().length === 0) {
         return reply.badRequest("q query parameter is required");
       }
-
       if (q.length > 200) {
         return reply.badRequest("Search query too long (max 200 characters)");
       }
@@ -634,27 +805,33 @@ export async function portalRoutes(fastify: FastifyInstance) {
       const page = Math.max(1, parseInt(pageStr ?? "1", 10) || 1);
       const offset = (page - 1) * PAGE_SIZE;
 
-      const { data: rows, error } = await fastify.supabase.rpc("portal_search", {
-        p_town_id: townId,
-        p_query: q.trim(),
-        p_type: type ?? "all",
-        p_board_id: board ?? null,
-        p_date_from: from ?? null,
-        p_date_to: to ?? null,
-        p_limit: PAGE_SIZE,
-        p_offset: offset,
-      });
+      const results = await scope.withTenant(async (tx) =>
+        rows<{
+          result_type: string;
+          meeting_id: string;
+          meeting_date: string;
+          board_name: string;
+          title: string;
+          snippet: string;
+          rank: number;
+          total_count: string | number;
+        }>(
+          await tx.execute(sql`
+            SELECT * FROM portal_search(
+              ${scope.townId}::uuid, ${q.trim()}, ${type ?? "all"},
+              ${board ?? null}::uuid, ${from ?? null}::date, ${to ?? null}::date,
+              ${PAGE_SIZE}, ${offset},
+              ${sql.raw(pgTextArrayLiteral(PORTAL_HIDDEN_MEETING_STATUSES))}::text[]
+            )
+          `),
+          "search",
+        ),
+      );
 
-      if (error) {
-        request.log.error(error, "portal_search RPC failed");
-        return reply.internalServerError("Search failed");
-      }
-
-      const results = rows ?? [];
-      const total = results.length > 0 ? Number(results[0].total_count) : 0;
+      const total = results.length > 0 ? Number(results[0]!.total_count) : 0;
 
       return {
-        results: results.map((r: Record<string, unknown>) => ({
+        results: results.map((r) => ({
           result_type: r.result_type,
           meeting_id: r.meeting_id,
           meeting_date: r.meeting_date,
@@ -675,97 +852,77 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/sitemap.xml",
     publicRoute,
     async (request, reply) => {
-      const { townId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
 
-      // Resolve subdomain for full URLs
-      const { data: town } = await fastify.supabase
-        .from("town")
-        .select("subdomain")
-        .eq("id", townId)
-        .single();
+      const { boards, meetings, minutes } = await scope.withTenant(async (tx) => ({
+        boards: rows<{ id: string; archived_at: string | null }>(
+          await tx.execute(sql`SELECT id, archived_at FROM board`),
+          "sitemap.boards",
+        ),
+        meetings: rows<{
+          id: string;
+          scheduled_date: string;
+          status: string;
+          agenda_status: string | null;
+        }>(
+          await tx.execute(sql`
+            SELECT id, scheduled_date, status, agenda_status
+            FROM meeting ORDER BY scheduled_date DESC
+          `),
+          "sitemap.meetings",
+        ),
+        minutes: rows<{ meeting_id: string; status: MinutesStatus }>(
+          await tx.execute(sql`SELECT meeting_id, status FROM minutes_document`),
+          "sitemap.minutes",
+        ),
+      }));
 
-      if (!town?.subdomain) {
-        return reply.notFound("Town not found");
+      const baseUrl = `https://${request.portalTenant!.subdomain}.townmeetingmanager.com`;
+      const publishedMinutes = new Set(
+        minutes.filter(portalCanSelectMinutesDocument).map((d) => String(d.meeting_id)),
+      );
+
+      const urls: Array<{ loc: string; lastmod?: string; changefreq: string; priority: string }> = [
+        { loc: baseUrl, changefreq: "daily", priority: "1.0" },
+      ];
+
+      for (const board of boards.filter((b) =>
+        portalCanSelectBoard({ archivedAt: b.archived_at }),
+      )) {
+        urls.push({ loc: `${baseUrl}/boards/${board.id}`, changefreq: "weekly", priority: "0.7" });
       }
 
-      const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
-
-      // Fetch active boards
-      const { data: boards } = await fastify.supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null);
-
-      // Fetch meetings with published agendas or published minutes
-      const { data: meetings } = await fastify.supabase
-        .from("meeting")
-        .select("id, scheduled_date, agenda_status")
-        .eq("town_id", townId)
-        .not("status", "in", `(${EXCLUDED_STATUSES.join(",")})`)
-        .order("scheduled_date", { ascending: false });
-
-      // Check which meetings have published minutes
-      const meetingIds = (meetings ?? []).map((m) => m.id);
-      const publishedMinutesSet = new Set<string>();
-
-      if (meetingIds.length > 0) {
-        const { data: minutesDocs } = await fastify.supabase
-          .from("minutes_document")
-          .select("meeting_id")
-          .in("meeting_id", meetingIds)
-          .eq("status", "published");
-
-        for (const doc of minutesDocs ?? []) {
-          publishedMinutesSet.add(doc.meeting_id);
-        }
-      }
-
-      const urls: Array<{ loc: string; lastmod?: string; changefreq: string; priority: string }> =
-        [];
-
-      // Homepage
-      urls.push({ loc: baseUrl, changefreq: "daily", priority: "1.0" });
-
-      // Board pages
-      for (const board of boards ?? []) {
-        urls.push({
-          loc: `${baseUrl}/boards/${board.id}`,
-          changefreq: "weekly",
-          priority: "0.7",
+      for (const meeting of meetings) {
+        if (!portalCanSelectMeeting({ status: meeting.status })) continue;
+        const hasAgenda = portalCanSelectAgenda({
+          agendaStatus: meeting.agenda_status,
+          meetingStatus: meeting.status,
         });
-      }
+        const hasMinutes = publishedMinutes.has(meeting.id);
+        if (!hasAgenda && !hasMinutes) continue;
 
-      // Meeting pages with published agendas or minutes
-      for (const meeting of meetings ?? []) {
-        const hasAgenda = meeting.agenda_status === "published";
-        const hasMinutes = publishedMinutesSet.has(meeting.id);
-
-        if (hasAgenda || hasMinutes) {
+        urls.push({
+          loc: `${baseUrl}/meetings/${meeting.id}`,
+          lastmod: meeting.scheduled_date,
+          changefreq: "monthly",
+          priority: "0.6",
+        });
+        if (hasAgenda) {
           urls.push({
-            loc: `${baseUrl}/meetings/${meeting.id}`,
+            loc: `${baseUrl}/meetings/${meeting.id}/agenda`,
             lastmod: meeting.scheduled_date,
             changefreq: "monthly",
-            priority: "0.6",
+            priority: "0.5",
           });
-
-          if (hasAgenda) {
-            urls.push({
-              loc: `${baseUrl}/meetings/${meeting.id}/agenda`,
-              lastmod: meeting.scheduled_date,
-              changefreq: "monthly",
-              priority: "0.5",
-            });
-          }
-
-          if (hasMinutes) {
-            urls.push({
-              loc: `${baseUrl}/meetings/${meeting.id}/minutes`,
-              lastmod: meeting.scheduled_date,
-              changefreq: "yearly",
-              priority: "0.5",
-            });
-          }
+        }
+        if (hasMinutes) {
+          urls.push({
+            loc: `${baseUrl}/meetings/${meeting.id}/minutes`,
+            lastmod: meeting.scheduled_date,
+            changefreq: "yearly",
+            priority: "0.5",
+          });
         }
       }
 
@@ -793,20 +950,10 @@ export async function portalRoutes(fastify: FastifyInstance) {
     "/:townId/robots.txt",
     publicRoute,
     async (request, reply) => {
-      const { townId } = request.params;
+      const scope = scopeFor(request, reply, request.params.townId);
+      if (!scope) return;
 
-      const { data: town } = await fastify.supabase
-        .from("town")
-        .select("subdomain")
-        .eq("id", townId)
-        .single();
-
-      if (!town?.subdomain) {
-        return reply.notFound("Town not found");
-      }
-
-      const baseUrl = `https://${town.subdomain}.townmeetingmanager.com`;
-
+      const baseUrl = `https://${request.portalTenant!.subdomain}.townmeetingmanager.com`;
       const text = ["User-agent: *", "Allow: /", "", `Sitemap: ${baseUrl}/sitemap.xml`, ""].join(
         "\n",
       );
@@ -816,54 +963,42 @@ export async function portalRoutes(fastify: FastifyInstance) {
     },
   );
 
-  // ─── Subdomain-based sitemap/robots (used by Nginx proxy) ──
-  // These resolve the town from the X-Town-Subdomain header
-  // so Nginx can proxy /sitemap.xml → /api/portal/sitemap
-
-  async function resolveTownIdFromSubdomain(
-    supabase: typeof fastify.supabase,
-    subdomain: string | undefined,
-  ): Promise<{ id: string; subdomain: string } | null> {
-    if (!subdomain) return null;
-    const { data } = await supabase
-      .from("town")
-      .select("id, subdomain")
-      .eq("subdomain", subdomain)
-      .single();
-    return data;
-  }
-
+  // ─── Subdomain-based sitemap/robots (used by the nginx proxy) ──
+  //
+  // nginx proxies `/sitemap.xml` and `/robots.txt` on a town's portal host to
+  // these two paths, which carry no `:townId`. They used to do their own
+  // `town` lookup on the service-role client; the tenant hook has now already
+  // done it, so they are a redirect to the canonical path and nothing else.
+  //
+  // `fastify.inject()` is gone with them. It re-entered the whole hook chain
+  // with the ORIGINAL request's headers, which happened to work and would have
+  // stopped working the moment the two disagreed about anything.
   fastify.get("/sitemap", publicRoute, async (request, reply) => {
-    const subdomain = request.headers["x-town-subdomain"] as string | undefined;
-    const town = await resolveTownIdFromSubdomain(fastify.supabase, subdomain);
-    if (!town) {
-      return reply.notFound("Town not found");
-    }
-    // Reuse the townId-based handler by internally redirecting
-    const response = await fastify.inject({
-      method: "GET",
-      url: `/api/portal/${town.id}/sitemap.xml`,
-      headers: request.headers,
-    });
-    reply.status(response.statusCode).headers(response.headers).send(response.body);
+    const scope = scopeFor(request, reply, undefined);
+    if (!scope) return;
+    return reply.redirect(`/api/portal/${scope.townId}/sitemap.xml`, 302);
   });
 
   fastify.get("/robots", publicRoute, async (request, reply) => {
-    const subdomain = request.headers["x-town-subdomain"] as string | undefined;
-    const town = await resolveTownIdFromSubdomain(fastify.supabase, subdomain);
-    if (!town) {
-      return reply.notFound("Town not found");
-    }
-    const response = await fastify.inject({
-      method: "GET",
-      url: `/api/portal/${town.id}/robots.txt`,
-      headers: request.headers,
-    });
-    reply.status(response.statusCode).headers(response.headers).send(response.body);
+    const scope = scopeFor(request, reply, undefined);
+    if (!scope) return;
+    return reply.redirect(`/api/portal/${scope.townId}/robots.txt`, 302);
   });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
+
+/**
+ * A `text[]` literal for a list of statuses that never comes from a request.
+ *
+ * `PORTAL_HIDDEN_MEETING_STATUSES` is a module constant, so this is not a
+ * parameterisation decision about user input — but it is still built by
+ * escaping rather than by concatenation, so that it stays safe if the list
+ * ever becomes configurable.
+ */
+function pgTextArrayLiteral(values: readonly string[]): string {
+  return `ARRAY[${values.map((v) => `'${v.replace(/'/g, "''")}'`).join(", ")}]`;
+}
 
 function escapeXml(str: string): string {
   return str

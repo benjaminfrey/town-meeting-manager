@@ -17,8 +17,15 @@ import { sql } from "drizzle-orm";
 import { router, protectedProcedure } from "./trpc.js";
 import { toRows } from "../db/rows.js";
 import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.js";
+import { townRouter } from "./routers/town.js";
 
 export const appRouter = router({
+  /**
+   * The town's own settings. Task D1b added the one procedure the public
+   * portal cannot function without — see `routers/town.ts`.
+   */
+  town: townRouter,
+
   /**
    * Who the caller is, read back through the tenant context rather than echoed
    * from the session — so a green answer here means RLS, the tenant bridge and

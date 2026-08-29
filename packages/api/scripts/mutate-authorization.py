@@ -504,10 +504,21 @@ def self_test() -> int:
     return failures
 
 
+# The tests a mutant has to be caught by.
+#
+# `src/trpc` is where the rules and their unit tests live. Task D1b added the
+# second entry: the portal predicates are now enforced by an HTTP route rather
+# than only asserted as pure functions, and a mutant that survives the route is
+# a mutant that reaches the public — so the route test has to be in the suite
+# the harness scores against. Adding it also means a future change that keeps
+# `portal-rules.test.ts` green while breaking the wiring is still caught.
+SUITE = ["src/trpc", "src/routes/__tests__/portal-tenancy.test.ts"]
+
+
 def run_suite() -> tuple[bool, list[str]]:
     """Run the authorization suite; return (passed, failing test names)."""
     proc = subprocess.run(
-        ["npx", "vitest", "run", "src/trpc", "--reporter=json", "--silent"],
+        ["npx", "vitest", "run", *SUITE, "--reporter=json", "--silent"],
         cwd=API,
         capture_output=True,
         text=True,

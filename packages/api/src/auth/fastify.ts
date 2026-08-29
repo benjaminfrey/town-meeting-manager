@@ -112,6 +112,21 @@
  * work for people with no account at all. No public route reads
  * `request.tenant`; a future one that wants to must ask for it explicitly.
  *
+ * ─── Task D1b: one public route family DOES establish a tenant ────────────
+ *
+ * `routes/portal.ts` installs an `onRequest` hook in its own encapsulated
+ * scope that resolves `X-Town-Subdomain` to a town and binds
+ * `request.withTenant` — so the public portal's queries run under RLS instead
+ * of on the service-role client. It sets `request.portalTenant`, deliberately
+ * NOT `request.tenant`: the portal's town is chosen by the caller, and code
+ * meaning "the caller's own town" must not silently accept "a town the caller
+ * named". `auth/portal-tenant.ts` states that boundary and the constraint it
+ * imposes — a route may use that binding only if every row it can return is
+ * gated by a `portalCanSelect*` publication predicate.
+ *
+ * That hook lives in the portal's scope rather than here, so it cannot reach a
+ * route in any other file, and this gate is unchanged by it.
+ *
  * ─── Why the gate is an `onRequest` hook and not a `preHandler` ───────────
  *
  * G1 first put it in `preHandler`, which was already unbypassable by every
