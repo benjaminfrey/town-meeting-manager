@@ -311,6 +311,25 @@ services:
       db: { condition: service_healthy }
       kong: { condition: service_started }
     mem_limit: 1g
+    # ── Stage 1, Task D1e review — the group nginx reads through ──────
+    #
+    # uid 0, gid 101. Root, because the API has to create its two roots
+    # inside a volume whose mount point Docker makes root:root — and gid
+    # 101 because that is the `nginx` group in nginx:1.27-alpine, which
+    # runs its WORKERS as the unprivileged `nginx` user (`user nginx;` in
+    # nginx/nginx.conf). The worker is what opens a seal for a static
+    # request and a minutes PDF for an X-Accel-Redirect.
+    #
+    # Setting nginx's group as the API's PRIMARY group means every file
+    # and directory the API creates is group-owned by nginx already — no
+    # chown anywhere, nothing to run on a schedule, nothing to forget.
+    # packages/api/src/storage/store.ts then writes documents 0640/0750,
+    # which is readable by exactly the API and nginx: not by the Supabase
+    # Storage container, which mounts this same volume at /var/lib/storage.
+    #
+    # Without this line the API wrote root:root 0640 and every nginx read
+    # was EACCES — correct in every test, dead in production.
+    user: "${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}"
     volumes:
       - storage-data:/var/lib/tmm:z
     healthcheck:

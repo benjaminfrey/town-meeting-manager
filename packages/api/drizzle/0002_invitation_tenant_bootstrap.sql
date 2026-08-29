@@ -159,26 +159,45 @@ CREATE TRIGGER invitation_tenant_sync
 --
 -- This SELECT runs as the migration role, which is the schema owner. Under
 -- FORCE RLS the owner is subject to `invitation`'s policy like anyone else, so
--- on a production database (`tmm_owner`, a non-superuser) this would read zero
--- rows and the backfill would be a silent no-op — the wrong answer, with
--- nothing to notice. `row_security = off` makes that case LOUD instead: a
--- session that cannot bypass RLS raises `query would be affected by row-level
--- security policy` and aborts the migration, rather than quietly skipping the
--- invitations already in flight.
+-- a plain SELECT here would read zero rows and the backfill would be a silent
+-- no-op — the wrong answer, with nothing to notice.
 --
--- Plain `SET` rather than `SET LOCAL` deliberately, and it is not the leak the
--- lint rule guards against. This is `row_security`, not `app.town_id`; it runs
--- on the migration's own connection, which is not pooled and is not serving
--- requests; and `SET LOCAL` would be a no-op under `psql -f` (which
--- `scripts/build-db-from-repo.sh` uses), where each statement is its own
--- implicit transaction — silently leaving RLS on and reintroducing exactly the
--- silent skip this is written to prevent.
+-- The first version of this migration reached for `SET row_security = off`,
+-- which does not work and cannot be made to. `row_security = off` is not a
+-- bypass: it is an ASSERTION that no policy applies, and PostgreSQL raises
+-- `query would be affected by row-level security policy for table
+-- "invitation"` for any session that is not `BYPASSRLS`. The production
+-- migration role is `tmm_owner` — a non-superuser without `BYPASSRLS`, by
+-- design (docs/superpowers/plans/2026-08-26-stage-1-platform.md § roles) — so
+-- that statement aborted the migration on exactly the databases it was
+-- written for, and `scripts/build-db-from-repo.sh` (`ON_ERROR_STOP=1` under
+-- `set -euo pipefail`) stopped here and applied nothing after it. CI never saw
+-- it because CI's DATABASE_URL is a superuser.
 --
-SET row_security = off;
+-- What actually works for the owner is what PostgreSQL's own HINT on that
+-- error says: drop FORCE for the length of the backfill and put it back.
+-- Without FORCE the table owner bypasses its own policies, which is precisely
+-- the privilege FORCE exists to take away and precisely what a one-shot
+-- backfill of pre-existing rows needs.
+--
+-- This keeps the loudness the original was reaching for, and does not depend
+-- on `BYPASSRLS` to get it:
+--
+--   * A role that is not the table owner cannot run `ALTER TABLE`. It gets
+--     `must be owner of table invitation` and the migration aborts — the
+--     silent zero-row backfill is still impossible.
+--   * The window in which FORCE is off is three statements on the migration's
+--     own connection, before the application is serving against this schema.
+--   * FORCE is restored unconditionally on the next line, and
+--     `db/__tests__/schema-invariants.test.ts` fails the build if any table in
+--     `public` ends the corpus without both RLS and FORCE — so a future edit
+--     that drops the restore cannot land quietly.
+--
+ALTER TABLE public.invitation NO FORCE ROW LEVEL SECURITY;
 
 INSERT INTO better_auth.invitation_tenant (token_sha256, town_id)
 SELECT sha256(convert_to(token, 'UTF8')), town_id
   FROM public.invitation
 ON CONFLICT (token_sha256) DO UPDATE SET town_id = EXCLUDED.town_id;
 
-RESET row_security;
+ALTER TABLE public.invitation FORCE ROW LEVEL SECURITY;

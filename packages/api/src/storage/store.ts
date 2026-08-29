@@ -38,7 +38,96 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveWithin } from "./paths.js";
+import { publicAssetRoot, resolveWithin } from "./paths.js";
+
+/**
+ * ─── Who has to be able to read these bytes ───────────────────────────────
+ *
+ * The process that WRITES every file here is the API container, running as
+ * root. The process that READS almost all of them is an nginx worker, which
+ * `infrastructure/nginx/nginx.conf` drops to the unprivileged `nginx` user —
+ * the master is root, but no worker is, and it is the worker that opens the
+ * file for a static request and for an `X-Accel-Redirect`.
+ *
+ * The first version of this module wrote every file `0640` with no group
+ * arrangement, so every file landed `root:root 0640`. Correct in every test
+ * — nothing in the suite reads a file as another user — and `EACCES` for
+ * every nginx worker in production. The whole document delivery path was
+ * dead behind nginx and no test could see it.
+ *
+ * The fix has two halves, one here and one in the compose file:
+ *
+ *   1. **A shared group.** `infrastructure/docker-compose.production.yml`
+ *      runs the API as `${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}` — still
+ *      root, so it can write into the volume, but with nginx's group as its
+ *      PRIMARY group. Every file and directory it creates is therefore
+ *      group-owned by nginx with no `chown` call anywhere. 101 is the `nginx`
+ *      uid/gid in the official `nginx:*-alpine` images; it is a variable so a
+ *      different base image is a compose edit, not a code change.
+ *
+ *   2. **Modes that say who may read, set here.** Below.
+ *
+ * ─── Two roots, two answers ───────────────────────────────────────────────
+ *
+ * PUBLIC ASSET ROOT — town seals. nginx serves these to the anonymous
+ * internet at `/public-assets/seals/` with no route in front, so "world
+ * readable" is not a widening of anything: it is a restatement of what the
+ * root is for. `0644`/`0755`. What must NOT happen is world-WRITABLE — these
+ * bytes are served from the application's own origin, so a writer other than
+ * the API is a stored-content vector. No group or other write bit is set.
+ *
+ * DOCUMENT ROOT — minutes and exhibits, including drafts and `board_only`
+ * material. nginx marks this root `internal` and only reaches it after a
+ * route has authorized the fetch. `0640`/`0750`: owner (the API) and group
+ * (nginx) and nobody else. That last clause is load-bearing rather than
+ * decorative, because the `storage-data` volume is mounted by a third
+ * container — Supabase Storage, at `/var/lib/storage` — so "other" here is
+ * not an empty set, and `0644` would hand that container every town's draft
+ * minutes.
+ *
+ * Both are applied with `fchmod`/`chmod` AFTER creation rather than by the
+ * `mode` argument to `open`/`mkdir`, which the process umask subtracts from.
+ * A deployment that set `umask 027` would otherwise strip the group read bit
+ * off the public root and take nginx's access away again — the exact failure
+ * this is fixing, arriving by a different door.
+ */
+export const PUBLIC_ASSET_FILE_MODE = 0o644;
+export const PUBLIC_ASSET_DIRECTORY_MODE = 0o755;
+export const DOCUMENT_FILE_MODE = 0o640;
+export const DOCUMENT_DIRECTORY_MODE = 0o750;
+
+/**
+ * The modes for a root. Default-deny: anything that is not demonstrably the
+ * public asset root gets the document root's tighter pair, so a root added
+ * later is private until someone decides otherwise.
+ */
+export function storageModesFor(root: string): { file: number; directory: number } {
+  return path.resolve(root) === publicAssetRoot()
+    ? { file: PUBLIC_ASSET_FILE_MODE, directory: PUBLIC_ASSET_DIRECTORY_MODE }
+    : { file: DOCUMENT_FILE_MODE, directory: DOCUMENT_DIRECTORY_MODE };
+}
+
+/**
+ * `mkdir -p` from `root` down to `directory`, and set the mode on every level
+ * including `root` itself.
+ *
+ * Chmod'ing the whole chain rather than only the leaf matters because a
+ * directory with no group `x` bit is not traversable, and nginx cannot read a
+ * file it cannot reach. Nothing above `root` is touched: `/var/lib/tmm` is the
+ * volume mount point, created by Docker, and is not ours to re-permission.
+ */
+async function ensureDirectory(root: string, directory: string, mode: number): Promise<void> {
+  const base = path.resolve(root);
+  const chain: string[] = [];
+  for (let current = directory; ; current = path.dirname(current)) {
+    chain.unshift(current);
+    if (current === base || path.dirname(current) === current) break;
+  }
+  await fs.mkdir(directory, { recursive: true, mode });
+  for (const level of chain) {
+    await fs.chmod(level, mode);
+  }
+}
 
 /**
  * Write `bytes` to `relative` under `root` so that a crash cannot leave a
@@ -53,13 +142,18 @@ export async function writeFileDurably(
 ): Promise<string> {
   const absolute = resolveWithin(root, relative);
   const directory = path.dirname(absolute);
-  await fs.mkdir(directory, { recursive: true });
+  const modes = storageModesFor(root);
+  await ensureDirectory(root, directory, modes.directory);
 
   const temporary = path.join(directory, `.tmp-${randomUUID()}`);
   let handle: fs.FileHandle | undefined;
   try {
-    handle = await fs.open(temporary, "wx", 0o640);
+    handle = await fs.open(temporary, "wx", modes.file);
     await handle.write(bytes);
+    // Set the mode explicitly: the `open` argument above is masked by the
+    // process umask, and the file has to be readable by nginx whatever the
+    // container's umask happens to be. fchmod is not masked.
+    await handle.chmod(modes.file);
     await handle.sync();
   } finally {
     await handle?.close();

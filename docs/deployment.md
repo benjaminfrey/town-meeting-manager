@@ -209,6 +209,36 @@ dumps **and** plain-SQL fallbacks. `backup.sh` verifies each new dump with
 | PDF generation fails         | API container memory; `docker compose logs api` for Chromium errors         |
 | TLS renew failed             | `CLOUDFLARE_API_TOKEN`; `sudo certbot renew --dry-run`                      |
 | Studio 403                   | add your IP to the `allow` lines in `nginx/nginx.conf`, reload Nginx        |
+| Seals or documents 403/404   | file ownership on the `storage-data` volume — see below                     |
+
+### Stored files must be group-readable by Nginx
+
+The API writes the two storage roots on the `storage-data` volume; the Nginx
+workers read them. `nginx.conf` sets `user nginx;`, so those workers are
+unprivileged — a file the API wrote as `root:root` is unreadable to them and
+every seal and every `X-Accel-Redirect` document answers 403 or 404 with a
+permission-denied line in the Nginx error log.
+
+The compose file therefore runs the API as `${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}`
+— root, with Nginx's group as its primary group — and the API writes documents
+`0640`/`0750` and public seals `0644`/`0755`. Both halves are required. If you
+change the Nginx base image, check the `nginx` user's gid in it and set
+`TMM_ASSET_GID` to match:
+
+```bash
+docker run --rm nginx:1.27-alpine id nginx
+```
+
+**Upgrading an existing deployment:** files written before this change are
+owned `root:root` and stay unreadable — the fix applies to newly written files
+only. Re-group the existing tree once, after the first deploy that includes it:
+
+```bash
+docker compose -f infrastructure/docker-compose.production.yml exec api \
+  sh -c 'chgrp -R 101 /var/lib/tmm/public /var/lib/tmm/documents &&
+         chmod -R u=rwX,g=rX,o= /var/lib/tmm/documents &&
+         chmod -R u=rwX,g=rX,o=rX /var/lib/tmm/public'
+```
 
 View logs: `docker compose -f infrastructure/docker-compose.production.yml logs -f <service>`
 Direct DB access: `docker exec -it tmm-db psql -U postgres`

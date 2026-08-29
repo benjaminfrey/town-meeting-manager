@@ -793,3 +793,34 @@ export function portalCanSelectBoard(row: { archivedAt: string | Date | null }):
 export function portalCanSelectBoardMember(row: { status: string }): boolean {
   return row.status === "active";
 }
+
+/**
+ * The town's own identity row — the one exception to the constraint in
+ * `auth/portal-tenant.ts`, made explicit here rather than left unstated.
+ *
+ * `GET /api/portal/resolve` returns a `town` row and there is no
+ * `portalCanSelectTown` gating it, because there is no publication decision to
+ * gate on. A town reachable through the portal tenant path is a town that
+ * published a portal at a subdomain; the row IS the portal. A predicate here
+ * would be `true` written at length, and a rule that cannot say no is worse
+ * than no rule — it makes the invariant read as upheld while adding nothing.
+ *
+ * What CAN go wrong on that route is a column, not a row: `town` also holds
+ * `contact_email`, onboarding state, and whatever a future migration adds, and
+ * a `SELECT t.*` written in a hurry would publish all of it to anonymous
+ * residents. So the gate here is a projection, not a filter. This list is what
+ * the portal may know about a town; `routes/__tests__/portal-tenancy.test.ts`
+ * asserts `/resolve`'s response keys are exactly these, so widening the route
+ * without widening this list fails, and widening this list is a decision made
+ * next to the other portal rules where it can be seen.
+ */
+export const PORTAL_TOWN_IDENTITY_COLUMNS = [
+  "id",
+  "name",
+  "state",
+  "municipality_type",
+  "seal_url",
+  "contact_name",
+  "contact_role",
+  "subdomain",
+] as const;

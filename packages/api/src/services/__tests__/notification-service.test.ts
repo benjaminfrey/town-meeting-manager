@@ -43,6 +43,16 @@ import { withTenant } from "../../db/with-tenant.js";
 const mockSendEmail = vi.fn().mockResolvedValue({ MessageID: "test-message-id" });
 const mockEmailSenderInstance = { sendEmail: mockSendEmail };
 
+// Hoisted so the assertions below can read what the service passed it. The
+// template layer is a pure function of these variables, so asserting on its
+// arguments is how `recipientName` and `preferencesUrl` — which do not survive
+// into the stubbed HTML — are observed at all.
+const mockRenderEmailTemplate = vi.fn().mockReturnValue({
+  html: "<p>Test email</p>",
+  text: "Test email",
+  subject: "Test Subject",
+});
+
 vi.mock("../email-sender.js", () => ({
   // Must use `function` (not arrow) so `new EmailSenderService()` works
   EmailSenderService: vi.fn(function () {
@@ -50,11 +60,7 @@ vi.mock("../email-sender.js", () => ({
   }),
   getMessageStream: vi.fn().mockReturnValue("outbound"),
   isBroadcastEvent: vi.fn().mockReturnValue(false),
-  renderEmailTemplate: vi.fn().mockReturnValue({
-    html: "<p>Test email</p>",
-    text: "Test email",
-    subject: "Test Subject",
-  }),
+  renderEmailTemplate: (...args: unknown[]) => mockRenderEmailTemplate(...args),
 }));
 
 vi.mock("../../lib/postmark.js", () => ({
@@ -69,6 +75,7 @@ vi.mock("../../lib/push.js", () => ({
 beforeEach(() => {
   mockSendEmail.mockClear();
   mockDispatchPushToTown.mockClear();
+  mockRenderEmailTemplate.mockClear();
 });
 
 // ─── Fixtures ─────────────────────────────────────────────────────────
@@ -158,6 +165,32 @@ function sentTo(): string[] {
   return mockSendEmail.mock.calls.map((call) => (call[0] as { to: string }).to).sort();
 }
 
+/** Everything the service handed Postmark for one recipient. */
+interface SentEmail {
+  to: string;
+  from: string;
+  replyTo?: string;
+  subject: string;
+  tag: string;
+  messageStream: string;
+  metadata: Record<string, string>;
+}
+
+function sentEmailTo(address: string): SentEmail {
+  const call = mockSendEmail.mock.calls.find((c) => (c[0] as SentEmail).to === address);
+  if (!call) throw new Error(`no email was sent to ${address}`);
+  return call[0] as SentEmail;
+}
+
+/** The variables the template layer was rendered with, for one recipient. */
+function templateVariablesFor(name: string): Record<string, unknown> {
+  const call = mockRenderEmailTemplate.mock.calls.find(
+    (c) => (c[1] as { recipientName?: string })?.recipientName === name,
+  );
+  if (!call) throw new Error(`no template was rendered for ${name}`);
+  return call[1] as Record<string, unknown>;
+}
+
 // ─── Subscriber resolution ────────────────────────────────────────────
 
 describe("getBoardSubscribers", () => {
@@ -234,6 +267,163 @@ describe("processNotificationEvent", () => {
 
         const summary = await service.getDeliverySummary(eventId);
         expect(summary).toMatchObject({ total: 3, sent: 3, failed: 0 });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  // ─── What is actually put on the wire ──────────────────────────────
+  //
+  // Restored in the D1c review, item 8. The rewrite of this file onto a real
+  // database was a genuine improvement — the Supabase mock it replaced could
+  // not tell a LEFT JOIN from an INNER JOIN and passed a bug that dropped
+  // every account-less board member — but these assertions went missing in
+  // the move, and each covers something with no other test:
+  //
+  //   * `getTownSenderConfig`'s CONFIGURED branch. Only the derived fallback
+  //     had coverage, so a town that had set up its own Postmark sender was
+  //     the untested case — and it is the one that matters, because mail from
+  //     the wrong From: is mail that fails DMARC and silently does not arrive.
+  //   * The Postmark `tag` and `metadata`. `routes/webhooks.ts` matches a
+  //     bounce back to a delivery through `metadata.delivery_id`; without it
+  //     a bounce cannot be attributed and `email_bounced` is never set.
+  //     `town_id` is what keeps that lookup inside one town.
+  //   * `preferencesUrl` and `recipientName`, which the stubbed template
+  //     renderer does not put in the HTML — so they are observed where they
+  //     are produced, on the call into the template layer.
+
+  it("sends from the town's CONFIGURED Postmark sender when it has one", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        await app.begin(async (tx) => {
+          await tx`SELECT set_config('app.town_id', ${town.townId}, true)`;
+          await tx`INSERT INTO town_notification_config
+                     (id, town_id, postmark_sender_email, postmark_sender_name)
+                   VALUES (gen_random_uuid(), ${town.townId}, 'clerk@alpha.gov',
+                           'Alpha Town Clerk')`;
+        });
+
+        const service = serviceFor(app, town.townId);
+        const eventId = await service.createNotificationEvent("agenda_published", {
+          board_id: town.boardId,
+          meeting_title: "Regular Meeting",
+        });
+        await service.processNotificationEvent(eventId);
+
+        expect(sentEmailTo("alice@alpha.gov").from).toBe("Alpha Town Clerk <clerk@alpha.gov>");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("derives a sender from the subdomain when the town has configured none", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        // A row exists but is only HALF filled in — the branch is
+        // `sender_email && sender_name`, so a town that typed an address and
+        // no display name must still get a working From: rather than
+        // "null <clerk@alpha.gov>".
+        await app.begin(async (tx) => {
+          await tx`SELECT set_config('app.town_id', ${town.townId}, true)`;
+          await tx`INSERT INTO town_notification_config (id, town_id, postmark_sender_email)
+                   VALUES (gen_random_uuid(), ${town.townId}, 'clerk@alpha.gov')`;
+        });
+
+        const service = serviceFor(app, town.townId);
+        const eventId = await service.createNotificationEvent("agenda_published", {
+          board_id: town.boardId,
+          meeting_title: "Regular Meeting",
+        });
+        await service.processNotificationEvent(eventId);
+
+        expect(sentEmailTo("alice@alpha.gov").from).toBe(
+          "Town of alpha <notifications@alpha.townmeetingmanager.com>",
+        );
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("tags each message and carries the ids a bounce is matched back through", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        const service = serviceFor(app, town.townId);
+        const eventId = await service.createNotificationEvent("agenda_published", {
+          board_id: town.boardId,
+          meeting_title: "Regular Meeting",
+        });
+        await service.processNotificationEvent(eventId);
+
+        const sent = sentEmailTo("alice@alpha.gov");
+        expect(sent.tag).toBe("agenda_published");
+        expect(sent.messageStream).toBe("outbound");
+
+        // The delivery id in the metadata must be the row that was actually
+        // written for this recipient — asserted against the database rather
+        // than against itself, because a metadata block full of ids that
+        // match nothing is exactly as useless as no metadata.
+        const [delivery] = await owner<{ id: string; subscriber_id: string }[]>`
+          SELECT d.id, d.subscriber_id
+            FROM notification_delivery d
+            JOIN person p ON p.id = d.subscriber_id
+           WHERE d.event_id = ${eventId} AND p.email = 'alice@alpha.gov'`;
+        expect(sent.metadata).toEqual({
+          town_id: town.townId,
+          event_id: eventId,
+          delivery_id: String(delivery!.id),
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("renders each recipient's own name and a link to their preferences", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        const service = serviceFor(app, town.townId);
+        const eventId = await service.createNotificationEvent("agenda_published", {
+          board_id: town.boardId,
+          meeting_title: "Regular Meeting",
+        });
+        await service.processNotificationEvent(eventId);
+
+        // One render per recipient, each with THAT person's name — not the
+        // first subscriber's, which is what a hoisted variable would produce.
+        const rendered = mockRenderEmailTemplate.mock.calls.map(
+          (c) => (c[1] as { recipientName: string }).recipientName,
+        );
+        expect(rendered.sort()).toEqual(["Carol Directory", "Member 0", "Member 1"]);
+
+        const variables = templateVariablesFor("Carol Directory");
+        expect(variables.preferencesUrl).toBe(
+          `${process.env.APP_URL ?? "https://app.townmeetingmanager.com"}/settings/notifications`,
+        );
+        // The payload is passed through alongside the derived variables, so a
+        // template can reference either.
+        expect(variables.meeting_title).toBe("Regular Meeting");
+        expect(variables.isBroadcast).toBe(false);
+        expect(mockRenderEmailTemplate.mock.calls[0]![0]).toBe("agenda-published");
+
+        // NOTE on the half of this assertion that was NOT restored: the
+        // service writes `subscriber.display_name ?? subscriber.email`, and
+        // the old mock-based test covered the email fallback by returning a
+        // null display name. It cannot happen here and it cannot happen in
+        // production: `display_name` is `person.name`, which is NOT NULL in
+        // the schema (0000_baseline.sql), so the fallback is unreachable.
+        // Asserting it would require a mock that lies about the database,
+        // which is the thing this file's rewrite existed to stop doing.
       } finally {
         await app.end();
       }

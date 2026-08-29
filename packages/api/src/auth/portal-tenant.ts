@@ -47,10 +47,26 @@
  * **The constraint that follows, and that must not be quietly dropped:**
  *
  *   > A route may use `request.portalTenant` / the `withTenant` it binds ONLY
- *   > if every row it can return is gated by a `portalCanSelect*` predicate.
+ *   > if every row it can return is gated by a `portalCanSelect*` predicate,
+ *   > with ONE enumerated exception: the town's own identity row, which
+ *   > `GET /resolve` returns and which is projected through
+ *   > `PORTAL_TOWN_IDENTITY_COLUMNS` in `trpc/authorization/rules.ts`.
  *   > Anything else — anything a town has not published, anything personal
  *   > beyond an active board member's seat — needs `request.tenant`, which is
  *   > derived from a session and cannot be chosen by the caller.
+ *
+ * The exception is named rather than glossed over because the invariant above
+ * was written as absolute and was already false for the FIRST route in
+ * `routes/portal.ts` — a guarantee with one silent hole in it stops being a
+ * guarantee the moment someone notices the hole. There is no
+ * `portalCanSelectTown` because there is no publication decision for one to
+ * make: a town reachable through this path is by construction a town that
+ * published a portal at a subdomain, so the predicate could only ever return
+ * `true`. The risk on that route is a COLUMN — `town` also holds
+ * `contact_email` and whatever the next migration adds — so the gate is a
+ * projection instead, pinned by a test on the response's key set. Any FURTHER
+ * exception needs the same treatment: a named constant, a test, and a line
+ * here. It does not get to be implicit.
  *
  * `__tests__/portal-tenant.test.ts` and `routes/__tests__/portal-tenancy.test.ts`
  * hold the read half of that. The write half needs no test: this path binds

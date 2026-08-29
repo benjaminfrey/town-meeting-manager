@@ -32,6 +32,61 @@ DB_URL="${1:?usage: build-db-from-repo.sh <postgres-url>}"
 MIGRATIONS_DIR="packages/api/drizzle"
 JOURNAL="$MIGRATIONS_DIR/meta/_journal.json"
 
+# ─── The connecting role is part of what this gate proves ────────────────
+#
+# A superuser (or any role with BYPASSRLS) is exempt from every row-level
+# security policy in the corpus. That makes a build as such a role strictly
+# weaker than a production migration: statements that abort for `tmm_owner`
+# succeed silently, and the script reports a green build for a corpus that
+# cannot be applied.
+#
+# This is not hypothetical. `0002_invitation_tenant_bootstrap.sql` used
+# `SET row_security = off` for its backfill, which raises `query would be
+# affected by row-level security policy for table "invitation"` for anything
+# that is not BYPASSRLS. It aborted this script at migration 3 of 4 as
+# `tmm_owner` — and passed for months as a superuser, here and in CI (whose
+# DATABASE_URL is `postgres`). Nothing after it was ever applied on a
+# production-shaped role.
+#
+# So: refuse. The remedy is one-time cluster setup, printed below. The escape
+# hatch exists because a developer poking at a scratch database has a real
+# reason to skip it, but it has to be typed — which is the whole point, since
+# the defect above hid precisely in nobody thinking about the role at all.
+privileges=$(psql "$DB_URL" -tAc \
+  "SELECT current_user || ' ' || rolsuper::text || ' ' || rolbypassrls::text
+     FROM pg_roles WHERE rolname = current_user")
+read -r connected_role is_super is_bypassrls <<<"$privileges"
+
+if [ -z "${connected_role:-}" ]; then
+  echo "ERROR: could not determine the connecting role from $DB_URL" >&2
+  exit 1
+fi
+
+if [ "$is_super" = "true" ] || [ "$is_bypassrls" = "true" ]; then
+  if [ "${ALLOW_SUPERUSER_BUILD:-}" = "1" ]; then
+    echo "WARNING: building as '$connected_role', which bypasses row-level security." >&2
+    echo "         ALLOW_SUPERUSER_BUILD=1 is set, so this build is proceeding — but it" >&2
+    echo "         does NOT prove the corpus applies in production. Re-run as a" >&2
+    echo "         non-superuser, non-BYPASSRLS owner before trusting the result." >&2
+  else
+    echo "ERROR: connected as '$connected_role' (superuser=$is_super, bypassrls=$is_bypassrls)." >&2
+    echo "       This gate exists to prove the repository can build the production" >&2
+    echo "       database. A role that bypasses RLS cannot prove that: every policy in" >&2
+    echo "       the corpus is inert for it, so migrations that abort in production" >&2
+    echo "       succeed here. Run as the schema owner instead:" >&2
+    echo "" >&2
+    echo "         CREATE ROLE tmm_owner LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;" >&2
+    echo "         CREATE DATABASE <db> OWNER tmm_owner;" >&2
+    echo "         GRANT tmm_app TO tmm_owner;   -- if tmm_app already exists" >&2
+    echo "         $0 postgres://tmm_owner@<host>/<db>" >&2
+    echo "" >&2
+    echo "       To build anyway, knowing the result proves less: ALLOW_SUPERUSER_BUILD=1" >&2
+    exit 1
+  fi
+else
+  echo "==> Connecting role: $connected_role (superuser=$is_super, bypassrls=$is_bypassrls)"
+fi
+
 # The journal is drizzle-kit's record of which migrations exist. Applying a
 # sorted glob is simpler than parsing JSON in bash, but a sorted glob would
 # also happily apply a stray .sql file nobody registered — so cross-check the

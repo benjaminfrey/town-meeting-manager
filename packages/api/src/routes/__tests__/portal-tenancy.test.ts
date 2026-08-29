@@ -26,17 +26,15 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import Fastify, { type FastifyInstance } from "fastify";
-import sensible from "@fastify/sensible";
+import type { FastifyInstance } from "fastify";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import type postgres from "postgres";
 import { randomUUID } from "node:crypto";
 import { withTestDb, connectAsAppRole } from "../../test/db-harness.js";
+import { buildPortalApp } from "../../test/portal-app.js";
 import { withTenant } from "../../db/with-tenant.js";
-import { createAuth } from "../../auth/auth.js";
-import { betterAuthPlugin } from "../../auth/fastify.js";
-import { portalRoutes } from "../portal.js";
+import { PORTAL_TOWN_IDENTITY_COLUMNS } from "../../trpc/authorization/rules.js";
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -55,6 +53,13 @@ interface TownSeed {
   cancelledMeetingId: string;
   publishedMinutesMeetingId: string;
   draftMinutesMeetingId: string;
+  /**
+   * A meeting the town CANCELLED after publishing its minutes. Item 4 of the
+   * review: without it, every minutes-bearing meeting in this fixture was
+   * `approved`, so the meeting-status gate on `/minutes` and `/minutes/pdf`
+   * could be deleted outright and the suite stayed green.
+   */
+  cancelledMinutesMeetingId: string;
   publicExhibitId: string;
   boardOnlyExhibitId: string;
   adminOnlyExhibitId: string;
@@ -73,6 +78,7 @@ async function seed(db: Db, label: string, subdomain: string): Promise<TownSeed>
     cancelledMeetingId: randomUUID(),
     publishedMinutesMeetingId: randomUUID(),
     draftMinutesMeetingId: randomUUID(),
+    cancelledMinutesMeetingId: randomUUID(),
     publicExhibitId: randomUUID(),
     boardOnlyExhibitId: randomUUID(),
     adminOnlyExhibitId: randomUUID(),
@@ -151,6 +157,15 @@ async function seed(db: Db, label: string, subdomain: string): Promise<TownSeed>
         "2020-05-15",
       ),
     );
+    await tx.execute(
+      meeting(
+        s.cancelledMinutesMeetingId,
+        `${label} Rescinded Meeting`,
+        "cancelled",
+        "published",
+        "2020-06-15",
+      ),
+    );
 
     // Agenda items on the published meeting, with one exhibit of each
     // visibility hung off the child item.
@@ -166,6 +181,40 @@ async function seed(db: Db, label: string, subdomain: string): Promise<TownSeed>
       VALUES (${itemId}, ${s.publishedMeetingId}, ${s.townId}, 'business', 1,
               ${`${label} Culvert Replacement`}, ${sectionId}, 'Award the contract')
     `);
+
+    // ── Agenda items on the meetings the portal must HIDE ──────────────
+    //
+    // Item 3 of the review. `portal_search`'s agenda branch joins
+    // `agenda_item` to `meeting`, so a meeting with no agenda item cannot
+    // appear in search results under ANY version of the function — including
+    // the version with the meeting-status filter deleted. The draft and
+    // cancelled meetings had none, which made
+    // "keeps a DRAFT meeting out of full-text search" pass vacuously: the
+    // headline fix of D1b was asserted by a test that could not fail.
+    //
+    // Both meetings carry `agenda_status = 'published'` already (that is the
+    // point — the town published an agenda and THEN did not proceed), and the
+    // search branch also requires `parent_item_id IS NOT NULL`, so each needs
+    // a section header and a child item. The child titles carry the same
+    // "culvert" term the search tests query for, and a distinctive uppercase
+    // marker the assertions look for in the raw response body.
+    for (const [meetingId, marker] of [
+      [s.draftMeetingId, "SECRET"],
+      [s.cancelledMeetingId, "RESCINDED"],
+    ] as const) {
+      const hiddenSectionId = randomUUID();
+      await tx.execute(sql`
+        INSERT INTO agenda_item (id, meeting_id, town_id, section_type, sort_order, title)
+        VALUES (${hiddenSectionId}, ${meetingId}, ${s.townId}, 'business', 0, 'New Business')
+      `);
+      await tx.execute(sql`
+        INSERT INTO agenda_item (id, meeting_id, town_id, section_type, sort_order, title,
+                                 parent_item_id, description)
+        VALUES (${randomUUID()}, ${meetingId}, ${s.townId}, 'business', 1,
+                ${`${label} ${marker} Culvert Award`}, ${hiddenSectionId},
+                ${`${marker} discussion of the culvert contract`})
+      `);
+    }
 
     const exhibit = (id: string, title: string, visibility: string) => sql`
       INSERT INTO exhibit (id, town_id, agenda_item_id, title, file_storage_path,
@@ -188,6 +237,18 @@ async function seed(db: Db, label: string, subdomain: string): Promise<TownSeed>
       VALUES (${randomUUID()}, ${s.townId}, ${s.draftMinutesMeetingId}, 'draft',
               ${`<p>${label} UNADOPTED draft minutes</p>`})
     `);
+    // PUBLISHED minutes on a meeting the town later CANCELLED. The document's
+    // own status says "serve this"; the meeting's says "this did not happen".
+    // The route has to honour the second, and `pdf_storage_path` is set so
+    // that the PDF route reaches its own gate rather than stopping at a
+    // missing file.
+    await tx.execute(sql`
+      INSERT INTO minutes_document (id, town_id, meeting_id, status, html_rendered,
+                                    published_at, pdf_storage_path)
+      VALUES (${randomUUID()}, ${s.townId}, ${s.cancelledMinutesMeetingId}, 'published',
+              ${`<p>${label} RESCINDED minutes of a cancelled meeting</p>`}, now(),
+              ${`minutes/${s.cancelledMinutesMeetingId}.pdf`})
+    `);
 
     // Two seats on the live board: one active, one no longer serving.
     for (const [name, status] of [
@@ -209,28 +270,6 @@ async function seed(db: Db, label: string, subdomain: string): Promise<TownSeed>
   return s;
 }
 
-async function buildApp(client: postgres.Sql): Promise<FastifyInstance> {
-  const db = drizzle(client);
-  const server = Fastify({ logger: false });
-  await server.register(sensible);
-  // Registered exactly as `server.ts` registers it. The portal's tenant hook
-  // reads `fastify.tenantDb`, which this plugin decorates, and the root
-  // deny-by-default gate it installs runs in front of every portal route — so
-  // this test also proves the two hooks compose in the right order.
-  await server.register(betterAuthPlugin, {
-    auth: createAuth({
-      db,
-      secret: "0123456789abcdef0123456789abcdef",
-      baseURL: "http://localhost:3000",
-      sendAuthEmail: async () => {},
-    }),
-    db,
-    allowedOrigins: ["http://localhost:3000"],
-  });
-  await server.register(portalRoutes, { prefix: "/api/portal" });
-  return server;
-}
-
 // One database for the whole file: the schema is expensive to build and every
 // test below is a read.
 let owner: postgres.Sql;
@@ -250,7 +289,7 @@ beforeAll(async () => {
     const db = drizzle(app);
     A = await seed(db, "Alpha", "alphatown");
     B = await seed(db, "Beta", "betatown");
-    server = await buildApp(app);
+    server = await buildPortalApp(app);
     ready!();
     await new Promise<void>((resolve) => (release = resolve));
     await server.close();
@@ -309,6 +348,28 @@ describe("the portal's tenant gate", () => {
     const res = await get("/api/portal/resolve");
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ id: A.townId, name: "Alpha", subdomain: "alphatown" });
+  });
+
+  it("returns EXACTLY the town columns the portal is allowed to know", async () => {
+    // Item 7 of the review. `auth/portal-tenant.ts` states that a route may
+    // use the portal tenant only if every row it can return is gated by a
+    // `portalCanSelect*` predicate — and `/resolve`, the first route in the
+    // file, returns a `town` row with no such gate and no predicate to write:
+    // a town reachable through this path published a portal by definition, so
+    // the predicate could only say yes.
+    //
+    // The invariant is now narrowed to name this one exception, and the gate
+    // on it is a PROJECTION rather than a filter. That is the failure mode
+    // that is actually available here: `town` also carries `contact_email`
+    // and onboarding state, and a `SELECT t.*` written in a hurry would hand
+    // all of it to anonymous residents. `toMatchObject` above would not
+    // notice — it ignores extra keys, which is exactly how an accidental
+    // widening stays invisible. This does not.
+    const res = await get("/api/portal/resolve");
+    expect(res.statusCode).toBe(200);
+    expect(Object.keys(res.json() as Record<string, unknown>).sort()).toEqual(
+      [...PORTAL_TOWN_IDENTITY_COLUMNS].sort(),
+    );
   });
 });
 
@@ -385,15 +446,32 @@ describe("publication: what a town has not published stays unpublished", () => {
     ).toBe(404);
   });
 
-  it("keeps a DRAFT meeting out of full-text search", async () => {
+  it("keeps DRAFT and CANCELLED meetings out of full-text search", async () => {
     // The regression `drizzle/0003_portal_tenant.sql` § 2 closes: the baseline
     // `portal_search` filtered on `agenda_status` and never on the meeting's
     // own status, so an unannounced meeting's title, date, board and agenda
     // text were searchable while every other route hid it.
+    //
+    // Both hidden meetings now own a published agenda item matching this
+    // query, which is what makes the negatives mean anything: delete
+    // `AND NOT (m.status::text = ANY (p_hidden_meeting_statuses))` from the
+    // agenda branch of `portal_search` and this test fails. Until the fixture
+    // gained those items it passed against every possible version of the
+    // function, because the join had nothing to return.
     const res = await get(`/api/portal/${A.townId}/search?q=culvert`);
     expect(res.statusCode).toBe(200);
+
+    // The positive control first. If the query stops matching anything at all
+    // — a changed dictionary, a renamed column, a fixture edit — the negatives
+    // below go back to being vacuous, and this line is what notices.
+    const results = res.json().results as Array<{ title: string; meeting_id: string }>;
+    expect(results.some((r) => r.meeting_id === A.publishedMeetingId)).toBe(true);
+
     expect(res.body).not.toContain(A.draftMeetingId);
     expect(res.body).not.toContain("SECRET");
+    expect(res.body).not.toContain(A.cancelledMeetingId);
+    expect(res.body).not.toContain("RESCINDED");
+    expect(results.map((r) => r.meeting_id)).toEqual([A.publishedMeetingId]);
   });
 
   it("404s a CANCELLED meeting's agenda even though the agenda was published", async () => {
@@ -452,6 +530,40 @@ describe("publication: what a town has not published stays unpublished", () => {
     // the public, which is how a 404 becomes a support call.
     const meeting = await get(`/api/portal/${A.townId}/meetings/${A.draftMinutesMeetingId}`);
     expect(meeting.json().has_published_minutes).toBe(false);
+  });
+
+  it("404s PUBLISHED minutes whose MEETING was cancelled, on both minutes routes", async () => {
+    // Item 4 of the review. Both of this fixture's other minutes-bearing
+    // meetings are `approved`, so nothing distinguished the meeting-status
+    // gate from the document-status gate: replacing
+    // `if (!result || !portalCanSelectMeeting(...))` with `if (!result)` at
+    // `routes/portal.ts:526` and `:576` left the api suite green.
+    //
+    // The row here is the case the gate exists for and the case a clerk
+    // actually creates: minutes published, then the meeting cancelled or
+    // reverted. The document still says `published`; the meeting says the
+    // proceeding did not happen, and the portal must not keep serving a
+    // record of it.
+    const minutes = await get(
+      `/api/portal/${A.townId}/meetings/${A.cancelledMinutesMeetingId}/minutes`,
+    );
+    expect(minutes.statusCode).toBe(404);
+    expect(minutes.body).not.toContain("RESCINDED");
+
+    // `/minutes/pdf` is a separate copy of the same gate at `:576`. It is
+    // reached with `pdf_storage_path` set, so the only thing that can produce
+    // a 404 here is the meeting-status check — the document check passes.
+    // (With the gate removed the route runs on to `fastify.supabase`, which
+    // this harness does not register, and answers 500 rather than 404.)
+    const pdf = await get(
+      `/api/portal/${A.townId}/meetings/${A.cancelledMinutesMeetingId}/minutes/pdf`,
+    );
+    expect(pdf.statusCode).toBe(404);
+    expect(pdf.body).not.toContain(".pdf");
+
+    // And the meeting itself stays hidden, so nothing links to either.
+    const meeting = await get(`/api/portal/${A.townId}/meetings/${A.cancelledMinutesMeetingId}`);
+    expect(meeting.statusCode).toBe(404);
   });
 
   it("does not link an unpublished agenda or unadopted minutes from the sitemap", async () => {
