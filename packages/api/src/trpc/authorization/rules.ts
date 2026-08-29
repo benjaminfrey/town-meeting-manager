@@ -17,18 +17,41 @@
  *    came out of the database inside the caller's own tenant context, so no
  *    rule can be steered by anything a client sent.
  *
- * 2. **Board-scoped rules take the board.** Rules 20 and 21 were
- *    `has_board_permission(code, board_id)`. Passing no board is NOT
- *    fail-closed: an override that grants is ignored (a board-specific clerk
- *    is wrongly refused) and an override that revokes is ignored too (a
- *    barred clerk is wrongly ALLOWED). The signatures below require a
- *    `boardId`, so the mistake is a type error.
+ * 2. **Board-scoped rules take the board — required, never optional.**
+ *    Passing no board is NOT fail-closed: an override that grants is ignored
+ *    (a board-specific clerk is wrongly refused) and an override that revokes
+ *    is ignored too (a barred clerk is wrongly ALLOWED). The signatures below
+ *    require a `boardId`, so the mistake is a type error rather than a quiet
+ *    global check.
+ *
+ *    SIXTEEN of the guards are board-scoped, not the two that were obviously
+ *    so. Every code the two `designated_boards` permission templates grant —
+ *    `TEMPLATE_BOARD_SPECIFIC_STAFF` (A1 A2 A3 A5 A6 M1–M7 R1–R6) and
+ *    `TEMPLATE_RECORDING_SECRETARY` (M2 M3 M4 M5 R1 R2 R3 R4 R6) — is granted
+ *    ONLY inside `board_overrides`, with global all-false. A guard that
+ *    resolves such a code globally answers "no" to every account either
+ *    template ever created. Those templates have never worked, and this is
+ *    half of why (the other half was a stale closure in
+ *    `StaffAccountFlow.tsx`, which discarded the overrides before they were
+ *    ever persisted).
+ *
+ *    What stays town-level is stated positively: C2 (the notification rules,
+ *    17–19). Neither `designated_boards` template grants C2, and a
+ *    notification event belongs to a town, not to a board — there is no board
+ *    column to scope it by.
  *
  * 3. **SELECT rules come in three forms.** `canX` answers the question,
  *    `assertCanX` throws, and `visibleX` filters a list. A list endpoint that
  *    threw on the first invisible row would be unusable; a detail endpoint
  *    that filtered would return 200 with nothing. Both shapes exist so the
  *    caller picks rather than improvises.
+ *
+ *    The list forms are why board scope arrives on the ROW rather than as one
+ *    argument: `visibleMinutesDocuments` filters minutes from many meetings,
+ *    and a single `scope` would apply one board's answer to another board's
+ *    row. The board is a property of the row, so the row carries it, and the
+ *    type makes it non-optional so a caller cannot forget the join. See
+ *    `BoardScopedRow` below for where that value must come from.
  *
  * 4. **The message is part of the rule.** A refusal names the code and says
  *    who can grant it. "Forbidden" gives a town clerk nothing to act on and
@@ -59,33 +82,73 @@ import {
 /** Exported so tests can hold these guards in a uniformly typed list. */
 export type ActorArg = Actor;
 
+/**
+ * The board a board-scoped check is about. Required wherever it appears.
+ *
+ * Not optional, and not defaulted. An optional board silently performs the
+ * GLOBAL check, which is wrong in both directions — see this file's header,
+ * point 2 — and "wrong quietly" is the failure mode this whole layer exists
+ * to remove.
+ */
+export interface BoardScope {
+  boardId: string;
+}
+
+/**
+ * A row a board-scoped SELECT rule can be asked about.
+ *
+ * ─── Where `boardId` must come from ───────────────────────────────────────
+ *
+ * `meeting.board_id` is NOT NULL, and every row these rules filter reaches a
+ * meeting: `minutes_document.meeting_id`, `exhibit.agenda_item_id` →
+ * `agenda_item.meeting_id`. So a board is always available and the field is
+ * `string`, not `string | null` — there is no legitimate row without one.
+ *
+ * `minutes_document` ALSO carries its own nullable `board_id` column. Do not
+ * read that one. It is denormalised and nullable, so a row where it is NULL
+ * would have to be either dropped from the list or resolved globally, and
+ * both of those are the silent-wrong-answer this type exists to prevent.
+ * Join through the meeting.
+ */
+export interface BoardScopedRow {
+  boardId: string;
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // The 21 action-code rules
 // ═══════════════════════════════════════════════════════════════════════
 
-// ─── 1, 2 — agenda_item INSERT / UPDATE: A2 ───────────────────────────
+// ─── 1, 2 — agenda_item INSERT / UPDATE: A2, BOARD-SCOPED ─────────────
+//
+// A2 is in `TEMPLATE_BOARD_SPECIFIC_STAFF`, which grants it per board only.
 
-export function assertCanInsertAgendaItem(actor: Actor): void {
-  assertPermission(actor, "A2", { action: "to add an agenda item" });
+export function assertCanInsertAgendaItem(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "A2", { boardId: scope.boardId, action: "to add an agenda item" });
 }
 
-export function assertCanUpdateAgendaItem(actor: Actor): void {
-  assertPermission(actor, "A2", { action: "to edit an agenda item" });
+export function assertCanUpdateAgendaItem(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "A2", { boardId: scope.boardId, action: "to edit an agenda item" });
 }
 
-// ─── 3, 4 — motion INSERT / UPDATE: M3 ────────────────────────────────
+// ─── 3, 4 — motion INSERT / UPDATE: M3, BOARD-SCOPED ──────────────────
+//
+// M3 is in BOTH `designated_boards` templates — a recording secretary
+// appointed to one board is the canonical holder of it.
 
-export function assertCanInsertMotion(actor: Actor): void {
-  assertPermission(actor, "M3", { action: "to record a motion" });
+export function assertCanInsertMotion(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M3", { boardId: scope.boardId, action: "to record a motion" });
 }
 
-export function assertCanUpdateMotion(actor: Actor): void {
-  assertPermission(actor, "M3", { action: "to record a motion's outcome" });
+export function assertCanUpdateMotion(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M3", {
+    boardId: scope.boardId,
+    action: "to record a motion's outcome",
+  });
 }
 
 // ─── 5 — vote_record INSERT: M3, or your own seat ─────────────────────
 
-export interface VoteRecordSubject {
+export interface VoteRecordSubject extends BoardScope {
   /** The `board_member.id` the vote is being recorded against. */
   boardMemberId: string;
 }
@@ -99,13 +162,18 @@ export interface VoteRecordSubject {
  * client-supplied "this is me" would let any board member vote as any other,
  * and an archived seat must not vote at all — a member whose term ended still
  * has a `board_member` row, and it is the `status` that stops it counting.
+ *
+ * The M3 branch is board-scoped like every other M3 check. `boardId` is the
+ * MEETING's board, which is also the board the seat is on; it is carried on
+ * the subject rather than as a separate argument because this guard already
+ * takes one, and two ways of saying "which board" is one too many.
  */
 export async function assertCanInsertVoteRecord(
   actor: Actor,
   tx: TenantTx,
   subject: VoteRecordSubject,
 ): Promise<void> {
-  if (resolvePermission(actor, "M3")) return;
+  if (resolvePermission(actor, "M3", subject.boardId)) return;
 
   if (isBoardMember(actor) && actor.personId) {
     const rows = toRows<{ id: string }>(
@@ -122,30 +190,36 @@ export async function assertCanInsertVoteRecord(
 
   throw new AuthorizationError(
     "This account cannot record that vote. Recording another member's vote requires M3 " +
-      "(capture_motions_votes); a board member may record their own vote on a seat they " +
-      "currently hold.",
-    { code: "M3" },
+      "(capture_motions_votes) for this board; a board member may record their own vote on a " +
+      "seat they currently hold.",
+    { code: "M3", boardId: subject.boardId },
   );
 }
 
-// ─── 6 — vote_record UPDATE: M3 ───────────────────────────────────────
+// ─── 6 — vote_record UPDATE: M3, BOARD-SCOPED ─────────────────────────
 
 /**
  * Correcting a recorded vote is narrower than casting one, on purpose: it is a
  * records action over a legal record, so the self-vote branch does not apply.
  */
-export function assertCanUpdateVoteRecord(actor: Actor): void {
-  assertPermission(actor, "M3", { action: "to correct a recorded vote" });
+export function assertCanUpdateVoteRecord(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M3", {
+    boardId: scope.boardId,
+    action: "to correct a recorded vote",
+  });
 }
 
-// ─── 7, 8 — meeting_attendance INSERT / UPDATE: M2 ────────────────────
+// ─── 7, 8 — meeting_attendance INSERT / UPDATE: M2, BOARD-SCOPED ──────
 
-export function assertCanInsertMeetingAttendance(actor: Actor): void {
-  assertPermission(actor, "M2", { action: "to record attendance" });
+export function assertCanInsertMeetingAttendance(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M2", { boardId: scope.boardId, action: "to record attendance" });
 }
 
-export function assertCanUpdateMeetingAttendance(actor: Actor): void {
-  assertPermission(actor, "M2", { action: "to change recorded attendance" });
+export function assertCanUpdateMeetingAttendance(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M2", {
+    boardId: scope.boardId,
+    action: "to change recorded attendance",
+  });
 }
 
 // ─── 9 — minutes_document SELECT: R4, or adopted ──────────────────────
@@ -163,7 +237,11 @@ const ADOPTED_MINUTES_STATUSES: readonly MinutesStatus[] = ["approved", "publish
  * unadopted minutes of an executive session are the single most sensitive
  * document this product holds.
  */
-export function canSelectMinutesDocument(actor: Actor, row: { status: MinutesStatus }): boolean {
+export interface MinutesDocumentRow extends BoardScopedRow {
+  status: MinutesStatus;
+}
+
+export function canSelectMinutesDocument(actor: Actor, row: MinutesDocumentRow): boolean {
   // Deliberately STRICTER than the policy this restores, which read
   // `has_permission('R4') OR status IN ('approved','published')` — no actor
   // term at all in the second branch, because a policy only ever evaluated
@@ -175,41 +253,48 @@ export function canSelectMinutesDocument(actor: Actor, row: { status: MinutesSta
   // `portalCanSelectMinutesDocument` below, which is `published` only.
   if (actor.kind !== "user") return false;
   if (ADOPTED_MINUTES_STATUSES.includes(row.status)) return true;
-  return resolvePermission(actor, "R4");
+  // R4 board-scoped: `TEMPLATE_RECORDING_SECRETARY` grants R4 per board and
+  // nothing globally, so a global check answers "no" to every secretary the
+  // product has ever created for a designated board.
+  return resolvePermission(actor, "R4", row.boardId);
 }
 
-export function assertCanSelectMinutesDocument(actor: Actor, row: { status: MinutesStatus }): void {
+export function assertCanSelectMinutesDocument(actor: Actor, row: MinutesDocumentRow): void {
   if (canSelectMinutesDocument(actor, row)) return;
   throw new AuthorizationError(
     `These minutes are still ${row.status}. Reading minutes before they are adopted ` +
-      "requires R4 (view_draft_minutes).",
-    { code: "R4" },
+      "requires R4 (view_draft_minutes) for this board.",
+    { code: "R4", boardId: row.boardId },
   );
 }
 
-export function visibleMinutesDocuments<T extends { status: MinutesStatus }>(
+export function visibleMinutesDocuments<T extends MinutesDocumentRow>(
   actor: Actor,
   rows: readonly T[],
 ): T[] {
+  // Per ROW, not per call: a list can span boards, and one `scope` argument
+  // would answer for the first board and apply it to all of them.
   return rows.filter((row) => canSelectMinutesDocument(actor, row));
 }
 
-// ─── 10, 11, 12, 13 — minutes writes: R1 ──────────────────────────────
+// ─── 10, 11, 12, 13 — minutes writes: R1, BOARD-SCOPED ────────────────
+//
+// R1 is in both `designated_boards` templates.
 
-export function assertCanInsertMinutesDocument(actor: Actor): void {
-  assertPermission(actor, "R1", { action: "to create minutes" });
+export function assertCanInsertMinutesDocument(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R1", { boardId: scope.boardId, action: "to create minutes" });
 }
 
-export function assertCanUpdateMinutesDocument(actor: Actor): void {
-  assertPermission(actor, "R1", { action: "to edit minutes" });
+export function assertCanUpdateMinutesDocument(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R1", { boardId: scope.boardId, action: "to edit minutes" });
 }
 
-export function assertCanInsertMinutesSection(actor: Actor): void {
-  assertPermission(actor, "R1", { action: "to add a minutes section" });
+export function assertCanInsertMinutesSection(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R1", { boardId: scope.boardId, action: "to add a minutes section" });
 }
 
-export function assertCanUpdateMinutesSection(actor: Actor): void {
-  assertPermission(actor, "R1", { action: "to edit a minutes section" });
+export function assertCanUpdateMinutesSection(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R1", { boardId: scope.boardId, action: "to edit a minutes section" });
 }
 
 // ─── 14 — exhibit SELECT: three tiers, three rules ────────────────────
@@ -225,7 +310,11 @@ export type ExhibitVisibility = "public" | "board_only" | "admin_only";
  * tiers: `admin_only` is where a staff memo about a personnel matter lands,
  * and a board member holding no staff permission must not see it.
  */
-export function canSelectExhibit(actor: Actor, row: { visibility: ExhibitVisibility }): boolean {
+export interface ExhibitRow extends BoardScopedRow {
+  visibility: ExhibitVisibility;
+}
+
+export function canSelectExhibit(actor: Actor, row: ExhibitRow): boolean {
   switch (row.visibility) {
     case "public":
       // Every member of the town, which for a signed-in actor is everyone.
@@ -233,42 +322,41 @@ export function canSelectExhibit(actor: Actor, row: { visibility: ExhibitVisibil
       // through this one.
       return actor.kind === "user";
     case "board_only":
-      return isAdmin(actor) || resolvePermission(actor, "A3") || isBoardMember(actor);
+      return isAdmin(actor) || resolvePermission(actor, "A3", row.boardId) || isBoardMember(actor);
     case "admin_only":
-      return isAdmin(actor) || resolvePermission(actor, "A3");
+      return isAdmin(actor) || resolvePermission(actor, "A3", row.boardId);
     default:
       // An unrecognised visibility is the most restrictive one, not the least.
       return false;
   }
 }
 
-export function assertCanSelectExhibit(actor: Actor, row: { visibility: ExhibitVisibility }): void {
+export function assertCanSelectExhibit(actor: Actor, row: ExhibitRow): void {
   if (canSelectExhibit(actor, row)) return;
   throw new AuthorizationError(
     `This attachment is marked ${row.visibility}. Reading it requires ` +
       (row.visibility === "board_only"
-        ? "a board seat, A3 (upload_attachments_staff), or the administrator role."
-        : "A3 (upload_attachments_staff) or the administrator role."),
-    { code: "A3" },
+        ? "a board seat, A3 (upload_attachments_staff) for this board, or the administrator role."
+        : "A3 (upload_attachments_staff) for this board, or the administrator role."),
+    { code: "A3", boardId: row.boardId },
   );
 }
 
-export function visibleExhibits<T extends { visibility: ExhibitVisibility }>(
-  actor: Actor,
-  rows: readonly T[],
-): T[] {
+export function visibleExhibits<T extends ExhibitRow>(actor: Actor, rows: readonly T[]): T[] {
+  // Per ROW — see `visibleMinutesDocuments`. An agenda packet's attachments
+  // can span boards as soon as anything lists across meetings.
   return rows.filter((row) => canSelectExhibit(actor, row));
 }
 
-// ─── 15, 16 — exhibit writes ──────────────────────────────────────────
+// ─── 15, 16 — exhibit writes: A3, BOARD-SCOPED ────────────────────────
 
-/** A3, or the board_member role — A4, "upload files for admin review". */
-export function assertCanInsertExhibit(actor: Actor): void {
-  if (resolvePermission(actor, "A3") || isBoardMember(actor)) return;
+/** A3 for this board, or the board_member role — A4, "upload for review". */
+export function assertCanInsertExhibit(actor: Actor, scope: BoardScope): void {
+  if (resolvePermission(actor, "A3", scope.boardId) || isBoardMember(actor)) return;
   throw new AuthorizationError(
-    "Uploading an attachment requires A3 (upload_attachments_staff). Board members may " +
-      "upload their own material without it.",
-    { code: "A3" },
+    "Uploading an attachment requires A3 (upload_attachments_staff) for this board. Board " +
+      "members may upload their own material without it.",
+    { code: "A3", boardId: scope.boardId },
   );
 }
 
@@ -277,9 +365,29 @@ export function assertCanInsertExhibit(actor: Actor): void {
  * is how an exhibit's VISIBILITY changes. If board members could update, one
  * could promote an `admin_only` staff memo to `public`.
  */
-export function assertCanUpdateExhibit(actor: Actor): void {
-  assertPermission(actor, "A3", { action: "to change an attachment or its visibility" });
+export function assertCanUpdateExhibit(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "A3", {
+    boardId: scope.boardId,
+    action: "to change an attachment or its visibility",
+  });
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// 17, 18, 19 — the C2 rules. TOWN-LEVEL, deliberately.
+//
+// These three keep a global check while the sixteen above became
+// board-scoped, and that is a decision rather than an oversight:
+//
+//   - Neither `designated_boards` template grants C2, so no account exists
+//     whose C2 lives in `board_overrides` and would be missed.
+//   - `notification_event`, `notification_delivery` and
+//     `subscriber_notification_preference` have no board column. There is no
+//     board to scope by; inventing one would mean choosing a board for a row
+//     that does not have one, and every such choice is a guess.
+//
+// If a future template ever grants C2 per board, these are the three to
+// revisit, and they are grouped here so that revisit is one place.
+// ═══════════════════════════════════════════════════════════════════════
 
 // ─── 17 — notification_event SELECT: C2 ───────────────────────────────
 
@@ -356,11 +464,6 @@ export function visibleSubscriberPreferences<T extends { personId: string | null
 }
 
 // ─── 20 — meeting INSERT: A1, BOARD-SCOPED ────────────────────────────
-
-export interface BoardScope {
-  /** Required. See this file's header for why it is not optional. */
-  boardId: string;
-}
 
 export function assertCanInsertMeeting(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "A1", {

@@ -37,10 +37,12 @@
 import type postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { withTenant, type TenantTx } from "../../db/with-tenant.js";
 import { loadActor, type Actor } from "../authorization/actor.js";
 import type { PermissionCode } from "../authorization/permission.js";
+import type { TrpcContext } from "../context.js";
 
 export type TestDb = ReturnType<typeof drizzle>;
 
@@ -191,6 +193,61 @@ export async function seedBoardSeat(
     `);
   });
   return id;
+}
+
+/**
+ * Build the context a procedure sees, from a real account in a real database.
+ *
+ * Deliberately assembled the same way `createTrpcContext` assembles it — a
+ * bound `withTenant` and a memoised actor loader, and no other database
+ * handle — so a procedure that finds a way to the database in a test would
+ * have found the same way in production.
+ */
+export function contextFor(
+  db: TestDb,
+  town: TownFixture,
+  seeded: { personId: string; userAccountId: string },
+): TrpcContext {
+  const tenant = {
+    townId: town.townId,
+    personId: seeded.personId,
+    userAccountId: seeded.userAccountId,
+  };
+  const bound = <T>(fn: Parameters<typeof withTenant<never, T>>[2]) =>
+    withTenant(db, { townId: town.townId }, fn as never) as Promise<T>;
+
+  let cached: ReturnType<typeof loadActor> | undefined;
+  return {
+    req: {} as never,
+    res: {} as never,
+    authUser: { id: "auth-user", email: "a@example.test", emailVerified: true },
+    tenant,
+    withTenant: bound as TrpcContext["withTenant"],
+    actor: () => {
+      cached ??= bound((tx) => loadActor(tx as never, tenant));
+      return cached;
+    },
+  };
+}
+
+/**
+ * Assert that `fn` refuses with a tRPC error, and hand it back for inspection.
+ *
+ * Checks the type, not just that something was thrown: a procedure that fails
+ * with a TypeError because a rule's signature changed underneath it also
+ * "throws", and a test satisfied by that is a test of nothing.
+ */
+export async function expectTrpcError(fn: () => Promise<unknown>): Promise<TRPCError> {
+  let thrown: unknown;
+  try {
+    await fn();
+  } catch (err) {
+    thrown = err;
+  }
+  if (!(thrown instanceof TRPCError)) {
+    throw new Error(`expected a TRPCError, got ${String(thrown)}`);
+  }
+  return thrown;
 }
 
 /** Run `fn` inside the fixture town's tenant context. */

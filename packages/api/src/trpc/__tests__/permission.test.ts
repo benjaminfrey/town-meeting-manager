@@ -65,18 +65,28 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied, sysAdmin } = await cast(db, town, ["A2"]);
 
-      expect(() => rules.assertCanInsertAgendaItem(granted.actor)).not.toThrow();
-      expect(() => rules.assertCanInsertAgendaItem(admin.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanInsertAgendaItem(denied.actor), { code: "A2" });
-      await expectRefusal(() => rules.assertCanInsertAgendaItem(sysAdmin.actor), { code: "A2" });
-      await expectRefusal(() => rules.assertCanInsertAgendaItem(anonymousActor(town.townId)), {
+      expect(() => rules.assertCanInsertAgendaItem(granted.actor, board)).not.toThrow();
+      expect(() => rules.assertCanInsertAgendaItem(admin.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanInsertAgendaItem(denied.actor, board), {
         code: "A2",
       });
+      await expectRefusal(() => rules.assertCanInsertAgendaItem(sysAdmin.actor, board), {
+        code: "A2",
+      });
+      await expectRefusal(
+        () => rules.assertCanInsertAgendaItem(anonymousActor(town.townId), board),
+        {
+          code: "A2",
+        },
+      );
 
-      expect(() => rules.assertCanUpdateAgendaItem(granted.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanUpdateAgendaItem(denied.actor), { code: "A2" });
+      expect(() => rules.assertCanUpdateAgendaItem(granted.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanUpdateAgendaItem(denied.actor, board), {
+        code: "A2",
+      });
     });
   });
 
@@ -85,16 +95,19 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied, boardMember } = await cast(db, town, ["M3"]);
 
-      expect(() => rules.assertCanInsertMotion(granted.actor)).not.toThrow();
-      expect(() => rules.assertCanInsertMotion(admin.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanInsertMotion(denied.actor), { code: "M3" });
+      expect(() => rules.assertCanInsertMotion(granted.actor, board)).not.toThrow();
+      expect(() => rules.assertCanInsertMotion(admin.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanInsertMotion(denied.actor, board), { code: "M3" });
       // A board member may vote; recording the motion itself is staff work.
-      await expectRefusal(() => rules.assertCanInsertMotion(boardMember.actor), { code: "M3" });
+      await expectRefusal(() => rules.assertCanInsertMotion(boardMember.actor, board), {
+        code: "M3",
+      });
 
-      expect(() => rules.assertCanUpdateMotion(granted.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanUpdateMotion(denied.actor), { code: "M3" });
+      expect(() => rules.assertCanUpdateMotion(granted.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanUpdateMotion(denied.actor, board), { code: "M3" });
     });
   });
 
@@ -119,27 +132,42 @@ describe("the 21 authorization rules", () => {
       await inTown(db, town, async (tx) => {
         // Clerk with M3 records anybody's vote.
         await expect(
-          rules.assertCanInsertVoteRecord(granted.actor, tx, { boardMemberId: othersSeat }),
+          rules.assertCanInsertVoteRecord(granted.actor, tx, {
+            boardMemberId: othersSeat,
+            boardId: town.boardId,
+          }),
         ).resolves.toBeUndefined();
 
         // Board member casting their own vote — no M3 needed.
         await expect(
-          rules.assertCanInsertVoteRecord(boardMember.actor, tx, { boardMemberId: ownSeat }),
+          rules.assertCanInsertVoteRecord(boardMember.actor, tx, {
+            boardMemberId: ownSeat,
+            boardId: town.boardId,
+          }),
         ).resolves.toBeUndefined();
 
         // Board member casting SOMEONE ELSE'S vote — refused.
         await expectRefusal(() =>
-          rules.assertCanInsertVoteRecord(boardMember.actor, tx, { boardMemberId: othersSeat }),
+          rules.assertCanInsertVoteRecord(boardMember.actor, tx, {
+            boardMemberId: othersSeat,
+            boardId: town.boardId,
+          }),
         );
 
         // An archived seat is not a seat. Casting through it is refused.
         await expectRefusal(() =>
-          rules.assertCanInsertVoteRecord(boardMember.actor, tx, { boardMemberId: archivedSeat }),
+          rules.assertCanInsertVoteRecord(boardMember.actor, tx, {
+            boardMemberId: archivedSeat,
+            boardId: town.otherBoardId,
+          }),
         );
 
         // Staff with no M3 is refused even for a seat that is not theirs.
         await expectRefusal(() =>
-          rules.assertCanInsertVoteRecord(denied.actor, tx, { boardMemberId: othersSeat }),
+          rules.assertCanInsertVoteRecord(denied.actor, tx, {
+            boardMemberId: othersSeat,
+            boardId: town.boardId,
+          }),
         );
       });
     });
@@ -150,13 +178,18 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { granted, denied, boardMember } = await cast(db, town, ["M3"]);
 
-      expect(() => rules.assertCanUpdateVoteRecord(granted.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanUpdateVoteRecord(denied.actor), { code: "M3" });
+      expect(() => rules.assertCanUpdateVoteRecord(granted.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanUpdateVoteRecord(denied.actor, board), {
+        code: "M3",
+      });
       // Deliberately narrower than INSERT: correcting a recorded vote is a
       // records action, not a voting action. The removed policy said so.
-      await expectRefusal(() => rules.assertCanUpdateVoteRecord(boardMember.actor), { code: "M3" });
+      await expectRefusal(() => rules.assertCanUpdateVoteRecord(boardMember.actor, board), {
+        code: "M3",
+      });
     });
   });
 
@@ -165,16 +198,17 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied } = await cast(db, town, ["M2"]);
 
-      expect(() => rules.assertCanInsertMeetingAttendance(granted.actor)).not.toThrow();
-      expect(() => rules.assertCanInsertMeetingAttendance(admin.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanInsertMeetingAttendance(denied.actor), {
+      expect(() => rules.assertCanInsertMeetingAttendance(granted.actor, board)).not.toThrow();
+      expect(() => rules.assertCanInsertMeetingAttendance(admin.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanInsertMeetingAttendance(denied.actor, board), {
         code: "M2",
       });
 
-      expect(() => rules.assertCanUpdateMeetingAttendance(granted.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanUpdateMeetingAttendance(denied.actor), {
+      expect(() => rules.assertCanUpdateMeetingAttendance(granted.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanUpdateMeetingAttendance(denied.actor, board), {
         code: "M2",
       });
     });
@@ -185,28 +219,34 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { granted, denied } = await cast(db, town, ["R4"]);
 
       for (const status of ["draft", "review"] as const) {
-        expect(rules.canSelectMinutesDocument(granted.actor, { status })).toBe(true);
-        expect(rules.canSelectMinutesDocument(denied.actor, { status })).toBe(false);
-        await expectRefusal(() => rules.assertCanSelectMinutesDocument(denied.actor, { status }), {
-          code: "R4",
-        });
+        expect(rules.canSelectMinutesDocument(granted.actor, { status, ...board })).toBe(true);
+        expect(rules.canSelectMinutesDocument(denied.actor, { status, ...board })).toBe(false);
+        await expectRefusal(
+          () => rules.assertCanSelectMinutesDocument(denied.actor, { status, ...board }),
+          {
+            code: "R4",
+          },
+        );
       }
 
       for (const status of ["approved", "published"] as const) {
-        expect(rules.canSelectMinutesDocument(denied.actor, { status })).toBe(true);
-        expect(() => rules.assertCanSelectMinutesDocument(denied.actor, { status })).not.toThrow();
+        expect(rules.canSelectMinutesDocument(denied.actor, { status, ...board })).toBe(true);
+        expect(() =>
+          rules.assertCanSelectMinutesDocument(denied.actor, { status, ...board }),
+        ).not.toThrow();
       }
 
       // The list form must filter, not throw — a clerk without R4 listing a
       // meeting's minutes should see the adopted ones, not an error.
       const rows = [
-        { id: "d", status: "draft" as const },
-        { id: "r", status: "review" as const },
-        { id: "a", status: "approved" as const },
-        { id: "p", status: "published" as const },
+        { id: "d", status: "draft" as const, ...board },
+        { id: "r", status: "review" as const, ...board },
+        { id: "a", status: "approved" as const, ...board },
+        { id: "p", status: "published" as const, ...board },
       ];
       expect(rules.visibleMinutesDocuments(denied.actor, rows).map((r) => r.id)).toEqual([
         "a",
@@ -226,6 +266,7 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied } = await cast(db, town, ["R1"]);
 
       for (const assert of [
@@ -234,14 +275,16 @@ describe("the 21 authorization rules", () => {
         rules.assertCanInsertMinutesSection,
         rules.assertCanUpdateMinutesSection,
       ]) {
-        expect(() => assert(granted.actor)).not.toThrow();
-        expect(() => assert(admin.actor)).not.toThrow();
-        await expectRefusal(() => assert(denied.actor), { code: "R1" });
+        expect(() => assert(granted.actor, board)).not.toThrow();
+        expect(() => assert(admin.actor, board)).not.toThrow();
+        await expectRefusal(() => assert(denied.actor, board), { code: "R1" });
       }
 
       // R4 is a read permission and must not be mistaken for a write one.
       const reader = await seedActor(db, town, { role: "staff", global: ["R4"] });
-      await expectRefusal(() => rules.assertCanUpdateMinutesDocument(reader.actor), { code: "R1" });
+      await expectRefusal(() => rules.assertCanUpdateMinutesDocument(reader.actor, board), {
+        code: "R1",
+      });
     });
   });
 
@@ -250,35 +293,54 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied, boardMember, sysAdmin } = await cast(db, town, ["A3"]);
 
       // public → every user of the town, whatever their permissions.
       for (const a of [admin, granted, denied, boardMember, sysAdmin]) {
-        expect(rules.canSelectExhibit(a.actor, { visibility: "public" })).toBe(true);
+        expect(rules.canSelectExhibit(a.actor, { visibility: "public", ...board })).toBe(true);
       }
 
       // board_only → admin OR A3 OR the board_member role.
-      expect(rules.canSelectExhibit(admin.actor, { visibility: "board_only" })).toBe(true);
-      expect(rules.canSelectExhibit(granted.actor, { visibility: "board_only" })).toBe(true);
-      expect(rules.canSelectExhibit(boardMember.actor, { visibility: "board_only" })).toBe(true);
-      expect(rules.canSelectExhibit(denied.actor, { visibility: "board_only" })).toBe(false);
-      expect(rules.canSelectExhibit(sysAdmin.actor, { visibility: "board_only" })).toBe(false);
+      expect(rules.canSelectExhibit(admin.actor, { visibility: "board_only", ...board })).toBe(
+        true,
+      );
+      expect(rules.canSelectExhibit(granted.actor, { visibility: "board_only", ...board })).toBe(
+        true,
+      );
+      expect(
+        rules.canSelectExhibit(boardMember.actor, { visibility: "board_only", ...board }),
+      ).toBe(true);
+      expect(rules.canSelectExhibit(denied.actor, { visibility: "board_only", ...board })).toBe(
+        false,
+      );
+      expect(rules.canSelectExhibit(sysAdmin.actor, { visibility: "board_only", ...board })).toBe(
+        false,
+      );
 
       // admin_only → admin OR A3. The board_member role does NOT carry here,
       // which is the whole difference between this tier and the one above.
-      expect(rules.canSelectExhibit(admin.actor, { visibility: "admin_only" })).toBe(true);
-      expect(rules.canSelectExhibit(granted.actor, { visibility: "admin_only" })).toBe(true);
-      expect(rules.canSelectExhibit(boardMember.actor, { visibility: "admin_only" })).toBe(false);
-      expect(rules.canSelectExhibit(denied.actor, { visibility: "admin_only" })).toBe(false);
+      expect(rules.canSelectExhibit(admin.actor, { visibility: "admin_only", ...board })).toBe(
+        true,
+      );
+      expect(rules.canSelectExhibit(granted.actor, { visibility: "admin_only", ...board })).toBe(
+        true,
+      );
+      expect(
+        rules.canSelectExhibit(boardMember.actor, { visibility: "admin_only", ...board }),
+      ).toBe(false);
+      expect(rules.canSelectExhibit(denied.actor, { visibility: "admin_only", ...board })).toBe(
+        false,
+      );
 
       await expectRefusal(() =>
-        rules.assertCanSelectExhibit(boardMember.actor, { visibility: "admin_only" }),
+        rules.assertCanSelectExhibit(boardMember.actor, { visibility: "admin_only", ...board }),
       );
 
       const rows = [
-        { id: "p", visibility: "public" as const },
-        { id: "b", visibility: "board_only" as const },
-        { id: "a", visibility: "admin_only" as const },
+        { id: "p", visibility: "public" as const, ...board },
+        { id: "b", visibility: "board_only" as const, ...board },
+        { id: "a", visibility: "admin_only" as const, ...board },
       ];
       expect(rules.visibleExhibits(boardMember.actor, rows).map((r) => r.id)).toEqual(["p", "b"]);
       expect(rules.visibleExhibits(denied.actor, rows).map((r) => r.id)).toEqual(["p"]);
@@ -291,20 +353,23 @@ describe("the 21 authorization rules", () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
+      const board = { boardId: town.boardId };
       const { admin, granted, denied, boardMember } = await cast(db, town, ["A3"]);
 
-      expect(() => rules.assertCanInsertExhibit(granted.actor)).not.toThrow();
-      expect(() => rules.assertCanInsertExhibit(admin.actor)).not.toThrow();
+      expect(() => rules.assertCanInsertExhibit(granted.actor, board)).not.toThrow();
+      expect(() => rules.assertCanInsertExhibit(admin.actor, board)).not.toThrow();
       // A4: a board member may upload their own material for review.
-      expect(() => rules.assertCanInsertExhibit(boardMember.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanInsertExhibit(denied.actor), { code: "A3" });
+      expect(() => rules.assertCanInsertExhibit(boardMember.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanInsertExhibit(denied.actor, board), { code: "A3" });
 
       // UPDATE is strictly narrower — it is how visibility gets changed, so a
       // board member being able to upload must not imply being able to
       // promote an admin_only exhibit to public.
-      expect(() => rules.assertCanUpdateExhibit(granted.actor)).not.toThrow();
-      await expectRefusal(() => rules.assertCanUpdateExhibit(boardMember.actor), { code: "A3" });
-      await expectRefusal(() => rules.assertCanUpdateExhibit(denied.actor), { code: "A3" });
+      expect(() => rules.assertCanUpdateExhibit(granted.actor, board)).not.toThrow();
+      await expectRefusal(() => rules.assertCanUpdateExhibit(boardMember.actor, board), {
+        code: "A3",
+      });
+      await expectRefusal(() => rules.assertCanUpdateExhibit(denied.actor, board), { code: "A3" });
     });
   });
 

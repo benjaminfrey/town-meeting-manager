@@ -22,6 +22,7 @@
  */
 
 import { initTRPC, TRPCError } from "@trpc/server";
+import { DEFAULT_PERMISSION_TEMPLATES, PERMISSIONS } from "@town-meeting/shared";
 import type { TrpcContext } from "./context.js";
 import type { TenantTx } from "../db/with-tenant.js";
 import type { ResolvedTenant } from "../auth/tenant-context.js";
@@ -139,20 +140,51 @@ export const protectedProcedure = t.procedure.use(translateAuthorizationErrors).
  * Codes whose rules are board-scoped, so a GLOBAL check on one of them is a
  * bug rather than a choice.
  *
- * `meeting` INSERT was `has_board_permission('A1', board_id)` and `meeting`
- * UPDATE was `is_admin() OR has_board_permission('A1', …) OR
- * has_board_permission('M1', …)`. Writing `requirePermission("A1")` with no
- * board silently performs the global check, which ignores an override that
- * grants (a board-specific clerk is wrongly refused) AND one that revokes (a
- * barred clerk is wrongly ALLOWED). Across the seventy files Phase E migrates,
- * "remember to pass the board" is not a control.
+ * Writing `requirePermission("A1")` with no board silently performs the global
+ * check, which ignores an override that grants (a board-specific clerk is
+ * wrongly refused) AND one that revokes (a barred clerk is wrongly ALLOWED).
+ * Across the seventy files Phase E migrates, "remember to pass the board" is
+ * not a control. So it is refused at MODULE LOAD, not per request: building
+ * such a procedure throws while the router is being imported, which is boot
+ * and test collection. A mistake that cannot be committed is better than one
+ * that is documented.
  *
- * So it is refused at MODULE LOAD, not per request: building such a procedure
- * throws while the router is being imported, which is boot and test
- * collection. A mistake that cannot be committed is better than one that is
- * documented.
+ * ─── Why this is derived and not a hand-written list ──────────────────────
+ *
+ * It used to be `["A1", "M1"]` — the two codes whose REMOVED SQL POLICIES said
+ * `has_board_permission(...)` in so many words. That was too narrow, and the
+ * evidence is in the product rather than in the policies: the two shipped
+ * `designated_boards` templates put EVERY code they grant in
+ * `board_overrides`, with global all-false. A global check on any of those
+ * codes answers "no" to every account either template ever created — which is
+ * one of the two reasons those templates have never worked.
+ *
+ * So the set is exactly "codes a board-specific account can hold", derived
+ * from the templates themselves. Adding a `designated_boards` template that
+ * grants a new code widens this automatically, instead of leaving a list to
+ * be updated by whoever remembers.
+ *
+ * Today that resolves to A1 A2 A3 A5 A6 M1–M7 R1–R6 (18 codes). Excluded:
+ * T1–T4 (never delegable), A4/A7/M8 (held by the board_member ROLE, not by
+ * configuration), C1–C5 (the civic-engagement codes; no `designated_boards`
+ * template grants one, and the tables they guard have no board column).
+ *
+ * Known limitation: `permission_template` rows a town writes itself are not
+ * visible here — this reads the five shipped defaults. A custom
+ * `designated_boards` template granting, say, C2 would not widen the set. That
+ * is a data-driven check this module cannot make synchronously at import time,
+ * and it is recorded rather than silently assumed away.
  */
-export const BOARD_SCOPED_CODES: readonly PermissionCode[] = ["A1", "M1"];
+export const BOARD_SCOPED_CODES: readonly PermissionCode[] = (() => {
+  const scopeable = new Set(
+    DEFAULT_PERMISSION_TEMPLATES.filter((t) => t.scope === "designated_boards").flatMap(
+      (t) => t.permissions as readonly string[],
+    ),
+  );
+  return (Object.keys(PERMISSIONS) as PermissionCode[]).filter((code) =>
+    scopeable.has(PERMISSIONS[code]),
+  );
+})();
 
 /**
  * Read a board id out of a procedure's input by property name.
@@ -205,10 +237,11 @@ export function requirePermission(code: PermissionCode, options: RequirePermissi
     // Thrown while the router module is being imported, so this never reaches
     // a request. See BOARD_SCOPED_CODES.
     throw new Error(
-      `requirePermission("${code}") has no board. ${code} is board-scoped — the policy it ` +
-        "restores was has_board_permission(code, board_id) — and a global check on it " +
-        "ignores an override that revokes it for one board, which ALLOWS a caller who " +
-        `should be refused. Use requireBoardPermission("${code}", boardIdFrom()).`,
+      `requirePermission("${code}") has no board. ${code} is board-scoped — a shipped ` +
+        "designated_boards permission template grants it per board and nothing globally — " +
+        "so a global check ignores both an override that GRANTS it (the board-specific " +
+        "clerk is wrongly refused) and one that REVOKES it (a barred clerk is wrongly " +
+        `allowed). Use requireBoardPermission("${code}", boardIdFrom()).`,
     );
   }
 

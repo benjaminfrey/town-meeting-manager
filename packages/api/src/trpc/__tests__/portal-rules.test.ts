@@ -21,6 +21,7 @@ import * as rules from "../authorization/rules.js";
 import { anonymousActor } from "../authorization/actor.js";
 
 const TOWN = "00000000-0000-4000-8000-000000000000";
+const BOARD = "00000000-0000-4000-8000-000000000001";
 
 describe("the public portal's read rules", () => {
   it("serves PUBLISHED minutes and nothing earlier — not even approved ones", () => {
@@ -95,9 +96,10 @@ describe("the public portal's read rules", () => {
 
   it("refuses the anonymous actor every one of the signed-in rules", () => {
     const anon = anonymousActor(TOWN);
+    const board = { boardId: BOARD };
 
     // Reads that a signed-in member of the town gets for free.
-    expect(rules.canSelectExhibit(anon, { visibility: "public" })).toBe(false);
+    expect(rules.canSelectExhibit(anon, { visibility: "public", ...board })).toBe(false);
 
     // Rule 9 as the policy wrote it was `has_permission('R4') OR status IN
     // ('approved','published')` — no actor term in the second branch, because
@@ -105,13 +107,18 @@ describe("the public portal's read rules", () => {
     // literally, an anonymous caller would pass it and receive a town's
     // APPROVED-but-unpublished minutes. The guard therefore carries an actor
     // term the policy did not need, and the portal has its own narrower rule.
-    expect(rules.canSelectMinutesDocument(anon, { status: "published" })).toBe(false);
-    expect(rules.canSelectMinutesDocument(anon, { status: "approved" })).toBe(false);
-    expect(rules.visibleMinutesDocuments(anon, [{ status: "published" as const }])).toEqual([]);
+    expect(rules.canSelectMinutesDocument(anon, { status: "published", ...board })).toBe(false);
+    expect(rules.canSelectMinutesDocument(anon, { status: "approved", ...board })).toBe(false);
+    expect(
+      rules.visibleMinutesDocuments(anon, [{ status: "published" as const, ...board }]),
+    ).toEqual([]);
     expect(rules.portalCanSelectMinutesDocument({ status: "approved" })).toBe(false);
     expect(rules.portalCanSelectMinutesDocument({ status: "published" })).toBe(true);
 
-    // Writes, uniformly refused.
+    // Writes, uniformly refused. Split by arity rather than called with a
+    // missing argument: `assert(anon)` on a board-scoped guard would throw a
+    // TypeError reading `scope.boardId`, and `.toThrow()` would be satisfied
+    // by it while the rule itself had stopped refusing anybody.
     for (const assert of [
       rules.assertCanInsertAgendaItem,
       rules.assertCanUpdateAgendaItem,
@@ -120,6 +127,12 @@ describe("the public portal's read rules", () => {
       rules.assertCanUpdateMinutesDocument,
       rules.assertCanInsertExhibit,
       rules.assertCanUpdateExhibit,
+      rules.assertCanInsertMeeting,
+      rules.assertCanUpdateMeeting,
+    ]) {
+      expect(() => assert(anon, board)).toThrow();
+    }
+    for (const assert of [
       rules.assertCanSelectNotificationEvent,
       rules.assertCanSelectAuditLog,
       rules.assertCanSelectTownNotificationConfig,
@@ -127,7 +140,5 @@ describe("the public portal's read rules", () => {
     ]) {
       expect(() => assert(anon)).toThrow();
     }
-    expect(() => rules.assertCanInsertMeeting(anon, { boardId: TOWN })).toThrow();
-    expect(() => rules.assertCanUpdateMeeting(anon, { boardId: TOWN })).toThrow();
   });
 });

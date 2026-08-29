@@ -13,7 +13,6 @@
 
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { sql } from "drizzle-orm";
 import { withTestDb } from "../../test/db-harness.js";
 import { toRows } from "../../db/rows.js";
@@ -22,11 +21,9 @@ import {
   seedTown,
   seedActor,
   seedActorWithRawMatrix,
-  type TownFixture,
-  type TestDb,
+  contextFor,
+  expectTrpcError,
 } from "./fixtures.js";
-import { withTenant } from "../../db/with-tenant.js";
-import { loadActor } from "../authorization/actor.js";
 import {
   toNameKeyedMatrix,
   resolvePermission,
@@ -40,50 +37,27 @@ import {
   requireBoardPermission,
   boardIdFrom,
   createCallerFactory,
+  BOARD_SCOPED_CODES,
 } from "../trpc.js";
+import { DEFAULT_PERMISSION_TEMPLATES, PERMISSIONS } from "@town-meeting/shared";
 import type { TrpcContext } from "../context.js";
-
-/**
- * Build the context a procedure sees, from a real account in a real database.
- *
- * Deliberately assembled the same way `createTrpcContext` assembles it — a
- * bound `withTenant` and a memoised actor loader, and no other database
- * handle — so a procedure that finds a way to the database in a test would
- * have found the same way in production.
- */
-function contextFor(
-  db: TestDb,
-  town: TownFixture,
-  seeded: { personId: string; userAccountId: string },
-): TrpcContext {
-  const tenant = {
-    townId: town.townId,
-    personId: seeded.personId,
-    userAccountId: seeded.userAccountId,
-  };
-  const bound = <T>(fn: Parameters<typeof withTenant<never, T>>[2]) =>
-    withTenant(db, { townId: town.townId }, fn as never) as Promise<T>;
-
-  let cached: ReturnType<typeof loadActor> | undefined;
-  return {
-    req: {} as never,
-    res: {} as never,
-    authUser: { id: "auth-user", email: "a@example.test", emailVerified: true },
-    tenant,
-    withTenant: bound as TrpcContext["withTenant"],
-    actor: () => {
-      cached ??= bound((tx) => loadActor(tx as never, tenant));
-      return cached;
-    },
-  };
-}
 
 /** A router exercising the global and board-scoped shapes of the middleware. */
 const testRouter = router({
-  // Global: A2 on agenda items.
+  // Board-scoped: A2 on agenda items. A2 used to be checked globally here,
+  // which is the shape `TEMPLATE_BOARD_SPECIFIC_STAFF` breaks on — it grants
+  // A2 per board and nothing globally.
   editAgenda: protectedProcedure
-    .use(requirePermission("A2", { action: "to edit an agenda" }))
+    .input(z.object({ boardId: z.string().uuid() }))
+    .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
     .mutation(() => "edited" as const),
+
+  // A code that is NOT board-scoped: C2, the notification settings. No
+  // designated_boards template grants it and the tables have no board column,
+  // so a global check is the right check and must stay buildable.
+  readNotificationLog: protectedProcedure
+    .use(requirePermission("C2", { action: "to read the notification log" }))
+    .query(() => "read" as const),
 
   // Board-scoped: A1 on meeting creation, board read from the input.
   scheduleMeeting: protectedProcedure
@@ -108,18 +82,7 @@ const testRouter = router({
 
 const createCaller = createCallerFactory(testRouter);
 
-async function expectForbidden(fn: () => Promise<unknown>): Promise<TRPCError> {
-  let thrown: unknown;
-  try {
-    await fn();
-  } catch (err) {
-    thrown = err;
-  }
-  if (!(thrown instanceof TRPCError)) {
-    throw new Error(`expected a TRPCError, got ${String(thrown)}`);
-  }
-  return thrown;
-}
+const expectForbidden = expectTrpcError;
 
 describe("requirePermission", () => {
   it("allows a caller holding the code and refuses one who does not, with a message that names it", async () => {
@@ -129,12 +92,12 @@ describe("requirePermission", () => {
       const granted = await seedActor(db, town, { role: "staff", global: ["A2"] });
       const denied = await seedActor(db, town, { role: "staff", global: ["A3"] });
 
-      await expect(createCaller(contextFor(db, town, granted)).editAgenda()).resolves.toBe(
-        "edited",
-      );
+      await expect(
+        createCaller(contextFor(db, town, granted)).editAgenda({ boardId: town.boardId }),
+      ).resolves.toBe("edited");
 
       const err = await expectForbidden(() =>
-        createCaller(contextFor(db, town, denied)).editAgenda(),
+        createCaller(contextFor(db, town, denied)).editAgenda({ boardId: town.boardId }),
       );
       expect(err.code).toBe("FORBIDDEN");
       // The refusal has to be actionable: a clerk needs to know which
@@ -200,7 +163,9 @@ describe("requirePermission", () => {
 
   it("refuses when the context carries no tenant, instead of resolving an empty actor", async () => {
     const ctx: TrpcContext = { req: {} as never, res: {} as never };
-    const err = await expectForbidden(() => createCaller(ctx).editAgenda());
+    const err = await expectForbidden(() =>
+      createCaller(ctx).editAgenda({ boardId: "00000000-0000-4000-8000-000000000001" }),
+    );
     expect(err.code).toBe("UNAUTHORIZED");
   });
 
@@ -216,6 +181,28 @@ describe("requirePermission", () => {
 
       // The only database-shaped thing on the context is `withTenant`.
       expect(Object.keys(ctx).filter((k) => /db|sql|client|supabase/i.test(k))).toEqual([]);
+    });
+  });
+
+  it("still performs a GLOBAL check for a code that is not board-scoped", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const granted = await seedActor(db, town, { role: "staff", global: ["C2"] });
+      const denied = await seedActor(db, town, { role: "staff", global: [] });
+
+      // C2 takes no board and must not start demanding one: notification
+      // events belong to a town, and no designated_boards template grants it.
+      await expect(createCaller(contextFor(db, town, granted)).readNotificationLog()).resolves.toBe(
+        "read",
+      );
+      expect(
+        (
+          await expectForbidden(() =>
+            createCaller(contextFor(db, town, denied)).readNotificationLog(),
+          )
+        ).code,
+      ).toBe("FORBIDDEN");
     });
   });
 
@@ -262,7 +249,9 @@ describe("the code/name translation", () => {
         board_overrides: [{ board_id: town.boardId, permissions: { create_meeting: false } }],
       });
 
-      await expect(createCaller(contextFor(db, town, clerk)).editAgenda()).resolves.toBe("edited");
+      await expect(
+        createCaller(contextFor(db, town, clerk)).editAgenda({ boardId: town.boardId }),
+      ).resolves.toBe("edited");
 
       // The board override is honoured in the name spelling too: revoked on
       // one board, still granted on the other.
@@ -284,10 +273,51 @@ describe("the code/name translation", () => {
   it("refuses to BUILD a board-scoped check with no board", async () => {
     // Thrown at module load, not per request — so `requirePermission("A1")`
     // cannot be committed, let alone reach production doing a global check.
-    expect(() => requirePermission("A1")).toThrow(/board-scoped/);
-    expect(() => requirePermission("M1")).toThrow(/board-scoped/);
-    // A code that is not board-scoped is unaffected.
-    expect(() => requirePermission("A2")).not.toThrow();
+    for (const code of BOARD_SCOPED_CODES) {
+      expect(() => requirePermission(code), `${code} must demand a board`).toThrow(/board-scoped/);
+    }
+    // Codes that are not board-scoped are unaffected.
+    for (const code of ["T1", "T2", "T3", "T4", "A4", "A7", "M8", "C1", "C2", "C5"] as const) {
+      expect(() => requirePermission(code), `${code} must not demand a board`).not.toThrow();
+    }
+  });
+
+  it("derives the board-scoped set from the designated_boards templates themselves", async () => {
+    // The set used to be the hand-written `["A1", "M1"]` — the two codes whose
+    // deleted SQL policies said `has_board_permission` out loud. But both
+    // shipped `designated_boards` templates put EVERY code they grant in
+    // `board_overrides` with global all-false, so a global check on any of
+    // them answers "no" to every account those templates create.
+    expect([...BOARD_SCOPED_CODES]).toEqual([
+      "A1",
+      "A2",
+      "A3",
+      "A5",
+      "A6",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "M7",
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+      "R6",
+    ]);
+
+    // Every code either designated_boards template grants is in the set. This
+    // is the property that matters; the literal above is only its value today.
+    for (const template of DEFAULT_PERMISSION_TEMPLATES) {
+      if (template.scope !== "designated_boards") continue;
+      for (const action of template.permissions) {
+        const code = PERMISSION_CODES.find((c) => PERMISSIONS[c] === action)!;
+        expect(BOARD_SCOPED_CODES, `${template.name} grants ${action} (${code})`).toContain(code);
+      }
+    }
   });
 
   it("boardIdFrom narrows at runtime instead of casting", async () => {
