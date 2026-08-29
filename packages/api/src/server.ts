@@ -22,6 +22,8 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { invitationRoutes } from "./routes/invitations.js";
 import { sessionRoutes } from "./routes/session.js";
 import { NotificationService } from "./services/notification-service.js";
+import { listJobTenants, tenantJob } from "./jobs/tenant-job.js";
+import { sql } from "drizzle-orm";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { appRouter } from "./trpc/router.js";
 import { createTrpcContext } from "./trpc/context.js";
@@ -161,17 +163,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // when auth is misconfigured reports "unhealthy" for the wrong reason, or
   // (worse) reports healthy because the probe treats any response as up. It
   // discloses only up/degraded and a process uptime.
+  //
+  // The probe is `SELECT 1` on the application pool, not a read of `town`
+  // through the service-role client. A liveness probe has no tenant and needs
+  // none: it is asking whether this process can reach Postgres, and any query
+  // that returns rows is asking a second question it cannot answer without one
+  // — under RLS `SELECT id FROM town` with no `app.town_id` returns zero rows
+  // and no error, which the old check could not distinguish from a healthy
+  // empty result.
   app.get("/api/health", { config: { ...PUBLIC_ROUTE } }, async (_request, reply) => {
-    let database: "connected" | "disconnected" = "disconnected";
-    try {
-      const { error } = await app.supabase
-        .from("town")
-        .select("id", { head: true, count: "exact" })
-        .limit(1);
-      if (!error) database = "connected";
-    } catch {
-      database = "disconnected";
-    }
+    const database = await app.tenantDb
+      .execute(sql`SELECT 1`)
+      .then(() => "connected" as const)
+      .catch(() => "disconnected" as const);
+
     return reply.code(database === "connected" ? 200 : 503).send({
       status: database === "connected" ? "ok" : "degraded",
       uptime: Math.round(process.uptime()),
@@ -207,15 +212,61 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(invitationRoutes, { prefix: "/api" });
   await app.register(sessionRoutes, { prefix: "/api" });
 
-  // ─── Retry processor — runs every 60 seconds ─────────────────────
-  const retryInterval = setInterval(() => {
-    const service = new NotificationService(app.supabase);
-    service.processRetries().catch((err) => {
-      app.log.error({ err }, "Notification retry processor error");
-    });
+  // ─── The notification sweep — runs every 60 seconds ───────────────
+  //
+  // ─── Task D1c: one job per town, not one query across all of them ───────
+  //
+  // This used to be `new NotificationService(app.supabase).processRetries()` —
+  // one unscoped query over `notification_delivery` with the service-role
+  // client, reading every town's rows and sending every town's mail from one
+  // pass. There is no session here to resolve a tenant from, so the tenant has
+  // to be named, and naming it means naming one at a time: `listJobTenants`
+  // returns the roster and each town gets its own `TenantJob`, which cannot be
+  // constructed without a town id (see `jobs/tenant-job.ts`).
+  //
+  // Two kinds of work, both per town:
+  //
+  //   processPendingEvents — events queued by a caller that had no
+  //        tenant-bound database handle. Today that is
+  //        `services/notification-triggers.ts`, driven from `routes/minutes.ts`,
+  //        which is still on the Supabase client and belongs to another task.
+  //        It inserts a `pending` row; this is what delivers it.
+  //   processRetries — deliveries past their `next_retry_at`.
+  //
+  // Sequential rather than `Promise.all`: the pool is shared with live
+  // requests, and a fan-out over every town would take a connection each.
+  //
+  // A town whose sweep throws is logged and the loop continues — one town's
+  // misconfigured Postmark token must not stop every other town's mail.
+  let sweeping = false;
+  const sweepInterval = setInterval(() => {
+    // A sweep that outruns the interval would otherwise start a second pass
+    // over the same rows. `processNotificationEvent` claims its row and
+    // `processRetries` is idempotent enough to survive it, but overlapping
+    // sweeps mean overlapping connections for no benefit.
+    if (sweeping) return;
+    sweeping = true;
+
+    void (async () => {
+      try {
+        for (const townId of await listJobTenants(app.tenantDb)) {
+          const service = new NotificationService(tenantJob(app.tenantDb, townId));
+          try {
+            await service.processPendingEvents();
+            await service.processRetries();
+          } catch (err) {
+            app.log.error({ err, townId }, "Notification sweep failed for one town");
+          }
+        }
+      } catch (err) {
+        app.log.error({ err }, "Notification sweep could not list tenants");
+      } finally {
+        sweeping = false;
+      }
+    })();
   }, 60_000);
 
-  app.addHook("onClose", async () => clearInterval(retryInterval));
+  app.addHook("onClose", async () => clearInterval(sweepInterval));
 
   return app;
 }

@@ -126,21 +126,25 @@ async function seed(app: postgres.Sql, overrides: { userAccountTownId?: string }
 /**
  * The real route, with a real Better Auth instance and a real tenant db.
  *
- * `app.supabase` is still the service-role client in production — the token
- * lookup has to happen before any town is known, and under FORCE RLS there is
- * no tenant-scoped way to do that. It is faked here rather than mocked away:
- * the fake reads the SAME database the route then writes to, so a divergence
- * between what the lookup saw and what the transaction does is still
- * observable.
+ * ─── Task D1c: the service-role fake is gone ─────────────────────────────
  *
- * It reads on the OWNER connection, because that is what "bypasses RLS" means
- * here — the same property the service-role key has in production. Reading on
- * the `tmm_app` connection would return zero rows for every lookup (no
- * `app.town_id` is set yet, which is the entire reason this lookup cannot be
- * tenant-scoped), and the tests would pass or fail for a reason unrelated to
- * the route. Task D1 removes the client and this fake with it.
+ * This function used to decorate the server with a hand-written Supabase
+ * stand-in that read on the OWNER connection — because "bypasses RLS" was what
+ * the service-role key meant in production, and the route's token lookup had
+ * no other way to find a town before one was known. That fake is deleted along
+ * with the thing it imitated.
+ *
+ * Everything now runs on `client`, the `tmm_app` connection, which is a
+ * non-owner and does NOT bypass row level security. That matters more than it
+ * sounds: with the old fake, a route that read the wrong town's row still
+ * passed, because the fake could see every row. Here the database refuses, so
+ * the tests below are testing tenancy rather than assuming it.
+ *
+ * The token lookup that still has to happen before any town is known goes
+ * through `db/invitation-bootstrap.ts`, on this same unprivileged connection.
+ * `routes/__tests__/invitation-bootstrap.test.ts` pins its boundary.
  */
-async function buildApp(client: postgres.Sql, lookup: postgres.Sql, sent: string[]) {
+async function buildApp(client: postgres.Sql, sent: string[]) {
   const db = drizzle(client);
   const auth = createAuth({
     db,
@@ -151,41 +155,8 @@ async function buildApp(client: postgres.Sql, lookup: postgres.Sql, sent: string
     },
   });
 
-  const supabaseLike = {
-    from(table: string) {
-      const filters: Array<[string, string]> = [];
-      const self = {
-        select: () => self,
-        eq: (column: string, value: string) => {
-          filters.push([column, value]);
-          return self;
-        },
-        single: () => self,
-        then: (
-          resolve: (value: { data: unknown; error: unknown }) => unknown,
-          reject?: (reason: unknown) => unknown,
-        ) => read().then(resolve, reject),
-      };
-
-      async function read(): Promise<{ data: unknown; error: unknown }> {
-        // Every read this route performs is by a single equality filter, and
-        // all of them run before a town is known.
-        const [[column, value]] = filters as [[string, string]];
-        const rows = await lookup.unsafe(
-          `SELECT * FROM ${table} WHERE ${column} = $1 LIMIT 1`,
-          [value],
-          { prepare: false },
-        );
-        return { data: rows[0] ?? null, error: null };
-      }
-
-      return self;
-    },
-  };
-
   const server = Fastify({ logger: false });
   await server.register(sensible);
-  server.decorate("supabase", supabaseLike as never);
   server.decorate("verifyAuth", async () => {});
   server.decorate("auth", auth);
   server.decorate("tenantDb", db);
@@ -200,7 +171,7 @@ describe("POST /api/invitations/accept", () => {
       try {
         const fixture = await seed(client);
         const sent: string[] = [];
-        const { server } = await buildApp(client, owner, sent);
+        const { server } = await buildApp(client, sent);
 
         try {
           const res = await server.inject({
@@ -252,7 +223,7 @@ describe("POST /api/invitations/accept", () => {
       const client = await connectAsAppRole(owner);
       try {
         const fixture = await seed(client);
-        const { server, auth, db } = await buildApp(client, owner, []);
+        const { server, auth, db } = await buildApp(client, []);
 
         try {
           const accept = await server.inject({
@@ -290,7 +261,7 @@ describe("POST /api/invitations/accept", () => {
       const client = await connectAsAppRole(owner);
       try {
         const fixture = await seed(client);
-        const { server } = await buildApp(client, owner, []);
+        const { server } = await buildApp(client, []);
 
         try {
           const first = await server.inject({
@@ -335,7 +306,7 @@ describe("POST /api/invitations/accept", () => {
       try {
         const otherTownId = randomUUID();
         const fixture = await seed(client, { userAccountTownId: otherTownId });
-        const { server } = await buildApp(client, owner, []);
+        const { server } = await buildApp(client, []);
 
         try {
           const res = await server.inject({
@@ -390,7 +361,7 @@ describe("POST /api/invitations/accept", () => {
                             ${fixture.userAccountId}, ${secondToken}, 'pending',
                             now() + interval '7 days', 'board_member', ${INVITEE_EMAIL})`;
 
-        const { server } = await buildApp(client, owner, []);
+        const { server } = await buildApp(client, []);
         try {
           const first = await server.inject({
             method: "POST",
@@ -446,7 +417,7 @@ describe("POST /api/invitations/accept", () => {
       const client = await connectAsAppRole(owner);
       try {
         const fixture = await seed(client);
-        const { server } = await buildApp(client, owner, []);
+        const { server } = await buildApp(client, []);
         try {
           const res = await server.inject({
             method: "POST",
@@ -479,7 +450,7 @@ describe("POST /api/invitations/accept", () => {
         await owner`UPDATE invitation SET expires_at = now() - interval '1 day'
                      WHERE id = ${fixture.invitationId}`;
 
-        const { server } = await buildApp(client, owner, []);
+        const { server } = await buildApp(client, []);
         try {
           const res = await server.inject({
             method: "POST",
@@ -491,6 +462,155 @@ describe("POST /api/invitations/accept", () => {
           const users = await owner`
             SELECT 1 FROM better_auth."user" WHERE email = ${INVITEE_EMAIL}`;
           expect(users.length).toBe(0);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        await client.end();
+      }
+    });
+  });
+});
+
+describe("invitation acceptance and the town next door (Task D1c)", () => {
+  /**
+   * The requirement, stated directly: acceptance must not be able to read or
+   * write any row of a town other than the invitation's own.
+   *
+   * Before this task that was a hope. The route read the invitation, the
+   * person, the town and the inviter through the service-role client, with row
+   * level security bypassed, filtered only by whatever `.eq()` the code
+   * happened to write — and the ONE cross-tenant check it did make
+   * (`inv.town_id !== user.townId`) was decided in TypeScript against a value
+   * from an unverified JWT claim (see `plugins/auth.ts`'s header).
+   *
+   * Now the whole route runs on a `tmm_app` connection inside
+   * `withTenant(town-from-the-token)`. Two towns, two live invitations; one is
+   * accepted, and the other must be untouched — not merely unchanged by
+   * intent, but invisible while the first was being processed.
+   */
+  it("closes its own invitation and leaves the neighbouring town entirely alone", async () => {
+    await withTestDb(async (owner) => {
+      const client = await connectAsAppRole(owner);
+      try {
+        const alpha = await seed(client);
+
+        // A second town, with its own pending invitation for its own person.
+        const beta = {
+          townId: randomUUID(),
+          personId: randomUUID(),
+          userAccountId: randomUUID(),
+          invitationId: randomUUID(),
+          token: `tok-${randomUUID()}`,
+        };
+        await client.begin(async (tx) => {
+          await tx`SELECT set_config('app.town_id', ${beta.townId}, true)`;
+          await tx`INSERT INTO town (id, name, subdomain) VALUES (${beta.townId}, 'Bristol', 'bristol')`;
+          await tx`INSERT INTO person (id, town_id, name, email)
+                   VALUES (${beta.personId}, ${beta.townId}, 'Neighbour', 'neighbour@example.gov')`;
+          await tx`INSERT INTO user_account (id, person_id, town_id, role)
+                   VALUES (${beta.userAccountId}, ${beta.personId}, ${beta.townId}, 'board_member')`;
+          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+                   VALUES (${beta.invitationId}, ${beta.townId}, ${beta.personId}, ${beta.userAccountId},
+                           ${beta.token}, 'pending', now() + interval '7 days', 'board_member',
+                           'neighbour@example.gov')`;
+        });
+
+        const { server } = await buildApp(client, []);
+        try {
+          const res = await server.inject({
+            method: "POST",
+            url: "/api/invitations/accept",
+            payload: { token: alpha.token, password: PASSWORD },
+          });
+          expect(res.statusCode).toBe(200);
+          expect(res.json().town_id).toBe(alpha.townId);
+
+          // Newcastle's invitation closed…
+          const [accepted] = await owner<{ status: string }[]>`
+            SELECT status FROM invitation WHERE id = ${alpha.invitationId}`;
+          expect(accepted!.status).toBe("accepted");
+
+          // …and Bristol's is exactly as it was. Nothing consumed it, nothing
+          // renamed it, nothing linked its account.
+          const [neighbour] = await owner<{ status: string; accepted_at: Date | null }[]>`
+            SELECT status, accepted_at FROM invitation WHERE id = ${beta.invitationId}`;
+          expect(neighbour!.status).toBe("pending");
+          expect(neighbour!.accepted_at).toBeNull();
+
+          const [neighbourAccount] = await owner<
+            { auth_user_id: string | null; email: string | null; display_name: string | null }[]
+          >`
+            SELECT auth_user_id, email, display_name FROM user_account WHERE id = ${beta.userAccountId}`;
+          expect(neighbourAccount!.auth_user_id).toBeNull();
+          expect(neighbourAccount!.email).toBeNull();
+          expect(neighbourAccount!.display_name).toBeNull();
+
+          // Exactly one identity→town mapping exists, and it is Newcastle's.
+          const mappings = await owner<{ town_id: string }[]>`
+            SELECT town_id FROM better_auth.user_tenant`;
+          expect(mappings.map((m) => m.town_id)).toEqual([alpha.townId]);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        await client.end();
+      }
+    });
+  });
+
+  it("answers a token whose town is not the one it names with 404, disclosing nothing", async () => {
+    // The hint says Newcastle; the invitation is Bristol's. That is what a
+    // corrupted or stale `better_auth.invitation_tenant` row looks like from
+    // the route's side — and the answer is the same 404 an unknown token gets,
+    // rather than an error that would confirm the token exists somewhere.
+    await withTestDb(async (owner) => {
+      const client = await connectAsAppRole(owner);
+      try {
+        const alpha = await seed(client);
+        const strangerToken = `tok-${randomUUID()}`;
+        const otherTownId = randomUUID();
+
+        await client.begin(async (tx) => {
+          await tx`SELECT set_config('app.town_id', ${otherTownId}, true)`;
+          await tx`INSERT INTO town (id, name, subdomain) VALUES (${otherTownId}, 'Bristol', 'bristol')`;
+          const [person] = await tx<{ id: string }[]>`
+            INSERT INTO person (id, town_id, name, email)
+            VALUES (${randomUUID()}, ${otherTownId}, 'Neighbour', 'neighbour@example.gov')
+            RETURNING id`;
+          const [account] = await tx<{ id: string }[]>`
+            INSERT INTO user_account (id, person_id, town_id, role)
+            VALUES (${randomUUID()}, ${person!.id}, ${otherTownId}, 'board_member')
+            RETURNING id`;
+          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+                   VALUES (${randomUUID()}, ${otherTownId}, ${person!.id}, ${account!.id},
+                           ${strangerToken}, 'pending', now() + interval '7 days', 'board_member',
+                           'neighbour@example.gov')`;
+        });
+
+        // Point the hint at the wrong town — the only thing here that can be
+        // corrupted, and the thing that must not matter.
+        await client`
+          UPDATE better_auth.invitation_tenant SET town_id = ${alpha.townId}
+           WHERE token_sha256 = sha256(convert_to(${strangerToken}, 'UTF8'))`;
+
+        const { server } = await buildApp(client, []);
+        try {
+          const res = await server.inject({
+            method: "POST",
+            url: "/api/invitations/accept",
+            payload: { token: strangerToken, password: PASSWORD },
+          });
+          expect(res.statusCode).toBe(404);
+
+          const validate = await server.inject({
+            method: "GET",
+            url: `/api/invitations/validate?token=${strangerToken}`,
+          });
+          expect(validate.statusCode).toBe(404);
+
+          // Nothing was created on the way to refusing.
+          expect(await owner`SELECT 1 FROM better_auth."user"`).toHaveLength(0);
         } finally {
           await server.close();
         }
