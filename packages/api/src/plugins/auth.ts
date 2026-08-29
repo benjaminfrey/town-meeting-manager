@@ -264,18 +264,35 @@ const CODE_BY_ACTION = new Map<PermissionAction, PermissionCode>(
  * "approve_minutes")`, which no template can grant, so only the admin
  * short-circuit could satisfy it. See `requireAdmin` for what replaced it.
  *
- * ─── What this deliberately does NOT do ──────────────────────────────────
+ * ─── What this does NOT do, and why that is now safe (Task D1f) ──────────
  *
  * It performs a GLOBAL check — no board id, because a Fastify preHandler runs
- * before any body parsing this API does and has no board to scope to. For
- * A6/R1/R2/R3 — four of the five codes these routes guard — that is not
- * fail-closed: the shipped `designated_boards` permission templates grant
- * those codes per board with global all-false, so a global check ignores an
- * override that REVOKES one for a board, and allows a caller who should be
- * refused. `trpc/trpc.ts` refuses a board-scoped code at module load for
- * exactly this reason; this path cannot, because it has nowhere to get the
- * board from. Recorded here rather than fixed here: giving these routes a
- * board id is the route migration, not a change to the guard.
+ * before any body parsing this API does and has no board to scope to.
+ *
+ * D1c recorded that as a LIVE DEFECT rather than fixing it. Four of the five
+ * codes this used to guard — A6, R1, R2, R3 — are granted per board by the two
+ * `designated_boards` templates with global all-false, so a global check
+ * ignored an override that REVOKED one and allowed a caller the town had
+ * explicitly barred from that board. `trpc/trpc.ts` refuses a board-scoped
+ * code at module load for exactly this reason; this path could not, because it
+ * had nowhere to get a board from, and adding the same module-load refusal
+ * here would have thrown at import and stopped the API booting.
+ *
+ * D1f removed the constraint by removing the callers. All six routes that
+ * needed a board-scoped decision (`documents.ts` ×2, `minutes.ts` ×4) now
+ * resolve the meeting inside their own tenant transaction and ask `rules.ts`
+ * about `meeting.board_id`. What is left calling this is
+ * `routes/notifications.ts`, with C2 — and C2 is town-level by design: neither
+ * `designated_boards` template grants it, and a notification event belongs to
+ * a town, not to a board, so there is no board column to scope it by. A global
+ * check is the CORRECT check for the one code that still arrives here.
+ *
+ * That is a fact about the callers, not about this function, so it is not
+ * enforced by the type — a future route could pass a board-scoped action and
+ * reintroduce the defect. The pin against that is
+ * `routes/__tests__/board-scoped-legacy-routes.test.ts`, which compares two
+ * boards for one caller on every one of the six routes and goes red in both
+ * directions if the board is dropped again.
  */
 export function requirePermission(action: PermissionAction) {
   const code = CODE_BY_ACTION.get(action);

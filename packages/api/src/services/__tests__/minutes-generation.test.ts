@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SQL } from "drizzle-orm";
+import type { TenantTx } from "../../db/with-tenant.js";
 import { assembleMinutesJson } from "../minutes-assembler.js";
 import { formatMinutes } from "../minutes-formatters.js";
 import type { MinutesContentJson, MinutesRenderOptions } from "@town-meeting/shared";
@@ -23,55 +24,82 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const MINUTES_ROUTE = path.join(testDir, "..", "..", "routes", "minutes.ts");
 
 describe("generated_by labelling", () => {
+  // Source-text pins. `minutes_document.generated_by` is a claim about HOW a
+  // document was produced, and this pipeline is deterministic assembly —
+  // Handlebars over rows — with no model anywhere in it. Labelling it `ai`
+  // puts a false provenance claim on a public record.
+  //
+  // Task D1f moved both write sites from a PostgREST object literal
+  // (`generated_by: "manual"`) into SQL (`'manual'` in a VALUES / SET list),
+  // so the pattern moved with them. It is still two, and still source text,
+  // because there is no harness in this package that can drive a route with
+  // Puppeteer.
   it("never labels deterministically assembled minutes as ai-generated", () => {
     const source = readFileSync(MINUTES_ROUTE, "utf8");
+    expect(source).not.toMatch(/generated_by\s*[:=]\s*'ai'/);
     expect(source).not.toContain('generated_by: "ai"');
   });
 
   it("labels assembled minutes as manual at both write sites", () => {
     const source = readFileSync(MINUTES_ROUTE, "utf8");
-    const matches = source.match(/generated_by: "manual"/g) ?? [];
+    // The INSERT names the column in a list and supplies `'manual'` in VALUES;
+    // the UPDATE writes `generated_by = 'manual'`. Count the value, which is
+    // the part that carries the claim.
+    const matches = source.match(/'manual'/g) ?? [];
     expect(matches).toHaveLength(2);
   });
 });
 
-// ─── Mock Supabase builder ────────────────────────────────────────────
+// ─── A stand-in tenant transaction ────────────────────────────────────
 
 /**
- * Creates a chainable query builder that handles all PostgREST-style
- * method chaining patterns used in minutes-assembler.ts.
+ * Stage 1, Task D1f: this used to be a chainable PostgREST mock, because
+ * `assembleMinutesJson` took a SERVICE-ROLE Supabase client. It takes a
+ * `TenantTx` now, so the stand-in is a `tx` whose `execute` answers by table.
  *
- * When awaited directly  → returns { data: array, error: null }
- * When .single() called  → returns { data: firstItem|null, error: null }
- * When .maybeSingle()    → returns { data: firstItem|null, error: null }
+ * Every assertion in this file is about the ASSEMBLY — how attendance,
+ * motions, votes, recusals, sections and certification are built out of rows —
+ * which is the same computation on the same fixture rows either way. What
+ * changed is only where the rows come from, so the fixtures below are
+ * untouched and so are the expectations.
+ *
+ * What this deliberately does NOT cover is tenancy, and could not: a fake tx
+ * has no `app.town_id` and no policy. That is covered where it can actually be
+ * proved — against a real database, in `db/__tests__/tenant-isolation.test.ts`
+ * and `routes/__tests__/portal-tenancy.test.ts`.
  */
-function makeBuilder(data: unknown | unknown[] | null) {
-  const arr = Array.isArray(data) ? data : data !== null ? [data] : [];
-  const single = arr[0] ?? null;
-
-  const builder: Record<string, unknown> = {};
-  builder["select"] = () => builder;
-  builder["eq"] = () => builder;
-  builder["order"] = () => builder;
-  builder["in"] = () => builder;
-  builder["not"] = () => builder;
-  builder["single"] = () => Promise.resolve({ data: single, error: null });
-  builder["maybeSingle"] = () => Promise.resolve({ data: single, error: null });
-  builder["then"] = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
-    Promise.resolve({ data: arr, error: null }).then(resolve, reject);
-  return builder;
+function tableOf(query: SQL): string {
+  const text = query.queryChunks
+    .map((chunk) => {
+      const value = (chunk as { value?: unknown }).value;
+      return Array.isArray(value) ? (value as string[]).join("") : " ? ";
+    })
+    .join("");
+  const match = /\bFROM\s+([a-z_]+)/i.exec(text);
+  if (!match) {
+    // A query this helper cannot route is a test that would otherwise pass by
+    // silently receiving an empty result — the exact failure `db/rows.ts`
+    // refuses for driver results.
+    throw new Error(`mock tx: no FROM clause found in ${JSON.stringify(text)}`);
+  }
+  return match[1]!.toLowerCase();
 }
 
 /**
- * Creates a mock SupabaseClient for testing assembleMinutesJson.
+ * A `TenantTx` that answers each query with the fixture rows for its table.
+ *
+ * Returns an ARRAY for every query, which is what `drizzle-orm/postgres-js`
+ * returns and what `db/rows.ts` normalises — so the assembler's `one()` and
+ * `rows()` see the same shape they see in production.
  */
-function createMockSupabase(tables: Record<string, unknown | unknown[] | null>): SupabaseClient {
+function createMockTx(tables: Record<string, unknown | unknown[] | null>): TenantTx {
   return {
-    from: (table: string) => {
+    execute: (query: SQL) => {
+      const table = tableOf(query);
       const data = table in tables ? tables[table] : [];
-      return makeBuilder(data ?? []);
+      return Promise.resolve(Array.isArray(data) ? data : data === null ? [] : [data]);
     },
-  } as unknown as SupabaseClient;
+  };
 }
 
 // ─── Test data ────────────────────────────────────────────────────────
@@ -464,8 +492,8 @@ const voteRecords = [
   },
 ];
 
-function buildFullMockSupabase() {
-  return createMockSupabase({
+function buildFullMockTx() {
+  return createMockTx({
     meeting: baseMeeting,
     board: baseBoard,
     town: baseTown,
@@ -487,8 +515,8 @@ function buildFullMockSupabase() {
 
 describe("assembleMinutesJson", () => {
   it("returns a valid MinutesContentJson for a completed meeting", async () => {
-    const supabase = buildFullMockSupabase();
-    const result = await assembleMinutesJson(supabase, MEETING_ID);
+    const tx = buildFullMockTx();
+    const result = await assembleMinutesJson(tx, MEETING_ID);
 
     expect(result).toMatchObject({
       meeting_header: expect.objectContaining({
@@ -504,8 +532,8 @@ describe("assembleMinutesJson", () => {
 
   describe("meeting header", () => {
     it("populates all header fields from meeting/board/town records", async () => {
-      const supabase = buildFullMockSupabase();
-      const { meeting_header: h } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { meeting_header: h } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(h.town_name).toBe("Testville");
       expect(h.board_name).toBe("Select Board");
@@ -520,8 +548,8 @@ describe("assembleMinutesJson", () => {
 
   describe("attendance", () => {
     it("places present members in members_present, absent in members_absent", async () => {
-      const supabase = buildFullMockSupabase();
-      const { attendance: att } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { attendance: att } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(att.members_present).toHaveLength(4);
       expect(att.members_absent).toHaveLength(1);
@@ -535,22 +563,22 @@ describe("assembleMinutesJson", () => {
     });
 
     it("identifies presiding officer from meeting.presiding_officer_id", async () => {
-      const supabase = buildFullMockSupabase();
-      const { attendance: att } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { attendance: att } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(att.presiding_officer).toBe("Alice Johnson");
     });
 
     it("identifies recording secretary from attendance.is_recording_secretary", async () => {
-      const supabase = buildFullMockSupabase();
-      const { attendance: att } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { attendance: att } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(att.recording_secretary).toBe("David Wilson");
     });
 
     it("marks quorum met when majority is present (4 of 5)", async () => {
-      const supabase = buildFullMockSupabase();
-      const { attendance: att } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { attendance: att } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(att.quorum.met).toBe(true);
       expect(att.quorum.present_count).toBe(4);
@@ -558,7 +586,7 @@ describe("assembleMinutesJson", () => {
     });
 
     it("marks quorum not met when fewer than majority present", async () => {
-      const supabase = createMockSupabase({
+      const tx = createMockTx({
         meeting: baseMeeting,
         board: baseBoard,
         town: baseTown,
@@ -595,7 +623,7 @@ describe("assembleMinutesJson", () => {
         exhibit: [],
       });
 
-      const { attendance: att } = await assembleMinutesJson(supabase, MEETING_ID);
+      const { attendance: att } = await assembleMinutesJson(tx, MEETING_ID);
       expect(att.quorum.met).toBe(false);
       expect(att.quorum.present_count).toBe(2);
     });
@@ -603,8 +631,8 @@ describe("assembleMinutesJson", () => {
 
   describe("content sections", () => {
     it("produces one section per parent agenda item, in sort order", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(result.sections[0].title).toBe("Call to Order");
       expect(result.sections[1].title).toBe("Public Comment");
@@ -613,8 +641,8 @@ describe("assembleMinutesJson", () => {
     });
 
     it("nests child items inside their parent section", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       expect(newBiz.items).toHaveLength(3);
@@ -626,16 +654,16 @@ describe("assembleMinutesJson", () => {
     });
 
     it("sets marked_none=true for completed sections with no children, motions, or speakers", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const publicSection = result.sections.find((s) => s.section_type === "public_input")!;
       expect(publicSection.marked_none).toBe(true);
     });
 
     it("sets marked_none=false for sections that have child items", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       expect(newBiz.marked_none).toBe(false);
@@ -644,8 +672,8 @@ describe("assembleMinutesJson", () => {
 
   describe("motions and votes", () => {
     it("attaches motions to their content items with mover and seconder names", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       const budgetItem = newBiz.items.find((i) => i.title === "FY2027 Budget Approval")!;
@@ -658,8 +686,8 @@ describe("assembleMinutesJson", () => {
     });
 
     it("tallies vote record rows into yeas/nays/abstentions/absent", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       const budgetItem = newBiz.items.find((i) => i.title === "FY2027 Budget Approval")!;
@@ -674,8 +702,8 @@ describe("assembleMinutesJson", () => {
     });
 
     it("excludes recusal vote from yea/nay counts", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       const contractItem = newBiz.items.find(
@@ -690,8 +718,8 @@ describe("assembleMinutesJson", () => {
     });
 
     it("builds recusal records on the parent content item", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       const contractItem = newBiz.items.find(
@@ -704,8 +732,8 @@ describe("assembleMinutesJson", () => {
     });
 
     it("records a failed motion with correct vote tallies", async () => {
-      const supabase = buildFullMockSupabase();
-      const result = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const result = await assembleMinutesJson(tx, MEETING_ID);
 
       const newBiz = result.sections.find((s) => s.title === "New Business")!;
       const policyItem = newBiz.items.find(
@@ -724,8 +752,8 @@ describe("assembleMinutesJson", () => {
 
   describe("adjournment", () => {
     it("builds without_objection adjournment", async () => {
-      const supabase = buildFullMockSupabase();
-      const { adjournment } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { adjournment } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(adjournment).not.toBeNull();
       expect(adjournment!.method).toBe("without_objection");
@@ -733,7 +761,7 @@ describe("assembleMinutesJson", () => {
     });
 
     it("returns null adjournment when meeting has no adjournment field", async () => {
-      const supabase = createMockSupabase({
+      const tx = createMockTx({
         meeting: { ...baseMeeting, adjournment: null },
         board: baseBoard,
         town: baseTown,
@@ -750,15 +778,15 @@ describe("assembleMinutesJson", () => {
         exhibit: [],
       });
 
-      const { adjournment } = await assembleMinutesJson(supabase, MEETING_ID);
+      const { adjournment } = await assembleMinutesJson(tx, MEETING_ID);
       expect(adjournment).toBeNull();
     });
   });
 
   describe("certification", () => {
     it("sets recording secretary name for prepared_by format", async () => {
-      const supabase = buildFullMockSupabase();
-      const { certification } = await assembleMinutesJson(supabase, MEETING_ID);
+      const tx = buildFullMockTx();
+      const { certification } = await assembleMinutesJson(tx, MEETING_ID);
 
       expect(certification.format).toBe("prepared_by");
       expect(certification.recording_secretary?.name).toBe("David Wilson");
@@ -766,16 +794,25 @@ describe("assembleMinutesJson", () => {
   });
 
   describe("error handling", () => {
-    it("throws a descriptive error when meeting fetch fails", async () => {
-      const errorBuilder = {
-        select: () => errorBuilder,
-        eq: () => errorBuilder,
-        single: () => Promise.resolve({ data: null, error: { message: "Row not found" } }),
-      };
-      const supabase = { from: () => errorBuilder } as unknown as SupabaseClient;
+    it("throws a descriptive error when the meeting is not visible", async () => {
+      // No meeting row. Under RLS that is what a meeting in ANOTHER TOWN looks
+      // like as well as one that does not exist, and the two must stay
+      // indistinguishable — see `storage/documents.ts`. Either way the
+      // assembler must fail loudly rather than assemble minutes with an empty
+      // header, which is what `unwrap` used to do for a null `data` arriving
+      // with no `error` beside it.
+      const tx = createMockTx({ meeting: [] });
 
-      await expect(assembleMinutesJson(supabase, "bad-id")).rejects.toThrow(
-        "Failed to fetch meeting",
+      await expect(assembleMinutesJson(tx, "bad-id")).rejects.toThrow("Failed to fetch meeting");
+    });
+
+    it("throws rather than treating an unrecognised driver result as no rows", async () => {
+      // `db/rows.ts` exists for this: a driver swap that changed the result
+      // shape must not read as "this meeting has nothing in it".
+      const tx: TenantTx = { execute: () => Promise.resolve("not a result" as unknown) };
+
+      await expect(assembleMinutesJson(tx, MEETING_ID)).rejects.toThrow(
+        /unrecognised result of type/,
       );
     });
   });

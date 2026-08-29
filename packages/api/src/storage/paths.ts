@@ -216,6 +216,42 @@ export function minutesRelativePath(
   ].join("/");
 }
 
+/**
+ * `agenda-packets/<townId>/<meetingId>.pdf`
+ *
+ * Stage 1, Task D1f. Derived from the meeting, with no column to store it in
+ * and none added: one packet per meeting, replace-not-versioned, so the path
+ * is a function of ids the serving route already has. `meeting.agenda_packet_url`
+ * keeps holding a URL (now `/api/files/agenda-packet/<meetingId>`) because
+ * that is what every consumer of the column already does with it — the web
+ * client opens it in a tab, and `types/portal.ts` ships it to the portal.
+ *
+ * The old path was `${townId}/meetings/${meetingId}/agenda-packet-${Date.now()}.pdf`
+ * in the Supabase `documents` bucket, which is declared `public = true`. Both
+ * ids are published by the portal, so the only thing between an anonymous
+ * fetch and an unpublished agenda packet was a millisecond timestamp — the
+ * same defect `services/minutes-pdf.ts` records for minutes. The timestamp is
+ * gone from the path because it never protected anything, and every
+ * regeneration now supersedes its predecessor instead of leaving an orphan
+ * that nothing points at but anyone could still fetch.
+ */
+export function agendaPacketRelativePath(townId: string, meetingId: string): string {
+  return [
+    "agenda-packets",
+    requireUuid(townId, "town id"),
+    `${requireUuid(meetingId, "meeting id")}.pdf`,
+  ].join("/");
+}
+
+/** `meeting-notices/<townId>/<meetingId>.pdf` — see `agendaPacketRelativePath`. */
+export function meetingNoticeRelativePath(townId: string, meetingId: string): string {
+  return [
+    "meeting-notices",
+    requireUuid(townId, "town id"),
+    `${requireUuid(meetingId, "meeting id")}.pdf`,
+  ].join("/");
+}
+
 /** `exhibits/<townId>/<agendaItemId>/<exhibitId>.<ext>` */
 export function exhibitRelativePath(
   townId: string,

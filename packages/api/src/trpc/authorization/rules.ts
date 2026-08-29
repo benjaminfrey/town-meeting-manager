@@ -297,6 +297,100 @@ export function assertCanUpdateMinutesSection(actor: Actor, scope: BoardScope): 
   assertPermission(actor, "R1", { boardId: scope.boardId, action: "to edit a minutes section" });
 }
 
+// ─── 9a — the four board-scoped codes the legacy routes guard ─────────
+//
+// Stage 1, Task D1f. A6, R1, R2 and R3 were resolved by `plugins/auth.ts` with
+// NO board id — `requirePermission(action)` is a Fastify preHandler and a
+// preHandler has no meeting to resolve one from. `permission.ts` states what
+// that costs, and it is not fail-closed in either direction:
+//
+//   an override that GRANTS  is ignored → a board-designated clerk is refused
+//                              everywhere, and both `designated_boards`
+//                              templates grant these codes ONLY per board with
+//                              global all-false, so such an account held
+//                              nothing at all;
+//   an override that REVOKES is ignored → a clerk explicitly barred from a
+//                              board could still generate its agenda packets
+//                              and edit its draft minutes.
+//
+// The second is the live defect. It could not be fixed in the guard, because
+// the guard has nowhere to obtain a board; the fix is that the SIX routes
+// (`documents.ts` ×2, `minutes.ts` ×4) now resolve the meeting first and call
+// these, against `meeting.board_id`.
+//
+// R1 already had a home above (rules 10–13 — the same code, the same board,
+// arrived at from the tRPC side), so `assertCanUpdateMinutesDocument` is what
+// the render route calls and nothing is duplicated for it.
+
+export function assertCanGenerateMeetingDocument(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "A6", {
+    boardId: scope.boardId,
+    action: "to generate this meeting's documents",
+  });
+}
+
+export function assertCanGenerateMinutes(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R2", { boardId: scope.boardId, action: "to generate minutes" });
+}
+
+export function assertCanSubmitMinutesForReview(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R3", {
+    boardId: scope.boardId,
+    action: "to submit minutes for review",
+  });
+}
+
+// ─── 9b — the generated meeting documents: A6, or published ───────────
+//
+// Stage 1, Task D1f. NOT one of the 21 restored policies: the agenda packet
+// and the meeting notice had no row-level policy to restore, because they were
+// not rows. They were PDFs in the Supabase `documents` bucket, which is
+// declared `public = true`, reachable at
+// `${townId}/meetings/${meetingId}/agenda-packet-${Date.now()}.pdf` — and the
+// portal publishes both ids, so the only secret was a millisecond timestamp.
+// The URL was then written into `meeting.agenda_packet_url` and handed to
+// anyone who could read the meeting.
+//
+// Moving those bytes into the authorized document root means deciding, for the
+// first time, who may read one. This is that decision, and it is shaped after
+// rule 9 rather than invented: the caller who may GENERATE the document (A6
+// for that board, the same code `routes/documents.ts` guards the POST with),
+// or ANY signed-in member of the town once the agenda is published — at which
+// point `routes/portal.ts` serves the same file to the anonymous public, so a
+// narrower rule for members would be theatre.
+//
+// It is strictly narrower than what it replaces in every case, because what it
+// replaces was "anyone at all".
+
+export interface MeetingDocumentRow extends BoardScopedRow {
+  agendaStatus: string | null;
+  meetingStatus: string;
+}
+
+export function canSelectMeetingDocument(actor: Actor, row: MeetingDocumentRow): boolean {
+  // The portal reaches its own copies of these through `portalCanSelectAgenda`
+  // directly; an anonymous actor must not arrive here and be answered "yes"
+  // by the published branch, because that branch is about members of the town.
+  if (actor.kind !== "user") return false;
+  if (portalCanSelectAgenda({ agendaStatus: row.agendaStatus, meetingStatus: row.meetingStatus })) {
+    return true;
+  }
+  // A6 board-scoped: `TEMPLATE_BOARD_SPECIFIC_STAFF` grants A6 per board and
+  // nothing globally, so a global check answers "no" to every board-designated
+  // clerk — and ignores an override that REVOKES it for one board.
+  return resolvePermission(actor, "A6", row.boardId);
+}
+
+export function assertCanSelectMeetingDocument(actor: Actor, row: MeetingDocumentRow): void {
+  if (canSelectMeetingDocument(actor, row)) return;
+  throw new AuthorizationError(
+    "This meeting's agenda has not been published, so its generated documents are " +
+      "not yet public record. Reading one before publication requires A6 " +
+      "(generate_agenda_packet) for this board.",
+    { code: "A6", boardId: row.boardId },
+  );
+}
+
 // ─── 14 — exhibit SELECT: three tiers, three rules ────────────────────
 
 export type ExhibitVisibility = "public" | "board_only" | "admin_only";

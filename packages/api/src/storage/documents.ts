@@ -37,6 +37,7 @@ import type { Actor } from "../trpc/authorization/actor.js";
 import {
   assertCanInsertExhibit,
   assertCanSelectExhibit,
+  assertCanSelectMeetingDocument,
   assertCanSelectMinutesDocument,
   assertCanUpdateExhibit,
   assertCanUpdateTown,
@@ -47,9 +48,11 @@ import {
   MAX_UPLOAD_BYTES,
   EXHIBIT_CONTENT_TYPES,
   StoragePathError,
+  agendaPacketRelativePath,
   allSealRelativePaths,
   documentRoot,
   exhibitRelativePath,
+  meetingNoticeRelativePath,
   publicAssetRoot,
   sealExtensionFor,
   sealRelativePath,
@@ -149,6 +152,100 @@ export async function resolveMinutesDocumentForDownload(
   return {
     relativePath: row.pdf_storage_path,
     filename: `minutes-${row.scheduled_date ?? row.id}.pdf`,
+    contentType: "application/pdf",
+    disposition: "inline",
+  };
+}
+
+// ─── The generated meeting documents ──────────────────────────────────
+
+interface MeetingDocumentRowRecord {
+  town_id: string;
+  board_id: string;
+  agenda_status: string | null;
+  meeting_status: string;
+  scheduled_date: string | null;
+  agenda_packet_url: string | null;
+  meeting_notice_url: string | null;
+}
+
+/** Which of the two generated documents a caller is asking for. */
+export type MeetingDocumentKind = "agenda-packet" | "meeting-notice";
+
+const MEETING_DOCUMENT_SPEC: Record<
+  MeetingDocumentKind,
+  {
+    label: string;
+    generatedColumn: (row: MeetingDocumentRowRecord) => string | null;
+    relativePath: (townId: string, meetingId: string) => string;
+  }
+> = {
+  "agenda-packet": {
+    label: "agenda packet",
+    generatedColumn: (row) => row.agenda_packet_url,
+    relativePath: agendaPacketRelativePath,
+  },
+  "meeting-notice": {
+    label: "meeting notice",
+    generatedColumn: (row) => row.meeting_notice_url,
+    relativePath: meetingNoticeRelativePath,
+  },
+};
+
+/**
+ * Resolve an agenda packet or a meeting notice, refusing a caller rule 9b
+ * excludes.
+ *
+ * Stage 1, Task D1f. The path is DERIVED — `agenda-packets/<townId>/<meetingId>.pdf`
+ * — rather than read out of a column, because there is no column for it and
+ * adding one would store a fact that is already implied by two ids the query
+ * just returned. One document per meeting, replace-not-versioned, which is the
+ * same decision `services/minutes-pdf.ts` records for minutes.
+ *
+ * The `*_url` column is still consulted, for exactly one thing: whether the
+ * document has ever been generated. A meeting whose packet was never generated
+ * must answer 404 rather than "the file is missing", and that distinction is
+ * only knowable from the row.
+ */
+export async function resolveMeetingDocumentForDownload(
+  tx: TenantTx,
+  actor: Actor,
+  kind: MeetingDocumentKind,
+  meetingId: string,
+): Promise<StoredDocument> {
+  const spec = MEETING_DOCUMENT_SPEC[kind];
+  requireLookupId(meetingId, "meeting");
+
+  const row = toRows<MeetingDocumentRowRecord>(
+    await tx.execute(sql`
+      SELECT m.town_id,
+             m.board_id,
+             m.agenda_status,
+             m.status::text AS meeting_status,
+             m.scheduled_date::text AS scheduled_date,
+             m.agenda_packet_url,
+             m.meeting_notice_url
+      FROM meeting m
+      WHERE m.id = ${meetingId}
+    `),
+    (message) => new Error(`resolveMeetingDocumentForDownload: ${message}`),
+  )[0];
+
+  if (!row) throw new DocumentNotFoundError("No such meeting.");
+
+  assertCanSelectMeetingDocument(actor, {
+    boardId: row.board_id,
+    agendaStatus: row.agenda_status,
+    meetingStatus: row.meeting_status,
+  });
+
+  if (!spec.generatedColumn(row)) {
+    throw new DocumentNotFoundError(`This meeting has no generated ${spec.label} yet.`);
+  }
+
+  return {
+    relativePath: spec.relativePath(row.town_id, meetingId),
+    filename: `${kind}-${row.scheduled_date ?? meetingId}.pdf`,
     contentType: "application/pdf",
     disposition: "inline",
   };

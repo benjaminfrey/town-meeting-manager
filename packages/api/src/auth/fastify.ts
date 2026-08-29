@@ -40,33 +40,27 @@
  * `request` carries no raw database handle, so nothing reached THROUGH THIS
  * BRIDGE can query outside a tenant context.
  *
- * It is not yet true that a route has no other way to reach the database, and
- * this comment should not be read as saying so. `plugins/supabase.ts`
- * decorates the Fastify instance with a SERVICE-ROLE Supabase client, which
- * bypasses RLS entirely, and it is reachable from any handler as
- * `request.server.supabase` — all five existing route files use exactly that.
- * `createAppDb()` is also exported and can be called again.
+ * ─── As of Task D1f it is also the ONLY path ──────────────────────────────
  *
- * ─── What Task D1 changed, and what it deliberately did not ───────────────
+ * This paragraph used to say the opposite, and said it deliberately:
+ * `plugins/supabase.ts` decorated the Fastify instance with a SERVICE-ROLE
+ * Supabase client that bypassed RLS entirely, reachable from any handler as
+ * `request.server.supabase`, and all five legacy route files used exactly
+ * that. D1 declined to remove it because doing so meant rewriting those files
+ * AND replacing Supabase Storage, which held every generated PDF and which
+ * nothing in the repository could then replace.
  *
- * D1 built the tRPC surface (`src/trpc/`) on top of this bridge and nothing
- * else: `trpc/context.ts` carries `withTenant` and no other database handle,
- * so a tRPC procedure has no bypass available to it even today. Every
- * procedure Task 2 and Phase E add inherits that by construction.
+ * Both halves are done. D1e built the two storage roots
+ * (`src/storage/`), and D1b, D1c and D1f moved every route and service onto
+ * `withTenant` or a `TenantJob`. `plugins/supabase.ts` is deleted, and
+ * `@supabase/supabase-js` is imported nowhere in `src/` outside tests.
  *
- * It did NOT delete `supabasePlugin`, and the reason is worth stating rather
- * than leaving as an omission. Doing so requires rewriting the five route
- * files and six services that use it — roughly 5,100 lines of PostgREST-idiom
- * data access, with no route-level test coverage over most of it — and it
- * additionally deletes the only path to Supabase STORAGE, which holds every
- * generated PDF (agenda packets, meeting notices, minutes) and which nothing
- * in this repository replaces. That is a rewrite plus an unmade
- * infrastructure decision, not a deletion, and doing it in the same change as
- * the authorization layer would have buried the security work in it. See
- * `.superpowers/sdd/2026-08-28-stage-1-phase-d-trpc/task-1-report.md` § "Step 7".
- *
- * So this remains the tenant-safe path rather than the only path, and the
- * difference is still worth more than the tidier sentence.
+ * What remains true and worth stating: `createAppDb()` is still exported and
+ * can be called again, so "no handler can obtain a raw handle" is a property
+ * of the code as written rather than one the type system enforces. What the
+ * types DO enforce is that nothing is HANDED one — not `request`, not
+ * `trpc/context.ts`, and not `TenantJob`, which carries a town and a `run` and
+ * nothing else.
  *
  * ─── The failure modes, and what each does ────────────────────────────────
  *
@@ -196,10 +190,11 @@ declare module "fastify" {
     /**
      * Run a unit of work scoped to this request's town.
      *
-     * The tenant-safe path — not, today, the only path: `request.server.supabase`
-     * is a service-role client that bypasses RLS. It is the ONLY path for a
-     * tRPC procedure (see `trpc/context.ts`); the five legacy route files still
-     * use the bypass, and removing it is its own task. See this file's header.
+     * Since Task D1f this is how every route reaches the database. The
+     * service-role bypass it used to share the job with (`request.server.supabase`)
+     * is gone with `plugins/supabase.ts`. Background work, which has no
+     * request to hang this on, uses `TenantJob` instead — same guarantee,
+     * different entry point. See this file's header.
      */
     withTenant?: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
   }

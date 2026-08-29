@@ -1,11 +1,10 @@
 /**
  * Stage 1, Task D1c — what the LEGACY route guards actually decide.
  *
- * `plugins/auth.ts` is the authorization the five surviving Fastify route
- * files still run on (`documents.ts`, `minutes.ts`, `notifications.ts`,
- * `invitations.ts`, `portal.ts`). Until this file existed it had no
- * permission-behaviour tests at all, and Task D1's report recorded two live
- * divergences between what those routes say their policy is and what it is:
+ * `plugins/auth.ts` is the authorization the surviving Fastify route files run
+ * on. Until this file existed it had no permission-behaviour tests at all, and
+ * Task D1's report recorded two live divergences between what those routes say
+ * their policy is and what it is:
  *
  *   1. `requirePermission` short-circuited `admin || sys_admin` to ALLOW, and
  *      `requireAdmin` admitted `sys_admin` too. The removed `has_permission()`
@@ -24,10 +23,11 @@
  *      the data, and it meant these routes were in practice reachable ONLY by
  *      the two roles the short-circuit let through.
  *
- * The routes mounted below are not stand-ins for the real ones — they carry
- * the SAME six guards, spelled the same way, cited to the line they are
- * written on. A guard whose decision changes here is a guard whose decision
- * changes in `minutes.ts`.
+ * The routes mounted below carry the SAME six guards, spelled the same way. A
+ * guard whose decision changes here is a guard whose decision changes wherever
+ * that code is resolved — see `LEGACY_GUARDS` below for which of them are
+ * still `requirePermission` preHandlers after Task D1f and which moved into
+ * their handlers to acquire a board.
  *
  * These drive a real Fastify instance over a real session against a real
  * database, for the reason `route-access.test.ts` gives: every historical
@@ -55,9 +55,26 @@ import { PERMISSIONS, type PermissionAction } from "@town-meeting/shared";
 const PASSWORD = "correct-horse-battery-staple";
 
 /**
- * Every `requirePermission` guard the five legacy route files actually use,
- * cited to where it is written. Adding a sixth to a route without adding it
- * here is how this file stops covering the thing it claims to cover.
+ * The codes this guard resolves, and where each one lives now.
+ *
+ * ─── Task D1f moved four of these out of `requirePermission` ─────────────
+ *
+ * When this file was written all five were `requirePermission` preHandlers on
+ * the legacy routes. A6, R1, R2 and R3 are BOARD-SCOPED, and a preHandler has
+ * no meeting to resolve a board from — the defect D1c recorded in
+ * `plugins/auth.ts` and D1f fixed by moving those four decisions into the
+ * handlers, where `rules.ts` is asked about `meeting.board_id`. C2 is the one
+ * that remains, and correctly: it is town-level, so a global check is the
+ * right check.
+ *
+ * The four board-scoped entries stay HERE anyway, and it is worth being clear
+ * about what they now pin. Not the routes — `routes/__tests__/board-scoped-legacy-routes.test.ts`
+ * does that, on two boards, in both directions. These pin the RESOLUTION
+ * ALGORITHM this guard shares with the rules layer: that `sys_admin` is denied,
+ * that both spellings of the stored matrix are honoured, that disagreeing
+ * spellings deny, and that a board member gets nothing from a stray staff
+ * grant. Those answers must not differ between the two paths, and testing them
+ * through five codes rather than one is the cheap way to notice if they do.
  */
 const LEGACY_GUARDS: ReadonlyArray<{
   path: string;
@@ -65,14 +82,14 @@ const LEGACY_GUARDS: ReadonlyArray<{
   action: PermissionAction;
   where: string;
 }> = [
-  { path: "/api/guard/a6", code: "A6", action: PERMISSIONS.A6, where: "documents.ts:84,:260" },
-  { path: "/api/guard/r2", code: "R2", action: PERMISSIONS.R2, where: "minutes.ts:79,:270" },
-  { path: "/api/guard/r1", code: "R1", action: PERMISSIONS.R1, where: "minutes.ts:438" },
-  { path: "/api/guard/r3", code: "R3", action: PERMISSIONS.R3, where: "minutes.ts:605" },
-  { path: "/api/guard/c2", code: "C2", action: PERMISSIONS.C2, where: "notifications.ts:78" },
+  { path: "/api/guard/a6", code: "A6", action: PERMISSIONS.A6, where: "board-scoped since D1f" },
+  { path: "/api/guard/r2", code: "R2", action: PERMISSIONS.R2, where: "board-scoped since D1f" },
+  { path: "/api/guard/r1", code: "R1", action: PERMISSIONS.R1, where: "board-scoped since D1f" },
+  { path: "/api/guard/r3", code: "R3", action: PERMISSIONS.R3, where: "board-scoped since D1f" },
+  { path: "/api/guard/c2", code: "C2", action: PERMISSIONS.C2, where: "notifications.ts:110" },
 ];
 
-/** `minutes.ts:662` — `requireAdmin("approving minutes")`. */
+/** `minutes.ts` — `requireAdmin("approving minutes")`, still a preHandler. */
 const ADMIN_ONLY_PATH = "/api/guard/approve-minutes";
 
 interface AccountSpec {

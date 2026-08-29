@@ -10,6 +10,11 @@
  *   GET    /api/files/exhibits/:exhibitId  download one, if the tier allows
  *   GET    /api/files/minutes/:documentId  download minutes, if rule 9 allows
  *
+ * Task D1f added two more, on the same design:
+ *
+ *   GET    /api/files/agenda-packet/:meetingId   rule 9b
+ *   GET    /api/files/meeting-notice/:meetingId  rule 9b
+ *
  * "Never worked" is literal and was checked before anything was ported: the
  * only bucket any migration creates is `documents`
  * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:8`).
@@ -41,14 +46,15 @@ import { AuthorizationError } from "../trpc/authorization/permission.js";
 import type { ExhibitVisibility } from "../trpc/authorization/rules.js";
 import { MAX_UPLOAD_BYTES, StoragePathError } from "../storage/paths.js";
 import { sendStoredDocument } from "../storage/serve.js";
+import { handleRouteErrors } from "./error-status.js";
 import {
-  DocumentNotFoundError,
   clearTownSeal,
   createExhibitFromUpload,
   deleteExhibit,
   removeExhibitFile,
   removeSealFiles,
   resolveExhibitForDownload,
+  resolveMeetingDocumentForDownload,
   resolveMinutesDocumentForDownload,
   setTownSeal,
 } from "../storage/documents.js";
@@ -79,33 +85,16 @@ async function actorFor(request: FastifyRequest): Promise<Actor> {
 /**
  * Turn the three error kinds this surface produces into three status codes.
  *
- * A refusal is 403 with the rule's own message, which names the action code
- * and says who can grant it. A missing record is 404 — and a record in another
- * town is also 404, because RLS made it invisible before any rule ran, so the
- * two are indistinguishable to this handler and must stay that way: a 403 for
- * one and a 404 for the other would confirm the existence of another town's
- * records. A malformed path or an unacceptable file is 400.
+ * The mapping moved to `routes/error-status.ts` in Task D1f, unchanged, so
+ * that `documents.ts` and `minutes.ts` decide 403-vs-404 the same way this
+ * file does rather than each carrying a copy.
  */
 async function handle(
   request: FastifyRequest,
   reply: FastifyReply,
   fn: () => Promise<unknown>,
 ): Promise<unknown> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof AuthorizationError) {
-      return reply.code(403).send({ error: "Forbidden", message: err.message });
-    }
-    if (err instanceof DocumentNotFoundError) {
-      return reply.code(404).send({ error: "Not Found", message: err.message });
-    }
-    if (err instanceof StoragePathError) {
-      return reply.code(400).send({ error: "Bad Request", message: err.message });
-    }
-    request.log.error({ err }, "file route failed");
-    throw err;
-  }
+  return handleRouteErrors(request, reply, fn);
 }
 
 interface UploadedPart {
@@ -302,4 +291,27 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return sendStoredDocument(reply, document.relativePath, document);
       }),
   );
+
+  // ─── The generated meeting documents (Stage 1, Task D1f) ────────────
+  //
+  // `routes/documents.ts` used to upload these to the `public = true`
+  // Supabase bucket and write the resulting public URL into
+  // `meeting.agenda_packet_url` / `meeting.meeting_notice_url`. Those columns
+  // now hold THESE routes, so the URL a client already had is still a URL —
+  // it just no longer bypasses a check on the way to the bytes. Rule 9b
+  // decides every fetch: A6 for that board, or the agenda is published.
+
+  for (const kind of ["agenda-packet", "meeting-notice"] as const) {
+    fastify.get<{ Params: { meetingId: string } }>(
+      `/files/${kind}/:meetingId`,
+      async (request, reply) =>
+        handle(request, reply, async () => {
+          const actor = await actorFor(request);
+          const document = await request.withTenant!((tx) =>
+            resolveMeetingDocumentForDownload(tx, actor, kind, request.params.meetingId),
+          );
+          return sendStoredDocument(reply, document.relativePath, document);
+        }),
+    );
+  }
 }
