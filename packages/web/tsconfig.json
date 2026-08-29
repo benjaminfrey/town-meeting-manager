@@ -9,8 +9,6 @@
     },
     "types": ["vite/client"],
     "noEmit": true,
-    "declaration": false,
-    "declarationMap": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },

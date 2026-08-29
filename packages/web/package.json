@@ -49,6 +49,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@town-meeting/api": "workspace:*",
+    "@trpc/server": "11.18.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "@types/react": "^19.1.0",

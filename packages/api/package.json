@@ -6,6 +6,12 @@
   "exports": {
     "./trpc/router": {
       "types": "./dist/trpc/router.d.ts"
+    },
+    "./trpc/context": {
+      "types": "./dist/trpc/context.d.ts"
+    },
+    "./trpc/authorization/actor": {
+      "types": "./dist/trpc/authorization/actor.d.ts"
     }
   },
   "scripts": {

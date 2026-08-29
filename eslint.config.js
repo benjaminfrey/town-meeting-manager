@@ -90,6 +90,25 @@ export default tseslint.config(
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
+      // packages/api's package.json "exports" map only exposes types (see
+      // its "./trpc/router" etc. entries), which stops the bare specifier
+      // `@town-meeting/api/...` from ever resolving to a runtime value. It
+      // is not a wall: a relative path straight into the sibling package's
+      // src still resolves and bundles fine — verified live, Vite pulled in
+      // drizzle and the whole server graph (202 modules transformed) from
+      // `../../api/src/trpc/router.js`. Ban the escape hatch outright.
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["../../api/*", "../../../api/*"],
+              message:
+                'Import API types via the "@town-meeting/api/..." package export, not a relative path into packages/api — a relative import bundles the server\'s runtime code into the browser.',
+            },
+          ],
+        },
+      ],
     },
   },
   {
