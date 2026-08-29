@@ -15,6 +15,13 @@
       "when": 1788000000000,
       "tag": "0001_better_auth_and_tenant_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0002_invitation_tenant_bootstrap",
+      "breakpoints": true
     }
   ]
 }

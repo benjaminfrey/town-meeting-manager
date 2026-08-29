@@ -4,10 +4,29 @@
  * Uses the web-push library to send Web Push notifications to
  * subscribed browsers/devices. Handles expired subscriptions
  * by cleaning them up from the database.
+ *
+ * ─── Task D1c: dispatch is tenant-bound ───────────────────────────────────
+ *
+ * These functions ran from the notification pipeline with the service-role
+ * Supabase client, so `push_subscription` and `user_account` were read with
+ * row level security bypassed. `dispatchPushToUser` in particular had NO town
+ * filter of any kind — it selected subscriptions by `user_account_id` alone,
+ * and the cleanup delete that follows it (`.in("endpoint", …)`) had none
+ * either, so an endpoint string colliding across towns would have deleted
+ * another town's subscription.
+ *
+ * They now take a `TenantJob` (see `jobs/tenant-job.ts`), which is the only
+ * way this file can reach the database and which cannot be constructed without
+ * naming a town. `push_subscription` has no `town_id` column of its own; its
+ * policy scopes it through `user_account` (`0000_baseline.sql` §3), so with a
+ * tenant set the subscriptions of another town are not merely unfiltered —
+ * they are invisible.
  */
 
 import webpush from "web-push";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { sql } from "drizzle-orm";
+import type { TenantJob } from "../jobs/tenant-job.js";
+import { toRows } from "../db/rows.js";
 
 // ─── VAPID Configuration ────────────────────────────────────────────
 
@@ -81,21 +100,31 @@ export async function sendPushNotification(
 }
 
 /**
- * Dispatch push to all subscriptions for a user, removing expired ones.
+ * Dispatch push to all of one account's subscriptions, removing expired ones.
+ *
+ * The account is named, but the TOWN is what bounds the query: an id belonging
+ * to another town selects nothing, because `push_subscription`'s policy
+ * resolves through `user_account.town_id`. The delete that follows is scoped
+ * the same way and additionally by `user_account_id`, so a colliding endpoint
+ * string cannot reach another account's row.
  */
 export async function dispatchPushToUser(
-  supabase: SupabaseClient,
-  userId: string,
+  job: TenantJob,
+  userAccountId: string,
   payload: PushPayload,
 ): Promise<void> {
-  const { data: subscriptions } = await supabase
-    .from("push_subscription")
-    .select("endpoint, p256dh, auth")
-    .eq("user_account_id", userId);
+  const rows = await job.run(async (tx) =>
+    toRows<PushSubscriptionRow>(
+      await tx.execute(sql`
+        SELECT endpoint, p256dh, auth
+          FROM push_subscription
+         WHERE user_account_id = ${userAccountId}::uuid
+      `),
+      (message) => new Error(`dispatchPushToUser: ${message}`),
+    ),
+  );
 
-  if (!subscriptions?.length) return;
-
-  const rows = subscriptions as PushSubscriptionRow[];
+  if (rows.length === 0) return;
 
   const results = await Promise.allSettled(rows.map((sub) => sendPushNotification(sub, payload)));
 
@@ -108,38 +137,45 @@ export async function dispatchPushToUser(
     .map((sub) => sub.endpoint);
 
   if (expiredEndpoints.length > 0) {
-    await supabase.from("push_subscription").delete().in("endpoint", expiredEndpoints);
+    await job.run(async (tx) => {
+      // One JSON parameter rather than `= ANY(${array})`: Drizzle expands a JS
+      // array in a `sql` template into `($1, $2, …)`, which Postgres reads as a
+      // record and refuses to cast to an array type.
+      await tx.execute(sql`
+        DELETE FROM push_subscription
+         WHERE user_account_id = ${userAccountId}::uuid
+           AND endpoint IN (SELECT jsonb_array_elements_text(${JSON.stringify(expiredEndpoints)}::jsonb))
+      `);
+    });
   }
 }
 
 /**
- * Dispatch push to all subscribed users in a town for a specific event type.
- * Respects user notification preferences.
+ * Dispatch push to every subscribed account in the job's town for one event
+ * type. Respects each account's notification preferences.
  */
 export async function dispatchPushToTown(
-  supabase: SupabaseClient,
-  townId: string,
+  job: TenantJob,
   eventType: PushEventType,
   payload: PushPayload,
 ): Promise<void> {
   const preferenceKey = EVENT_TO_PREFERENCE[eventType];
 
-  // Find all user_accounts in this town (not archived)
-  const { data: userAccounts } = await supabase
-    .from("user_account")
-    .select("id, notification_preferences")
-    .eq("town_id", townId)
-    .is("archived_at", null);
+  // No `town_id` filter here, and that is the point: `app.town_id` is set for
+  // the length of this transaction, so `user_account`'s policy has already
+  // decided which rows exist.
+  const accounts = await job.run(async (tx) =>
+    toRows<{ id: string; notification_preferences: Record<string, boolean> | null }>(
+      await tx.execute(sql`
+        SELECT id, notification_preferences
+          FROM user_account
+         WHERE archived_at IS NULL
+      `),
+      (message) => new Error(`dispatchPushToTown: ${message}`),
+    ),
+  );
 
-  if (!userAccounts?.length) return;
-
-  // Filter by notification preference
-  const eligibleUserIds = (
-    userAccounts as Array<{
-      id: string;
-      notification_preferences: Record<string, boolean> | null;
-    }>
-  )
+  const eligibleUserIds = accounts
     .filter((ua) => {
       const prefs = ua.notification_preferences;
       if (!prefs) return true; // default: all enabled
@@ -147,9 +183,9 @@ export async function dispatchPushToTown(
       if (prefs[preferenceKey] === false) return false;
       return true;
     })
-    .map((ua) => ua.id);
+    .map((ua) => String(ua.id));
 
   await Promise.allSettled(
-    eligibleUserIds.map((userId) => dispatchPushToUser(supabase, userId, payload)),
+    eligibleUserIds.map((userAccountId) => dispatchPushToUser(job, userAccountId, payload)),
   );
 }

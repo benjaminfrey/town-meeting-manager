@@ -22,7 +22,29 @@
 import { describe, it, expect } from "vitest";
 import { withTestDb } from "../../test/db-harness.js";
 
-const EXPECTED_TABLES = ["account", "session", "user", "user_tenant", "verification"];
+// `invitation_tenant` is Task D1c's addition, and it is here for the same
+// reason `user_tenant` is: it answers a question that has to be answered
+// BEFORE a tenant exists, which is the one thing a table in `public` cannot
+// do. `user_tenant` maps an identity to a town; `invitation_tenant` maps
+// sha256(invitation token) to a town, so invitation acceptance — which runs
+// for someone with no person row, no account and no session — can open a
+// `withTenant` transaction at all.
+//
+// The decision this list exists to force, made explicitly: it is unprotected
+// by RLS, like everything else here, and that is acceptable because it holds
+// no secret and confers no access. The key is a one-way digest, so reading the
+// whole table yields no usable token; the value is a town id that is only ever
+// a HINT, verified by RLS when the invitation is actually read
+// (`db/invitation-bootstrap.ts`). A wrong or tampered row denies service to
+// one token; it cannot disclose another town's row.
+const EXPECTED_TABLES = [
+  "account",
+  "invitation_tenant",
+  "session",
+  "user",
+  "user_tenant",
+  "verification",
+];
 
 describe("better_auth schema invariants", () => {
   it("contains exactly the tables the migration creates", async () => {
