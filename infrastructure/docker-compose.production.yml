@@ -37,6 +37,20 @@ networks:
 
 volumes:
   postgres-data:
+  # Stage 1, Task D1e — repurposed.
+  #
+  # This volume used to hold ONLY Supabase Storage's file backend
+  # (/var/lib/storage in the `storage` service). It now also holds the two
+  # roots the API writes directly:
+  #
+  #   /var/lib/tmm/public      town seals — nginx serves this, no auth
+  #   /var/lib/tmm/documents   minutes and exhibits — nginx `internal`, a
+  #                            route authorizes and then X-Accel-Redirects
+  #
+  # One volume, three trees, mounted at different paths by different services.
+  # NOTE FOR OPERATORS: infrastructure/scripts/backup.sh takes two pg_dumps and
+  # touches no file tree, and restore.sh only runs pg_restore. Documents on
+  # this volume are therefore NOT in the backup set. See this task's report.
   storage-data:
 
 services:
@@ -219,7 +233,7 @@ services:
       db: { condition: service_healthy }
       rest: { condition: service_started }
     volumes:
-      - storage-data:/var/lib/storage:z
+      - storage-data:/var/lib/storage:z # Supabase Storage's own subtree
     environment:
       ANON_KEY: ${ANON_KEY}
       SERVICE_KEY: ${SERVICE_ROLE_KEY}
@@ -297,6 +311,8 @@ services:
       db: { condition: service_healthy }
       kong: { condition: service_started }
     mem_limit: 1g
+    volumes:
+      - storage-data:/var/lib/tmm:z
     healthcheck:
       test:
         [
@@ -335,6 +351,14 @@ services:
       #   CREATE ROLE tmm_app LOGIN PASSWORD '...';
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (must use the tmm_app role, not the owner)}
       POSTMARK_AUTH_FROM_EMAIL: ${POSTMARK_AUTH_FROM_EMAIL:?set POSTMARK_AUTH_FROM_EMAIL}
+      # ── Storage roots (Stage 1, Task D1e) ──
+      # The API writes both; nginx reads both. See the `volumes:` note above.
+      PUBLIC_ASSET_ROOT: /var/lib/tmm/public
+      DOCUMENT_ROOT: /var/lib/tmm/documents
+      # Hand the bytes to nginx instead of piping them through Node. Only
+      # meaningful when something is in front that honours the header, which
+      # is why it is off by default and set explicitly here.
+      X_ACCEL_ENABLED: "true"
 
   # ─── Nginx (the only host-published service) ───────────────────────
   nginx:
@@ -354,6 +378,10 @@ services:
       - ${WEB_ROOT:-/var/www/townmeetingmanager/web}:/var/www/web:ro
       # Wildcard TLS certificate from certbot on the host.
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      # The two storage roots, READ ONLY. nginx serves /public-assets/seals/
+      # from one and the `internal` /__documents/ from the other; only the API
+      # writes to either.
+      - storage-data:/var/lib/tmm:ro
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
       interval: 30s

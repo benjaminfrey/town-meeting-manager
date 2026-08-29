@@ -16,6 +16,7 @@ import {
   type AgendaPacketSubItem,
 } from "../services/templates.js";
 import { generateMeetingNotice } from "../services/pdf-lib.js";
+import { absoluteSealUrl } from "../storage/paths.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -190,7 +191,9 @@ export async function documentRoutes(fastify: FastifyInstance) {
         scheduledDate: meeting.scheduled_date,
         scheduledTime: meeting.scheduled_time,
         location: meeting.location,
-        sealUrl: town.seal_url,
+        // Absolute: Chromium fetches it during PDF rendering, from a page
+        // loaded with no base URL. See `absoluteSealUrl`.
+        sealUrl: absoluteSealUrl(town.seal_url),
         sections: templateSections,
       });
 

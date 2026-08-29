@@ -16,6 +16,7 @@ import { createPostmarkAuthEmailSender } from "./auth/email.js";
 import { betterAuthPlugin } from "./auth/fastify.js";
 import { PUBLIC_ROUTE } from "./auth/route-access.js";
 import { documentRoutes } from "./routes/documents.js";
+import { fileRoutes } from "./routes/files.js";
 import { minutesRoutes } from "./routes/minutes.js";
 import { portalRoutes } from "./routes/portal.js";
 import { notificationRoutes } from "./routes/notifications.js";
@@ -200,6 +201,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
+  // Stage 1, Task D1e — seals and exhibits, on the two storage roots. No
+  // PUBLIC_ROUTE marking: the deny-by-default gate applies, and every document
+  // these routes serve is authorized before nginx is told to send it.
+  await app.register(fileRoutes, { prefix: "/api" });
   await app.register(documentRoutes, { prefix: "/api" });
   await app.register(minutesRoutes, { prefix: "/api" });
   await app.register(portalRoutes, { prefix: "/api/portal" });

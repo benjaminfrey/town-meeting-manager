@@ -12,13 +12,33 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { requirePermission, requireAdmin } from "../plugins/auth.js";
 import { triggerMinutesReview, triggerMinutesApproved } from "../services/notification-triggers.js";
 import { assembleMinutesJson } from "../services/minutes-assembler.js";
 import { formatMinutes } from "../services/minutes-formatters.js";
 import { renderMinutes } from "../services/templates.js";
 import { generateMinutesPdf } from "../services/minutes-pdf.js";
+import { absoluteSealUrl } from "../storage/paths.js";
 import type { MinutesRenderOptions, MinutesContentJson } from "@town-meeting/shared";
+
+/**
+ * Where a client fetches a minutes PDF.
+ *
+ * Stage 1, Task D1e. This used to be
+ * `supabase.storage.from("documents").getPublicUrl(path)` — a URL into a
+ * bucket declared `public = true`, handed back to the caller and, once
+ * stored or forwarded, fetchable by anyone with the string. Draft minutes
+ * included.
+ *
+ * It is now a route on this API. `GET /api/files/minutes/:documentId` applies
+ * rule 9 — R4 for that board, or the document is approved or published — on
+ * every fetch, against the session presenting it. There is no token, so there
+ * is nothing to forward and nothing to expire.
+ */
+function minutesPdfUrl(minutesDocumentId: string): string {
+  return `/api/files/minutes/${minutesDocumentId}`;
+}
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -156,7 +176,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         certification_format: (board.certification_format ??
           "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: true,
-        town_seal_url: town.seal_url,
+        // Absolute: Chromium fetches this while rendering the PDF, from a
+        // page loaded with no base URL. See `absoluteSealUrl`.
+        town_seal_url: absoluteSealUrl(town.seal_url),
       };
 
       try {
@@ -180,7 +202,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
         const html = renderMinutes({
           isDraft: true,
-          sealUrl: town.seal_url,
+          sealUrl: absoluteSealUrl(town.seal_url),
           townName: town.name,
           boardName: board.name,
           meetingHeader: formattedContent.meeting_header as unknown as Record<string, unknown>,
@@ -193,12 +215,18 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         });
 
         // 7. Generate PDF
+        //
+        // Stage 1, Task D1e: the id is generated HERE rather than by the
+        // insert below, because the storage path contains it. One document,
+        // one path — the owner's replace-not-versioned decision — so a
+        // regeneration overwrites rather than accumulating orphaned drafts in
+        // the authorized root.
+        const minutesDocumentId = randomUUID();
         const pdfStoragePath = await generateMinutesPdf(
-          fastify.supabase,
           html,
           meetingId,
           meeting.town_id,
-          meeting.board_id,
+          minutesDocumentId,
           {
             townName: town.name,
             boardName: board.name,
@@ -212,6 +240,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         const { data: minutesDoc, error: insertErr } = await fastify.supabase
           .from("minutes_document")
           .insert({
+            id: minutesDocumentId,
             meeting_id: meetingId,
             board_id: meeting.board_id,
             town_id: meeting.town_id,
@@ -242,16 +271,11 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             .eq("id", meetingId);
         }
 
-        // Get public URL for the PDF
-        const {
-          data: { publicUrl },
-        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
-
         return {
           id: minutesDoc.id,
           status: minutesDoc.status,
           minutes_style: minutesDoc.minutes_style,
-          pdf_url: publicUrl,
+          pdf_url: minutesPdfUrl(minutesDoc.id),
           created_at: minutesDoc.created_at,
         };
       } catch (err) {
@@ -341,7 +365,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         certification_format: (board.certification_format ??
           "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: true,
-        town_seal_url: town.seal_url,
+        // Absolute: Chromium fetches this while rendering the PDF, from a
+        // page loaded with no base URL. See `absoluteSealUrl`.
+        town_seal_url: absoluteSealUrl(town.seal_url),
       };
 
       try {
@@ -361,7 +387,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
         const html = renderMinutes({
           isDraft: true,
-          sealUrl: town.seal_url,
+          sealUrl: absoluteSealUrl(town.seal_url),
           townName: town.name,
           boardName: board.name,
           meetingHeader: formattedContent.meeting_header as unknown as Record<string, unknown>,
@@ -374,11 +400,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         });
 
         const pdfStoragePath = await generateMinutesPdf(
-          fastify.supabase,
           html,
           meetingId,
           meeting.town_id,
-          meeting.board_id,
+          existingMinutes.id,
           {
             townName: town.name,
             boardName: board.name,
@@ -410,15 +435,11 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           return reply.internalServerError("Failed to update minutes document");
         }
 
-        const {
-          data: { publicUrl },
-        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
-
         return {
           id: updated.id,
           status: updated.status,
           minutes_style: updated.minutes_style,
-          pdf_url: publicUrl,
+          pdf_url: minutesPdfUrl(updated.id),
           regenerated: true,
           created_at: updated.created_at,
         };
@@ -509,7 +530,9 @@ export async function minutesRoutes(fastify: FastifyInstance) {
         certification_format: (board.certification_format ??
           "prepared_by") as MinutesRenderOptions["certification_format"],
         is_draft: isDraft,
-        town_seal_url: town.seal_url,
+        // Absolute: Chromium fetches this while rendering the PDF, from a
+        // page loaded with no base URL. See `absoluteSealUrl`.
+        town_seal_url: absoluteSealUrl(town.seal_url),
       };
 
       try {
@@ -531,7 +554,7 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
         const html = renderMinutes({
           isDraft,
-          sealUrl: town.seal_url,
+          sealUrl: absoluteSealUrl(town.seal_url),
           townName: town.name,
           boardName: board.name,
           meetingHeader: formattedContent.meeting_header as unknown as Record<string, unknown>,
@@ -545,11 +568,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
 
         // 6. Generate PDF
         const pdfStoragePath = await generateMinutesPdf(
-          fastify.supabase,
           html,
           meetingId,
           meeting.town_id,
-          meeting.board_id,
+          existingMinutes.id,
           {
             townName: town.name,
             boardName: board.name,
@@ -576,15 +598,11 @@ export async function minutesRoutes(fastify: FastifyInstance) {
           return reply.internalServerError("Failed to update minutes document");
         }
 
-        const {
-          data: { publicUrl },
-        } = fastify.supabase.storage.from("documents").getPublicUrl(pdfStoragePath);
-
         return {
           id: updated.id,
           status: updated.status,
           minutes_style: updated.minutes_style,
-          pdf_url: publicUrl,
+          pdf_url: minutesPdfUrl(updated.id),
           rendered: true,
           is_draft: isDraft,
           created_at: updated.created_at,

@@ -2,7 +2,11 @@
  * ExhibitUploader — manages exhibits attached to an agenda item.
  *
  * Shows numbered exhibit list and supports file upload or URL reference.
- * Client-side validation: PDF/JPEG/PNG/DOCX/XLSX, max 10MB.
+ *
+ * The checks below are a courtesy that saves a round trip. They are NOT the
+ * enforcement: the API re-checks the size and sniffs the file's actual bytes,
+ * because anything a component decides is a decision the client makes about
+ * itself. See `useExhibitUpload` and `packages/api/src/storage/paths.ts`.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -31,7 +35,7 @@ const ALLOWED_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_SIZE = 5 * 1024 * 1024; // 5 MB — matches MAX_UPLOAD_BYTES on the server
 
 interface ExhibitUploaderProps {
   agendaItemId: string;
@@ -81,48 +85,28 @@ export function ExhibitUploader({
         return;
       }
       if (file.size > MAX_SIZE) {
-        setFileError("File must be under 10MB.");
+        setFileError("File must be under 5 MB.");
         return;
       }
 
       try {
-        const storagePath = await upload(file, townId, meetingId, agendaItemId);
-        const id = crypto.randomUUID();
-        const now = new Date().toISOString();
-
-        const { error } = await supabase.from("exhibit").insert({
-          id,
-          agenda_item_id: agendaItemId,
-          town_id: townId,
-          title: title || file.name,
-          file_storage_path: storagePath,
-          file_type: file.type,
-          file_size: file.size,
-          file_name: file.name,
-          exhibit_type: exhibitType,
-          visibility: "public",
-          sort_order: exhibits.length,
-          created_at: now,
-        });
-        if (error) throw error;
+        // One request: the API applies rule 15 for this item's BOARD, checks
+        // the bytes and the size limit server-side, stores the file in the
+        // authorized document root and inserts the row — all inside one tenant
+        // transaction. The client no longer writes the `exhibit` row itself,
+        // so an upload can no longer leave a row pointing at a file that was
+        // never stored (or, as it happened, a file that never stored because
+        // the bucket did not exist).
+        await upload({ file, agendaItemId, title, exhibitType, visibility: "public" });
         await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
         resetForm();
-      } catch {
-        // Error handled by useExhibitUpload
+      } catch (err) {
+        // Shown, not swallowed. The previous `catch {}` here is why nobody
+        // noticed that every exhibit upload had always failed.
+        setFileError(err instanceof Error ? err.message : "Upload failed.");
       }
     },
-    [
-      upload,
-      supabase,
-      queryClient,
-      townId,
-      meetingId,
-      agendaItemId,
-      title,
-      exhibitType,
-      exhibits.length,
-      resetForm,
-    ],
+    [upload, queryClient, agendaItemId, title, exhibitType, resetForm],
   );
 
   const handleAddUrl = useCallback(async () => {
