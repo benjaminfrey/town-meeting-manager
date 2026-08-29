@@ -44,6 +44,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
+// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard
+//
+// The marker above is the machine-checkable half of this comment, and it is
+// the point: a ten-line explanation is invisible to
+// `grep -rn "TODO(phase-e-wave" packages/web/src`, so a completeness sweep
+// over 66 remaining Supabase importers would read this file as finished.
+//
 // `supabase` is still needed for two reads this task does not migrate: town
 // settings (used for the Overview "effective settings" rows, and passed down
 // as defaults to EditBoardDialog / MinutesWorkflowEditor) and the agenda
