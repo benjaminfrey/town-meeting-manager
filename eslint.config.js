@@ -40,6 +40,16 @@ export default tseslint.config(
       "**/docker/volumes/**",
       "**/playwright-report/**",
       "**/.superpowers/**",
+      // `.claude/` is Claude Code's directory, not application source. Two
+      // distinct reasons it must not be linted, both learned the hard way:
+      // workflow scripts under `.claude/workflows/` run in the workflow
+      // engine's own runtime, where `agent`/`pipeline`/`parallel`/`log`/`args`
+      // are injected globals that `no-undef` cannot know about; and agent
+      // worktrees under `.claude/worktrees/` are nested checkouts of this
+      // same repo, which give typescript-eslint several candidate
+      // tsconfigRootDirs and produce hundreds of parse errors in the parent
+      // tree while any agent is running.
+      "**/.claude/**",
     ],
   },
   js.configs.recommended,
