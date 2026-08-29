@@ -598,7 +598,55 @@ Cover, each with a code example lifted from Task 2 or Task 4:
 4. **The client call shape.** `useQuery(trpc.<router>.<procedure>.queryOptions(input))`, plus mutation + `invalidateQueries`.
 5. **Error and loading states are required, and `role="alert"` is the pin.**
 6. **The test idiom**: typed mock per screen; authorization not re-proven on the web; one wiring entry per new router.
-7. **The rule that outranks the rest:** for every security-relevant assertion, delete the guard and watch the test go red before believing it. List the four suites in this repo that could not fail, so the next author knows this is a live habit and not a slogan.
+7. **Cache invalidation — a read owns its key.** The commit that moves a read to tRPC also
+   updates every writer that was invalidating the key it abandoned, _in that same commit_. This is
+   a completion gate, not advice: after migrating a read, `grep -rn "queryKeys\.<entity>"
+packages/web/src` and update every `invalidateQueries` hit, or record why one does not apply.
+   During the transition a Supabase-backed writer invalidates **both** — the legacy key (other,
+   unmigrated screens still read it) and the tRPC filter. The legacy line goes when the last legacy
+   reader does, not before. Default to router-level `trpc.<router>.pathFilter()`, because a board
+   edit can change both `detail` and `stats` and the writer should not need to know which
+   procedures a screen calls. Show both lines verbatim. Ban bare `invalidateQueries()` with no
+   filter.
+
+   _Found the hard way in Task 4: four writers invalidated `queryKeys.boards.detail(boardId)` while
+   the screen read through tRPC's key, so a rename left the old name on screen for 60s and a saved
+   notice template came back reverted._
+
+8. **Mock the transport, not the proxy.** Task 4's test mocked `@/lib/trpc` wholesale, which
+   fabricates query keys and binds nothing to the router — renaming `name` to `nayme` in the mock
+   left `tsc --noEmit` at exit 0. Two consequences: no invalidation test is possible, because the
+   key under test is invented by the test; and any column the test does not assert on can drift
+   from the router with typecheck and tests both green. Build the real `createTRPCOptionsProxy`
+   over a client whose fetch is stubbed, so real keys are produced. At minimum require
+   `satisfies inferProcedureOutput<...>` on every mocked payload. **This is the single
+   highest-leverage item in this document** — it is the file 80 tests get copied from.
+
+9. **Settle the test-harness question once.** `packages/web/src/test/render.ts:72` builds a fresh
+   `QueryClient` per render, but `lib/trpc.ts` binds its proxy to the app singleton and every
+   `clientLoader` calls `ensureQueryData` on that singleton. Task 4 worked around it by mutating
+   the production singleton's defaults in `beforeEach` — safe under vitest's current per-file
+   isolation, but it is shared production state and it will be copied 80 times. Extend
+   `renderWithProviders` or give `lib/queryClient` a test hook. Also rule on `MockAuthProvider`
+   versus `vi.mock("@/hooks/useCurrentUser")` rather than letting each file choose.
+
+10. **The column-parity audit covers props, not just JSX.** Task 4 audited every field the screen
+    itself reads and still shipped a regression, because `ArchiveBoardDialog` reads `board.town_id`
+    off an object the screen passes down. Child components receiving a tRPC payload must take
+    `inferProcedureOutput<...>`, never `Record<string, unknown>` — the bag type is what made it
+    silent.
+
+11. **Partial migrations need a machine-checkable marker.** A file that keeps some Supabase calls
+    because no procedure exists yet must carry `// TODO(phase-e-wave-N): <procedures needed>`. Task
+    4 left a careful ten-line prose comment and no grep-able token; with 82 files still importing
+    Supabase, a sweep would read that file as done. Track "files with a remaining marker" as a
+    countdown to zero.
+
+12. **Say which error surface is canonical.** Task 4 has both a loader that throws NOT_FOUND into
+    `RouteErrorBoundary` and an in-component `role="alert"` branch for post-mount refetch failures.
+    Both are needed; say so, and say which handles what, or 80 screens will diverge.
+
+13. **The rule that outranks the rest:** for every security-relevant assertion, delete the guard and watch the test go red before believing it. List the four suites in this repo that could not fail, so the next author knows this is a live habit and not a slogan.
 
 - [ ] **Step 2: Commit**
 
