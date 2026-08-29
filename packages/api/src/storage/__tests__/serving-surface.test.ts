@@ -87,16 +87,32 @@ describe("the document root is internal", () => {
     expect(block).toContain("alias /var/lib/tmm/documents/;");
   });
 
-  it("is absent from the portal host, which serves anonymous residents", () => {
-    // The portal server block renders town-authored content for people with no
-    // session. It gets the public seal subtree and nothing else.
+  it("is internal on the portal host too, and reachable only via /api/portal/", () => {
+    // ─── Stage 1, Task D1f changed what this pins ──────────────────────
+    //
+    // D1e asserted the document root was ABSENT from the portal host, because
+    // the portal served no stored documents. It serves two now — the minutes
+    // and agenda PDFs the portal UI links from three pages, which answered 500
+    // on every input until D1f — so the location has to exist for
+    // `X-Accel-Redirect` to resolve.
+    //
+    // What replaces "absent" is not weaker, and this test says which property
+    // is now doing the work. `internal` means nginx answers 404 to any CLIENT
+    // request for /__documents/...; the only way in is an X-Accel-Redirect on
+    // a response an upstream produced. On this host the only upstream under
+    // /api/ is /api/portal/ — everything else there is 404'd — so the only
+    // handlers that can emit one are in `routes/portal.ts`, where every
+    // document is gated by a publication predicate. Both halves are asserted:
+    // drop `internal;` and this fails, and widen the proxy back to all of
+    // /api/ and the last assertion in the block below fails.
     const portalBlock = NGINX.match(/server_name ~\^\(\?<subdomain>.*?\n\s*\}\n\}/s)?.[0];
     expect(portalBlock).toBeTruthy();
     expect(portalBlock).toContain("location /public-assets/seals/ {");
-    // The DIRECTIVE, not the string: the block carries a comment saying why
-    // the document root is deliberately absent, and a substring check on the
-    // path would be satisfied by that comment. (It was, first time.)
-    expect(portalBlock).not.toMatch(/location\s+\/__documents\//);
+
+    const documents = portalBlock?.match(/location \/__documents\/ \{.*?\n\s*\}/s)?.[0];
+    expect(documents).toBeTruthy();
+    expect(documents).toContain("internal;");
+    expect(documents).toContain("alias /var/lib/tmm/documents/;");
   });
 
   it("leaves Phase C's sibling-subdomain hardening intact", () => {

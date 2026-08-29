@@ -49,19 +49,28 @@
  * no longer decides anything. One owner per rule, and the tests prove it is
  * the owner.
  *
- * ─── What did NOT move, and why ───────────────────────────────────────────
+ * ─── Task D1f: the two PDF routes work now ───────────────────────────────
  *
- * The two PDF routes (`…/minutes/pdf`, `…/agenda/pdf`) still reach
- * `fastify.supabase` for ONE call each: `storage.from("minutes")
- * .createSignedUrl(...)`. Their database reads moved with everything else, so
- * no read here bypasses RLS; the storage call did not, because nothing in this
- * repository replaces Supabase Storage yet and a concurrent task owns that
- * decision.
+ * D1b left `…/minutes/pdf` and `…/agenda/pdf` on `fastify.supabase` for ONE
+ * call each — `storage.from("minutes").createSignedUrl(...)` — and recorded
+ * that both were DEAD: there has never been a `"minutes"` bucket in this
+ * project, so `createSignedUrl` failed and both answered 500 for every input
+ * that got past their publication check. Nothing in this repository could
+ * replace that call at the time.
  *
- * Both routes are, in any case, already dead: there has never been a
- * `"minutes"` storage bucket, so `createSignedUrl` fails and both answer 500
- * on every input that gets past their publication check. That is stated here
- * rather than fixed, and nothing in this change pretends otherwise.
+ * D1e then built filesystem storage with an authorized document root, so it
+ * can be replaced, and D1f does: both routes now answer with
+ * `sendStoredDocument`, and this file no longer touches `fastify.supabase` at
+ * all — the plugin is deleted.
+ *
+ * Serving a document from the portal is new ground, so the division above is
+ * worth restating for it explicitly. Tenancy is RLS; PUBLICATION is the gate
+ * — `portalCanSelectMinutesDocument` (published, not merely approved) and
+ * `portalCanSelectAgenda` (published, on a meeting the portal lists). There is
+ * no actor and no permission involved, because the portal holds none, and no
+ * signed URL is minted, so there is no token to forward and nothing that
+ * outlives a withdrawal of publication. Each route's own comment says what
+ * decides it.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -70,6 +79,8 @@ import { PUBLIC_ROUTE as PUBLIC } from "../auth/route-access.js";
 import { bindPortalTenant, portalTownIdFrom } from "../auth/portal-tenant.js";
 import type { TenantTx } from "../db/with-tenant.js";
 import { toRows as normaliseRows } from "../db/rows.js";
+import { agendaPacketRelativePath } from "../storage/paths.js";
+import { sendStoredDocument } from "../storage/serve.js";
 import {
   PORTAL_HIDDEN_MEETING_STATUSES,
   portalCanSelectAgenda,
@@ -544,12 +555,42 @@ export async function portalRoutes(fastify: FastifyInstance) {
 
   // ─── GET /:townId/meetings/:meetingId/minutes/pdf ──────────────
   //
-  // DEAD, and left dead deliberately. `storage.from("minutes")` names a bucket
-  // that has never existed in this project, so `createSignedUrl` errors and
-  // this route answers 500 for every meeting whose minutes ARE published. The
-  // read below moved onto the tenant path with everything else, so nothing
-  // here bypasses RLS; replacing the storage call is a concurrent task's, and
-  // guessing at it would only make a broken route look fixed.
+  // ─── Stage 1, Task D1f: alive again, and on the authorized root ────────
+  //
+  // This was DEAD, and D1b said so rather than pretending otherwise:
+  // `storage.from("minutes")` named a bucket that has never existed in this
+  // project, so `createSignedUrl` errored and the route answered 500 for every
+  // meeting whose minutes ARE published. D1e then built real filesystem
+  // storage with an authorized document root, and `minutes_document.pdf_storage_path`
+  // now holds a path inside it, so there is something real to serve.
+  //
+  // ─── What decides this fetch ───────────────────────────────────────────
+  //
+  // TWO things, and neither is sufficient alone — the same division the rest
+  // of this file runs on:
+  //
+  //   tenancy      RLS, via `scope.withTenant`. Another town's minutes are not
+  //                filtered out here; they are not visible.
+  //   publication  `portalCanSelectMeeting` AND `portalCanSelectMinutesDocument`,
+  //                which is `published` only — NOT `approved`. A board adopting
+  //                minutes and a town putting them on the website are different
+  //                decisions, and this route honours the second.
+  //
+  // Deliberately NOT `canSelectMinutesDocument` (rule 9): that rule's second
+  // branch requires a signed-in actor, exactly so that the portal cannot reach
+  // it and be handed approved-but-unpublished minutes. The portal predicate is
+  // the gate; there is no actor here to hold R4.
+  //
+  // No signed URL is issued. A signed URL would be a bearer token with a
+  // lifetime — forwardable, and still valid after publication is withdrawn.
+  // `sendStoredDocument` names the file to nginx instead, so the publication
+  // check runs again on every single fetch. See `storage/serve.ts`.
+  //
+  // The `Cache-Control: public, max-age=3600` this route used to set is gone
+  // with it: `sendStoredDocument` sets `private, no-store` for every document
+  // it serves, and a published PDF being uncached costs bandwidth, whereas a
+  // shared cache holding a document whose publication was withdrawn costs the
+  // withdrawal.
   fastify.get<{ Params: MeetingParams }>(
     "/:townId/meetings/:meetingId/minutes/pdf",
     publicRoute,
@@ -559,8 +600,10 @@ export async function portalRoutes(fastify: FastifyInstance) {
       const { meetingId } = request.params;
 
       const result = await scope.withTenant(async (tx) => {
-        const [meeting] = rows<{ status: string }>(
-          await tx.execute(sql`SELECT status FROM meeting WHERE id = ${meetingId}`),
+        const [meeting] = rows<{ status: string; scheduled_date: string | null }>(
+          await tx.execute(
+            sql`SELECT status, scheduled_date::text AS scheduled_date FROM meeting WHERE id = ${meetingId}`,
+          ),
           "minutes-pdf.meeting",
         );
         if (!meeting) return null;
@@ -579,22 +622,34 @@ export async function portalRoutes(fastify: FastifyInstance) {
       const doc = result.docs.find((d) => portalCanSelectMinutesDocument(d) && d.pdf_storage_path);
       if (!doc?.pdf_storage_path) return reply.notFound("Published minutes PDF not found");
 
-      const { data: signedUrlData, error: signError } = await fastify.supabase.storage
-        .from("minutes")
-        .createSignedUrl(doc.pdf_storage_path, 3600);
-
-      if (signError || !signedUrlData?.signedUrl) {
-        return reply.internalServerError("Failed to generate PDF URL");
-      }
-
-      reply.header("Cache-Control", "public, max-age=3600");
-      return reply.redirect(signedUrlData.signedUrl);
+      // `pdf_storage_path` is validated against the document root inside
+      // `sendStoredDocument` before anything is sent — including because it
+      // came out of the database. A row written before D1e holds a Supabase
+      // bucket path rather than one of ours; that fails validation or fails to
+      // exist, and either way answers 4xx rather than serving something we did
+      // not put there.
+      return sendStoredDocument(reply, doc.pdf_storage_path, {
+        filename: `minutes-${result.meeting.scheduled_date ?? meetingId}.pdf`,
+        contentType: "application/pdf",
+        disposition: "inline",
+      });
     },
   );
 
   // ─── GET /:townId/meetings/:meetingId/agenda/pdf ───────────────
   //
-  // Dead for the same reason as the route above — same nonexistent bucket.
+  // Alive again for the same reasons as the route above, with one difference
+  // worth stating: there is no `agenda_packet_storage_path` column, and D1f
+  // did not add one. The packet's path is DERIVED from the town and meeting
+  // ids — `agenda-packets/<townId>/<meetingId>.pdf`, one per meeting,
+  // replace-not-versioned — so `meeting.agenda_packet_url` is consulted for
+  // exactly one thing: whether a packet has ever been generated. A meeting
+  // whose packet was never generated must answer 404 rather than "the file is
+  // missing", and only the row knows that.
+  //
+  // The gate is `portalCanSelectAgenda`, which is BOTH `agenda_status =
+  // 'published'` AND the draft/cancelled meeting exclusion — the second half
+  // being the fix D1b lifted out of this route rather than transcribing.
   fastify.get<{ Params: MeetingParams }>(
     "/:townId/meetings/:meetingId/agenda/pdf",
     publicRoute,
@@ -604,9 +659,17 @@ export async function portalRoutes(fastify: FastifyInstance) {
       const { meetingId } = request.params;
 
       const [meeting] = await scope.withTenant(async (tx) =>
-        rows<{ agenda_packet_url: string | null; agenda_status: string | null; status: string }>(
+        rows<{
+          town_id: string;
+          agenda_packet_url: string | null;
+          agenda_status: string | null;
+          status: string;
+          scheduled_date: string | null;
+        }>(
           await tx.execute(sql`
-            SELECT agenda_packet_url, agenda_status, status FROM meeting WHERE id = ${meetingId}
+            SELECT town_id, agenda_packet_url, agenda_status, status,
+                   scheduled_date::text AS scheduled_date
+              FROM meeting WHERE id = ${meetingId}
           `),
           "agenda-pdf",
         ),
@@ -623,16 +686,11 @@ export async function portalRoutes(fastify: FastifyInstance) {
       }
       if (!meeting.agenda_packet_url) return reply.notFound("Agenda PDF not available");
 
-      const { data: signedUrlData, error: signError } = await fastify.supabase.storage
-        .from("minutes")
-        .createSignedUrl(meeting.agenda_packet_url, 3600);
-
-      if (signError || !signedUrlData?.signedUrl) {
-        return reply.internalServerError("Failed to generate PDF URL");
-      }
-
-      reply.header("Cache-Control", "public, max-age=3600");
-      return reply.redirect(signedUrlData.signedUrl);
+      return sendStoredDocument(reply, agendaPacketRelativePath(meeting.town_id, meetingId), {
+        filename: `agenda-packet-${meeting.scheduled_date ?? meetingId}.pdf`,
+        contentType: "application/pdf",
+        disposition: "inline",
+      });
     },
   );
 

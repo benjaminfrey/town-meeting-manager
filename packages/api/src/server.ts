@@ -8,7 +8,6 @@ import Fastify, { type onRouteHookHandler } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import sensible from "@fastify/sensible";
-import { supabasePlugin } from "./plugins/supabase.js";
 import { authPlugin } from "./plugins/auth.js";
 import { createAppDb } from "./auth/db.js";
 import { createAuth } from "./auth/auth.js";
@@ -102,16 +101,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
 
   await app.register(sensible);
-  await app.register(supabasePlugin);
   await app.register(authPlugin);
 
   // ─── Better Auth and the tenant bridge (Stage 1, Task C1) ────────
   //
-  // `plugins/auth.ts` above is the Supabase-era JWT verifier, still in place
-  // because the routes registered below use `verifyAuth`. Task C2 and Phase D
-  // move those onto `request.tenant`; deleting it here would break them all in
-  // one commit for no security gain, since it is only reachable on routes
-  // that opt into it.
+  // `plugins/auth.ts` above is what remains of the Supabase-era route
+  // decorators: `verifyAuth` (which now reads `request.tenant` and loads the
+  // account through RLS), plus `requirePermission` and `requireAdmin`, which
+  // `notifications.ts`, `invitations.ts` and `minutes.ts`'s approve route
+  // still use. Task D1f removed the last of the routes that needed a
+  // BOARD-scoped decision from it — a preHandler cannot resolve a board — so
+  // what is left is the town-scoped and admin-only half, which it decides
+  // correctly.
+  //
+  // `plugins/supabase.ts` is GONE as of Task D1f. It created a service-role
+  // client that bypassed row level security outright, and it was the last one
+  // in this codebase. Nothing here can reach the database except through
+  // `request.withTenant` or a `TenantJob`, both of which set `app.town_id`
+  // inside a transaction.
   //
   // What is registered here is the replacement: Better Auth's handler at
   // `/api/auth/*`, plus the preHandler that resolves a session to a town and
@@ -231,11 +238,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
   //
   // Two kinds of work, both per town:
   //
-  //   processPendingEvents — events queued by a caller that had no
-  //        tenant-bound database handle. Today that is
-  //        `services/notification-triggers.ts`, driven from `routes/minutes.ts`,
-  //        which is still on the Supabase client and belongs to another task.
-  //        It inserts a `pending` row; this is what delivers it.
+  //   processPendingEvents — events left `pending` because the process that
+  //        queued them died before delivering them. Task D1c also needed this
+  //        for `services/notification-triggers.ts`, which could not schedule
+  //        its own delivery while it had no tenant; D1f gave it one, so that
+  //        is no longer the case and this is a crash-recovery sweep rather
+  //        than the normal delivery path.
   //   processRetries — deliveries past their `next_retry_at`.
   //
   // Sequential rather than `Promise.all`: the pool is shared with live

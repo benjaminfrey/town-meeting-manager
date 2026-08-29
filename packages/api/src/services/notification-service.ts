@@ -330,11 +330,12 @@ export class NotificationService {
   /**
    * Process every `pending` event in this job's town.
    *
-   * The durable half of `createNotificationEvent`'s `setImmediate`. An event
-   * queued by a caller that has no tenant-bound database handle — today
-   * `services/notification-triggers.ts`, driven from `routes/minutes.ts`,
-   * which is still on the service-role client — is delivered by this rather
-   * than by the process that queued it.
+   * The durable half of `createNotificationEvent`'s `setImmediate`: an event
+   * whose queuing process died before delivering it is picked up here on the
+   * next sweep. Task D1c also relied on this as the ONLY delivery path for
+   * `services/notification-triggers.ts`, which had no tenant and so could not
+   * schedule its own; D1f gave it one, so this is crash recovery again rather
+   * than the normal route.
    */
   async processPendingEvents(): Promise<number> {
     const pending = await this.job.run(async (tx) =>

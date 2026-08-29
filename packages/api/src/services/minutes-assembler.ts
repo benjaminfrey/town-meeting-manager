@@ -1,12 +1,30 @@
 /**
  * Minutes JSON assembler.
  *
- * Queries Supabase for all meeting-related data and constructs the
- * canonical MinutesContentJson structure used by renderers and PDF
- * generators downstream.
+ * Reads all meeting-related data and constructs the canonical
+ * MinutesContentJson structure used by renderers and PDF generators
+ * downstream.
+ *
+ * ─── Stage 1, Task D1f: this ran on the service-role client ───────────────
+ *
+ * Fourteen queries, every one of them through `fastify.supabase` — the client
+ * that bypasses row level security — and NONE of them filtered by town. The
+ * meeting id came off the URL (`routes/minutes.ts`), and the routes' own
+ * `meeting.town_id !== user.townId` check was the entire tenancy of this file:
+ * a check written in TypeScript, in a caller, that this module could not see
+ * and had no way to require. Two of the reads did not even have that much —
+ * `person` and `board_member` were fetched by `meeting.town_id` and
+ * `meeting.board_id`, values read back out of the first unfiltered query.
+ *
+ * It now takes a `TenantTx`, so every read below happens inside a transaction
+ * with `app.town_id` already set and the database decides tenancy. A meeting
+ * id belonging to another town returns no row rather than that town's minutes,
+ * and there is no argument a caller can pass to change that.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { sql } from "drizzle-orm";
+import type { TenantTx } from "../db/with-tenant.js";
+import { toRows } from "../db/rows.js";
 import type {
   MinutesContentJson,
   MinutesMeetingHeader,
@@ -27,7 +45,7 @@ import type {
 import { calculateQuorum } from "@town-meeting/shared";
 
 // ─── Internal Row Types ─────────────────────────────────────────────
-// Lightweight row shapes for PostgREST results — not exhaustive,
+// Lightweight row shapes for the query results — not exhaustive,
 // only the columns we actually read.
 
 interface MeetingRow {
@@ -156,84 +174,119 @@ interface ExhibitRow {
   title: string;
 }
 
-// ─── Helper: throw on Supabase error ───────────────────────────────
+// ─── Helper: driver result → rows ──────────────────────────────────
 
-function unwrap<T>(result: { data: T | null; error: unknown }, label: string): T {
-  if (result.error) {
-    throw new Error(`Failed to fetch ${label}: ${JSON.stringify(result.error)}`);
-  }
-  return result.data as T;
+function rows<T>(result: unknown, label: string): T[] {
+  return toRows<T>(result, (message) => new Error(`Failed to fetch ${label}: ${message}`));
+}
+
+/**
+ * The single row a `WHERE id = …` must return, or a failure naming what was
+ * missing.
+ *
+ * Under RLS "no such row" and "that row belongs to another town" are the same
+ * answer, and deliberately so — see `storage/documents.ts`. Here they are also
+ * the same FAILURE: this function is only ever called with ids that came out
+ * of the caller's own tenant transaction, so a missing meeting means the
+ * meeting was deleted mid-request, not that a caller guessed.
+ */
+function one<T>(result: unknown, label: string): T {
+  const [row] = rows<T>(result, label);
+  if (!row) throw new Error(`Failed to fetch ${label}: no row`);
+  return row;
+}
+
+/**
+ * A parameterised list of uuids, for `... IN ${uuidList(ids)}`.
+ *
+ * Drizzle expands a JS array inside a `sql` template into `($1, $2, $3)` — a
+ * record, not an array — so `= ANY(${ids}::uuid[])` fails with "cannot cast
+ * type record to uuid[]". One JSON parameter unnested in SQL stays a single
+ * bound value regardless of length. Same helper, same reason, as
+ * `services/notification-service.ts`.
+ */
+function uuidList(ids: readonly string[]) {
+  return sql`(SELECT jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)::uuid)`;
 }
 
 // ─── Main Assembler ─────────────────────────────────────────────────
 
 export async function assembleMinutesJson(
-  supabase: SupabaseClient,
+  tx: TenantTx,
   meetingId: string,
 ): Promise<MinutesContentJson> {
   // ── 1. Fetch the meeting record ───────────────────────────────────
-  const meeting = unwrap<MeetingRow>(
-    await supabase.from("meeting").select("*").eq("id", meetingId).single(),
+  const meeting = one<MeetingRow>(
+    await tx.execute(sql`SELECT * FROM meeting WHERE id = ${meetingId}`),
     "meeting",
   );
 
-  // ── 2. Parallel fetches for board, town, and meeting-scoped data ──
-  const [
-    boardResult,
-    townResult,
-    agendaItemsResult,
-    attendanceResult,
-    motionsResult,
-    voteRecordsResult,
-    execSessionsResult,
-    transitionsResult,
-    guestSpeakersResult,
-  ] = await Promise.all([
-    supabase.from("board").select("*").eq("id", meeting.board_id).single(),
-    supabase.from("town").select("*").eq("id", meeting.town_id).single(),
-    supabase.from("agenda_item").select("*").eq("meeting_id", meetingId).order("sort_order"),
-    supabase.from("meeting_attendance").select("*").eq("meeting_id", meetingId),
-    supabase.from("motion").select("*").eq("meeting_id", meetingId),
-    supabase.from("vote_record").select("*").eq("meeting_id", meetingId),
-    supabase.from("executive_session").select("*").eq("meeting_id", meetingId),
-    supabase.from("agenda_item_transition").select("*").eq("meeting_id", meetingId),
-    supabase.from("guest_speaker").select("*").eq("meeting_id", meetingId),
-  ]);
-
-  const board = unwrap<BoardRow>(boardResult, "board");
-  const town = unwrap<TownRow>(townResult, "town");
-  const agendaItems = unwrap<AgendaItemRow[]>(agendaItemsResult, "agenda_items") ?? [];
-  const attendance = unwrap<AttendanceRow[]>(attendanceResult, "attendance") ?? [];
-  const motions = unwrap<MotionRow[]>(motionsResult, "motions") ?? [];
-  const voteRecords = unwrap<VoteRecordRow[]>(voteRecordsResult, "vote_records") ?? [];
-  const execSessions = unwrap<ExecSessionRow[]>(execSessionsResult, "executive_sessions") ?? [];
-  const transitions = unwrap<TransitionRow[]>(transitionsResult, "transitions") ?? [];
-  const guestSpeakers = unwrap<GuestSpeakerRow[]>(guestSpeakersResult, "guest_speakers") ?? [];
+  // ── 2. Board, town, and meeting-scoped data ───────────────────────
+  //
+  // Sequential rather than `Promise.all`. These all run on ONE transaction
+  // now, and a `postgres.js` transaction is a single connection: firing nine
+  // queries at it concurrently does not parallelise anything, and interleaving
+  // statements on one connection is how a driver-level pipeline error turns
+  // into a rolled-back transaction with an unhelpful message.
+  const board = one<BoardRow>(
+    await tx.execute(sql`SELECT * FROM board WHERE id = ${meeting.board_id}`),
+    "board",
+  );
+  const town = one<TownRow>(
+    await tx.execute(sql`SELECT * FROM town WHERE id = ${meeting.town_id}`),
+    "town",
+  );
+  const agendaItems = rows<AgendaItemRow>(
+    await tx.execute(
+      sql`SELECT * FROM agenda_item WHERE meeting_id = ${meetingId} ORDER BY sort_order`,
+    ),
+    "agenda_items",
+  );
+  const attendance = rows<AttendanceRow>(
+    await tx.execute(sql`SELECT * FROM meeting_attendance WHERE meeting_id = ${meetingId}`),
+    "attendance",
+  );
+  const motions = rows<MotionRow>(
+    await tx.execute(sql`SELECT * FROM motion WHERE meeting_id = ${meetingId}`),
+    "motions",
+  );
+  const voteRecords = rows<VoteRecordRow>(
+    await tx.execute(sql`SELECT * FROM vote_record WHERE meeting_id = ${meetingId}`),
+    "vote_records",
+  );
+  const execSessions = rows<ExecSessionRow>(
+    await tx.execute(sql`SELECT * FROM executive_session WHERE meeting_id = ${meetingId}`),
+    "executive_sessions",
+  );
+  const transitions = rows<TransitionRow>(
+    await tx.execute(sql`SELECT * FROM agenda_item_transition WHERE meeting_id = ${meetingId}`),
+    "transitions",
+  );
+  const guestSpeakers = rows<GuestSpeakerRow>(
+    await tx.execute(sql`SELECT * FROM guest_speaker WHERE meeting_id = ${meetingId}`),
+    "guest_speakers",
+  );
 
   // ── 3. Fetch board members + persons for name lookups ─────────────
-  const [boardMembersResult, personsResult] = await Promise.all([
-    supabase
-      .from("board_member")
-      .select("*")
-      .eq("board_id", meeting.board_id)
-      .eq("status", "active"),
-    supabase.from("person").select("id, name").eq("town_id", meeting.town_id),
-  ]);
-
-  const boardMembers = unwrap<BoardMemberRow[]>(boardMembersResult, "board_members") ?? [];
-  const persons = unwrap<PersonRow[]>(personsResult, "persons") ?? [];
+  const boardMembers = rows<BoardMemberRow>(
+    await tx.execute(
+      sql`SELECT * FROM board_member WHERE board_id = ${meeting.board_id} AND status = 'active'`,
+    ),
+    "board_members",
+  );
+  const persons = rows<PersonRow>(
+    await tx.execute(sql`SELECT id, name FROM person WHERE town_id = ${meeting.town_id}`),
+    "persons",
+  );
 
   // ── 4. Fetch default agenda template for section config ───────────
-  const templateResult = await supabase
-    .from("agenda_template")
-    .select("*")
-    .eq("board_id", meeting.board_id)
-    .eq("is_default", true)
-    .maybeSingle();
-
-  const templateRow = templateResult.data as {
-    sections: AgendaTemplateSection[] | string | null;
-  } | null;
+  const templateRow =
+    rows<{ sections: AgendaTemplateSection[] | string | null }>(
+      await tx.execute(
+        sql`SELECT * FROM agenda_template WHERE board_id = ${meeting.board_id} AND is_default = true`,
+      ),
+      "agenda_template",
+    )[0] ?? null;
 
   let templateSections: AgendaTemplateSection[] = [];
   if (templateRow?.sections) {
@@ -247,11 +300,12 @@ export async function assembleMinutesJson(
   const allItemIds = agendaItems.map((ai) => ai.id);
   let exhibits: ExhibitRow[] = [];
   if (allItemIds.length > 0) {
-    const exhibitsResult = await supabase
-      .from("exhibit")
-      .select("id, agenda_item_id, title")
-      .in("agenda_item_id", allItemIds);
-    exhibits = unwrap<ExhibitRow[]>(exhibitsResult, "exhibits") ?? [];
+    exhibits = rows<ExhibitRow>(
+      await tx.execute(
+        sql`SELECT id, agenda_item_id, title FROM exhibit WHERE agenda_item_id IN ${uuidList(allItemIds)}`,
+      ),
+      "exhibits",
+    );
   }
 
   // ── 6. Build lookup maps ──────────────────────────────────────────
