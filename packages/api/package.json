@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "exports": {
+    "./trpc/router": {
+      "types": "./dist/trpc/router.d.ts"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b && cp -r src/templates dist/",
