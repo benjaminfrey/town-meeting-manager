@@ -24,6 +24,7 @@
 ## File Structure
 
 **Create:**
+
 - `packages/web/src/lib/trpc.ts` — the typed client and its TanStack Query integration. One responsibility: construct the client and expose the options proxy.
 - `packages/api/src/trpc/routers/board.ts` — board read procedures.
 - `packages/api/src/trpc/routers/__tests__/board.test.ts` — real-Postgres tests for those procedures.
@@ -31,6 +32,7 @@
 - `docs/superpowers/plans/phase-e-conventions.md` — the template the waves copy.
 
 **Modify:**
+
 - `packages/web/package.json` — add the two client dependencies.
 - `packages/api/src/trpc/router.ts` — mount `boardRouter`.
 - `packages/web/src/providers/QueryProvider.tsx` — provide the tRPC client alongside the QueryClient.
@@ -42,12 +44,14 @@
 ## Task 1: The tRPC client
 
 **Files:**
+
 - Modify: `packages/web/package.json`
 - Create: `packages/web/src/lib/trpc.ts`
 - Modify: `packages/web/src/providers/QueryProvider.tsx`
 - Test: `packages/web/src/lib/__tests__/trpc.test.ts`
 
 **Interfaces:**
+
 - Consumes: `AppRouter` type from `packages/api/src/trpc/router.ts` (already exported).
 - Produces: `trpc` (the TanStack Query options proxy) and `trpcClient` (the raw client), both from `@/lib/trpc`. Every later wave imports `trpc` from here and nothing else.
 
@@ -186,11 +190,13 @@ git commit -m "Give the web package a typed client to the API it already has"
 ## Task 2: The board router
 
 **Files:**
+
 - Create: `packages/api/src/trpc/routers/board.ts`
 - Create: `packages/api/src/trpc/routers/__tests__/board.test.ts`
 - Modify: `packages/api/src/trpc/router.ts`
 
 **Interfaces:**
+
 - Consumes: `router`, `protectedProcedure` from `../trpc.js`; `toRows` from `../../db/rows.js`; `ctx.withTenant`, `ctx.tenant.townId`.
 - Produces: `boardRouter` with `detail`, `stats`, `recentMeetings`. Mounted as `board` on `appRouter`, so the client calls `trpc.board.detail`.
 
@@ -326,7 +332,9 @@ export const boardRouter = router({
     }),
 
   recentMeetings: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid(), limit: z.number().int().min(1).max(50).default(5) }))
+    .input(
+      z.object({ boardId: z.string().uuid(), limit: z.number().int().min(1).max(50).default(5) }),
+    )
     .query(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) =>
         toRows<{ id: string; title: string; scheduled_date: string; status: string }>(
@@ -376,14 +384,16 @@ git commit -m "Give boards a tRPC router, gated by tenancy exactly as its policy
 ## Task 3: The wiring smoke test
 
 **Files:**
+
 - Create: `packages/api/src/trpc/__tests__/router-wiring.test.ts`
 
 **Interfaces:**
+
 - Consumes: `appRouter` from `../router.js`.
 - Produces: a pattern extended by one block per router for the remainder of Phase E.
 
 **Why this exists.** Web tests mock at the typed tRPC boundary, which catches a
-wrong input *shape* but not a wrong *procedure*: `trpc.board.stats` where
+wrong input _shape_ but not a wrong _procedure_: `trpc.board.stats` where
 `trpc.board.recentMeetings` was meant type-checks and mocks cleanly, and ships.
 This is the cheap structural cover for that, and it is the one place in Phase E
 that runs against the real router.
@@ -439,10 +449,12 @@ git commit -m "Pin the procedure names the web package calls"
 ## Task 4: Migrate the board detail screen
 
 **Files:**
+
 - Modify: `packages/web/src/routes/boards.$boardId.tsx` (7 call sites; the loader at ~:95 and the queries from ~:123)
 - Create: `packages/web/src/routes/__tests__/boards.$boardId.test.tsx` (there is no existing test for this screen — `__tests__/` holds only login, people, reset-password and wizard)
 
 **Interfaces:**
+
 - Consumes: `trpc` from `@/lib/trpc`; `board.detail`, `board.stats`, `board.recentMeetings`.
 - Produces: the conventions Task 5 documents.
 
@@ -460,9 +472,30 @@ import { render, screen } from "@testing-library/react";
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     board: {
-      detail: { queryOptions: (input: unknown) => ({ queryKey: ["board.detail", input], queryFn: async () => ({ id: "b1", name: "Select Board", board_type: "select", quorum_rule: null, archived_at: null }) }) },
-      stats: { queryOptions: (input: unknown) => ({ queryKey: ["board.stats", input], queryFn: async () => ({ active_members: 3, meetings: 7 }) }) },
-      recentMeetings: { queryOptions: (input: unknown) => ({ queryKey: ["board.recentMeetings", input], queryFn: async () => [] }) },
+      detail: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ["board.detail", input],
+          queryFn: async () => ({
+            id: "b1",
+            name: "Select Board",
+            board_type: "select",
+            quorum_rule: null,
+            archived_at: null,
+          }),
+        }),
+      },
+      stats: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ["board.stats", input],
+          queryFn: async () => ({ active_members: 3, meetings: 7 }),
+        }),
+      },
+      recentMeetings: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ["board.recentMeetings", input],
+          queryFn: async () => [],
+        }),
+      },
     },
   },
 }));
@@ -499,7 +532,9 @@ Each `useQuery({ queryKey: ..., queryFn: async () => { const { data } = await su
 ```tsx
 const { data: board } = useQuery(trpc.board.detail.queryOptions({ boardId }));
 const { data: stats } = useQuery(trpc.board.stats.queryOptions({ boardId }));
-const { data: recentMeetings = [] } = useQuery(trpc.board.recentMeetings.queryOptions({ boardId, limit: 5 }));
+const { data: recentMeetings = [] } = useQuery(
+  trpc.board.recentMeetings.queryOptions({ boardId, limit: 5 }),
+);
 ```
 
 The two separate count queries collapse into `stats`. Delete the
@@ -536,6 +571,7 @@ git commit -m "Put the board detail screen on tRPC"
 ## Task 5: Write down the template
 
 **Files:**
+
 - Create: `docs/superpowers/plans/phase-e-conventions.md`
 
 This is the deliverable the other six waves actually consume, so it is a task,

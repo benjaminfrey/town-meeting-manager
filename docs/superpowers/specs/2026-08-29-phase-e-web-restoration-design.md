@@ -32,29 +32,29 @@ whose intended behaviour is genuinely ambiguous, and should surface it rather th
 
 At `d4cdd09`, in `packages/web/src`, excluding tests:
 
-| | count |
-|---|---|
-| files touching supabase | 82 |
-| chain entries | 220 |
-| `.from(` (data) | 46 |
-| `.auth.` | 3 |
-| `.storage.` | 2 |
-| `.channel(` (realtime) | 1 hook + 2 status files |
-| direct browser writes (`insert`/`update`/`delete`) | 104 |
-| test files mocking supabase | 14 |
+|                                                    | count                   |
+| -------------------------------------------------- | ----------------------- |
+| files touching supabase                            | 82                      |
+| chain entries                                      | 220                     |
+| `.from(` (data)                                    | 46                      |
+| `.auth.`                                           | 3                       |
+| `.storage.`                                        | 2                       |
+| `.channel(` (realtime)                             | 1 hook + 2 status files |
+| direct browser writes (`insert`/`update`/`delete`) | 104                     |
+| test files mocking supabase                        | 14                      |
 
 Concentration is extreme and matters more than the total:
 
-| file | sites |
-|---|---|
-| `routes/meetings.$meetingId.live.tsx` | 24 |
-| `routes/meetings.$meetingId.review.tsx` | 16 |
-| `components/members/AddMemberDialog.tsx` | 14 |
-| `routes/meetings.$meetingId.minutes.tsx` | 11 |
-| `routes/meetings.$meetingId.agenda.tsx` | 9 |
-| `routes/meetings.$meetingId.tsx` | 8 |
-| `routes/boards.$boardId.tsx` | 7 |
-| `lib/meeting-helpers.ts` | 7 |
+| file                                     | sites |
+| ---------------------------------------- | ----- |
+| `routes/meetings.$meetingId.live.tsx`    | 24    |
+| `routes/meetings.$meetingId.review.tsx`  | 16    |
+| `components/members/AddMemberDialog.tsx` | 14    |
+| `routes/meetings.$meetingId.minutes.tsx` | 11    |
+| `routes/meetings.$meetingId.agenda.tsx`  | 9     |
+| `routes/meetings.$meetingId.tsx`         | 8     |
+| `routes/boards.$boardId.tsx`             | 7     |
+| `lib/meeting-helpers.ts`                 | 7     |
 
 Eight files carry 96 of the 220. The rest is a long, shallow tail.
 
@@ -86,14 +86,14 @@ is a defect 80 times.
 
 ## Waves, in dependency order
 
-| # | Area | Notes |
-|---|---|---|
-| 1 | identity, settings, town profile, people | light; `useCurrentUser` already reads `GET /api/me` |
-| 2 | board detail tabs | finishes what unit 0 starts |
-| 3 | meetings list, kanban, `meetings.$meetingId` | 8 + tail |
-| 4 | agenda, agenda templates | 9 + tail |
-| 5 | **live + the SSE transport** | 24 sites and a new transport — the hard one |
-| 6 | minutes, review, member dialogs | 16 + 11 + 14 |
+| #   | Area                                         | Notes                                               |
+| --- | -------------------------------------------- | --------------------------------------------------- |
+| 1   | identity, settings, town profile, people     | light; `useCurrentUser` already reads `GET /api/me` |
+| 2   | board detail tabs                            | finishes what unit 0 starts                         |
+| 3   | meetings list, kanban, `meetings.$meetingId` | 8 + tail                                            |
+| 4   | agenda, agenda templates                     | 9 + tail                                            |
+| 5   | **live + the SSE transport**                 | 24 sites and a new transport — the hard one         |
+| 6   | minutes, review, member dialogs              | 16 + 11 + 14                                        |
 
 Each wave runs as an orchestrated unit — migrate, verify, review — using
 `.claude/workflows/sdd-review-wave.js`, whose interaction phase checks the merged tree. Waves are
@@ -127,7 +127,7 @@ anything and did.
 real-Postgres suite. Web tests cover rendering, interaction, loading and error states.
 
 **One wiring smoke test per router, against the real router.** This closes the one hole a typed
-mock cannot: calling the wrong *procedure*. `meeting.list` standing in for `meeting.listForBoard`
+mock cannot: calling the wrong _procedure_. `meeting.list` standing in for `meeting.listForBoard`
 type-checks and mocks cleanly. The smoke test asserts each screen's procedures exist, accept the
 input the screen sends, and return the shape it reads — without dragging a database into every
 screen test.
