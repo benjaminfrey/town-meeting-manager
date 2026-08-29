@@ -421,9 +421,19 @@ describe("router wiring", () => {
     );
   });
 
-  it("board.detail rejects an input the screen could not send", async () => {
-    const caller = appRouter.createCaller({} as never);
-    await expect(caller.board.detail({ boardId: "not-a-uuid" } as never)).rejects.toThrow();
+  it("every pinned procedure validates its input", () => {
+    // NOT via createCaller with an empty context: protectedProcedure's
+    // requireTenant middleware runs BEFORE input parsing, so such a call
+    // rejects with UNAUTHORIZED and the assertion passes for the wrong
+    // reason — it would still pass with the input schema deleted. Parse the
+    // schema directly instead. Real input handling end-to-end is covered by
+    // board.test.ts, which has a real context.
+    for (const name of ["board.detail", "board.stats", "board.recentMeetings"]) {
+      const def = appRouter._def.procedures[name]._def;
+      const schema = def.inputs?.[0];
+      expect(schema, `${name} has no input schema`).toBeDefined();
+      expect(() => schema.parse({ boardId: "not-a-uuid" })).toThrow();
+    }
   });
 });
 ```
