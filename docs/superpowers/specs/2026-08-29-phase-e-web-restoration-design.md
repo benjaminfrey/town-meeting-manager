@@ -28,6 +28,16 @@ from tests and from the spec, and where the spec is silent we are reconstructing
 that has never run against a live database. Every wave should expect to find at least one screen
 whose intended behaviour is genuinely ambiguous, and should surface it rather than guess.
 
+**But read that narrowly, because the first task to rely on it dropped a filter.** "No parity
+baseline" is true of the _rendering_ — nothing is on screen to compare against. It is **not** true
+of the _query being replaced_, which is a written statement of intent even though it returns zero
+rows today. A `.neq("status", "cancelled")` in the code you are deleting is a requirement, not an
+artifact. Read every query you replace as a specification, and when you drop one of its clauses,
+say so and why.
+
+Caught in Phase E unit 0, Task 2: `recentMeetings` silently lost the source query's exclusion of
+cancelled meetings, under cover of this framing as originally worded.
+
 ## Measured surface
 
 At `d4cdd09`, in `packages/web/src`, excluding tests:

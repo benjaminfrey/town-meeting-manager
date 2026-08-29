@@ -17,7 +17,7 @@
 - Gates are the list in `.github/workflows/ci.yml`. Run tests as `npx turbo run test --force`; `pnpm test --force` is not a valid command, and a run reporting anything but `0 cached` proved nothing.
 - Rebuild `@town-meeting/shared` (`npx turbo run build --force`) before trusting any test result. A stale `dist` has produced both false failures and false passes in this repo.
 - `DATABASE_URL="postgres://ben@localhost:5432/postgres"`. Scratch databases get unique names and are dropped; leave the `tmm_app` role.
-- **There is no parity baseline.** The screen currently renders nothing, because the browser sends no credential and `get_current_town_id()` cannot resolve for a PostgREST request. Do not verify by comparing to current behaviour; there is none.
+- **There is no parity baseline — for the RENDERING.** The screen shows nothing today, because the browser sends no credential and `get_current_town_id()` cannot resolve for a PostgREST request. But the **query you are replacing is a specification**: its filters, ordering and limits state intent even though it returns zero rows. Dropping one of its clauses is a behaviour change, and must be deliberate and stated.
 
 ---
 
