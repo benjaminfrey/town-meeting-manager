@@ -189,6 +189,35 @@ describe("§4b — self-scoping", () => {
       const admin = await seedActor(db, town, { role: "admin" });
       const me = await seedActor(db, town, { role: "staff", global: [] });
 
+      // The loop below iterates the list under test, so it shrinks when the
+      // list shrinks and cannot notice a column being dropped. Measured:
+      // replacing the six entries with ["permissions"] left the whole api
+      // suite green and `tsc --noEmit` clean, which means the entry that
+      // actually stops a clerk writing role: "admin" onto their own row was
+      // pinned by nothing. Name the columns here, and assert the
+      // self-promotion case by name below, so removing one is a red test
+      // rather than a silent widening.
+      expect([...rules.ADMIN_ONLY_USER_ACCOUNT_COLUMNS].sort()).toEqual([
+        "archived_at",
+        "gov_title",
+        "permissions",
+        "person_id",
+        "role",
+        "town_id",
+      ]);
+
+      // The escalation this guard exists for, spelled out rather than
+      // reached via the list: a staff account promoting itself to
+      // administrator, and from there to every draft minute in the town and
+      // the SMTP credentials in town_notification_config.
+      const selfPromotion = await expectRefusal(() =>
+        rules.assertCanUpdateUserAccount(me.actor, {
+          userAccountId: me.userAccountId,
+          columns: ["role"],
+        }),
+      );
+      expect(selfPromotion.message).toContain("role");
+
       for (const column of rules.ADMIN_ONLY_USER_ACCOUNT_COLUMNS) {
         const err = await expectRefusal(() =>
           rules.assertCanUpdateUserAccount(me.actor, {

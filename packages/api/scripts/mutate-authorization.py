@@ -544,6 +544,39 @@ def main() -> int:
     digest = hashlib.sha256(original.encode()).hexdigest()
     print(f"rules.ts sha256 before: {digest}\n")
 
+    # ── The baseline, and why a run without one proves nothing ──────────
+    #
+    # A mutant is scored by whether the suite goes red. That is only evidence
+    # about the MUTATION if the suite was green to begin with. Without this
+    # check the harness reports a clean sweep whenever the suite is red for a
+    # reason that has nothing to do with any guard: an unreachable database, a
+    # mistyped DATABASE_URL, a stale @town-meeting/shared build, one unrelated
+    # failing test. Measured 2026-08-29, before this existed:
+    #
+    #   DATABASE_URL=postgres://ben@localhost:59999/postgres \
+    #     python3 scripts/mutate-authorization.py --only 1
+    #   → "[1] assertCanInsertAgendaItem killed" … "1/1 mutations killed", exit 0
+    #
+    # Nothing was proven and the harness said everything was. That is the
+    # manufactured kill this file's header (see the top) says must never
+    # happen — the AST locator closed the wrong-region path to it, not this
+    # one. Three revisions of the body-locator all missed it, because they
+    # were each looking at where the mutation landed rather than at what the
+    # red suite was evidence of.
+    print("baseline: running the unmutated suite …")
+    base_passed, base_failing = run_suite()
+    if not base_passed:
+        print(
+            "\nREFUSING TO RUN: the suite is already red before any mutation.\n"
+            "Every mutant would be scored 'killed' and the run would prove nothing.\n"
+            "Fix the environment or the failing tests first. Failing now:",
+            file=sys.stderr,
+        )
+        for f in base_failing[:10] or ["(no test names parsed — the runner itself failed)"]:
+            print(f"  {f}", file=sys.stderr)
+        return 2
+    print("baseline: green\n")
+
     results: list[tuple[str, str, bool, list[str]]] = []
     restored = False
     try:
@@ -566,6 +599,32 @@ def main() -> int:
     if not restored:
         print("RESTORE FAILED — rules.ts does not match the original", file=sys.stderr)
         return 2
+
+    # ── The closing baseline ────────────────────────────────────────────
+    #
+    # The opening baseline proves the suite was green when the run started;
+    # it says nothing about an environment that died halfway through. A
+    # database that goes away at mutant 30 turns mutants 30-60 into kills
+    # that were never earned, and the sha check above would still pass
+    # because the file was restored correctly.
+    #
+    # Green before + green after + the file byte-identical is what licenses
+    # the claim that every red suite in between was caused by its mutation.
+    # Without both ends, "60/60 killed" is an assertion about the tests; with
+    # them it is evidence.
+    print("\nbaseline: re-running the unmutated suite …")
+    end_passed, end_failing = run_suite()
+    if not end_passed:
+        print(
+            "\nRUN IS VOID: the suite is red with rules.ts restored to its original bytes.\n"
+            "Something changed underneath this run, so the kills above are not attributable\n"
+            "to their mutations. Failing now:",
+            file=sys.stderr,
+        )
+        for f in end_failing[:10] or ["(no test names parsed — the runner itself failed)"]:
+            print(f"  {f}", file=sys.stderr)
+        return 2
+    print("baseline: green — kills above are attributable to their mutations\n")
 
     survived = [r for r in results if r[2]]
     print(f"\n{len(results) - len(survived)}/{len(results)} mutations killed")
