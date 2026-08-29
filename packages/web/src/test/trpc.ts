@@ -30,7 +30,7 @@
  * mutation, not assumed.
  */
 
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { AnyProcedure, inferProcedureInput, inferProcedureOutput } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
 
@@ -152,10 +152,28 @@ function parseRequest(input: unknown, init?: RequestInit): { url: URL; body?: st
  * Replace `globalThis.fetch` for the current test file, answering
  * `/api/trpc/...` from `handlers` and leaving every other URL to fail loudly.
  *
- * Registers its own `afterEach` restore, so a file that calls this cannot
- * leak a stubbed `fetch` into the next one.
+ * ─── COLLECTION SCOPE ONLY ────────────────────────────────────────────────
+ *
+ * Call this at module or `describe` scope — above your `it(...)` blocks —
+ * exactly once per file. It installs the stub in a `beforeEach` and restores
+ * the original `fetch` in an `afterEach`, so every test starts from a clean
+ * transport and nothing leaks into the next file.
+ *
+ * Calling it from inside a test body throws. That is not pedantry: vitest
+ * SILENTLY IGNORES a lifecycle hook registered while a test is running, so
+ * the internal `afterEach` would never run, `globalThis.fetch` would stay
+ * stubbed after the file finished, and the guarantee in this comment would be
+ * a lie that no test could detect. The first version of this helper did
+ * exactly that. Failing at the call is the only version of this that a
+ * reviewer can trust.
+ *
+ * Per-test variation belongs in mutable state the handlers close over (see
+ * `server` in `routes/__tests__/boards.$boardId.test.tsx`), not in a second
+ * install.
  */
 export function installTRPCFetchStub(handlers: TestHandlers): TRPCFetchStub {
+  assertCollectionScope("installTRPCFetchStub");
+
   const record: TRPCFetchStub = {
     calls: [],
     countFor: (path) => record.calls.filter((c) => c.paths.includes(path)).length,
@@ -213,12 +231,41 @@ export function installTRPCFetchStub(handlers: TestHandlers): TRPCFetchStub {
     );
   });
 
-  vi.stubGlobal("fetch", stub);
+  // Not `vi.stubGlobal` / `vi.unstubAllGlobals`: that pair restores EVERY
+  // global a file has stubbed, so this helper would silently undo an
+  // unrelated stub the test author installed. Save and restore just `fetch`.
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    record.calls.length = 0;
+    globalThis.fetch = stub as unknown as typeof fetch;
+  });
+
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   return record;
+}
+
+/**
+ * Refuse a helper call made from inside a running test.
+ *
+ * `expect.getState().currentTestName` is set only while a test executes; at
+ * collection time — module body, `describe` body — it is undefined. That is
+ * the one signal available before the ignored-hook damage is done.
+ */
+export function assertCollectionScope(helper: string): void {
+  if (expect.getState().currentTestName) {
+    throw new Error(
+      `${helper}() was called inside a test body. Vitest silently ignores ` +
+        "beforeEach/afterEach registered while a test is running, so this helper's " +
+        "setup and teardown would never run and its state would leak into the next " +
+        `test. Move the ${helper}() call above your it(...) blocks — module or ` +
+        "describe scope — and put per-test variation in mutable state the handlers " +
+        "close over.",
+    );
+  }
 }
 
 function errorEnvelope(code: TestErrorCode, message: string, path: string) {

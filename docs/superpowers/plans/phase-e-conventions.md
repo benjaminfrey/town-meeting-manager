@@ -84,6 +84,45 @@ absent guard to look like an oversight:
 **A write gets the matching `assertCan*` rule from `packages/api/src/trpc/authorization/rules.ts`.**
 Do not invent a check. If the rule does not exist, add it there, next to its siblings.
 
+**Which form — middleware or resolver?** Both exist, and 80 migrations will diverge on this unless
+it is said plainly:
+
+- **Resolver form**, first line of the resolver, when the rule needs only the `Actor`. The repo's
+  one tRPC mutation does this:
+
+  ```ts
+  // packages/api/src/trpc/routers/town.ts
+  setPortalAddress: protectedProcedure
+    .input(z.object({ subdomain: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      assertCanUpdateTown(await ctx.actor());
+      // ...
+    }),
+  ```
+
+  The `translateAuthorizationErrors` middleware is applied to every procedure precisely so a rule
+  thrown from inside a resolver still surfaces as FORBIDDEN rather than a 500.
+
+- **Middleware form** — `.use(requireBoardPermission(code, boardIdFrom()))` — whenever the check is
+  board-scoped. It is not a style choice there: `requirePermission` refuses at module import time
+  if a board-scoped code arrives with no board, and that refusal is the whole safety net. A
+  board-scoped rule called by hand inside a resolver skips it.
+
+- **Row-level rules stay in the resolver by necessity.** "These minutes are still a draft" cannot
+  be decided before the row is read. `rules.ts` provides three shapes for SELECT — `canX` answers,
+  `assertCanX` throws, `visibleX` filters — so pick rather than improvise: a list endpoint that
+  threw on the first invisible row would be unusable, and a detail endpoint that filtered would
+  return 200 with nothing.
+
+Status today, so nobody mistakes transcription for exercise: the town-level half **is** exercised
+(`town.setPortalAddress` above, with tests). The board-scoped half is not — `requirePermission`,
+`requireBoardPermission` and `boardIdFrom` in `packages/api/src/trpc/trpc.ts`, and `BoardScope`
+itself, have **zero call sites outside their own unit tests**. (Do not be misled by the grep: the
+same-named `requirePermission` in `packages/api/src/plugins/auth.ts` is a different function, a
+Fastify preHandler, and it is in use.) The part most likely to be got wrong is the part unproven
+in a real procedure.
+The first wave to add a board-scoped write should expect to amend this item, not assume it settled.
+
 **If the action is one of the 18 board-scoped codes, the guard takes a `BoardScope` and the
 procedure must resolve the board.** The set is derived, not hand-written —
 `BOARD_SCOPED_CODES` in `packages/api/src/trpc/trpc.ts` computes it from the two shipped
@@ -218,7 +257,14 @@ silent-failure mode being migrated away from.
 ```ts
 const procedures = Object.keys(appRouter._def.procedures).sort();
 expect(procedures).toEqual(
-  expect.arrayContaining(["board.detail", "board.recentMeetings", "board.stats" /* yours */]),
+  expect.arrayContaining([
+    "board.detail",
+    "board.recentMeetings",
+    "board.stats",
+    "town.portalAddress",
+    "whoami",
+    /* yours */
+  ]),
 );
 ```
 
@@ -255,8 +301,16 @@ legacy reader does — not before.
 board edit can change what both `detail` and `stats` return, and a writer should not have to know
 which procedures some screen happens to call.
 
-**Bare `invalidateQueries()` with no filter is banned.** It invalidates every query in the cache,
-which hides exactly the bug this item is about.
+**Bare `invalidateQueries()` with no filter is banned in a mutation's `onSuccess`.** It invalidates
+every query in the cache, which hides exactly the bug this item is about: a writer that
+invalidates everything is indistinguishable from a writer that invalidates the right key, so the
+day someone narrows it, the missing key surfaces as a bug in a screen nobody touched.
+
+The one carve-out already in the tree, and it is a real one:
+`packages/web/src/lib/connection-error-handler.ts:54` calls bare `invalidateQueries()` after a
+Realtime reconnect. That is not a writer — nothing local changed; the client has no idea WHAT went
+stale while the socket was down, and "everything" is the correct answer. A connection-level
+recovery may invalidate globally. A mutation may not. Do not "fix" that handler on a grep.
 
 _Found the hard way in Task 4: four writers — `EditBoardDialog`, `ArchiveBoardDialog`,
 `NoticeTemplateEditor`, `MinutesWorkflowEditor` — invalidated `queryKeys.boards.detail(boardId)`
@@ -290,9 +344,14 @@ Leave `@/lib/trpc` **unmocked**. Replace `globalThis.fetch` — the actual bound
 and the API — using `packages/web/src/test/trpc.ts`:
 
 ```tsx
-// packages/web/src/routes/__tests__/boards.$boardId.test.tsx
+// packages/web/src/routes/__tests__/boards.$boardId.test.tsx — MODULE SCOPE,
+// above the it(...) blocks. Not inside a test. See "scope" below.
+
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
+
+/** Mutable so a test can change what the server returns between refetches. */
+const server = { boardName: "Select Board", detailRejects: false };
 
 const stub = installTRPCFetchStub({
   "board.detail": () => {
@@ -302,7 +361,39 @@ const stub = installTRPCFetchStub({
   "board.stats": () => ({ active_members: 3, meetings: 7 }),
   "board.recentMeetings": () => [],
 });
+
+describe("board detail", () => {
+  beforeEach(() => {
+    server.boardName = "Select Board";
+    server.detailRejects = false;
+  });
+  // ...
+});
 ```
+
+### Scope: once per file, at collection scope
+
+`installTRPCFetchStub` installs the stub in a `beforeEach` and restores the original `fetch` in an
+`afterEach`. **Call it above your `it(...)` blocks, exactly once, and route per-test variation
+through mutable state the handlers close over** — the `server` object above. Calling it from
+inside a test body throws with an actionable message.
+
+That guard is not decoration. Vitest **silently ignores** a lifecycle hook registered while a test
+is running, so the first version of this helper — which called `afterEach` from wherever it
+happened to be invoked — had two failure modes and no way to notice either:
+
+| Where it was called | What happened                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| inside a test body  | the hook was dropped; `fetch` stayed stubbed past the end of the file, and the doc comment's "cannot leak" promise was simply false                                                     |
+| at module scope     | the hook ran and unstubbed `fetch` after test 1; every later test failed with `Unable to find an element with the text: Select Board` — a DOM error pointing nowhere near the transport |
+
+`packages/web/src/test/__tests__/trpc-stub-scope.test.ts` pins both directions: the supported form
+answers across two tests with its call log reset between them and `fetch` restored by `afterAll`,
+and each helper refuses a call made from inside a test body. Verified by mutation — dropping the
+scope guard, the call-log reset, or the restore each turns that file red.
+
+`setupAppQueryClient()` carries the identical requirement, for the identical reason. Both throw
+rather than degrade.
 
 `TestHandlers` is keyed by `AppRouter`'s flattened procedure paths, and each handler's input and
 output are inferred from the procedure. Both halves verified by mutation:
@@ -388,12 +479,29 @@ renderWithProviders(<BoardDetailPage {...props} />, { route: "/boards/b1", query
 It installs `retry: false, staleTime: 0, gcTime: Infinity`, clears the cache before and after each
 test, and restores the production defaults in `afterEach`.
 
-`gcTime: Infinity` — not the `0` that `createTestQueryClient()` uses — is deliberate and was found
-by a failing assertion, not by reasoning. A per-render client dies with the test, so immediate
+**Collection scope, once per file** — the same rule as `installTRPCFetchStub`, enforced the same
+way: it registers lifecycle hooks, vitest ignores hooks registered during a running test, and a
+silently-skipped `afterEach` here means the production singleton keeps test defaults for the rest
+of the process. It throws if called from inside a test body.
+
+`gcTime: Infinity` — not the `0` that `createTestQueryClient()` uses — is deliberate, and the
+hazard is subtler than "the test breaks". A per-render client dies with the test, so immediate
 collection costs nothing there. Here the cache outlives the render, and an invalidation assertion
-reads a query with no observer left: under `gcTime: 0` that entry is already gone,
-`getQueryState()` answers `undefined`, and the assertion goes quietly vacuous. `clear()` on both
-edges is what keeps files isolated.
+reads a query with no observer left: under `gcTime: 0` that entry is already collected and
+`getQueryState()` answers `undefined`.
+
+The `.toBe(true)` assertion at the end of such a test fails **loudly** on that — reverting this
+line turns both `ArchiveBoardDialog` tests red, which is what protects it. The quiet half is the
+**precondition** those tests open with:
+
+```ts
+expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBeFalsy();
+```
+
+`toBeFalsy()` passes on `undefined` exactly as happily as on a real un-invalidated entry. Under
+`gcTime: 0` that line stops witnessing anything at all — it no longer establishes that the entry
+was cached and un-invalidated before the write, so the test's later assertion loses the baseline
+it was contrasted against. Keep the setting; know which line it is protecting.
 
 Components with no tRPC read may keep using the default fresh client.
 
@@ -467,9 +575,21 @@ token:
 // TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard
 ```
 
-Task 4 left a careful ten-line prose comment and no token. With 66 non-test files in
-`packages/web/src` still importing Supabase, a completeness sweep would have read that file as
-done.
+Task 4 left a careful ten-line prose comment and no token, and a completeness sweep would have read
+that file as done.
+
+Quote the grep, not the number — the count moves with what you match, which is half the reason
+"82 files" drifted for so long:
+
+```
+$ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+26
+$ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+67
+```
+
+The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
+and a file reaching it that way is no more migrated than one importing directly.
 
 Track `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at
 the same moment `packages/web/src/lib/supabase.ts` is deleted, which is the phase's real
@@ -522,6 +642,15 @@ Mutations performed in unit 0, all red then restored:
 | `"board.stats"` → `"board.statz"`                                | `TS2353`                          |
 | a pinned procedure renamed in the router                         | `router-wiring.test.ts` red       |
 | `board.town_id` reintroduced in `ArchiveBoardDialog`             | `TS2339`                          |
+| `assertCollectionScope` guard removed from the stub              | scope test red                    |
+| the stub's per-test call-log reset removed                       | `expected 2 to be 1`              |
+| the stub's `afterEach` fetch restore removed                     | `afterAll` red: `[Function Mock]` |
+
+Two of those were found by mutating something that had just been written and was passing. The
+`TestHandlers` type originally keyed off `AppRouter["_def"]["procedures"]` directly: it compiled,
+the tests passed, and it checked **nothing** — that type is nested, so `"board.detail"` was never
+a key and `inferProcedureInput` of a sub-router is `never`. The tell was the error message naming
+`board` rather than `board.detail`. The harness scope bug was the same shape: green, and untrue.
 
 If your mutation does not go red, you have not written a test. You have written a comment that
 runs.
@@ -546,6 +675,9 @@ runs.
 - `EditBoardDialog`, `NoticeTemplateEditor` and `MinutesWorkflowEditor` have their `pathFilter()`
   calls but no test pinning them. Deleting any of those three lines is still green. The wave that
   migrates each screen writes the pin.
+- The board-scoped authorization form in item 2 is transcribed from `rules.ts` and `trpc.ts`, not
+  exercised — no procedure calls `requireBoardPermission` yet.
+- `TestHandlers` rejects a missing field but accepts an extra one (item 8).
 - `MockAuthProvider` remains inert in 13 files. Item 9 rules on which mechanism to use; it does
   not remove the other one.
 - `router-wiring.test.ts` pins only the procedure names it lists.

@@ -22,6 +22,7 @@ import { QueryClient, QueryClientProvider, type DefaultOptions } from "@tanstack
 import { MockAuthProvider } from "./mocks/auth-mock";
 import { createAdminUser } from "./mocks/auth-mock";
 import { queryClient as appQueryClient } from "@/lib/queryClient";
+import { assertCollectionScope } from "./trpc";
 import type { CurrentUser } from "@/hooks/useCurrentUser";
 
 // ─── Test QueryClient ────────────────────────────────────────────────
@@ -60,6 +61,15 @@ export function createTestQueryClient() {
  * saves and restores instead, and clears the cache on both edges so one test's
  * cached row cannot satisfy the next test's read.
  *
+ * ─── COLLECTION SCOPE ONLY ────────────────────────────────────────────────
+ *
+ * Call at module or `describe` scope, once per file — the same requirement
+ * `installTRPCFetchStub` has, and for the same reason: this registers
+ * `beforeEach`/`afterEach`, and vitest silently ignores a hook registered
+ * while a test is running. Called from inside a test body the production
+ * defaults would never be restored, which is precisely the leak this helper
+ * exists to end, so it throws instead.
+ *
  * ```ts
  * const queryClient = setupAppQueryClient();
  * // ...
@@ -67,6 +77,8 @@ export function createTestQueryClient() {
  * ```
  */
 export function setupAppQueryClient(): QueryClient {
+  assertCollectionScope("setupAppQueryClient");
+
   const productionDefaults = appQueryClient.getDefaultOptions();
 
   beforeEach(() => {
@@ -76,8 +88,17 @@ export function setupAppQueryClient(): QueryClient {
     // costs nothing there. Here the cache outlives the render, and an
     // invalidation assertion reads a query that has no observer left — with
     // `gcTime: 0` that entry is already gone and `getQueryState()` answers
-    // `undefined`, which reads as "not invalidated" and quietly makes the
-    // assertion vacuous. `clear()` on both edges is what keeps files isolated.
+    // `undefined`.
+    //
+    // A `.toBe(true)` assertion on that fails loudly, which is fine. The
+    // quiet half is the PRECONDITION such a test opens with:
+    // `expect(getQueryState(key)?.isInvalidated).toBeFalsy()` passes on
+    // `undefined` just as happily as on a real un-invalidated entry, so under
+    // `gcTime: 0` it stops witnessing anything. Reverting this line turns
+    // both ArchiveBoardDialog tests red — the line is protected; the
+    // precondition inside them is what it protects.
+    //
+    // `clear()` on both edges is what keeps files isolated.
     appQueryClient.setDefaultOptions({
       ...TEST_QUERY_DEFAULTS,
       queries: { ...TEST_QUERY_DEFAULTS.queries, gcTime: Infinity },

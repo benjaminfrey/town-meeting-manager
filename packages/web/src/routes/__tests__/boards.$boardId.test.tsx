@@ -58,37 +58,38 @@ const queryClient = setupAppQueryClient();
 /** Mutable so a test can change what the server returns between refetches. */
 const server = { boardName: "Select Board", detailRejects: false };
 
-function installStub() {
-  return installTRPCFetchStub({
-    "board.detail": () => {
-      if (server.detailRejects) trpcTestError("NOT_FOUND");
-      return {
-        id: "b1",
-        name: server.boardName,
-        elected_or_appointed: "elected",
-        member_count: 5,
-        election_method: "at_large",
-        officer_election_method: "vote_of_board",
-        is_governing_board: true,
-        meeting_formality_override: null,
-        minutes_style_override: null,
-        quorum_type: "simple_majority",
-        quorum_value: null,
-        motion_display_format: "inline_narrative",
-        archived_at: null,
-        created_at: "2026-01-01T00:00:00Z",
-        notice_template_blocks: null,
-        minutes_consent_agenda: false,
-        minutes_requires_second: true,
-        r4_board_member_default: true,
-        audio_retention_policy_override: null,
-        auto_publish_on_approval_override: null,
-      };
-    },
-    "board.stats": () => ({ active_members: 3, meetings: 7 }),
-    "board.recentMeetings": () => [],
-  });
-}
+// Collection scope, once per file — see `installTRPCFetchStub`'s doc comment.
+// Per-test variation goes through `server` above, which the handlers close
+// over, not through a second install.
+const stub = installTRPCFetchStub({
+  "board.detail": () => {
+    if (server.detailRejects) trpcTestError("NOT_FOUND");
+    return {
+      id: "b1",
+      name: server.boardName,
+      elected_or_appointed: "elected",
+      member_count: 5,
+      election_method: "at_large",
+      officer_election_method: "vote_of_board",
+      is_governing_board: true,
+      meeting_formality_override: null,
+      minutes_style_override: null,
+      quorum_type: "simple_majority",
+      quorum_value: null,
+      motion_display_format: "inline_narrative",
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      notice_template_blocks: null,
+      minutes_consent_agenda: false,
+      minutes_requires_second: true,
+      r4_board_member_default: true,
+      audio_retention_policy_override: null,
+      auto_publish_on_approval_override: null,
+    };
+  },
+  "board.stats": () => ({ active_members: 3, meetings: 7 }),
+  "board.recentMeetings": () => [],
+});
 
 function renderRoute(boardId: string) {
   return renderWithProviders(
@@ -107,7 +108,6 @@ describe("board detail", () => {
   });
 
   it("shows the board's name and its member and meeting counts", async () => {
-    installStub();
     renderRoute("b1");
     // The name renders twice (breadcrumb + header), so assert with findAllByText.
     expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
@@ -119,7 +119,6 @@ describe("board detail", () => {
     // The failure mode this whole phase exists to end is a screen that
     // renders nothing and says nothing. An error must be visible.
     server.detailRejects = true;
-    installStub();
     renderRoute("b1");
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(await screen.findByText("This board could not be found.")).toBeInTheDocument();
@@ -131,7 +130,6 @@ describe("board detail", () => {
     // `NoticeTemplateEditor` and `MinutesWorkflowEditor` call after their
     // writes; with the real proxy in play, the key it matches is the key this
     // screen actually reads under.
-    const stub = installStub();
     renderRoute("b1");
     expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
     const before = stub.countFor("board.detail");
