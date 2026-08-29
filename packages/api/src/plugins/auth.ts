@@ -59,8 +59,18 @@ import fp from "fastify-plugin";
 import { sql } from "drizzle-orm";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { UserRole } from "@town-meeting/shared";
-import { hasPermission, type PermissionAction, type PermissionsMatrix } from "@town-meeting/shared";
+import { PERMISSIONS, type PermissionAction } from "@town-meeting/shared";
 import { toRows } from "../db/rows.js";
+import {
+  toPermissionMatrixByCode,
+  type Actor,
+  type PermissionMatrixByCode,
+} from "../trpc/authorization/actor.js";
+import {
+  isAdmin,
+  resolvePermission,
+  type PermissionCode,
+} from "../trpc/authorization/permission.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -81,7 +91,19 @@ export interface RequestUser {
   email: string;
   townId: string;
   role: UserRole;
-  permissions: PermissionsMatrix;
+  /**
+   * The matrix EXACTLY as `user_account.permissions` stores it — which is
+   * keyed by action CODE (`A2`) for every account the seed wrote and by
+   * action NAME (`edit_agenda`) for every account the product itself created.
+   *
+   * It used to be typed `PermissionsMatrix`, i.e. name-keyed, which was a
+   * claim the column does not honour: a code-keyed row reached `hasPermission`
+   * as a matrix with no recognisable keys and resolved to `false` for all
+   * thirty actions. The type now says what the bytes are, so the translation
+   * has to happen at the point of resolution — `resolvePermission` — and
+   * cannot be skipped by a caller who mistakes one shape for the other.
+   */
+  permissions: PermissionMatrixByCode;
 }
 
 declare module "fastify" {
@@ -103,33 +125,6 @@ interface UserAccountRow {
 }
 
 const VALID_ROLES = new Set<UserRole>(["sys_admin", "admin", "staff", "board_member"]);
-
-const EMPTY_PERMISSIONS: PermissionsMatrix = {
-  global: {} as PermissionsMatrix["global"],
-  board_overrides: [],
-};
-
-/**
- * Coerce the `permissions` jsonb column into the shape `hasPermission` expects.
- *
- * The column defaults to `{"global": {}, "board_overrides": []}` and is NOT
- * NULL, but a row written before that default, or by a client that stored the
- * flat `{action: true}` shape the old JWT claim used, would otherwise reach
- * `hasPermission` as something it silently reads as "no permissions" or
- * crashes on. Anything unrecognised becomes an explicit empty matrix — deny —
- * rather than an optimistic guess.
- */
-function toPermissionsMatrix(value: unknown): PermissionsMatrix {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return EMPTY_PERMISSIONS;
-  const candidate = value as Partial<PermissionsMatrix>;
-  return {
-    global:
-      candidate.global && typeof candidate.global === "object"
-        ? candidate.global
-        : EMPTY_PERMISSIONS.global,
-    board_overrides: Array.isArray(candidate.board_overrides) ? candidate.board_overrides : [],
-  };
-}
 
 // ─── Plugin ──────────────────────────────────────────────────────────
 
@@ -198,7 +193,7 @@ export const authPlugin = fp(async (fastify) => {
       email: row.email ?? row.person_email ?? "",
       townId: tenant.townId,
       role,
-      permissions: toPermissionsMatrix(row.permissions),
+      permissions: toPermissionMatrixByCode(row.permissions),
     };
   });
 });
@@ -206,47 +201,117 @@ export const authPlugin = fp(async (fastify) => {
 // ─── Permission checks ───────────────────────────────────────────────
 
 /**
+ * Build the `Actor` the authorization layer resolves against.
+ *
+ * Every field comes from `request.user`, which `verifyAuth` filled from
+ * `user_account` inside the caller's own tenant transaction — so nothing here
+ * is derived from anything the client sent, and the legacy Fastify path feeds
+ * `resolvePermission` exactly the same inputs the tRPC path does.
+ */
+function actorFromRequestUser(user: RequestUser): Actor {
+  return {
+    kind: "user",
+    townId: user.townId,
+    role: user.role,
+    personId: user.personId,
+    userAccountId: user.id,
+    permissions: user.permissions,
+  };
+}
+
+/** Action NAME → action CODE. `resolvePermission` is keyed on the code. */
+const CODE_BY_ACTION = new Map<PermissionAction, PermissionCode>(
+  (Object.entries(PERMISSIONS) as Array<[PermissionCode, PermissionAction]>).map(
+    ([code, action]) => [action, code],
+  ),
+);
+
+/**
  * Creates a preHandler that checks a specific permission.
  *
- * The action is typed as `PermissionAction`, so a string that is not one of
- * the thirty governable actions no longer compiles. It used to: `minutes.ts`
- * guarded minutes approval with `requirePermission("approve_minutes")`, which
- * is not an action any template can grant, so the check could only ever be
- * satisfied by the admin short-circuit. That failed closed and so was not a
- * hole, but it meant the route's stated policy and its actual policy differed
- * with nothing to catch it. See `requireAdmin` for what replaced it.
+ * ─── Task D1c: this now answers what the authorization layer answers ──────
  *
- * Resolution is delegated to the shared `hasPermission`, which is what the web
- * client uses. The previous implementation did `user.permissions[action]` — a
- * flat lookup against a column whose shape is
- * `{global: {...}, board_overrides: [...]}`, so it read `undefined` for every
- * staff permission and never consulted a board override at all.
+ * The five surviving Fastify route files (`documents.ts`, `minutes.ts`,
+ * `notifications.ts`, `invitations.ts`, `portal.ts`) authorize through here,
+ * and until this commit it decided two things differently from
+ * `trpc/authorization/permission.ts`, which is the layer Phase E migrates them
+ * onto:
+ *
+ *   1. It short-circuited `admin || sys_admin` to ALLOW. The removed
+ *      `has_permission()` denied `sys_admin` ON PURPOSE — its own comment said
+ *      "sys_admin has no meeting management permissions" — and
+ *      `resolvePermission` denies it as an explicit branch. A platform
+ *      operator held every permission these routes guard, confined to their
+ *      own town but including `requireAdmin("approving minutes")`, which is
+ *      adopting a town's minutes.
+ *
+ *   2. It took an action NAME and resolved it against a matrix that was passed
+ *      through verbatim — and `user_account.permissions` is code-keyed for
+ *      every account `supabase/seed.sql` wrote. So for every non-admin it
+ *      answered `false` unconditionally. That failed closed and was never a
+ *      disclosure, but it meant the route's stated policy and its actual
+ *      policy differed, and that the short-circuit in (1) was the WHOLE of the
+ *      authorization on these routes.
+ *
+ * Both are now one call to `resolvePermission`, which is the same function the
+ * tRPC procedures use: it denies `sys_admin`, and it normalises BOTH spellings
+ * of the stored matrix before resolving. Two paths, one algorithm — so
+ * migrating a route in Phase E cannot silently change who may call it.
+ *
+ * The action stays typed as `PermissionAction`, so a string that is not one of
+ * the thirty governable actions still does not compile. It used to:
+ * `minutes.ts` guarded minutes approval with `requirePermission(
+ * "approve_minutes")`, which no template can grant, so only the admin
+ * short-circuit could satisfy it. See `requireAdmin` for what replaced it.
+ *
+ * ─── What this deliberately does NOT do ──────────────────────────────────
+ *
+ * It performs a GLOBAL check — no board id, because a Fastify preHandler runs
+ * before any body parsing this API does and has no board to scope to. For
+ * A6/R1/R2/R3 — four of the five codes these routes guard — that is not
+ * fail-closed: the shipped `designated_boards` permission templates grant
+ * those codes per board with global all-false, so a global check ignores an
+ * override that REVOKES one for a board, and allows a caller who should be
+ * refused. `trpc/trpc.ts` refuses a board-scoped code at module load for
+ * exactly this reason; this path cannot, because it has nowhere to get the
+ * board from. Recorded here rather than fixed here: giving these routes a
+ * board id is the route migration, not a change to the guard.
  */
 export function requirePermission(action: PermissionAction) {
+  const code = CODE_BY_ACTION.get(action);
+  if (!code) {
+    // Unreachable through the type, so this is a guard against `PERMISSIONS`
+    // and `PermissionAction` drifting apart rather than against a caller.
+    throw new Error(
+      `requirePermission(${JSON.stringify(action)}) is not one of the thirty governable ` +
+        "actions in PERMISSIONS. Refusing to build a check that can never be satisfied.",
+    );
+  }
+
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user;
     if (!user) {
       return reply.unauthorized("Not authenticated");
     }
 
-    // `hasPermission` short-circuits `admin` but not `sys_admin`.
-    if (user.role === "admin" || user.role === "sys_admin") {
-      return;
-    }
-
-    if (!hasPermission(user.permissions, action, undefined, user.role)) {
+    if (!resolvePermission(actorFromRequestUser(user), code)) {
       return reply.forbidden(`Missing permission: ${action}`);
     }
   };
 }
 
 /**
- * Creates a preHandler that admits only `admin` and `sys_admin`.
+ * Creates a preHandler that admits only the town `admin` role.
  *
  * For operations that are genuinely not delegable and have no matching entry
  * in the thirty governable actions. `reason` is required so the route says why
  * it is admin-only at the point where that is decided, rather than in a
  * comment that can drift away from it.
+ *
+ * `sys_admin` is NOT admitted, and was until Task D1c. The removed `is_admin()`
+ * was strictly `role = 'admin'` and `assertAdmin` in the authorization layer
+ * mirrors it exactly; a platform operator administers the deployment and is
+ * not an officer of any town.
  */
 export function requireAdmin(reason: string) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
@@ -254,7 +319,7 @@ export function requireAdmin(reason: string) {
     if (!user) {
       return reply.unauthorized("Not authenticated");
     }
-    if (user.role !== "admin" && user.role !== "sys_admin") {
+    if (!isAdmin(actorFromRequestUser(user))) {
       return reply.forbidden(`Administrators only: ${reason}`);
     }
   };

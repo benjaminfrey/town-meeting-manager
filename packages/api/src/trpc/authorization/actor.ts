@@ -128,7 +128,7 @@ export async function loadActor(tx: TenantTx, tenant: ActorTenant): Promise<Acto
     role: row.role as ActorRole,
     personId: tenant.personId,
     userAccountId: tenant.userAccountId,
-    permissions: normaliseMatrix(row.permissions),
+    permissions: toPermissionMatrixByCode(row.permissions),
   };
 }
 
@@ -140,8 +140,14 @@ export async function loadActor(tx: TenantTx, tenant: ActorTenant): Promise<Acto
  * becomes an empty matrix, which denies. Deliberately NOT throwing here: an
  * account whose matrix is `null` is a real and legitimate state (every board
  * member has one), and it means "holds nothing", not "the database is broken".
+ *
+ * Exported because `plugins/auth.ts` reads the same column on the legacy
+ * Fastify path and must reach the same value from the same bytes. It used to
+ * carry its own copy of this, and the copy had drifted into declaring the
+ * result NAME-keyed when the column is frequently code-keyed — which is the
+ * whole of Task D1c. One coercion, one shape, two readers.
  */
-function normaliseMatrix(value: unknown): PermissionMatrixByCode {
+export function toPermissionMatrixByCode(value: unknown): PermissionMatrixByCode {
   let parsed: unknown = value;
   if (typeof value === "string") {
     try {
