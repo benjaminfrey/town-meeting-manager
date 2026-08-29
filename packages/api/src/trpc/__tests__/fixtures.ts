@@ -176,6 +176,22 @@ export async function seedActorWithRawMatrix(
   return { actor, personId, userAccountId };
 }
 
+/** Create a board in the given town's tenant context and return its id. */
+export async function seedBoard(
+  db: TestDb,
+  town: TownFixture,
+  opts: { name: string },
+): Promise<string> {
+  const id = randomUUID();
+  await withTenant(db, { townId: town.townId }, async (tx) => {
+    await tx.execute(sql`
+      INSERT INTO board (id, town_id, name)
+      VALUES (${id}, ${town.townId}, ${opts.name})
+    `);
+  });
+  return id;
+}
+
 /** Give a person a seat on a board and return the `board_member.id`. */
 export async function seedBoardSeat(
   db: TestDb,
