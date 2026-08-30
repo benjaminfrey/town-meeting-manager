@@ -81,4 +81,15 @@ describe("EditGovTitleDialog", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
+
+  it("invalidates trpc.boardMember.pathFilter() — the key MemberRoster reads under", async () => {
+    const key = trpc.boardMember.roster.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(key, []);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderDialog();
+    await user.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
 });

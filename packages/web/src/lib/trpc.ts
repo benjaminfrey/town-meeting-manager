@@ -9,7 +9,7 @@
  * that the API reads itself; without this every procedure answers UNAUTHORIZED,
  * and the symptom reads as an authorization bug rather than a transport one.
  */
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, isTRPCClientError } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
@@ -43,3 +43,22 @@ export const trpc = createTRPCOptionsProxy<AppRouter>({
   client: trpcClient,
   queryClient,
 });
+
+/**
+ * The message a CONFLICT carries (a role/name/uniqueness collision a caller
+ * should see verbatim — "This person already has a login account", "A
+ * template named ... already exists"); a generic fallback for anything else.
+ *
+ * Extracted here in this wave's whole-branch review: `AddPersonDialog.tsx`,
+ * `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx` and
+ * `RoleConflictDialog.tsx` each carried this exact function, verbatim, as a
+ * private local helper — four copies of the same three lines, which is
+ * exactly the "the same logic in three [or four] places instead of one"
+ * shape this file's own `RouterOutputs` doc comment and conventions item 1
+ * both warn against for the identical reason: nothing keeps four
+ * independent copies in sync if the rule (which code is CONFLICT, what
+ * counts as "generic") ever needs to change.
+ */
+export function errorMessage(err: unknown, fallback: string): string {
+  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
+}

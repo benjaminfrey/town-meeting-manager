@@ -3,6 +3,22 @@
  *
  * Split-panel editor: left panel has the draggable section list,
  * right panel has the detail editor for the selected section.
+ *
+ * Named as the intended caller in both `agendaTemplate.detail`'s and
+ * `agendaTemplate.update`'s own doc comments
+ * (`packages/api/src/trpc/routers/agenda-template.ts`) since those
+ * procedures shipped in wave 2, Task 1 — but never actually wired here. This
+ * route's read (`.select("*")`) and write (`.update(...)`) still go straight
+ * through `@/lib/supabase`, and the write also bypasses
+ * `assertCanUpdateAgendaTemplate` entirely (raw Supabase update, no admin
+ * gate), the same non-admin-can-write inconsistency Task 3 closed for
+ * `DeleteTemplateDialog.tsx`. Found in this wave's whole-branch review: no
+ * task's file list or the wave plan names this route, and it carried no
+ * `TODO(phase-e-wave-2)` marker, so conventions item 11's completeness sweep
+ * read it as done. Not migrated here — that is wave 3's work — but marked so
+ * the sweep sees it.
+ *
+ * TODO(phase-e-wave-2): agendaTemplate.detail, agendaTemplate.update
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -19,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -157,6 +174,13 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
       queryClient.invalidateQueries({
         queryKey: queryKeys.agendaTemplates.byBoard(boardId),
       });
+      // `boards.$boardId.templates.tsx`'s list read moved onto
+      // `trpc.agendaTemplate.list` (wave 2, Task 2) — the two legacy-key
+      // invalidations above no longer reach it. This route was originally
+      // named as only a legacy READER of `queryKeys.agendaTemplates`; it is
+      // also a WRITER, and the same gap applies (`cache-key-parity.test.ts`'s
+      // `MIGRATED` entry for `agendaTemplates`).
+      queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
     } finally {
       setIsSaving(false);
     }

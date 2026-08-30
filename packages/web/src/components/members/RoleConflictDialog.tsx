@@ -4,10 +4,30 @@
  *
  * Per Maine conflict-of-interest law (30-A M.R.S.A. §2605), a person
  * cannot simultaneously serve as staff and a board member.
+ *
+ * Phase E, wave 2, Task 4 — the one write here (`archiveAccount`) moved onto
+ * `person.archiveUserAccount`. This file's own single `.from("user_account")`
+ * call matched the master plan's "measured scope" table exactly (1 site, 1
+ * write) — a task dispatch describing this file as having "4 data-access
+ * references" to check before assuming it needed migrating was counting
+ * lines (`import`, the hook call, and the two-line statement itself), not
+ * distinct operations; there was exactly one write. See this task's report.
+ *
+ * No cache invalidation existed here before this task — this component held
+ * no `QueryClient` reference at all. Archiving the account changes what
+ * `person.list` and `boardMember.roster` both report for this person
+ * (`person.list`'s join drops an archived account's role entirely;
+ * `boardMember.roster` selects `user_account_archived_at` unconditionally),
+ * so both are invalidated below, per conventions item 7.
+ *
+ * Review round: added `onError` — this dialog had none before, and a refused
+ * write (e.g. a stale `userAccountId` answering NOT_FOUND) left the button
+ * re-enabled with no explanation, conventions item 5's exact failure mode.
  */
 
-import { useMutation } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { Loader2, AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
@@ -20,6 +40,14 @@ import {
 import { Button } from "@/components/ui/button";
 import type { RoleConflictResult } from "@town-meeting/shared";
 import { ROLE_LABELS } from "@town-meeting/shared";
+
+// `errorMessage` (the message a CONFLICT carries; a generic one otherwise)
+// moved to `@/lib/trpc` in this wave's whole-branch review — this file,
+// `AddPersonDialog.tsx`, `MemberTransitionDialog.tsx` and
+// `MemberArchiveDialog.tsx` each carried an identical copy. `archiveUserAccount`
+// does not throw CONFLICT today (its own refusals are FORBIDDEN/NOT_FOUND),
+// but the gate costs nothing to carry and matches every sibling in this file
+// family, rather than being a fourth, slightly different shape.
 
 interface RoleConflictDialogProps {
   personName: string;
@@ -38,26 +66,26 @@ export function RoleConflictDialog({
   onOpenChange,
   onResolved,
 }: RoleConflictDialogProps) {
-  const supabase = useSupabase();
+  const queryClient = useQueryClient();
 
   const existingLabel = conflict.existingRole
     ? (ROLE_LABELS[conflict.existingRole]?.toLowerCase() ?? conflict.existingRole)
     : "current";
 
-  const { mutate: archiveAccount, isPending: isArchiving } = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from("user_account")
-        .update({ archived_at: now })
-        .eq("id", userAccountId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      onResolved();
-      onOpenChange(false);
-    },
-  });
+  const archiveAccountMutation = useMutation(
+    trpc.person.archiveUserAccount.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries(trpc.person.pathFilter());
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        onResolved();
+        onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't archive this account — please try again."));
+      },
+    }),
+  );
+  const isArchiving = archiveAccountMutation.isPending;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -85,7 +113,11 @@ export function RoleConflictDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isArchiving}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => archiveAccount()} disabled={isArchiving}>
+          <Button
+            variant="destructive"
+            onClick={() => archiveAccountMutation.mutate({ userAccountId })}
+            disabled={isArchiving}
+          >
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Archive {existingLabel} Account & Continue
           </Button>

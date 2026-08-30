@@ -75,12 +75,17 @@ export default function PeoplePage() {
     error: peopleError,
   } = useQuery(trpc.person.list.queryOptions());
 
-  // TODO(phase-e-wave-2): boardMember.listByTown (or equivalent) — no
-  // `boardMember` router exists yet. Kept on Supabase; see `person.ts`'s own
-  // doc comment for why this join was deliberately NOT folded into
-  // `person.list` (it would make `trpc.person.pathFilter()` a key every
-  // Board → Members writer — none of them touched by this task — owed an
-  // invalidation to).
+  // TODO(phase-e-wave-2): boardMember.listByTown (or equivalent) — the
+  // `boardMember` router exists now (Phase E, wave 2, Task 3), but no
+  // procedure on it answers this question: `boardMember.roster` is scoped to
+  // ONE board and `boardMember.memberCount` returns a bare count, neither the
+  // town-wide "which boards does each person hold a seat on" join this read
+  // needs. Re-checked directly in Task 4 rather than assumed closed by that
+  // router's existence — see that task's report. Kept on Supabase; see
+  // `person.ts`'s own doc comment for why this join was deliberately NOT
+  // folded into `person.list` (it would make `trpc.person.pathFilter()` a
+  // key every Board → Members writer — none of them touched by this task —
+  // owed an invalidation to).
   const { data: memberships = [] } = useQuery({
     queryKey: [...queryKeys.members.all, "byTown", townId],
     queryFn: async () => {

@@ -3,13 +3,38 @@
  *
  * Supports: archive membership, move to different board, convert to staff,
  * convert from staff to board member. Enforces mutual exclusivity rules.
+ *
+ * Phase E, wave 2, Task 4 — moved onto `boardMember.otherActiveCount`,
+ * `boardMember.archiveMembership`, `boardMember.addToBoard` and
+ * `boardMember.convertToStaff`. This file's own plan brief already measured
+ * it at 7 sites / 5 writes (the master plan's "measured scope" table, at
+ * commit `a165049`) — a later task dispatch's scope note claimed only 2
+ * remained; checked against the file directly and was wrong. See this
+ * task's report for the corrected count.
+ *
+ * `otherBoards` (the "move to different board" picker) now reads
+ * `board.listActive` — the same procedure `StaffAccountFlow.tsx` already
+ * uses for the identical "every active board in this town" question — and
+ * filters out the current board client-side. `listActive` orders
+ * `is_governing_board DESC, name ASC`, not strict alphabetical; accepted as
+ * a harmless reorder, same call `StaffAccountFlow.tsx`'s own doc comment
+ * already made for this procedure.
+ *
+ * Review round: all three mutations gained `onError`. `addToBoard` and
+ * `convertToStaff` both throw DESIGNED `CONFLICT`s ("This person already has
+ * an active seat on this board" / "already has a login account") that this
+ * dialog was silently swallowing — the dialog stayed open, the button
+ * re-enabled, and nothing was said, conventions item 5's exact failure mode.
+ * Not a regression (the pre-migration Supabase code was equally silent on a
+ * `23505`), but worth closing while every write in this file is being
+ * touched anyway.
  */
 
 import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
+import { toast } from "sonner";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
 import type { PermissionsMatrix, UserRole } from "@town-meeting/shared";
@@ -52,6 +77,12 @@ interface MemberTransitionDialogProps {
 
 type TransitionType = "archive" | "move_board" | "to_staff" | "to_board_member";
 
+// `errorMessage` (the message a CONFLICT carries; a generic one otherwise —
+// only a designed refusal's own message is safe to show verbatim) moved to
+// `@/lib/trpc` in this wave's whole-branch review: this file,
+// `AddPersonDialog.tsx`, `RoleConflictDialog.tsx` and `MemberArchiveDialog.tsx`
+// each carried an identical copy.
+
 export function MemberTransitionDialog({
   member,
   boardId,
@@ -60,7 +91,6 @@ export function MemberTransitionDialog({
   open,
   onOpenChange,
 }: MemberTransitionDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [transition, setTransition] = useState<TransitionType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -68,45 +98,30 @@ export function MemberTransitionDialog({
   const [pendingTransition, setPendingTransition] = useState<TransitionType | null>(null);
   const [targetBoardId, setTargetBoardId] = useState<string>("");
 
-  // Active boards for "move to different board"
+  // Active boards for "move to different board" — `townId` is not a query
+  // input; `board.listActive` scopes to the caller's own tenant server-side.
   const { data: boardRows = [] } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId), "otherBoards", boardId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("id, name, election_method")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .neq("id", boardId)
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,
   });
   const otherBoards = useMemo(
     () =>
-      boardRows.map((b) => ({
-        id: String(b.id),
-        name: String(b.name),
-        election_method: String(b.election_method ?? "at_large"),
-      })),
-    [boardRows],
+      boardRows
+        .filter((b) => b.id !== boardId)
+        .map((b) => ({
+          id: b.id,
+          name: b.name,
+          election_method: b.election_method ?? "at_large",
+        })),
+    [boardRows, boardId],
   );
 
   // Check for other active board memberships
   const { data: otherActiveMemberships = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byPerson(member.person_id), "otherActive", boardId],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("board_member")
-        .select("*", { count: "exact", head: true })
-        .eq("person_id", member.person_id)
-        .neq("board_id", boardId)
-        .eq("status", "active");
-      if (error) throw error;
-      return count ?? 0;
-    },
+    ...trpc.boardMember.otherActiveCount.queryOptions({
+      personId: member.person_id,
+      excludeBoardId: boardId,
+    }),
     enabled: !!member.person_id,
   });
 
@@ -146,118 +161,83 @@ export function MemberTransitionDialog({
 
   // ─── Execute transitions ───────────────────────────────────────────
 
-  const { mutate: archiveMembership, isPending: isArchivingPending } = useMutation({
-    mutationFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const { error } = await supabase
-        .from("board_member")
-        .update({ status: "archived", term_end: today })
-        .eq("id", member.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      onOpenChange(false);
-    },
-  });
+  const archiveMembershipMutation = useMutation(
+    trpc.boardMember.archiveMembership.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+        // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
+        // (Phase E, wave 2, Task 3) — this mutation changes that row's status.
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't archive this membership — please try again."));
+      },
+    }),
+  );
+  const isArchivingPending = archiveMembershipMutation.isPending;
 
-  const { mutate: moveMembership, isPending: isMovingPending } = useMutation({
-    mutationFn: async () => {
-      if (!targetBoardId) throw new Error("No target board selected");
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      const today = now.split("T")[0];
-      const { error } = await supabase.from("board_member").insert({
-        id,
-        person_id: member.person_id,
-        board_id: targetBoardId,
-        town_id: townId,
-        seat_title: null,
-        term_start: today,
-        term_end: null,
-        status: "active",
-        is_default_rec_sec: false,
-        created_at: now,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(targetBoardId) });
-      onOpenChange(false);
-    },
-  });
+  const moveMembershipMutation = useMutation(
+    trpc.boardMember.addToBoard.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(targetBoardId) });
+        // This seats the person on a NEW board — both that board's roster and
+        // the town-wide `boardMember.memberCount` change. Router-level filter,
+        // not per-board, per conventions item 7 ("a writer should not have to
+        // know which procedures some screen happens to call").
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't add this board membership — please try again."));
+      },
+    }),
+  );
+  const isMovingPending = moveMembershipMutation.isPending;
 
-  const { mutate: convertToStaff, isPending: isConvertingPending } = useMutation({
-    mutationFn: async (staffResult: StaffAccountResult) => {
-      const now = new Date().toISOString();
-      const today = now.split("T")[0];
-
-      // Archive all active board memberships
-      const { error: archiveError } = await supabase
-        .from("board_member")
-        .update({ status: "archived", term_end: today })
-        .eq("person_id", member.person_id)
-        .eq("status", "active");
-      if (archiveError) throw archiveError;
-
-      if (member.user_account_id) {
-        // Update existing user_account to staff role
-        const { error } = await supabase
-          .from("user_account")
-          .update({
-            role: "staff",
-            permissions: staffResult.permissions,
-            gov_title: staffResult.gov_title || null,
-            archived_at: null,
-          })
-          .eq("id", member.user_account_id);
-        if (error) throw error;
-      } else {
-        // Create new staff user_account
-        const uaId = crypto.randomUUID();
-        const { error } = await supabase.from("user_account").insert({
-          id: uaId,
-          person_id: member.person_id,
-          town_id: townId,
-          role: "staff",
-          gov_title: staffResult.gov_title || null,
-          permissions: staffResult.permissions,
-          // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
-          // foreign key to `better_auth."user"(id)`, so an empty string is
-          // rejected with SQLSTATE 23503 and the whole insert fails. The
-          // column is nullable by design: a `user_account` exists before any
-          // login does, and invitation acceptance is what fills it in.
-          created_at: now,
-        });
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(townId) });
-      // This mutation creates a `user_account` — `person.list` (which
-      // `people.tsx` now reads through, Phase E wave 1 Task 3) would
-      // otherwise show this person as having no role until the 60s
-      // `staleTime` expired.
-      void queryClient.invalidateQueries(trpc.person.pathFilter());
-      onOpenChange(false);
-    },
-  });
+  const convertToStaffMutation = useMutation(
+    trpc.boardMember.convertToStaff.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+        // `queryKeys.userAccounts.byTown` invalidation removed (Phase E, wave
+        // 2, Task 3 fix round) — see `AddPersonDialog.tsx`'s identical comment
+        // for why: that key has no reader left anywhere in the app.
+        // This mutation creates OR updates a `user_account` — `person.list`
+        // (which `people.tsx` now reads through, Phase E wave 1 Task 3) would
+        // otherwise show this person's stale role until the 60s `staleTime`
+        // expired.
+        void queryClient.invalidateQueries(trpc.person.pathFilter());
+        // Archives the board seat AND writes `user_account` — both roster
+        // fields `boardMember.roster` selects.
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't convert this member to staff — please try again."));
+      },
+    }),
+  );
+  const isConvertingPending = convertToStaffMutation.isPending;
 
   const handleArchive = useCallback(() => {
-    archiveMembership();
-  }, [archiveMembership]);
+    archiveMembershipMutation.mutate({ boardMemberId: member.id });
+  }, [archiveMembershipMutation, member.id]);
 
   const handleMoveBoard = useCallback(() => {
-    moveMembership();
-  }, [moveMembership]);
+    if (!targetBoardId) return;
+    moveMembershipMutation.mutate({ personId: member.person_id, boardId: targetBoardId });
+  }, [moveMembershipMutation, member.person_id, targetBoardId]);
 
   const handleToStaff = useCallback(
     (staffResult: StaffAccountResult) => {
-      convertToStaff(staffResult);
+      convertToStaffMutation.mutate({
+        personId: member.person_id,
+        govTitle: staffResult.gov_title || null,
+        permissions: staffResult.permissions,
+      });
     },
-    [convertToStaff],
+    [convertToStaffMutation, member.person_id],
   );
 
   const isPendingAny = isArchivingPending || isMovingPending || isConvertingPending || isSaving;

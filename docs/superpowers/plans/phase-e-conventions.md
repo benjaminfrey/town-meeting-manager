@@ -500,9 +500,18 @@ onSuccess: () => {
   void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
   void queryClient.invalidateQueries(trpc.board.pathFilter());
+  // Archives every active `board_member` row on this board — a fourth
+  // writer of the legacy `queryKeys.members.byBoard` key above, added in
+  // Task 3's own fix round after a reviewer caught this dialog missing it.
+  void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
   // ...
 };
 ```
+
+(Kept in sync with the real file, not re-quoted from memory: `ArchiveBoardDialog.tsx`'s own
+`onSuccess` carries both `pathFilter()` calls today. An earlier version of this example omitted the
+`trpc.boardMember.pathFilter()` line — the exact line Task 3's own blocking finding added — which
+matters here specifically, since this is the example roughly 80 wave migrations copy from.)
 
 The legacy line stays because other, unmigrated screens still read that key. It goes when the last
 legacy reader does — not before.
@@ -538,12 +547,25 @@ it mechanically, on every `npx turbo run test`, and fails with a filename instea
 reviewer's grep.
 
 What it checks: for every `invalidateQueries(` call in a non-test file, if the call's own argument
-names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (currently
-`towns`/`boards`/`persons`), the same file must also call the matching `trpc.<router>.pathFilter()`
-somewhere. The match is scoped to roughly 250 characters measured from inside the `invalidateQueries(`
-call itself, not the whole file — a whole-file version of this check raises 12 false positives at
-HEAD (files that read a migrated key in a `useQuery` far from an unrelated `invalidateQueries()`
-call); the windowed version raises zero.
+names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (seven entries
+as of this wave's final fix round — `towns`, `boards`, `persons`, `agendaTemplates`, `members`,
+`userAccounts`, `invitations` — quote `cache-key-parity.test.ts`'s own `MIGRATED` object, not this
+number, which will drift the same way "currently `towns`/`boards`/`persons`" drifted here from three
+to seven without this paragraph ever being updated), the same file must also call the matching
+`trpc.<router>.pathFilter()` somewhere. The match is scoped to roughly 250 characters measured from
+inside the `invalidateQueries(` call itself, not the whole file — a whole-file version of this check
+raises 12 false positives at HEAD (files that read a migrated key in a `useQuery` far from an
+unrelated `invalidateQueries()` call); the windowed version raises zero.
+
+That contrast is real but the "windowed versus whole-file" framing above overstates what the number
+`250` itself buys: the precision comes from the match being **forward-only** from the
+`invalidateQueries(` marker, not from the width being small. Widening the forward-only window all
+the way to 999999 characters — in effect everything from the call to the end of the file — still
+raises zero false positives, while a bidirectional variant of the same check (the width measured on
+both sides of the marker, rather than only ahead of it) picks up 1, 4 and 9 of the twelve at widths
+1000, 3000 and 10000 respectively, climbing to the full 12 once its own width is unbounded — which
+is just the whole-file check by another name. `250` could be far larger with the same result; what
+actually does the work is that nothing behind the marker is ever read.
 
 Validated against `git archive` snapshots of six real commits from this wave, not assumed: it
 reproduces two of the three blocking findings a human reviewer found by hand, by file, at the commit
@@ -908,15 +930,30 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 8
 ```
 
-Those 8 lines name 7 distinct gaps: `ProgressChecklist.tsx` (`boardMember.countByTown`),
-`StaffAccountFlow.tsx` (`board.listByTown` — stale, see the Known-gaps bullet below),
-`AddPersonDialog.tsx` (`invitation.insert`, marked twice), `home.tsx` (`meeting.byTown` /
-`minutesDocument.pendingByTown` / a board-picker read), `settings.town.tsx` (`board.byTown`),
-`boards.$boardId.tsx` (`agendaTemplate.countForBoard`), `people.tsx`
-(`boardMember.listByTown`). Whether the count is 15, 8, or 7 depends entirely on what you constrain
-the grep to — quote the grep used, always, and prefer describing the gaps by name (as the bullets
-below do) over reporting a bare count that a reader cannot check without also re-deriving which
-lines you meant.
+**Stale as of wave 2's own final fix round — corrected here, and timestamped the way item 9
+timestamps its greps (item 9: "current as of `2d78964`"); this enumeration read as current and was
+not.** The 8-lines-7-gaps count above was wave 2 Task 4's snapshot and drifted the same task it was
+written in: `boards.$boardId.tsx`'s `agendaTemplate.countForBoard` and `ProgressChecklist.tsx`'s
+`boardMember.countByTown` both closed (Tasks 2 and 3 respectively — before this enumeration was even
+written), `StaffAccountFlow.tsx`'s `board.listByTown` marker closed the same way (Task 3), and
+`settings.town.tsx`'s `board.byTown` marker closed too (its own Known-gaps entry above already says
+so). Re-run at HEAD, this fix round's own commit (`bb60e295b8ebc81e26a03206dcac6aaa6548c8ed`):
+
+```
+$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+6
+```
+
+Those 6 lines name 5 distinct gaps: `AddPersonDialog.tsx` (`invitation.insert`, marked twice),
+`home.tsx` (`meeting.byTown` / `minutesDocument.pendingByTown` / `board.listActive` — exists, not
+wired here, see the Known-gaps bullet below), `boards.$boardId.templates.$templateId.edit.tsx`
+(`agendaTemplate.detail` / `agendaTemplate.update` — a marker this same review round added; see its
+Known-gaps entry below), `boards.$boardId.tsx` (`town.detail` — exists, not wired here; this
+review round restored the marker after closing the file's other gap silently dropped it, see its
+own Known-gaps entry below), and `people.tsx` (`boardMember.listByTown`). Whether the count is 15,
+8, 7, 6, or 5 depends entirely on what you constrain the grep to and when you ran it — quote the
+grep AND the commit, always, and prefer describing the gaps by name (as the bullets below do) over
+reporting a bare count that a reader cannot check without also re-deriving which lines you meant.
 
 This countdown is not monotonic within a wave regardless of which grep measures it — a task can
 legitimately raise it by naming a gap explicitly that was previously silent (Task 5 added
@@ -1028,6 +1065,42 @@ runs.
 
 ---
 
+## 14. The close-out step: re-check every Known-gaps bullet against HEAD
+
+Added in wave 2's final whole-branch review, after that review found **four of the five most
+recent Known-gaps bullets stale — three of them CLOSED and still described as open**
+(`boards.$boardId.tsx`'s agenda-template half, `ProgressChecklist.tsx`'s `memberCount`,
+`StaffAccountFlow.tsx`'s board picker) and one actively **wrong** rather than merely outdated
+(`home.tsx`'s board-picker bullet kept insisting no archived-filtered procedure existed after
+`board.listActive` shipped and was already wired into the identical gap one file over). A fifth
+bullet — item 11's own marker enumeration — was stale in the same review for the identical reason:
+it quoted a marker count that had already moved by the time it was written.
+
+**The root cause is structural, not a discipline lapse a reminder fixes.** Every task in this wave
+amended `phase-e-conventions.md` when its OWN work touched a bullet — closing the bullet it was
+told about, adding the bullet its own file's remaining gap needed. No task's job was ever "does
+anything ELSE in this document describe my work as still open." A bullet written by Task N about a
+file Task N did not finish stays exactly as Task N left it, word for word, until something
+_deliberately_ re-reads it against the current tree — and nothing in the per-task workflow asked
+anyone to do that, so it did not happen, four times in a row, across three different tasks' own fix
+rounds.
+
+**The step:** before ending a task (or a fix round) that touches `phase-e-conventions.md`, or before
+closing out a wave, re-read every bullet under "Known gaps this document does not close" against
+HEAD — not against memory, not against what the task itself changed — and retire (with the
+`~~strikethrough~~ ... closed in Task N` pattern already used throughout this document) any bullet
+this wave's work closed, whether or not the task that closed it was the one that wrote the bullet.
+A bullet is stale exactly as easily by someone else's fix landing nearby as by the task that named
+it forgetting to update it — check the file, not the diff.
+
+This is intentionally scoped to Known-gaps, not "audit the whole document every time" — item 11's
+own countdown grep already does the analogous job for `TODO(phase-e-wave-*)` markers in the
+CODEBASE; this step is the same discipline applied to the PLAN DOCUMENT's own claims about that
+codebase, which no automated check can verify because "is this bullet's prose still true" is not a
+grep-able property.
+
+---
+
 ## Files to copy from
 
 | Concern                                                  | File                                                                       |
@@ -1107,62 +1180,94 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   implicitly — `render.ts` wraps every render in it unconditionally — so retiring it touches every
   caller, not only the 4 that name it.
 - `router-wiring.test.ts` pins only the procedure names it lists.
-- **`cache-key-parity.test.ts` (item 7) checks only that a `pathFilter()` call exists in the file —
-  not that every `pathFilter()`-calling writer is itself pinned by a writer test (item 8).** That
-  second check — "does every file calling `trpc.<router>.pathFilter()` have a test that asserts the
-  invalidation actually happens" — is the one that would reach "the four person writers at
-  `3b22df8`" (the finding the shipped check above cannot). Deliberately not shipped this round: an
-  earlier pass at it was reported to raise three false positives at HEAD and to need tuning before it
-  could ship without teaching people to ignore it (item 13's exact concern with a check that cries
-  wolf). Not reattempted here either — this task's brief named it explicitly out of scope. Available
-  as a starting point for whichever wave next hits this gap, not as a finished check; re-derive the
-  false-positive count rather than trust three.
-- `boards.$boardId.tsx` still reads two things through `@/lib/supabase`: town settings (the
-  Overview "effective settings" rows, and the defaults passed to
-  `EditBoardDialog`/`MinutesWorkflowEditor`) and the agenda template count. **Not the same gap for
-  both, as of Task 5 (confirmed, not newly true — Task 2's fix round already narrowed the marker
-  this way):** `town.detail` shipped in Task 1, so the town-settings read has a procedure to move
-  onto and simply has not been migrated to it yet — real work (retyping two components' props,
-  re-checking the effective-settings mapping), not a missing router. The agenda-template count is
-  the only one with genuinely **no procedure at all**. The file's own marker reflects exactly this:
-  `// TODO(phase-e-wave-2): agendaTemplate.countForBoard` — one item, not two, and has read that way
-  since Task 2. An earlier version of this bullet (through Task 4's fix round) quoted the marker as
-  `town.detail, agendaTemplate.countForBoard`, which was already stale when quoted; kept accurate
-  here now rather than re-drifting.
-- `home.tsx` (Task 5) moved its town-name/state header onto `town.detail`, but three reads stay on
-  Supabase, all named in the file's own `// TODO(phase-e-wave-2)` marker: `meetingRows` and
-  `minutesDocs` have no router at all (`meeting`, `minutesDocument`); `boardRows` — the "which board
-  is meeting" picker — has a near-miss in `board.list` (added by Task 4, extended by Task 5) that is
-  DELIBERATELY not used, because `board.list` does not filter `archived_at` (by design — its two
-  existing callers both need archived boards visible: `settings.meeting-notices.tsx`, for the "copy
-  template" picker, and `ProgressChecklist.tsx`, for its totalSeats/notice-template-completion
-  aggregates — the second joined `board.list` in the same task, Task 5, that wrote this bullet)
-  while the picker's original Supabase query does. Reusing `board.list` here would
-  silently start offering archived boards as places to schedule a NEW meeting — a regression smuggled
-  into a read migration, the exact failure mode item 1's "the query you are replacing is a
-  specification" language exists to prevent. The board picker still needs its own procedure (an
-  archived-filtered `board.listActive` or an `activeOnly` argument on `board.list`), not a reuse of
-  the existing one.
-- `ProgressChecklist.tsx` (Task 5) moved two of its three own reads (`totalSeats`, the notice-
-  template counts) onto the same extended `board.list`. Its third, `memberCount` — a count of
-  actual, filled `board_member` rows — stays on Supabase: that table is board-membership territory
-  this wave deliberately does not touch (the task brief's own self-review notes: the four
-  board-member dialogs are wave 2's), and `person.ts`'s own doc comment already declines to join
-  `board_member` for the identical reason. Marked `// TODO(phase-e-wave-2): boardMember.countByTown
-(or equivalent)`.
-- The wave inherited one existing, unrelated staleness while Task 5 was in the neighborhood:
-  `StaffAccountFlow.tsx`'s `// TODO(phase-e-wave-2): board.listByTown` marker says "no procedure
-  exists yet that lists every board for a town" — no longer true; `board.list` has existed since
-  Task 4. **This IS the same gap as `home.tsx`'s board picker above, not a different one** —
-  corrected here after a reviewer caught the first version of this bullet claiming otherwise:
-  `StaffAccountFlow.tsx:64` filters `.is("archived_at", null)`, identical to `home.tsx`'s board
-  picker, for the identical reason (offering an archived board as a place to assign a new staff
-  account's board seat is the same wrong answer as offering it as a place to schedule a meeting).
-  Whichever wave migrates this file must NOT swap it onto `board.list` as-is — that would ship
-  exactly the archived-board regression Task 5 declined for `home.tsx`. `StaffAccountFlow.tsx`
-  itself was not touched by this task's declared scope (`routes/home.tsx` and
-  `components/dashboard/ProgressChecklist.tsx` only), so the stale comment is documented here rather
-  than edited on the strength of reading it alone. Left for whichever wave touches that file next.
+- ~~`cache-key-parity.test.ts` (item 7) checks only that a `pathFilter()` call exists in the file —
+  not that every `pathFilter()`-calling writer is itself pinned by a writer test (item 8).\*\*
+  ... Deliberately not shipped this round ... Available as a starting point for whichever wave next
+  hits this gap, not as a finished check.~~ — **shipped in this wave's final whole-branch review**,
+  as `packages/web/src/lib/__tests__/pathfilter-pin-coverage.test.ts`: for every non-test file whose
+  comment-stripped code calls `trpc.<router>.pathFilter()`, at least one test file must import it (a
+  static `from "..."` or a `vi.mock("...")`, resolving both `@/` and relative specifiers) and itself
+  assert `isInvalidated` or call `countFor(`. Matching by import graph rather than filename was
+  deliberate — a filename-only matcher fails on `routes/boards.$boardId.templates.$templateId.edit.test.tsx`
+  (lives outside any `__tests__/` directory) and would be fooled by a plausible-but-wrong name like
+  `Foo.pathfilter.test.tsx` that does not actually import `Foo.tsx` (see the check's own fixture
+  tests for both). Comment-stripping is load-bearing the identical way item 11's marker grep needs
+  it to be: without it, `routes/people.tsx` and `test/trpc.ts` both false-positive as writers because
+  each mentions `trpc.<router>.pathFilter()` in a comment, not real code — 28 files contain the raw
+  substring at HEAD, 26 after stripping, and 26 is the number the check's own history-validation
+  section (below) confirms is right. Validated against `git archive` snapshots of three real commits,
+  not assumed: HEAD (26 writers, 0 violations), `3b22df8` (16 writers, 3 violations —
+  `AddMemberDialog.tsx`, `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`), `081a27e` (25
+  writers, 1 violation — `MemberRoster.tsx`) — all three matching this wave's own named findings by
+  file and by count, the same discipline `cache-key-parity.test.ts`'s own history section uses.
+  **Still bounded exactly as originally scoped**, and the boundary is worth restating precisely: a
+  test that imports the writer and asserts `isInvalidated`/`countFor(` ANYWHERE in the file passes,
+  even for a totally unrelated procedure — this reaches item 8's "a writer is tested at all", not the
+  harder claim "the RIGHT procedure is tested". See the next bullet for why that harder claim is not
+  worth chasing with a static check, and what to do instead.
+- **The per-mutation half — "is the RIGHT procedure being pinned, not just A procedure" — is not
+  statically mechanisable, and this wave's review tried before concluding that.** Task 3's real
+  failure (three of nine invalidations shipped unpinned, INSIDE files that already had other pins —
+  so a whole-file "does this file call `pathFilter()` and does some test in it assert an
+  invalidation" check would have called those files fine) is exactly the shape the check above
+  cannot see: the file-level pin exists, it is just pinning a different mutation than the one that
+  shipped broken. A prototype requiring a test to name the SPECIFIC procedure it is asserting on
+  (e.g. matching `stub.countFor("board.detail")`'s string literal against the particular
+  `pathFilter()` call's router) caught **nothing** beyond what the coarser check above already
+  catches, because `installTRPCFetchStub`'s handler map already keys on every real procedure path —
+  a test asserting the wrong procedure name would not compile in the first place (the same shape
+  item 8's own "`board.statz`" mutation example demonstrates), so there is no "names the wrong
+  procedure and passes" failure mode left for a stricter static check to add value against. What
+  actually catches a missing invalidation on a specific mutation, proven by Task 3's own fix round,
+  is a **scripted deletion sweep** run as a close-out step, not a new assertion shape: comment out
+  each `pathFilter()` call one at a time (`~21` sites at HEAD — `grep -rl "\.pathFilter()"
+packages/web/src | grep -v __tests__ | grep -v '\.test\.'`, minus the two comment-only false
+  positives item 4's own check already excludes), run the web suite, confirm something goes red,
+  restore. At roughly 10 seconds per site that is about 4 minutes for the whole tree — cheap enough
+  to run as a matter of course before closing out a task that touched cache invalidation, and it is
+  the only thing in this document that has actually caught a missing-but-plausible-looking pin.
+- **Re-checked in the wave's final whole-branch review (current as of `9e87b7b`) — four of the
+  five bullets that used to sit here were stale, three of them CLOSED and described as open. This
+  is exactly the drift item 14 above (the standing close-out step) exists to catch, and the fact
+  that four slipped through at once is why that step got added.**
+- `boards.$boardId.tsx`: the agenda-template-count half of the old two-item bullet here is
+  **closed** — `agendaTemplate.countForBoard` is wired (in the `Overview` tab's template-count
+  `useQuery`) and the file's marker naming it is gone, exactly as an earlier version of this bullet
+  predicted it would be. The
+  town-settings half is still open — `town.detail` shipped in Task 1 but this file has not been
+  migrated onto it (real work: retyping two components' props, re-checking the effective-settings
+  mapping) — and **closing the other half had silently dropped this file's marker entirely**, which
+  the whole-branch review caught as its own small instance of item 11's hole: `town.detail` existing
+  elsewhere reads as "done" to a bare grep unless the file's own marker says otherwise. Restored:
+  `// TODO(phase-e-wave-2): town.detail (exists, not yet wired here for the Overview "effective
+settings" read)`.
+- ~~`home.tsx` ... The board picker still needs its own procedure (an archived-filtered
+  `board.listActive` or an `activeOnly` argument on `board.list`), not a reuse of the existing
+  one.~~ — **Wrong as of Task 4, not just stale wording: `board.listActive` shipped there, doing
+  exactly the archived-filtering job this bullet said did not exist yet, and Task 5 wired it into
+  `StaffAccountFlow.tsx`'s identical picker gap (see the next bullet) in the very same task that
+  last touched this sentence.** `home.tsx` itself was rewritten by this wave's own final commit
+  (`9e87b7b`) — two commits after `board.listActive` shipped, one after `StaffAccountFlow` started
+  using it for the identical gap — and its comment still claimed no such procedure existed; the rot
+  here was being actively refreshed, not merely left alone. Corrected directly in `home.tsx` and its
+  marker in this same round: `board.listActive` exists and is not a blind swap, because its ordering
+  (governing board first, then alphabetical — see its own doc comment) differs from this picker's
+  plain `.order("name")`, a real behavior difference whoever migrates this file next needs to check,
+  not a missing procedure. `meetingRows`/`minutesDocs` still have no router at all
+  (`meeting`/`minutesDocument`) and stay open exactly as before.
+- ~~`ProgressChecklist.tsx` (Task 5) ... Its third, `memberCount` ... stays on Supabase ... Marked
+  `// TODO(phase-e-wave-2): boardMember.countByTown (or equivalent)`.~~ — **closed in Task 3.**
+  `boardMember.memberCount` (the relocated procedure — see `board-member.ts`'s own header, "Task 1,
+  wave 2") is what `ProgressChecklist.tsx` reads today, in its "board members added" progress row's
+  `useQuery`, and the file carries no `TODO(phase-e-wave-2)` marker any more. This bullet described
+  a gap Task 3 had already closed by the time it was written.
+- ~~The wave inherited one existing, unrelated staleness ... `StaffAccountFlow.tsx`'s ...
+  marker ... Left for whichever wave touches that file next.~~ — **closed in Task 3.**
+  `StaffAccountFlow.tsx` was in Task 3's own file list (`081a27e`, `f80a074`) and now reads
+  `trpc.board.listActive.queryOptions()` in its board-picker `useQuery`, with no
+  `TODO(phase-e-wave-2)` marker left. "Left for whichever wave touches that file next" was true when
+  Task 4 wrote it and false one task later — the exact shape of drift the standing close-out step
+  (item 14) exists to catch before it reaches a fifth or sixth wave.
 - **Named wave-2 item: `SetPortalAddressModal` has exactly one door, and it disappears.**
   `ProgressChecklist`'s "portal-subdomain" row (`onSetPortalAddressClick`) is the ONLY UI path to
   `SetPortalAddressModal` anywhere in the product. Once every checklist item is complete — not
@@ -1187,3 +1292,98 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   row, stops being reachable — but "the card hides" and "the card is replaced by a different card"
   are different claims, and only the second is what the component's own `if (allComplete) { return
 <Card>...</Card>; }` branch actually does.
+- **Both doors from staff to board_member dead-end at `RoleConflictDialog`.** Wave 2, Task 3 shipped
+  `AddMemberDialog`'s server-side mutual-exclusivity check in `boardMember.addBoardMember`
+  (`packages/api/src/trpc/routers/board-member.ts`), and a review round of that same task found the
+  archived-account-reuse defect immediately upstream of it (sequenced here for exactly that reason —
+  both are the same underlying question: what does an EXISTING `user_account` row mean when a new
+  write wants to seat its person as something else). `RoleConflictDialog.tsx`'s `archiveAccount`
+  mutation only sets `archived_at` on the conflicting account; it does not delete the row, and
+  `user_account_person_id_key` is unique on `person_id` alone, unfiltered by `archived_at`. So after
+  an admin resolves a staff→board_member conflict through that dialog, the row conflicting a moment
+  ago still exists with `role = 'staff'` — and `addBoardMember`'s mutual-exclusivity check (correctly)
+  refuses it again, every time, with no way through. An administrator correcting a mis-assigned role
+  under Maine 30-A M.R.S.A. §2605 has nowhere to go today through THIS door.
+
+  **Corrected in Task 4, wave 2 — the sentence above about a second, identical door is wrong; the rest
+  of this bullet is not.** This paragraph originally also claimed "the identical trap exists in
+  `MemberTransitionDialog.tsx`'s `to_board_member` transition, which routes through the same
+  `RoleConflictDialog`." Checked directly: that transition has no UI path at all — `MemberRoster.tsx`
+  is the only caller of `MemberTransitionDialog`, always with `member.role: "board_member"`, and the
+  dialog's own `RadioGroup` never renders a "convert to board_member" option (dead at `081a27e`,
+  before this task, too — not a regression this task introduced). `handleTransitionSelect` and the
+  mutual-exclusivity `useMemo` both still branch on `"to_board_member"`, so the TYPE and the dead
+  branches exist, but nothing in the component ever sets `transition` to that value. There was never a
+  second live door here to dead-end. **This does NOT close the bullet.** The `AddMemberDialog` door —
+  `boardMember.addBoardMember`'s mutual-exclusivity check (the `checkRoleMutualExclusivity` call at
+  the top of the `if (existing)` branch, which runs BEFORE that branch's reactivation logic) — still
+  refuses every time, exactly as the rest of this bullet, including its last paragraph's fix-shape
+  citation, already says. One of the two doors described here was never real; the other is still
+  shut.
+
+  The review confirmed `RoleConflictDialog`'s own refusal is correct and should NOT change: the old,
+  pre-migration code hit this identical case as an uncaught `23505` with no `onError` and no toast at
+  all — strictly worse — and the unique constraint really is unconditional, so refusing is the honest
+  answer for a write that has not decided what an archived row means. Inventing an un-archive policy
+  inside a port would be a design decision smuggled into a migration, which is exactly the failure
+  mode conventions item 1's "the query you are replacing is a specification" exists to prevent.
+
+  The fix shape already exists in this codebase and should not be re-derived: `MemberTransitionDialog
+.tsx`'s `convertToStaff` mutation handles the MIRROR direction (board_member → staff) correctly
+  already — when the person already has an account, it `UPDATE`s that row in place
+  (`role: 'staff', archived_at: null, ...`) rather than archiving it and inserting a fresh one.
+  `addBoardMember`'s own reuse branch was fixed the same way in the same review round (`archived_at =
+NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialog` or the
+  board_member-seating path should apply the identical "update in place" shape to the direction that
+  still dead-ends, rather than treating this as an open design question — it is not; only the wiring
+  is missing.
+
+- **A task dispatch's own "measured scope" can be wrong — verify against the file, or the plan's own
+  table, before trusting it (Task 4).** A dispatch summarizing this task claimed `MemberArchiveDialog.tsx`
+  was "already fully migrated, 0 supabase calls" and that only 2 raw inserts remained in
+  `MemberTransitionDialog.tsx`. Both were checked directly against the files (`grep -n '\.from('`,
+  accounting for a `supabase\n  .from(...)` line break the naive `grep "supabase\."` the dispatch
+  presumably used would miss) and were wrong: `MemberArchiveDialog.tsx` still had all 3 of its original
+  sites (1 read, 2 writes, both inside one `mutationFn`) — only its writer-invalidation lines had been
+  added, not its data layer; `MemberTransitionDialog.tsx` had all 7 (2 reads, 5 writes), exactly matching
+  the number the MASTER PLAN's own "measured scope" table already recorded at commit `a165049` — a
+  number that document had been carrying correctly the whole time. The plan document itself was the
+  authority to check against, and was right; the dispatch's own restatement of it was not. Re-run the
+  grep, or re-read the plan's own table, before accepting a summary's scope claim — the same "quote the
+  grep, not the number" discipline item 11 already states for marker counts applies just as much to a
+  file's own remaining-sites count.
+- **Recompute a client's destructive-option request server-side; do not trust the toggle
+  (Task 4).** `MemberArchiveDialog`'s "also archive the user account" switch is disabled client-side
+  when the person holds another active board seat — but a caller bypassing that UI could still send
+  `archiveAccount: true` for a person who, by the time the mutation runs, holds one. `archiveMembership`
+  answers this the way `addBoardMember`'s mutual-exclusivity check already answers a stronger version of
+  the same question ("check the ACTUAL database state, not what the client believes it to be"): it
+  recomputes `otherActiveCount` in the same transaction and silently declines to archive the account if
+  the answer disagrees with what the client assumed, rather than trusting the boolean or throwing on a
+  stale value. Silent decline, not a refusal, because this is a race on informational state the client
+  read moments earlier, not an authorization boundary — the caller is still allowed to archive the seat;
+  only the SECOND effect (archiving the account) is the one whose precondition gets re-checked. Contrast
+  with an FK from client input (item 3), which is always refused (`NOT_FOUND`) rather than silently
+  adjusted, because there the caller has no legitimate reading of "the row doesn't exist right now" to
+  race against — the two are different hazards and warrant different answers, not the same guard reused
+  twice.
+- **`AddPersonDialog.tsx`'s `invitation.insert` and `people.tsx`'s `boardMember.listByTown` markers are
+  still open — checked directly in Task 4, not assumed closed by Task 3's `boardMember` router.**
+  `board-member.ts`'s `insertInvitation` is a private helper used only by `addBoardMember`/
+  `addStaffMember`; it is not a callable procedure `AddPersonDialog` (which never seats anyone on a
+  board) could reach, and `AddPersonDialog`'s own flow — `person.insert` → `person.insertStaffAccount` →
+  a bare invitation write — has no seat to hang an invitation off of the way those two do.
+  `boardMember.roster` is scoped to ONE board and `boardMember.memberCount` returns a bare count;
+  neither answers `people.tsx`'s actual question ("for every person in the town, which board names do
+  they hold a seat on"), which needs a town-wide `board_member` JOIN `board` grouped by person — a
+  procedure that does not exist yet. Both markers stay exactly as they were.
+- **`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
+  re-labeled to a specific wave number in Task 4.** A dispatch for this task asked for it to be re-tagged
+  to "the wave that will own them," on the reasoning that `meeting`/`minutesDocument` are wave 3+ work —
+  correct as far as it goes (this wave's own "Measured scope" table and Global Constraints both say this
+  wave is board/membership only), but no wave 3–6 plan document exists yet (only
+  `2026-08-29-phase-e-wave-1-identity-and-settings.md`, `2026-08-29-phase-e-unit-0-boards-slice.md` and
+  this wave's own plan exist in `docs/superpowers/plans/` as of Task 4). Guessing a specific wave number
+  with nothing to check it against would be exactly the kind of unverified claim this document exists to
+  prevent. Left as `TODO(phase-e-wave-2)` — mis-scoped but honestly so — for whoever writes the wave 3
+  plan to retag with an actual number.

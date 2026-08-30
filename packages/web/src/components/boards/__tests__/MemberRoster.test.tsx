@@ -1,39 +1,26 @@
-import React from "react";
+/**
+ * MemberRoster — real options proxy, stubbed transport.
+ *
+ * Phase E, wave 2, Task 3. Was three `@tanstack/react-query` mocks keyed by
+ * invented query-key strings (`"members"`, `"userAccounts"`) — exactly the
+ * anti-pattern conventions item 8 exists to end: those keys matched nothing
+ * the app actually produces, so a deleted `boardMember.roster` read (or a
+ * missing invalidation call from any writer) could not have been caught.
+ * Rewritten on `installTRPCFetchStub`, per that item.
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import type { RouterOutputs } from "@/lib/trpc";
 
-// ─── Mock TanStack Query ──────────────────────────────────────────────
-
-const { mockUseQuery } = vi.hoisted(() => ({
-  mockUseQuery: vi.fn(),
-}));
-
-vi.mock("@tanstack/react-query", async () => {
-  const actual = await vi.importActual("@tanstack/react-query");
-  return {
-    ...(actual as object),
-    useQuery: (...args: unknown[]) => mockUseQuery(...args),
-    useQueryClient: vi.fn().mockReturnValue({ invalidateQueries: vi.fn() }),
-    useMutation: vi
-      .fn()
-      .mockReturnValue({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-  };
-});
-
-// ─── Mock Supabase ────────────────────────────────────────────────────
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: null, error: null }),
-      then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve),
-    }),
-  },
-}));
-
-// ─── Mock child dialogs ──────────────────────────────────────────────
+// `sendInviteMutation`/`resendInviteMutation` POST to the existing REST
+// endpoints (`/api/invitations/:id/send`/`/resend`), not tRPC —
+// `installTRPCFetchStub` only answers `/api/trpc/...`. Mocked directly so
+// those two mutations' `onSuccess` actually fires.
+const { apiJsonMock } = vi.hoisted(() => ({ apiJsonMock: vi.fn().mockResolvedValue({}) }));
+vi.mock("@/lib/api-client", () => ({ apiJson: apiJsonMock }));
 
 vi.mock("@/components/members/AddMemberDialog", () => ({
   AddMemberDialog: () => null,
@@ -48,70 +35,48 @@ vi.mock("@/components/members/EditGovTitleDialog", () => ({
   EditGovTitleDialog: () => null,
 }));
 
-// ─── Mock sonner ─────────────────────────────────────────────────────
-
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 import { MemberRoster } from "../MemberRoster";
 
-// ─── Helpers ─────────────────────────────────────────────────────────
+const queryClient = setupAppQueryClient();
 
-function makeMockData(
-  members: Array<{
-    id?: string;
-    person_id?: string;
-    name?: string;
-    email?: string;
-    status?: string;
-    is_default_rec_sec?: boolean;
-    seat_title?: string | null;
-    term_start?: string | null;
-    term_end?: string | null;
-    board_id?: string;
-  }>,
-  userAccounts?: Array<Record<string, unknown>>,
-) {
-  const defaultUAs =
-    userAccounts ??
-    members.map((m) => ({
-      id: `ua-${m.person_id ?? m.id ?? "p1"}`,
-      person_id: m.person_id ?? m.id ?? "p1",
-      town_id: "town-1",
-      role: "board_member",
-      gov_title: null,
-    }));
+type RosterRow = RouterOutputs["boardMember"]["roster"][number];
 
-  // board_member rows with embedded person object
-  const bmRows = members.map((m) => ({
-    id: m.id ?? "bm1",
-    person_id: m.person_id ?? m.id ?? "p1",
-    board_id: m.board_id ?? "board-1",
-    seat_title: m.seat_title ?? null,
-    term_start: m.term_start ?? null,
-    term_end: m.term_end ?? null,
-    status: m.status ?? "active",
-    is_default_rec_sec: m.is_default_rec_sec ?? false,
-    person: {
-      id: m.person_id ?? m.id ?? "p1",
-      name: m.name ?? "Test Person",
-      email: m.email ?? "test@test.com",
-      town_id: "town-1",
-    },
-  }));
-
-  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
-    const key = queryKey[0] as string;
-    if (key === "members") {
-      return { data: bmRows, isLoading: false, isFetching: false, error: undefined };
-    }
-    if (key === "userAccounts") {
-      return { data: defaultUAs, isLoading: false, isFetching: false, error: undefined };
-    }
-    return { data: [], isLoading: false, isFetching: false, error: undefined };
-  });
+function rosterRow(overrides: Partial<RosterRow> & { id: string; person_id: string }): RosterRow {
+  return {
+    board_id: "board-1",
+    seat_title: null,
+    term_start: null,
+    term_end: null,
+    status: "active",
+    is_default_rec_sec: false,
+    name: "Test Person",
+    email: "test@test.com",
+    user_account_id: null,
+    role: null,
+    gov_title: null,
+    user_account_archived_at: null,
+    invitation_id: null,
+    invitation_token: null,
+    invitation_status: null,
+    invitation_sent_at: null,
+    invitation_expires_at: null,
+    ...overrides,
+  };
 }
+
+/** Mutable so a test can change what the server returns between renders. */
+const server = { rows: [] as RosterRow[], rosterRejects: false };
+
+const stub = installTRPCFetchStub({
+  "boardMember.roster": () => {
+    if (server.rosterRejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return server.rows;
+  },
+});
 
 const defaultProps = {
   boardId: "board-1",
@@ -121,93 +86,169 @@ const defaultProps = {
   isArchived: false,
 };
 
-// ─── Tests ───────────────────────────────────────────────────────────
+function renderRoster(props = defaultProps) {
+  return renderWithProviders(<MemberRoster {...props} />, { queryClient });
+}
 
 describe("MemberRoster", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockUseQuery.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      error: undefined,
-    });
+    server.rows = [];
+    server.rosterRejects = false;
   });
 
-  it("renders member names from mock data", () => {
-    makeMockData([
-      { id: "bm1", person_id: "p1", name: "Alice Johnson" },
-      { id: "bm2", person_id: "p2", name: "Bob Smith" },
-    ]);
+  /**
+   * Regression pin for the whole-branch review's finding: this component had
+   * no `isError`/`role="alert"` branch, so a failed fetch fell through to
+   * the same "No members added yet" text a genuinely empty board renders —
+   * worse than a blank screen, since it tells an admin the board has no
+   * members when the read simply failed. Verified by mutation: deleting the
+   * `isRosterError` branch in `MemberRoster.tsx` makes this test fail with
+   * `Unable to find role="alert"` and leaves the misleading empty-state text
+   * on screen instead.
+   */
+  it("shows an error state, not the empty-member message, when the roster fetch fails", async () => {
+    server.rosterRejects = true;
+    renderRoster({ ...defaultProps, boardName: "Planning Board" });
 
-    render(<MemberRoster {...defaultProps} />);
+    expect(
+      await screen.findByText("Something went wrong loading Planning Board’s members."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/No members added yet/)).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Alice Johnson")).toBeInTheDocument();
-    expect(screen.getByText("Bob Smith")).toBeInTheDocument();
+  it("renders member names from the roster", async () => {
+    server.rows = [
+      rosterRow({ id: "bm1", person_id: "p1", name: "Alice Johnson" }),
+      rosterRow({ id: "bm2", person_id: "p2", name: "Bob Smith" }),
+    ];
+    renderRoster();
+
+    expect(await screen.findByText("Alice Johnson")).toBeInTheDocument();
+    expect(await screen.findByText("Bob Smith")).toBeInTheDocument();
   });
 
   it("shows Add Member button when board is not archived", () => {
-    makeMockData([]);
-    render(<MemberRoster {...defaultProps} isArchived={false} />);
-    // Empty state renders two Add Member buttons (header + CTA)
+    renderRoster({ ...defaultProps, isArchived: false });
     const addButtons = screen.getAllByText("Add Member");
     expect(addButtons.length).toBeGreaterThanOrEqual(1);
   });
 
   it("hides Add Member button when board is archived", () => {
-    makeMockData([]);
-    render(<MemberRoster {...defaultProps} isArchived={true} />);
+    renderRoster({ ...defaultProps, isArchived: true });
     expect(screen.queryByText("Add Member")).not.toBeInTheDocument();
   });
 
-  it("shows gov_title in parentheses next to name", () => {
-    makeMockData(
-      [{ id: "bm1", person_id: "p1", name: "Jane Doe" }],
-      [
-        {
-          id: "ua-p1",
-          person_id: "p1",
-          town_id: "town-1",
-          role: "staff",
-          gov_title: "Town Clerk",
-        },
-      ],
-    );
+  it("shows gov_title in parentheses next to name", async () => {
+    server.rows = [
+      rosterRow({
+        id: "bm1",
+        person_id: "p1",
+        name: "Jane Doe",
+        role: "staff",
+        gov_title: "Town Clerk",
+      }),
+    ];
+    renderRoster();
 
-    render(<MemberRoster {...defaultProps} />);
-
-    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
-    expect(screen.getByText("(Town Clerk)")).toBeInTheDocument();
+    expect(await screen.findByText("Jane Doe")).toBeInTheDocument();
+    expect(await screen.findByText("(Town Clerk)")).toBeInTheDocument();
   });
 
-  it("shows empty state message when no members", () => {
-    makeMockData([]);
-    render(<MemberRoster {...defaultProps} boardName="Planning Board" />);
+  it("shows empty state message when no members", async () => {
+    renderRoster({ ...defaultProps, boardName: "Planning Board" });
     expect(
-      screen.getByText("No members added yet. Add your Planning Board members to get started."),
+      await screen.findByText(
+        "No members added yet. Add your Planning Board members to get started.",
+      ),
     ).toBeInTheDocument();
   });
 
-  it("displays active count correctly", () => {
-    makeMockData([
-      { id: "bm1", person_id: "p1", name: "Alice", status: "active" },
-      { id: "bm2", person_id: "p2", name: "Bob", status: "active" },
-    ]);
+  it("displays active count correctly", async () => {
+    server.rows = [
+      rosterRow({ id: "bm1", person_id: "p1", name: "Alice", status: "active" }),
+      rosterRow({ id: "bm2", person_id: "p2", name: "Bob", status: "active" }),
+    ];
+    renderRoster();
 
-    render(<MemberRoster {...defaultProps} />);
-
-    expect(screen.getByText("2 active members")).toBeInTheDocument();
+    expect(await screen.findByText("2 active members")).toBeInTheDocument();
   });
 
-  it("hides archived members by default", () => {
-    makeMockData([
-      { id: "bm1", person_id: "p1", name: "Alice Active", status: "active" },
-      { id: "bm2", person_id: "p2", name: "Bob Archived", status: "archived" },
-    ]);
+  it("hides archived members by default", async () => {
+    server.rows = [
+      rosterRow({ id: "bm1", person_id: "p1", name: "Alice Active", status: "active" }),
+      rosterRow({ id: "bm2", person_id: "p2", name: "Bob Archived", status: "archived" }),
+    ];
+    renderRoster();
 
-    render(<MemberRoster {...defaultProps} />);
-
-    expect(screen.getByText("Alice Active")).toBeInTheDocument();
+    expect(await screen.findByText("Alice Active")).toBeInTheDocument();
     expect(screen.queryByText("Bob Archived")).not.toBeInTheDocument();
+  });
+
+  /**
+   * `sendInviteMutation`/`resendInviteMutation` — this file's own header
+   * used to claim `queryKeys.invitations.byTown` had "no reader left
+   * anywhere in the app" as the reason their invalidation moved onto
+   * `trpc.boardMember.pathFilter()`, but that move had never actually been
+   * exercised: deleting BOTH lines left the whole 355-test web suite green.
+   * Each gets its own pin below, verified by deletion in the fix report.
+   *
+   * Asserts a REFETCH (`stub.countFor` increasing), not `isInvalidated`:
+   * `MemberRoster` is itself the active observer of `boardMember.roster` for
+   * this exact `boardId`, so `invalidateQueries` triggers an immediate
+   * refetch under `setupAppQueryClient()`'s `staleTime: 0` — by the time a
+   * `waitFor` polls `isInvalidated`, the refetch may have already completed
+   * and cleared it, which is a race the `isInvalidated` shape (correct for
+   * `ArchiveBoardDialog`'s tests, where the target query has no live
+   * observer in that test) cannot see through here.
+   */
+  it("invalidates trpc.boardMember.pathFilter() after sending an invitation", async () => {
+    server.rows = [
+      rosterRow({
+        id: "bm1",
+        person_id: "p1",
+        name: "Jamie Clerk",
+        invitation_id: "inv-1",
+        invitation_status: "pending",
+        invitation_sent_at: null,
+      }),
+    ];
+
+    const { user } = renderRoster();
+    await screen.findByText("Jamie Clerk");
+    const before = stub.countFor("boardMember.roster");
+
+    await user.click(screen.getByTitle("Send invitation email"));
+
+    await waitFor(() =>
+      expect(apiJsonMock).toHaveBeenCalledWith("/api/invitations/inv-1/send", { method: "POST" }),
+    );
+    await waitFor(() => expect(stub.countFor("boardMember.roster")).toBeGreaterThan(before));
+  });
+
+  it("invalidates trpc.boardMember.pathFilter() after resending an invitation", async () => {
+    server.rows = [
+      rosterRow({
+        id: "bm1",
+        person_id: "p1",
+        name: "Jamie Clerk",
+        invitation_id: "inv-1",
+        invitation_status: "expired",
+        invitation_sent_at: "2026-01-01T00:00:00Z",
+      }),
+    ];
+
+    const { user } = renderRoster();
+    await screen.findByText("Jamie Clerk");
+    const before = stub.countFor("boardMember.roster");
+
+    await user.click(screen.getByTitle("Resend invitation"));
+
+    await waitFor(() =>
+      expect(apiJsonMock).toHaveBeenCalledWith("/api/invitations/inv-1/resend", {
+        method: "POST",
+      }),
+    );
+    await waitFor(() => expect(stub.countFor("boardMember.roster")).toBeGreaterThan(before));
   });
 });

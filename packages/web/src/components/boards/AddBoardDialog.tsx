@@ -1,16 +1,21 @@
 /**
  * AddBoardDialog — dialog for creating a new board.
  *
- * Uses useWizardForm + Zod for validation. Writes via Supabase mutation.
- * Navigates to the new board's detail page on success.
+ * Uses useWizardForm + Zod for validation. Writes via `trpc.board.insert`
+ * (wave 2, Task 2 — previously a raw Supabase insert; see that procedure's
+ * own doc comment for exactly which fields it hardcodes or omits versus what
+ * this dialog used to send directly, e.g. `board_type`/`district_based`/
+ * `staggered_terms`/`is_governing_board` all stay at their DB defaults, and
+ * `officer_election_method` is hardcoded server-side to `'vote_of_board'`,
+ * matching what this dialog always sent). Navigates to the new board's
+ * detail page on success.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -68,13 +73,12 @@ const INITIAL: AddBoardData = {
 
 interface AddBoardDialogProps {
   townId: string;
-  town: Record<string, unknown> | undefined;
+  town: RouterOutputs["town"]["detail"] | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [seatTitles, setSeatTitles] = useState<string[]>([]);
@@ -108,58 +112,54 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
     return titles.slice(0, count);
   }, [values.election_method, values.member_count, seatTitles]);
 
-  const insertMutation = useMutation({
-    mutationFn: async (data: AddBoardData) => {
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      const formality = data.meeting_formality_override || null;
-      const minutesStyle = data.minutes_style_override || null;
-
-      const { error } = await supabase.from("board").insert({
-        id,
-        town_id: townId,
-        name: data.name,
-        board_type: "other",
-        elected_or_appointed: data.elected_or_appointed,
-        member_count: data.member_count,
-        election_method: data.election_method,
-        officer_election_method: "vote_of_board",
-        district_based: false,
-        staggered_terms: false,
-        is_governing_board: false,
-        meeting_formality_override: formality,
-        minutes_style_override: minutesStyle,
-        quorum_type: data.quorum_type,
-        quorum_value: data.quorum_value,
-        motion_display_format: data.motion_display_format,
-        created_at: now,
-      });
-      if (error) throw error;
-      return id;
-    },
-    onSuccess: (id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
-      // `ProgressChecklist`'s `totalSeats` and notice-template-count rows
-      // read `board.list` now (Phase E, wave 1, Task 5), not the legacy
-      // `queryKeys.boards.byTown` key this dialog still invalidates above
-      // for the (still-unmigrated) `/boards` list screen. Without this line
-      // a new board's seats and "N of M boards configured" denominator
-      // stayed stale for up to the 60s `staleTime` — see
-      // `AddBoardDialog.test.tsx` for the pin (conventions item 7/8: found
-      // by the review round after Task 5, the third time this exact shape
-      // of gap shipped in this wave).
-      void queryClient.invalidateQueries(trpc.board.pathFilter());
-      onOpenChange(false);
-      void navigate(`/boards/${id}`);
-    },
-  });
+  const insertMutation = useMutation(
+    trpc.board.insert.mutationOptions({
+      onSuccess: ({ id }) => {
+        // `/boards` (`routes/boards.tsx`) reads `board.list` now (wave 2,
+        // Task 2), not this legacy key — but `CommandPalette`,
+        // `PermissionOverrideView`, `StaffAccountFlow`, `MemberTransitionDialog`
+        // and `routes/{home,meetings}.tsx` still do, so this invalidation
+        // stays during the transition (conventions item 7).
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+        // `ProgressChecklist`'s `totalSeats` and notice-template-count rows,
+        // and now `/boards` itself, read `trpc.board.list`/`listActive` —
+        // this is the invalidation that reaches both. Without it a new
+        // board's seats and "N of M boards configured" denominator stayed
+        // stale for up to the 60s `staleTime` — see `AddBoardDialog.test.tsx`
+        // for the pin (conventions item 7/8: found by the review round after
+        // wave 1 Task 5, the third time this exact shape of gap shipped in
+        // that wave).
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        onOpenChange(false);
+        void navigate(`/boards/${id}`);
+      },
+    }),
+  );
 
   const isSaving = insertMutation.isPending;
 
   const handleSave = useCallback(async () => {
     const data = validate();
     if (!data) return;
-    await insertMutation.mutateAsync(data);
+    // `board.insert`'s schema wants `null`, not `""`, for "use the town
+    // default" — the same coercion the pre-migration Supabase insert did
+    // inline. `seatTitles`/`effectiveSeatTitles` are collected above but were
+    // never actually sent by the mutation this replaces either (checked
+    // against the Supabase insert payload this dialog used to send) — left
+    // as-is, not a gap this task was asked to close.
+    await insertMutation.mutateAsync({
+      ...data,
+      meeting_formality_override: (data.meeting_formality_override || null) as
+        | "informal"
+        | "semi_formal"
+        | "formal"
+        | null,
+      minutes_style_override: (data.minutes_style_override || null) as
+        | "action"
+        | "summary"
+        | "narrative"
+        | null,
+    });
   }, [validate, insertMutation]);
 
   return (

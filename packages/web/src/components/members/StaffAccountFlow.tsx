@@ -8,8 +8,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
-import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   DEFAULT_PERMISSION_TEMPLATES,
@@ -51,34 +50,28 @@ export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlo
   const [selectedBoardIds, setSelectedBoardIds] = useState<string[]>([]);
   const [govTitle, setGovTitle] = useState("");
 
-  const supabase = useSupabase();
-
-  // TODO(phase-e-wave-2): board.listByTown (or equivalent) — no procedure
-  // exists yet that lists every board for a town; `board.ts` today only
-  // reads a single board by id (`detail`/`stats`/`recentMeetings`).
-  // Fetch active boards for board-specific selection
+  // Phase E, wave 2, Task 3 — was a raw Supabase read of `board`, filtered
+  // to `archived_at IS NULL` (the marker this closed named `board.listByTown`,
+  // but `board.listActive` — shipped in wave 2, Task 2 — already answers the
+  // identical "every active board" question with the identical archived-board
+  // exclusion; see that procedure's own doc comment for why it is NOT
+  // `board.list`, which deliberately includes archived boards for its two
+  // other callers). `townId` comes off the caller's own tenant context on
+  // the server, not from this component, so it is no longer a query input.
+  //
+  // Order changed, undocumented until this review round: the Supabase read
+  // this replaced ordered by `name` only; `board.listActive` orders
+  // `is_governing_board DESC, name ASC` (for `settings.town.tsx`'s "governing
+  // board sorts first" need — see that procedure's own doc comment). This
+  // board-selection checkbox list renders in that governing-board-first
+  // order now, not strict alphabetical. Same rows, harmless reorder — no
+  // other caller of `board.listActive` needs strict alphabetical order
+  // either, so a third procedure was not worth adding for this.
   const { data: boardRows = [] } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,
   });
-  const boards = useMemo(
-    () =>
-      ((boardRows ?? []) as Record<string, unknown>[]).map((b) => ({
-        id: String(b.id),
-        name: String(b.name),
-      })),
-    [boardRows],
-  );
+  const boards = useMemo(() => boardRows.map((b) => ({ id: b.id, name: b.name })), [boardRows]);
 
   const needsBoardSelection =
     selectedTemplate?.scope === "designated_boards" && selectedBoardIds.length === 0;

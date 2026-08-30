@@ -17,13 +17,12 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isTRPCClientError } from "@trpc/client";
 import { z } from "zod";
 import { Loader2, ChevronLeft, IdCard, UserCog } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import {
   Dialog,
@@ -79,11 +78,6 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
     setStep(1);
     setMode("choose");
     personForm.setValues(INITIAL_PERSON);
-  }
-
-  /** The message a CONFLICT ("email already in use") carries; a generic one otherwise. */
-  function errorMessage(err: unknown, fallback: string): string {
-    return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
   }
 
   const insertPerson = useMutation(trpc.person.insert.mutationOptions());
@@ -150,9 +144,15 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
       void queryClient.invalidateQueries({
         queryKey: queryKeys.persons.byTown(townId),
       });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.userAccounts.byTown(townId),
-      });
+      // `queryKeys.userAccounts.byTown` invalidation removed (Phase E, wave
+      // 2, Task 3 fix round): Task 3 moved `MemberRoster.tsx`/
+      // `AddMemberDialog.tsx`'s reads off that key onto `boardMember.roster`/
+      // `.searchCandidates`, which were its last two readers — nothing in
+      // the app reads `queryKeys.userAccounts.byTown` any more
+      // (`grep -rn "queryKeys\.userAccounts\.byTown" packages/web/src`),
+      // so invalidating it here was dead. Per conventions item 7, "the
+      // legacy line stays because other, unmigrated screens still read that
+      // key. It goes when the last legacy reader does" — it just did.
       void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added as staff — invitation sent`);
       reset();

@@ -83,6 +83,12 @@ export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: Archiv
       // the legacy factory, and the writer should not need to know which of
       // `board`'s procedures a given screen happens to call.
       void queryClient.invalidateQueries(trpc.board.pathFilter());
+      // Archives every active `board_member` row on this board —
+      // `MemberRoster.tsx`'s roster read moved onto `boardMember.roster`
+      // (Phase E, wave 2, Task 3), a fourth writer of the legacy
+      // `queryKeys.members.byBoard` key that missed this call in that
+      // task's own commit; caught in review.
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       onOpenChange(false);
       setConfirmation("");
       void navigate("/boards");

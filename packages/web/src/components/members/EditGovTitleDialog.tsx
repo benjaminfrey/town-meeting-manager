@@ -11,6 +11,10 @@
  * holder. This dialog is currently only opened from `MemberRoster`
  * (Board → Members), which is admin-gated in the UI already; the server gate
  * is now the actual enforcement, not a belt-and-braces duplicate of it.
+ *
+ * Phase E, wave 2, Task 3 — also invalidates `trpc.boardMember.pathFilter()`:
+ * `MemberRoster.tsx`'s roster read moved onto `boardMember.roster`, which
+ * selects `gov_title`.
  */
 
 import { useState } from "react";
@@ -63,6 +67,10 @@ export function EditGovTitleDialog({
           });
         }
         void queryClient.invalidateQueries(trpc.person.pathFilter());
+        // `MemberRoster.tsx` reads its roster through `boardMember.roster`
+        // now (Phase E, wave 2, Task 3), which selects `gov_title` — the
+        // exact column this mutation writes.
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
         onOpenChange(false);
       },
     }),

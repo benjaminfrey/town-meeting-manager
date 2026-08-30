@@ -18,10 +18,13 @@
  *     `AppRouter`, so renaming a column here is a compile error rather than a
  *     green test against a shape the server does not return.
  *
- * `town` and the agenda-template count still read through `@/lib/supabase` in
- * the component (see its comment), so that module is mocked too, just enough
- * that those two queries resolve instead of hitting a real network client in
- * jsdom.
+ * `town` still reads through `@/lib/supabase` in the component (see its
+ * comment — not this task's file list), so that module is mocked too, just
+ * enough that the query resolves instead of hitting a real network client in
+ * jsdom. The Overview tab's template count moved onto
+ * `trpc.agendaTemplate.countForBoard` in wave 2, Task 2 — stubbed below like
+ * `board.detail`/`board.stats`/`board.recentMeetings`, not through the
+ * Supabase mock.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,7 +34,7 @@ import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import BoardDetailPage from "../boards.$boardId";
 
-// ─── Mock Supabase (only town + template-count reads still use it) ─────────
+// ─── Mock Supabase (only the town read still uses it) ──────────────────────
 
 vi.mock("@/lib/supabase", () => {
   const chain: Record<string, unknown> = {};
@@ -67,6 +70,7 @@ const stub = installTRPCFetchStub({
     return {
       id: "b1",
       name: server.boardName,
+      board_type: "select_board",
       elected_or_appointed: "elected",
       member_count: 5,
       election_method: "at_large",
@@ -89,6 +93,7 @@ const stub = installTRPCFetchStub({
   },
   "board.stats": () => ({ active_members: 3, meetings: 7 }),
   "board.recentMeetings": () => [],
+  "agendaTemplate.countForBoard": () => 2,
 });
 
 function renderRoute(boardId: string) {
@@ -113,6 +118,9 @@ describe("board detail", () => {
     expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
     expect(await screen.findByText("3 members")).toBeInTheDocument();
     expect(await screen.findByText("7 meetings")).toBeInTheDocument();
+    // `agendaTemplate.countForBoard` (wave 2, Task 2) — the Overview tab's
+    // template count, no longer read off `@/lib/supabase`.
+    expect(await screen.findByText("2 templates")).toBeInTheDocument();
   });
 
   it("shows an error state when a query rejects, not an empty page", async () => {

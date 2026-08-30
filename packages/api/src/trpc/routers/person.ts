@@ -146,8 +146,13 @@ function isAccountAlreadyExistsCollision(err: unknown): boolean {
  * reference it by id — see this file's header for why `insertStaffAccount`
  * needs this and `update`/`updateGovTitle` do not (their own UPDATE is
  * itself RLS-scoped; there is no FK to bypass).
+ *
+ * Exported (Phase E, wave 2, Task 3) so `board-member.ts` can run the
+ * identical check for its own FK-bearing writes (`addBoardMember`,
+ * `addStaffMember`) rather than duplicating the query — the same reuse
+ * `board.ts` already set up for `assertBoardExists`.
  */
-async function assertPersonExists(tx: TenantTx, personId: string): Promise<void> {
+export async function assertPersonExists(tx: TenantTx, personId: string): Promise<void> {
   const rows = toRows<{ id: string }>(
     await tx.execute(sql`SELECT id FROM person WHERE id = ${personId}`),
     (message) => new Error(`person.assertPersonExists: ${message}`),
@@ -171,8 +176,12 @@ async function assertPersonExists(tx: TenantTx, personId: string): Promise<void>
  * procedure does not call `normalisePermissionsMatrix` either; it persists
  * exactly the object the client sent, the same as `AddPersonDialog`'s
  * current direct Supabase insert does.
+ *
+ * Exported (Phase E, wave 2, Task 3) so `board-member.ts`'s `addStaffMember`
+ * — `AddMemberDialog`'s staff path — can reuse this exact contract rather
+ * than redeclaring it with a chance to narrow it by accident.
  */
-const PermissionsMatrixInput = z.object({
+export const PermissionsMatrixInput = z.object({
   global: z.record(z.string(), z.boolean()).default({}),
   board_overrides: z
     .array(
@@ -461,5 +470,44 @@ export const personRouter = router({
       );
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
       return { user_account_id: input.userAccountId, gov_title: govTitle };
+    }),
+
+  /**
+   * `RoleConflictDialog.tsx`'s write (Phase E, wave 2, Task 4): archive a
+   * `user_account` to resolve a staff/board_member mutual-exclusivity
+   * conflict before seating a person as the other role.
+   *
+   * Same guard shape as `updateGovTitle` immediately above, for the same
+   * reason: `archived_at` is also one of `ADMIN_ONLY_USER_ACCOUNT_COLUMNS`,
+   * so `requireOwnAccountColumns(["archived_at"])` refuses EVERY non-admin
+   * caller — including one archiving their own account — which is the
+   * correct answer here too: this dialog is only ever reached from an
+   * admin's Board → Members roster screen, never a self-service flow.
+   *
+   * NOT_FOUND parity: `user_account_tenant_isolation` scopes the UPDATE the
+   * same way it does for `updateGovTitle`.
+   *
+   * Does not itself resolve the "archived account still blocks a new seat"
+   * gap `phase-e-conventions.md`'s Known-gaps entry names — that is
+   * `addBoardMember`'s reactivation branch reading an already-archived row,
+   * which this procedure's own write makes possible; nothing here needs to
+   * change for that fix, only the seating path.
+   */
+  archiveUserAccount: protectedProcedure
+    .use(requireOwnAccountColumns(["archived_at"]))
+    .input(z.object({ userAccountId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const rows = await ctx.withTenant(async (tx) =>
+        toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE user_account SET archived_at = now()
+            WHERE id = ${input.userAccountId}
+            RETURNING id
+          `),
+          (message) => new Error(`person.archiveUserAccount: ${message}`),
+        ),
+      );
+      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+      return { user_account_id: input.userAccountId };
     }),
 });

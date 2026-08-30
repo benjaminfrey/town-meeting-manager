@@ -1,42 +1,21 @@
 /**
- * `AddBoardDialog`'s cache invalidation.
+ * `AddBoardDialog` — `trpc.board.insert` on tRPC, and its cache invalidation.
  *
- * Review finding on Task 5 of Phase E, wave 1: `ProgressChecklist` moved its
- * `totalSeats` and notice-template-count reads onto `trpc.board.list` (that
- * task), but nothing checked whether every WRITER of the key those reads
- * abandoned (`queryKeys.boards.byTown`) had picked up the new one — see
- * conventions item 7's "a read owns its key" rule and item 8's "pin the
- * writers, not just the readers". `AddBoardDialog` was the one board writer
- * without `trpc.board.pathFilter()` (`EditBoardDialog`, `ArchiveBoardDialog`
- * and `NoticeTemplateEditor` all had it already) — proven by a reviewer:
- * invalidating `queryKeys.boards.byTown` does not reach `trpc.board.list`'s
- * cache entry, so creating a board left the checklist's seat total and
- * board-configured denominator stale for up to the 60s `staleTime`.
- *
- * Same shape as `EditBoardDialog.test.tsx`: the real options proxy and the
- * real `QueryClient` singleton run, Supabase mocked only at
- * `@/hooks/useSupabase`. Deleting `AddBoardDialog`'s `pathFilter()` line
- * turns this red.
+ * Wave 2, Task 2 converted this dialog's write from a raw Supabase insert to
+ * `trpc.board.insert` — see that component's own doc comment. Real options
+ * proxy, real `QueryClient` singleton, only `globalThis.fetch` replaced (see
+ * `boards.$boardId.test.tsx` for why that distinction matters). This
+ * supersedes the previous version of this file, which mocked
+ * `@/hooks/useSupabase` directly; the underlying finding it pinned —
+ * `AddBoardDialog` was the one board writer missing `trpc.board.pathFilter()`
+ * — is unchanged and still covered below.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub } from "@/test/trpc";
 import { trpc, type RouterOutputs } from "@/lib/trpc";
-
-const { inserts } = vi.hoisted(() => ({ inserts: [] as string[] }));
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: (table: string) => ({
-      insert: () => {
-        inserts.push(table);
-        return Promise.resolve({ data: null, error: null });
-      },
-    }),
-  }),
-}));
-
 import { AddBoardDialog } from "../AddBoardDialog";
 
 const queryClient = setupAppQueryClient();
@@ -46,7 +25,15 @@ const boardListRow: RouterOutputs["board"]["list"][number] = {
   name: "Existing Board",
   notice_template_blocks: null,
   member_count: 3,
+  elected_or_appointed: "elected",
+  archived_at: null,
+  is_governing_board: false,
+  active_member_count: 2,
 };
+
+const stub = installTRPCFetchStub({
+  "board.insert": (input) => ({ id: "new-board", name: input.name }),
+});
 
 async function create() {
   const listKey = trpc.board.list.queryOptions().queryKey;
@@ -65,13 +52,18 @@ async function create() {
   const createButton = await screen.findByRole("button", { name: /create board/i });
   await waitFor(() => expect(createButton).not.toBeDisabled());
   await user.click(createButton);
-  await waitFor(() => expect(inserts).toContain("board"));
+  await waitFor(() => expect(stub.countFor("board.insert")).toBe(1));
 
   return { listKey };
 }
 
-describe("AddBoardDialog cache invalidation", () => {
-  it("invalidates trpc.board.pathFilter() — the key ProgressChecklist's totalSeats/template counts read under", async () => {
+describe("AddBoardDialog", () => {
+  it("submits the new board through trpc.board.insert", async () => {
+    await create();
+    expect(stub.calls[0]?.inputs["0"]).toMatchObject({ name: "Zoning Board" });
+  });
+
+  it("invalidates trpc.board.pathFilter() — the key ProgressChecklist's totalSeats/template counts and /boards read under", async () => {
     const { listKey } = await create();
     await waitFor(() => expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true));
   });
