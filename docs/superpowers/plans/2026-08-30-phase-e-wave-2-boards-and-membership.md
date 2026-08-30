@@ -67,9 +67,15 @@ Rules: `assertCanInsertBoard`, `assertCanUpdateBoard`, `assertCanInsert/Update/D
 
 ## Task 2: Board list, detail tabs, and templates
 
-**Files:** `routes/boards.tsx`, `routes/boards.$boardId.tsx`, `routes/boards.$boardId.templates.tsx`, `components/boards/AddBoardDialog.tsx`, `EditBoardDialog.tsx`.
+**Files:** `routes/boards.tsx`, `routes/boards.$boardId.tsx`, `routes/boards.$boardId.templates.tsx`, `components/boards/AddBoardDialog.tsx`, `EditBoardDialog.tsx`, **`routes/settings.town.tsx`**, **`components/dashboard/ProgressChecklist.tsx`**.
+
+**The last two were missing from this plan** — a gap the Task 1 review caught. Their `TODO(phase-e-wave-2)` markers name `board.byTown` and `boardMember.countByTown`, which Task 1 shipped as `board.listActive` and `board.memberCount`. Without them, both procedures ship with **no consumer** and both markers survive Task 5's sweep. Wire them and remove the markers.
+
+**Two known facts about those files.** `settings.town.tsx` reads exactly `id, name, is_governing_board, member_count, election_method, officer_election_method` — precisely `listActive`'s six columns, verified. And `listActive` orders governing-boards-first, which matches `settings.town.tsx`'s own query but not `StaffAccountFlow`'s; if a consumer needs alphabetical, sort at the call site rather than adding a second procedure.
 
 `boards.$boardId.tsx` was partly migrated in unit 0 — its Overview tab reads `board.detail`. The remaining tabs and its `TODO(phase-e-wave-2)` marker are yours. `AddBoardDialog` and `EditBoardDialog` already invalidate `trpc.board.pathFilter()`; check what exists before adding.
+
+**`EditBoardDialog.tsx` writes `updated_at`, a column the `board` table does not have** — confirmed against both `schema.ts` and the live database. The untyped Supabase client let it compile; PostgREST would reject it. `board.update` correctly drops it. This is the **second** instance of this shape (wave 1 found `EditGovTitleDialog` writing `updated_at` to `user_account`), so treat a stray `updated_at` in any payload you migrate as suspect until you have checked the schema.
 
 `boards.$boardId.templates.tsx` has four writes against `agenda_template`. Note `unit 0`'s `board.detail` returns `notice_template_blocks`; do not duplicate that read.
 
@@ -77,7 +83,9 @@ Rules: `assertCanInsertBoard`, `assertCanUpdateBoard`, `assertCanInsert/Update/D
 
 ## Task 3: The board roster and AddMemberDialog
 
-**Files:** `components/boards/MemberRoster.tsx`, `components/members/AddMemberDialog.tsx`, `StaffAccountFlow.tsx`, `PermissionOverrideView.tsx`.
+**Files:** `components/boards/MemberRoster.tsx`, `components/members/AddMemberDialog.tsx`, `StaffAccountFlow.tsx`, `PermissionOverrideView.tsx`, and a new `packages/api/src/trpc/routers/board-member.ts`.
+
+**Move `board.memberCount` into the new `boardMember` router as your first step.** Task 1 put it in `board.ts` because no `boardMember` router existed; its subject is `board_member` rows keyed to the town, so it is the wrong noun by item 1. It has **zero consumers until Task 2 wires it**, so moving it is free now and stops being free later — coordinate with Task 2 if that has already landed.
 
 **This is the largest single file in Phase E — 14 sites, 9 writes — and the most dangerous.** Three reasons:
 
