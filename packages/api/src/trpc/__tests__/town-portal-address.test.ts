@@ -130,4 +130,36 @@ describe("town.setPortalAddress", () => {
       });
     });
   });
+
+  /**
+   * The reorder pin (conventions item 2/13), added when Task 5 of wave 1
+   * converted this procedure from resolver form to
+   * `.use(requireActor(...)).input(...)`. The test above proves the guard
+   * exists — but only with input (`"newcastle"`) that parses either way, so
+   * it cannot tell a correctly-ordered guard from one declared after
+   * `.input()`: with valid input the parser succeeds regardless of order,
+   * and the guard is what answers FORBIDDEN either way. This test sends a
+   * refused caller AND input that fails the schema's own `min(1)` — with
+   * `.use()` correctly declared first, the guard throws FORBIDDEN before the
+   * parser ever runs (probe 1, conventions item 2); if `.use()` were moved
+   * after `.input()`, the parser would run first and answer BAD_REQUEST
+   * before the guard got a chance, which is the exact defect
+   * `town.updateProfile`'s own reorder pin
+   * (`routers/__tests__/town.test.ts`) exists to catch on that procedure.
+   * Verified the same way that one was: moved this procedure's `.use(...)`
+   * to after `.input(...)` and re-ran this file — this test went red with
+   * `BAD_REQUEST`, restored byte-identical. See the task report for output.
+   */
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db, "Newcastle");
+      const actor = await seedActor(db, town, { role: "staff" });
+
+      const err = await expectTrpcError(() =>
+        callerFor(contextFor(db, town, actor)).setPortalAddress({ subdomain: "" }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
+    });
+  });
 });

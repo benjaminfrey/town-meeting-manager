@@ -206,10 +206,17 @@ because its schema (`z.object({ subdomain: z.string() })`) is too permissive for
 to fail — `setPortalAddress` itself is not yet converted to the middleware form as of this fix round
 (see its own doc comment in `town.ts` for why, and that it still owes the conversion).
 
-Status today: the Actor-only middleware form (`requireActor`) is exercised — the four `town.*`
-mutations, with tests, each guard re-verified by deletion after the conversion, AND `updateProfile`
-specifically carries a second pin that catches a REORDER (`.use()` moved back after `.input()`), not
-only a deletion — see item 13 for why that distinction matters and could not be skipped. The
+Status today: the Actor-only middleware form (`requireActor`) is exercised — six `town.*`
+mutations now: `updateProfile`, `updateMeetingDefaults`, `updateMeetingRoles`,
+`acknowledgeRetentionPolicy` (Task 2's fix round) and `updateMinutesWorkflow` (Task 4) were already
+converted; Task 5 converts `setPortalAddress`, the sixth and last write in `town.ts`, with tests,
+each guard re-verified by deletion after the conversion, AND `updateProfile` AND `setPortalAddress`
+specifically carry a second pin that catches
+a REORDER (`.use()` moved back after `.input()`), not only a deletion — see item 13 for why that
+distinction matters and could not be skipped. `setPortalAddress`'s own reorder pin is also the proof
+that the item 2 rewrite's diagnosis was right: its schema used to be a bare `z.string()`, "too
+permissive for almost any string to fail," and literally could not have supported a reorder pin
+until Task 5 tightened it — see that procedure's own doc comment. The
 `PermissionCode` form (`requirePermission`) declared before `.input()` is exercised too, in
 `require-permission.test.ts`'s synthetic router, including its own reorder pin — but has **zero
 call sites in a real procedure**; every real Actor-only write so far is an admin gate
@@ -781,14 +788,24 @@ Quote the grep, not the number — the count moves with what you match, which is
 
 ```
 $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
-26
+24
 $ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
-63
+59
 ```
 
-(Re-run at Task 2's fix round — the second number was 67 when this item was written and had already
-drifted to 63 one wave later. Quote the grep, not the number, is the rule this drift itself
-demonstrates: re-run it rather than trusting either figure.)
+(Re-run at Task 5, the close of wave 1: 24 and 59, down from 26 and 63 at Task 2's fix round, which
+was itself down from 67 one wave earlier. Quote the grep, not the number, is the rule this drift
+itself demonstrates: re-run it rather than trusting any of these three figures.)
+
+`grep -rn "TODO(phase-e-wave" packages/web/src | wc -l` answers **15** at the same point — UP from
+whatever it was before Task 5, not down, because Task 5 added two new deliberate gaps
+(`ProgressChecklist.tsx`'s `memberCount`, `home.tsx`'s three remaining Supabase reads) at the same
+time it closed two others (`home.tsx`'s town read migrated onto `town.detail`;
+`boards.$boardId.tsx`'s marker was already narrowed to one item by Task 2, confirmed still accurate
+by Task 5, not touched further). This countdown is not monotonic within a wave — a task can
+legitimately raise it by naming a gap explicitly that was previously silent. It only has to reach
+zero once `packages/web/src/lib/supabase.ts` itself is deleted (see this item's own closing
+paragraph); tracking it per-task is for visibility, not for proving progress every single time.
 
 The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
 and a file reaching it that way is no more migrated than one importing directly.
@@ -931,11 +948,27 @@ runs.
   nothing in this repository encrypts or decrypts it — `lib/postmark.ts` reads and uses it as a
   plaintext token (see that file's own doc comment). Any future write path for this column inherits
   that contradiction and should not paper over it.
-- `setPortalAddress` (`packages/api/src/trpc/routers/town.ts`) is still resolver-form, not
-  `requireActor`-form, as of Task 2's fix round. Its own permissive schema means the ordering
-  defect item 2 describes cannot fire on it today, but it is inconsistent with every other write in
-  the same file and owes the conversion — see its doc comment.
+- ~~`setPortalAddress` is still resolver-form~~ — **closed in Task 5.** Converted to
+  `.use(requireActor(assertCanUpdateTown)).input(...)`, and the schema tightened from a bare
+  `z.string()` to `min`/`max` on `SUBDOMAIN_MAX_LENGTH`, which is what let the reorder pin exist at
+  all (`packages/api/src/trpc/__tests__/town-portal-address.test.ts`) — see `town.ts`'s own doc
+  comment on that procedure. Same task also gave it its first UI caller ever
+  (`SetPortalAddressModal.tsx`, opened from `ProgressChecklist`'s "portal-subdomain" row) — the
+  mutation had existed since Phase D with nothing in the product able to call it.
 - `TestHandlers` rejects a missing field but accepts an extra one (item 8).
+- `test/trpc.ts`'s `TestErrorCode` union had five members, not every code a real procedure can
+  answer — found in Task 5 writing `SetPortalAddressModal.test.tsx`, the first test in this codebase
+  to simulate a MUTATION's error response rather than a query's. `trpcTestError("CONFLICT")`
+  typechecked fine (the string is not itself constrained at the call site) and failed at runtime with
+  `TransformResultError: Unable to transform response from server` — `@trpc/client`'s own
+  `transformResult` requires a numeric `error.error.code`, and `JSONRPC_CODE`/`HTTP_STATUS` being
+  `Record<TestErrorCode, number>` had no `CONFLICT` entry to look up, so the envelope built
+  `{ code: undefined, ... }`. Not a compile-time gap — nothing in `TestHandlers`' own typing catches
+  an error CODE the way it catches an output SHAPE. Fixed by adding `CONFLICT` to the union and both
+  records (`-32009` / `409`, from `@trpc/server`'s own `TRPC_ERROR_CODES_BY_KEY`); the same shape of
+  gap exists for every other `TRPC_ERROR_CODE_KEY` this harness does not yet list
+  (`PAYMENT_REQUIRED`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, …) — add the next one the same
+  way, at the point a real procedure needs a test to simulate it, not preemptively.
 - `MockAuthProvider` is directly named in 4 files (`grep -rl "MockAuthProvider" packages/web/src`:
   `test/render.ts` and `test/mocks/auth-mock.ts`, where it is defined and wraps every render, plus
   `PermissionGate.test.tsx` and `boards.$boardId.test.tsx`, the two tests that reach it by name). It
@@ -943,9 +976,43 @@ runs.
   implicitly — `render.ts` wraps every render in it unconditionally — so retiring it touches every
   caller, not only the 4 that name it.
 - `router-wiring.test.ts` pins only the procedure names it lists.
-- `boards.$boardId.tsx` still reads two things through `@/lib/supabase` because no procedure exists
-  for them yet: town settings (the Overview "effective settings" rows, and the defaults passed to
-  `EditBoardDialog`/`MinutesWorkflowEditor`) and the agenda template count. Both are marked with
-  `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard` in that file (item 11) — the
-  screen still owes a `town.detail` router and an `agendaTemplate` router before the last two
-  Supabase reads leave it.
+- `boards.$boardId.tsx` still reads two things through `@/lib/supabase`: town settings (the
+  Overview "effective settings" rows, and the defaults passed to
+  `EditBoardDialog`/`MinutesWorkflowEditor`) and the agenda template count. **Not the same gap for
+  both, as of Task 5 (confirmed, not newly true — Task 2's fix round already narrowed the marker
+  this way):** `town.detail` shipped in Task 1, so the town-settings read has a procedure to move
+  onto and simply has not been migrated to it yet — real work (retyping two components' props,
+  re-checking the effective-settings mapping), not a missing router. The agenda-template count is
+  the only one with genuinely **no procedure at all**. The file's own marker reflects exactly this:
+  `// TODO(phase-e-wave-2): agendaTemplate.countForBoard` — one item, not two, and has read that way
+  since Task 2. An earlier version of this bullet (through Task 4's fix round) quoted the marker as
+  `town.detail, agendaTemplate.countForBoard`, which was already stale when quoted; kept accurate
+  here now rather than re-drifting.
+- `home.tsx` (Task 5) moved its town-name/state header onto `town.detail`, but three reads stay on
+  Supabase, all named in the file's own `// TODO(phase-e-wave-2)` marker: `meetingRows` and
+  `minutesDocs` have no router at all (`meeting`, `minutesDocument`); `boardRows` — the "which board
+  is meeting" picker — has a near-miss in `board.list` (added by Task 4, extended by Task 5) that is
+  DELIBERATELY not used, because `board.list` does not filter `archived_at` (by design — its one
+  existing caller, `settings.meeting-notices.tsx`, needs archived boards visible for the "copy
+  template" picker) while the picker's original Supabase query does. Reusing `board.list` here would
+  silently start offering archived boards as places to schedule a NEW meeting — a regression smuggled
+  into a read migration, the exact failure mode item 1's "the query you are replacing is a
+  specification" language exists to prevent. The board picker still needs its own procedure (an
+  archived-filtered `board.listActive` or an `activeOnly` argument on `board.list`), not a reuse of
+  the existing one.
+- `ProgressChecklist.tsx` (Task 5) moved two of its three own reads (`totalSeats`, the notice-
+  template counts) onto the same extended `board.list`. Its third, `memberCount` — a count of
+  actual, filled `board_member` rows — stays on Supabase: that table is board-membership territory
+  this wave deliberately does not touch (the task brief's own self-review notes: the four
+  board-member dialogs are wave 2's), and `person.ts`'s own doc comment already declines to join
+  `board_member` for the identical reason. Marked `// TODO(phase-e-wave-2): boardMember.countByTown
+(or equivalent)`.
+- The wave inherited one existing, unrelated staleness while Task 5 was in the neighborhood:
+  `StaffAccountFlow.tsx`'s `// TODO(phase-e-wave-2): board.listByTown` marker says "no procedure
+  exists yet that lists every board for a town" — no longer true; `board.list` has existed since
+  Task 4. Not the same gap as `home.tsx`'s board picker above (that one needs `board.list` to filter
+  `archived_at`, which is a real change to make), but `StaffAccountFlow.tsx` itself was not touched by
+  this task's declared scope (`routes/home.tsx` and `components/dashboard/ProgressChecklist.tsx`
+  only) and a component this wave did not test should not be edited on the strength of reading its
+  comment alone. Left for whichever wave touches that file next; flagged here so it is not
+  rediscovered as if new.

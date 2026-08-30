@@ -4,6 +4,19 @@
  * States what the app is, makes the meeting lifecycle visible, leads with the
  * next meeting, and surfaces what needs doing. Role-aware: admin/staff see the
  * full operations view; board members see a lighter review-oriented view.
+ *
+ * Stage 1, Phase E, wave 1, Task 5 — the town name/state header moved onto
+ * `town.detail` (shipped in Task 1 of this wave). The other three reads below
+ * stay on Supabase: no `meeting` or `minutesDocument` router exists yet in
+ * `packages/api/src/trpc/routers/`, and `board.list` (used elsewhere in this
+ * same task) is not a substitute for the board picker's `boardRows` read
+ * below — that query filters `archived_at IS NULL`, which `board.list`
+ * deliberately does not (see that procedure's own doc comment: its one
+ * existing consumer, `settings.meeting-notices.tsx`, needs archived boards
+ * visible). Migrating the picker onto `board.list` would silently start
+ * offering archived boards as places to schedule a new meeting — a real
+ * regression, not a port. See the `TODO(phase-e-wave-2)` marker below
+ * (conventions item 11) for the three procedures still owed.
  */
 
 import { useMemo, useState, useCallback } from "react";
@@ -24,7 +37,17 @@ import {
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
+// TODO(phase-e-wave-2): meeting.byTown, minutesDocument.pendingByTown, a
+// board picker read that filters archived_at (NOT `board.list` — see this
+// file's header comment for why that procedure is not a substitute).
+//
+// The marker above is the machine-checkable half of this comment (item 11)
+// — a completeness sweep greps for it, not for prose. `meetingRows` and
+// `minutesDocs` below are the two reads with no procedure at all yet;
+// `boardRows` has a near-miss (`board.list`) that is deliberately not used,
+// for the reason in this file's header comment.
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MEETING_STATUS_LABELS, MEETING_STATUS_COLORS } from "@/components/meetings/meeting-labels";
@@ -133,17 +156,17 @@ export default function Home() {
     enabled: !!townId,
   });
 
-  const { data: townRows } = useQuery({
-    queryKey: queryKeys.towns.detail(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
+  // Only `name`/`state` are read below — see conventions item 1 for why
+  // `town.detail`'s explicit 19-column list is not narrowed further here:
+  // it is one procedure shared by every screen that needs the town row
+  // (`settings.town.tsx` and, as of this task, this one), not a per-screen
+  // query. `isTownError` gets a small non-blocking banner, not a full-page
+  // `role="alert"` replacement (conventions item 5/12): unlike
+  // `settings.town.tsx`, where `town.detail` gates the entire page, this
+  // screen's header degrades to safe defaults ("Your town", "ME") and the
+  // meeting pipeline below it is still fully useful without this read.
+  const { data: town, isError: isTownError } = useQuery({
+    ...trpc.town.detail.queryOptions(),
     enabled: !!townId,
   });
 
@@ -187,9 +210,10 @@ export default function Home() {
     setSelectedBoard(board);
   }, []);
 
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
-  const townName = (town?.name as string) ?? "Your town";
-  const townState = (town?.state as string) ?? "ME";
+  // No `as`/`Record<string, unknown>` cast (conventions item 10): `town` is
+  // already typed off `town.detail`'s real output.
+  const townName = town?.name ?? "Your town";
+  const townState = town?.state ?? "ME";
 
   // ─── Compute sections ─────────────────────────────────────────────
 
@@ -306,6 +330,21 @@ export default function Home() {
             This is your home base for running meetings. Below you can see your meeting pipeline and
             what needs doing next.
           </p>
+        </div>
+      )}
+
+      {/* town.detail failed after mount (conventions item 5/12) — small and
+          non-blocking, matching this read's own weight on this screen: see
+          the query's own doc comment for why this is not a full-page
+          replacement the way settings.town.tsx's is. */}
+      {isTownError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>Couldn't load your town's profile. Try reloading the page.</p>
         </div>
       )}
 

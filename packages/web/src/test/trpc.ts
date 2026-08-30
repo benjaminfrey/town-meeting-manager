@@ -84,12 +84,36 @@ export type TestHandlers = Partial<{
     : never;
 }>;
 
-/** The tRPC error codes a web screen can meaningfully branch on. */
+/**
+ * The tRPC error codes a web screen can meaningfully branch on.
+ *
+ * `CONFLICT` added in Phase E, wave 1, Task 5 — `town.setPortalAddress` is
+ * the first procedure a screen test needed to simulate it for
+ * (`SetPortalAddressModal.test.tsx`). Before that, every `trpcTestError`
+ * call in this codebase exercised one of the other five, so this code path
+ * was never run: `JSONRPC_CODE`/`HTTP_STATUS` are `Record<TestErrorCode,
+ * number>`, and TypeScript would have caught a missing entry HERE, at this
+ * file — but nothing enforces that the STRING passed to `trpcTestError` at a
+ * call site is actually a `TestErrorCode` member versus any other string tRPC
+ * defines (`"CONFLICT"` was a plain string until this widening, so a call
+ * site could pass it and typecheck yet look up `undefined` in both records
+ * below). The result was not a compile error — `errorEnvelope` happily built
+ * `{ code: undefined, data: { httpStatus: undefined, ... } }` — it was
+ * `@trpc/client`'s own `transformResult` throwing `TransformResultError`
+ * ("Unable to transform response from server") the first time a test tried
+ * to read the mutation's error, because a JSON-RPC error object without a
+ * numeric `code` fails that function's own shape check. A green vitest run
+ * would not have caught this either way; only running the test caught it, on
+ * the first attempt, which is why this comment records it — the fix is
+ * closing the actual gap (this record has no member for `"CONFLICT"`), not
+ * only making that one test pass.
+ */
 export type TestErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"
+  | "CONFLICT"
   | "INTERNAL_SERVER_ERROR";
 
 const JSONRPC_CODE: Record<TestErrorCode, number> = {
@@ -97,6 +121,7 @@ const JSONRPC_CODE: Record<TestErrorCode, number> = {
   UNAUTHORIZED: -32001,
   FORBIDDEN: -32003,
   NOT_FOUND: -32004,
+  CONFLICT: -32009,
   INTERNAL_SERVER_ERROR: -32603,
 };
 
@@ -105,6 +130,7 @@ const HTTP_STATUS: Record<TestErrorCode, number> = {
   UNAUTHORIZED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,
+  CONFLICT: 409,
   INTERNAL_SERVER_ERROR: 500,
 };
 

@@ -52,9 +52,15 @@ const server = {
       id: "b1",
       name: "Select Board",
       notice_template_blocks: [{ id: "block-1", type: "letterhead" }],
+      member_count: 5,
     },
-    { id: "b2", name: "Planning Board", notice_template_blocks: null },
-  ] as Array<{ id: string; name: string; notice_template_blocks: unknown[] | null }>,
+    { id: "b2", name: "Planning Board", notice_template_blocks: null, member_count: null },
+  ] as Array<{
+    id: string;
+    name: string;
+    notice_template_blocks: unknown[] | null;
+    member_count: number | null;
+  }>,
   listRejects: false,
 };
 
@@ -88,8 +94,9 @@ describe("settings.meeting-notices", () => {
         id: "b1",
         name: "Select Board",
         notice_template_blocks: [{ id: "block-1", type: "letterhead" }],
+        member_count: 5,
       },
-      { id: "b2", name: "Planning Board", notice_template_blocks: null },
+      { id: "b2", name: "Planning Board", notice_template_blocks: null, member_count: null },
     ];
     server.listRejects = false;
   });

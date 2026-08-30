@@ -34,6 +34,7 @@ import { sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   checkSubdomain,
+  SUBDOMAIN_MAX_LENGTH,
   AudioRetentionPolicy,
   MeetingFormality,
   MinutesStyle,
@@ -227,24 +228,47 @@ export const townRouter = router({
    * after the check had already said the name was free. Letting the constraint
    * be the check means the answer is the constraint's answer.
    *
-   * ─── Left in resolver form, not converted with the four below ────────────
+   * ─── Converted to middleware form, Task 5 of wave 1 ───────────────────────
    *
-   * Conventions item 2 now requires `.use(requireActor(...))` declared before
-   * `.input()`, because anything declared after can be preempted by
-   * validation (a refused caller whose input also fails parsing gets
-   * BAD_REQUEST, never reaching the guard). This procedure's schema —
-   * `z.object({ subdomain: z.string() })` — accepts almost any string, so
-   * that failure mode cannot occur here: nothing a non-admin sends fails
-   * parsing before `assertCanUpdateTown` runs. Left unconverted in the Task 2
-   * fix round because it was out of that round's stated scope (four named
-   * mutations), not because it is exempt from the rule — a future pass should
-   * still convert it for consistency with every other write in this router.
+   * This was the one procedure in the file conventions item 2 flagged as
+   * still owing the `.use(requireActor(...))` conversion — its own doc
+   * comment (now history, see the fix round it was written in) explained why
+   * the ordering defect could not fire on the OLD schema: `z.object({
+   * subdomain: z.string() })` accepted almost any string, so nothing a
+   * non-admin sent ever failed parsing before `assertCanUpdateTown` ran
+   * inside the resolver. That permissiveness was exactly the problem, not a
+   * mitigation — it meant this procedure's own test suite could not tell a
+   * correctly-ordered guard from a reordered one, the same gap
+   * `town.updateProfile` shipped with before its reorder pin caught it (see
+   * that procedure's doc comment and `routers/__tests__/town.test.ts`).
+   *
+   * The schema below is real now: `min`/`max` on `SUBDOMAIN_MAX_LENGTH`, not
+   * a bare `z.string()`. `checkSubdomain` still owns every semantic rule
+   * (character set, reserved names, casing) — the schema only narrows enough
+   * to give a non-admin caller SOME input that fails to parse, which is what
+   * `town-portal-address.test.ts`'s reorder pin needs to exist at all. An
+   * empty or over-long subdomain now answers BAD_REQUEST from the parser
+   * either way (guard correctly placed or not), same as before this
+   * conversion — the two existing "not a usable DNS label" cases this
+   * schema newly catches (`""`, `"a".repeat(64)`) were always going to be
+   * BAD_REQUEST, just from a different layer. See that test file's own
+   * reorder pin for the case that actually distinguishes the two orderings:
+   * a REFUSED caller sending that same invalid input.
    */
   setPortalAddress: protectedProcedure
-    .input(z.object({ subdomain: z.string() }))
+    .use(requireActor(assertCanUpdateTown))
+    .input(
+      z.object({
+        subdomain: z
+          .string()
+          .min(1, "A portal address is required.")
+          .max(
+            SUBDOMAIN_MAX_LENGTH,
+            `A portal address can be at most ${SUBDOMAIN_MAX_LENGTH} characters long.`,
+          ),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      assertCanUpdateTown(await ctx.actor());
-
       const checked = checkSubdomain(input.subdomain);
       if (!checked.ok) {
         throw new TRPCError({ code: "BAD_REQUEST", message: checked.message });

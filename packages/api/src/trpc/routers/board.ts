@@ -173,12 +173,32 @@ export const boardRouter = router({
    * none either — see conventions' "the query you are replacing is a
    * specification" rule. An archived board still needs its notice template
    * visible to whoever is deciding what to copy from.
+   *
+   * `member_count` added in Task 5 of wave 1, for `ProgressChecklist`'s
+   * "board members added (N of M seats)" and "notice templates configured"
+   * checklist rows — both are town-wide sums/counts over exactly the rows
+   * this procedure already scans, so extending the existing SELECT is the
+   * one-column change; a second procedure would just re-run the same query.
+   * Same no-archived-filter reasoning applies: `ProgressChecklist`'s own
+   * Supabase reads before this task summed `member_count` and counted
+   * `notice_template_blocks` over EVERY board in the town, archived or not,
+   * so this migration is not the place to newly exclude them (that would be
+   * a behavior change smuggled into a read migration, not a port of one).
+   * `settings.meeting-notices.tsx`, the other caller, ignores the extra
+   * column — an extra field a handler returns is invisible to a typed
+   * consumer that does not read it (see `test/trpc.ts`'s own "the gap runs
+   * one way" note).
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.withTenant(async (tx) =>
-      toRows<{ id: string; name: string; notice_template_blocks: unknown | null }>(
+      toRows<{
+        id: string;
+        name: string;
+        notice_template_blocks: unknown | null;
+        member_count: number | null;
+      }>(
         await tx.execute(sql`
-          SELECT id, name, notice_template_blocks
+          SELECT id, name, notice_template_blocks, member_count
           FROM board
           ORDER BY name
         `),

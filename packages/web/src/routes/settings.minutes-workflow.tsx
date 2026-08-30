@@ -87,11 +87,13 @@ export default function MinutesWorkflowSettingsPage() {
       onSuccess: () => {
         // Both invalidations run during the transition (conventions item 7):
         // `queryKeys.towns.detail(townId)` is still read directly by several
-        // unmigrated screens (`home.tsx`, `boards.tsx`, `boards.$boardId.tsx`,
+        // unmigrated screens (`boards.tsx`, `boards.$boardId.tsx`,
         // `meetings.$meetingId.{agenda,review,minutes}.tsx`,
-        // `CreateMeetingDialog`), and `trpc.town.pathFilter()` is this
-        // screen's own read (`town.detail`) — the legacy line stays until the
-        // last of those migrates, per item 7's own rule.
+        // `CreateMeetingDialog` — see `TownSettingsEditor.tsx`'s header for
+        // the current list; `home.tsx` moved onto `town.detail` in Task 5 of
+        // this wave, so it is no longer on it), and `trpc.town.pathFilter()`
+        // is this screen's own read (`town.detail`) — the legacy line stays
+        // until the last of those migrates, per item 7's own rule.
         void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId ?? "") });
         void queryClient.invalidateQueries(trpc.town.pathFilter());
         setRetentionPolicy(null);

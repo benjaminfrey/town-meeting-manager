@@ -368,6 +368,41 @@ describe("board.list", () => {
     });
   });
 
+  /**
+   * `member_count` (Task 5, wave 1) — `ProgressChecklist`'s "N of M seats"
+   * row sums this across every board in the town, so a missing or wrong
+   * value there would under- or over-report how many seats exist without
+   * ever producing a wrong-looking single-board number to notice. `seedBoard`
+   * takes no `member_count` option (the column defaults to `NULL`), so this
+   * sets it directly, and covers both the real-value and the NULL case in
+   * the same assertion — `ProgressChecklist`'s `(b.member_count ?? 0)`
+   * reduction is exactly what a NULL here is meant to exercise.
+   */
+  it("returns each board's member_count, including NULL for one never set", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const withSeats = await seedBoard(db, town, { name: "Budget Committee" });
+        await inTown(db, town, (tx) =>
+          tx.execute(sql`UPDATE board SET member_count = 5 WHERE id = ${withSeats}`),
+        );
+        const withoutSeats = await seedBoard(db, town, { name: "Recreation Committee" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.board.list();
+
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        expect(byId.get(withSeats)?.member_count).toBe(5);
+        expect(byId.get(withoutSeats)?.member_count).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("does not return another town's boards", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);

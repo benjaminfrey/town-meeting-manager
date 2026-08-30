@@ -8,11 +8,13 @@
  * Supabase `update()`. The mutation invalidates BOTH the legacy
  * `queryKeys.towns.detail(townId)` key and `trpc.town.pathFilter()`
  * (conventions item 7): `settings.town.tsx` itself moved onto the tRPC key,
- * but `home.tsx`, `boards.tsx`, `boards.$boardId.tsx`,
- * `meetings.$meetingId.{agenda,review,minutes}.tsx` and
- * `settings.minutes-workflow.tsx` all still read the town row through the
- * legacy key, so dropping that invalidation would leave every one of them
- * stale for up to the 60s `staleTime`.
+ * but `boards.tsx`, `boards.$boardId.tsx`,
+ * `meetings.$meetingId.{agenda,review,minutes}.tsx`,
+ * `settings.minutes-workflow.tsx` and `CreateMeetingDialog` all still read
+ * the town row through the legacy key, so dropping that invalidation would
+ * leave every one of them stale for up to the 60s `staleTime`. `home.tsx`
+ * moved onto `town.detail` too, in Task 5 of this same wave — removed from
+ * this list rather than left stale on it.
  */
 
 import { useCallback } from "react";

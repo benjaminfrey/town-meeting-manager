@@ -4,12 +4,18 @@
  * Same shape as `boards.$boardId.test.tsx`: the real options proxy and real
  * `QueryClient` singleton run; only `globalThis.fetch` is replaced
  * (`installTRPCFetchStub`). `@/lib/supabase` is mocked too — the boards list
- * (`queryKeys.boards.byTown`) and `ProgressChecklist`'s three own reads still
- * go through it (see `settings.town.tsx`'s `TODO(phase-e-wave-2)` marker) —
- * with a thenable chain, because those call sites await different points in
- * the chain (`.eq(...)` directly in `ProgressChecklist`, `.throwOnError()` in
- * this route), unlike `boards.$boardId.test.tsx`'s mock which only needed the
- * latter.
+ * this ROUTE reads directly (`queryKeys.boards.byTown`, for the "Governing
+ * Board" / "Boards & Committees" sections) and `ProgressChecklist`'s one
+ * remaining own Supabase read (`memberCount`, off `board_member` — see that
+ * component's own `TODO(phase-e-wave-2)` marker) still go through it — with
+ * a thenable chain, because those call sites await different points in the
+ * chain (`.eq(...)` directly in `ProgressChecklist`, `.throwOnError()` in
+ * this route), unlike `boards.$boardId.test.tsx`'s mock which only needed
+ * the latter.
+ *
+ * `ProgressChecklist`'s other two former Supabase reads (`totalSeats`, the
+ * notice-template counts) moved onto `board.list` in Task 5 — stubbed below
+ * like any other tRPC procedure, not through the Supabase mock.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,7 +25,7 @@ import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import SettingsTownPage from "../settings.town";
 
-// ─── Mock Supabase (boards list + ProgressChecklist's own reads) ──────────
+// ─── Mock Supabase (route's own boards list + ProgressChecklist's memberCount) ──
 
 vi.mock("@/lib/supabase", () => {
   function makeChain(): Record<string, unknown> {
@@ -78,6 +84,7 @@ const stub = installTRPCFetchStub({
       minutes_review_window_days: 7,
     };
   },
+  "board.list": () => [],
 });
 
 function renderRoute() {
@@ -123,6 +130,20 @@ describe("settings.town", () => {
     expect(
       await screen.findByText("Something went wrong loading your town's settings."),
     ).toBeInTheDocument();
+  });
+
+  it("opens SetPortalAddressModal from the portal-subdomain checklist row", async () => {
+    // The wiring this test pins: `ProgressChecklist`'s "portal-subdomain"
+    // row calls `onSetPortalAddressClick`, which this ROUTE (not
+    // `ProgressChecklist` itself) turns into opening `SetPortalAddressModal`
+    // — see this file's own header comment and `ProgressChecklist.tsx`'s.
+    // Before Task 5, this row had no `onClick` at all (a `linkTo="/settings"`
+    // that led nowhere useful), so there was no way to complete this
+    // checklist item anywhere in the product.
+    const { user } = renderRoute();
+    const row = await screen.findByText(/public portal subdomain set/i);
+    await user.click(row);
+    expect(await screen.findByText("Set your public portal address")).toBeInTheDocument();
   });
 
   it("refetches when a writer invalidates trpc.town.pathFilter()", async () => {

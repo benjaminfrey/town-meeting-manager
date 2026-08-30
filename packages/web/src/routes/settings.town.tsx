@@ -11,6 +11,11 @@
  * item 5); the old version rendered an indefinite skeleton or a generic
  * "not found" message for both, which is the silent-failure mode this
  * migration exists to end.
+ *
+ * Task 5 (same wave) adds `SetPortalAddressModal`, mounted here the same way
+ * `RetentionPolicyModal` already is: `ProgressChecklist` only holds a
+ * callback (`onSetPortalAddressClick`), this route owns the dialog's
+ * open/closed state.
  */
 
 import { useState } from "react";
@@ -40,6 +45,7 @@ import {
 } from "@/components/dashboard/MeetingRolesEditor";
 import { TownSealUpload } from "@/components/dashboard/TownSealUpload";
 import { RetentionPolicyModal } from "@/components/dashboard/RetentionPolicyModal";
+import { SetPortalAddressModal } from "@/components/dashboard/SetPortalAddressModal";
 import { Accordion } from "@/components/ui/accordion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
@@ -97,6 +103,7 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
   // ─── Edit mode state ────────────────────────────────────────────
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [retentionModalOpen, setRetentionModalOpen] = useState(false);
+  const [portalAddressModalOpen, setPortalAddressModalOpen] = useState(false);
 
   // ─── Reactive queries ───────────────────────────────────────────
   // `town.detail` takes no input — see its own doc comment — so `enabled`
@@ -222,6 +229,14 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
         onOpenChange={setRetentionModalOpen}
       />
 
+      {/* Set portal address modal */}
+      <SetPortalAddressModal
+        townId={t.id}
+        currentSubdomain={t.subdomain}
+        open={portalAddressModalOpen}
+        onOpenChange={setPortalAddressModalOpen}
+      />
+
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">
           {MUNICIPALITY_LABELS[t.municipality_type] ?? "Town"} of {t.name}
@@ -238,6 +253,7 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
           retentionAcknowledgedAt={t.retention_policy_acknowledged_at}
           minutesWorkflowConfiguredAt={t.minutes_workflow_configured_at}
           onRetentionPolicyClick={() => setRetentionModalOpen(true)}
+          onSetPortalAddressClick={() => setPortalAddressModalOpen(true)}
         />
       </div>
 
