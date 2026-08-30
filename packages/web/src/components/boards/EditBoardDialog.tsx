@@ -3,6 +3,15 @@
  *
  * Same form as AddBoardDialog but pre-filled. Board name is disabled
  * if the board has associated meetings (to preserve historical records).
+ *
+ * Writes via `trpc.board.update` (wave 2, Task 2 — previously a raw Supabase
+ * update). That update sent `updated_at: new Date().toISOString()` — a
+ * column `board` does not have (confirmed against `schema.ts` and the live
+ * database; the untyped Supabase client let it compile, PostgREST would have
+ * rejected it). `board.update` correctly omits it, so this dialog no longer
+ * sends it either; this is the second instance of this exact defect shape in
+ * this codebase (wave 1 found `EditGovTitleDialog` writing `updated_at` to
+ * `user_account`).
  */
 
 import { useCallback, useMemo } from "react";
@@ -55,7 +64,7 @@ type EditBoardData = z.infer<typeof EditBoardSchema>;
 
 interface EditBoardDialogProps {
   townId: string;
-  town: Record<string, unknown> | undefined;
+  town: RouterOutputs["town"]["detail"] | undefined;
   board: RouterOutputs["board"]["detail"];
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -116,45 +125,46 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
     [values.member_count, values.quorum_type, values.quorum_value],
   );
 
-  const updateMutation = useMutation({
-    mutationFn: async (data: EditBoardData) => {
-      const formality = data.meeting_formality_override || null;
-      const minutesStyle = data.minutes_style_override || null;
-      const { error } = await supabase
-        .from("board")
-        .update({
-          name: data.name,
-          elected_or_appointed: data.elected_or_appointed,
-          member_count: data.member_count,
-          election_method: data.election_method,
-          meeting_formality_override: formality,
-          minutes_style_override: minutesStyle,
-          quorum_type: data.quorum_type,
-          quorum_value: data.quorum_value,
-          motion_display_format: data.motion_display_format,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", boardId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
-      // See ArchiveBoardDialog's comment on the matching line: the legacy
-      // key no longer reaches BoardDetailPage's tRPC-backed read, so both
-      // invalidations run during the transition.
-      void queryClient.invalidateQueries(trpc.board.pathFilter());
-      onOpenChange(false);
-    },
-  });
+  const updateMutation = useMutation(
+    trpc.board.update.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+        // See ArchiveBoardDialog's comment on the matching line: the legacy
+        // keys no longer reach BoardDetailPage's or /boards's tRPC-backed
+        // reads, so both invalidations run during the transition.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        onOpenChange(false);
+      },
+    }),
+  );
 
   const isSaving = updateMutation.isPending;
 
   const handleSave = useCallback(async () => {
     const data = validate();
     if (!data) return;
-    await updateMutation.mutateAsync(data);
-  }, [validate, updateMutation]);
+    // `board.update`'s schema wants `null`, not `""`, for "use the town
+    // default" — the same coercion the pre-migration Supabase update did
+    // inline. See `AddBoardDialog.tsx`'s identical cast for why the `as` is
+    // needed: this form's own Zod schema keeps these two fields as bare
+    // `z.string()` so the Select's `"__default__"` sentinel round-trips
+    // through `setValue` cleanly.
+    await updateMutation.mutateAsync({
+      ...data,
+      boardId,
+      meeting_formality_override: (data.meeting_formality_override || null) as
+        | "informal"
+        | "semi_formal"
+        | "formal"
+        | null,
+      minutes_style_override: (data.minutes_style_override || null) as
+        | "action"
+        | "summary"
+        | "narrative"
+        | null,
+    });
+  }, [validate, updateMutation, boardId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

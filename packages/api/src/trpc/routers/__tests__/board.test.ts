@@ -188,6 +188,10 @@ describe("board.detail", () => {
         const board = await caller.board.detail({ boardId });
 
         expect(board.name).toBe("Historical Commission");
+        // `board_type` (wave 2, Task 2) — no longer excluded from this
+        // procedure's column list; `seedBoard` sets no explicit value, so
+        // this also pins the column's own DB default.
+        expect(board.board_type).toBe("other");
       } finally {
         await app.end();
       }
@@ -478,6 +482,49 @@ describe("board.list", () => {
         const rows = await caller.board.list();
 
         expect(rows.some((r) => r.name === "Their Committee")).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * `elected_or_appointed`/`archived_at`/`is_governing_board`/
+   * `active_member_count` — wave 2, Task 2, added for `routes/boards.tsx`
+   * (see this procedure's own doc comment). `active_member_count` gets its
+   * own assertion distinguishing active from archived board members —
+   * exactly the `board.memberCount`-vs-`board.stats.active_members`
+   * distinction this file already exercises elsewhere, reproduced here for a
+   * town-wide scan instead of a single board.
+   */
+  it("returns each board's type/archived/governing columns and its ACTIVE member count only", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Conservation Commission" });
+        await inTown(db, town, (tx) =>
+          tx.execute(sql`
+            UPDATE board SET elected_or_appointed = 'appointed', archived_at = now()
+            WHERE id = ${boardId}
+          `),
+        );
+        const p1 = await seedPerson(db, town, "Active One");
+        const p2 = await seedPerson(db, town, "Former Member");
+        await seedBoardMember(db, town, boardId, p1, "active");
+        await seedBoardMember(db, town, boardId, p2, "archived");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.board.list();
+
+        const row = rows.find((r) => r.id === boardId);
+        expect(row?.elected_or_appointed).toBe("appointed");
+        expect(row?.archived_at).not.toBeNull();
+        expect(row?.is_governing_board).toBe(false);
+        expect(row?.active_member_count).toBe(1);
+        expect(typeof row?.active_member_count).toBe("number");
       } finally {
         await app.end();
       }

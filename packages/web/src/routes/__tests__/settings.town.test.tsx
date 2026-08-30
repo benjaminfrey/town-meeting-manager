@@ -3,19 +3,13 @@
  *
  * Same shape as `boards.$boardId.test.tsx`: the real options proxy and real
  * `QueryClient` singleton run; only `globalThis.fetch` is replaced
- * (`installTRPCFetchStub`). `@/lib/supabase` is mocked too — the boards list
- * this ROUTE reads directly (`queryKeys.boards.byTown`, for the "Governing
- * Board" / "Boards & Committees" sections) and `ProgressChecklist`'s one
- * remaining own Supabase read (`memberCount`, off `board_member` — see that
- * component's own `TODO(phase-e-wave-2)` marker) still go through it — with
- * a thenable chain, because those call sites await different points in the
- * chain (`.eq(...)` directly in `ProgressChecklist`, `.throwOnError()` in
- * this route), unlike `boards.$boardId.test.tsx`'s mock which only needed
- * the latter.
- *
- * `ProgressChecklist`'s other two former Supabase reads (`totalSeats`, the
- * notice-template counts) moved onto `board.list` in Task 5 — stubbed below
- * like any other tRPC procedure, not through the Supabase mock.
+ * (`installTRPCFetchStub`). `@/lib/supabase` is no longer mocked — wave 2,
+ * Task 2 moved this route's own boards list (the "Governing Board" /
+ * "Boards & Committees" sections) onto `board.listActive`, and
+ * `ProgressChecklist`'s last remaining own Supabase read (`memberCount`, off
+ * `board_member`) onto `board.memberCount` — both stubbed below like every
+ * other tRPC procedure, closing the two `TODO(phase-e-wave-2)` markers this
+ * file used to work around.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,27 +18,6 @@ import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import SettingsTownPage from "../settings.town";
-
-// ─── Mock Supabase (route's own boards list + ProgressChecklist's memberCount) ──
-
-vi.mock("@/lib/supabase", () => {
-  function makeChain(): Record<string, unknown> {
-    const chain: Record<string, unknown> = {
-      // Every mocked method returns this same object, and the object is
-      // itself thenable, so `await` works no matter which chained call a
-      // caller happens to await from — `.eq(...)` directly
-      // (`ProgressChecklist`) or `.order(...).throwOnError()`
-      // (`settings.town.tsx`'s own boards read).
-      then: (resolve: (value: { data: unknown[]; count: number; error: null }) => void) =>
-        resolve({ data: [], count: 0, error: null }),
-    };
-    for (const m of ["select", "eq", "is", "order", "limit", "neq", "throwOnError"]) {
-      chain[m] = vi.fn().mockReturnValue(chain);
-    }
-    return chain;
-  }
-  return { supabase: { from: vi.fn().mockReturnValue(makeChain()) } };
-});
 
 // ─── Mock identity ──────────────────────────────────────────────────────
 
@@ -85,6 +58,17 @@ const stub = installTRPCFetchStub({
     };
   },
   "board.list": () => [],
+  "board.listActive": () => [
+    {
+      id: "b1",
+      name: "Select Board",
+      member_count: 5,
+      is_governing_board: true,
+      election_method: "at_large",
+      officer_election_method: "vote_of_board",
+    },
+  ],
+  "board.memberCount": () => 3,
 });
 
 function renderRoute() {
@@ -144,6 +128,17 @@ describe("settings.town", () => {
     const row = await screen.findByText(/public portal subdomain set/i);
     await user.click(row);
     expect(await screen.findByText("Set your public portal address")).toBeInTheDocument();
+  });
+
+  it("shows the governing board from board.listActive once its section is expanded", async () => {
+    // Pins the wiring this task closed: this route's own boards read moved
+    // off `queryKeys.boards.byTown` (a Supabase select) onto
+    // `trpc.board.listActive` — see this file's header comment. The section
+    // is a collapsed accordion panel (see the first test's comment), so it
+    // has to be expanded before its summary rows reach the DOM.
+    const { user } = renderRoute();
+    await user.click(await screen.findByText("Governing Board"));
+    expect(await screen.findByText("Select Board")).toBeInTheDocument();
   });
 
   it("refetches when a writer invalidates trpc.town.pathFilter()", async () => {

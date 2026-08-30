@@ -16,6 +16,18 @@
  * `RetentionPolicyModal` already is: `ProgressChecklist` only holds a
  * callback (`onSetPortalAddressClick`), this route owns the dialog's
  * open/closed state.
+ *
+ * Wave 2, Task 2 — the "Governing Board" / "Boards & Committees" sections'
+ * board list moves onto `board.listActive`, closing the `TODO(phase-e-wave-2)`
+ * marker naming `board.byTown` that Task 1 of this wave shipped that
+ * procedure to answer. This route's own query read exactly
+ * `id, name, is_governing_board, member_count, election_method,
+ * officer_election_method` — precisely `listActive`'s six columns, checked
+ * against the `boards.find(...)` (Governing Board) and `boards.map(...)`
+ * (Boards & Committees) blocks below — and `listActive`'s own
+ * `archived_at IS NULL` filter matches this route's prior
+ * `.is("archived_at", null)` exactly, so this is a like-for-like swap, not a
+ * behavior change.
  */
 
 import { useState } from "react";
@@ -48,17 +60,6 @@ import { RetentionPolicyModal } from "@/components/dashboard/RetentionPolicyModa
 import { SetPortalAddressModal } from "@/components/dashboard/SetPortalAddressModal";
 import { Accordion } from "@/components/ui/accordion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-2): board.byTown (or equivalent)
-//
-// The marker above is the machine-checkable half of this comment — see
-// conventions item 11. `board`'s router has no list-by-town procedure today
-// (only `detail`/`stats`/`recentMeetings`, all single-board), so the
-// "Governing Board" and "Boards & Committees" sections below still read the
-// board list through Supabase. Dropping the read instead of leaving it on
-// Supabase would silently remove those two sections, which is a worse
-// regression than an incomplete migration.
-import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 import { DashboardStatsSkeleton, SettingsSectionSkeleton } from "@/components/skeletons";
 
@@ -116,23 +117,10 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
     error: townError,
   } = useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId });
 
-  const { data: boardRows } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId ?? ""),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("town_id", townId!)
-        .is("archived_at", null)
-        .order("is_governing_board", { ascending: false })
-        .order("name", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
+  const { data: boards = [] } = useQuery({
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,
   });
-
-  const boards = (boardRows ?? []) as Record<string, unknown>[];
 
   // No townId at all → user hasn't completed onboarding
   if (!townId) {
@@ -247,7 +235,6 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
       {/* Progress checklist */}
       <div className="mb-6">
         <ProgressChecklist
-          townId={t.id}
           sealUrl={t.seal_url}
           subdomain={t.subdomain}
           retentionAcknowledgedAt={t.retention_policy_acknowledged_at}
@@ -309,9 +296,7 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
 
             {/* ─── Governing Board ────────────────────────────── */}
             {(() => {
-              const govBoard = boards.find(
-                (b: Record<string, unknown>) => b.is_governing_board === true,
-              ) as Record<string, unknown> | undefined;
+              const govBoard = boards.find((b) => b.is_governing_board === true);
               if (!govBoard) return null;
               return (
                 <SettingsSection
@@ -319,7 +304,7 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
                   title="Governing Board"
                   summary={
                     <>
-                      <SettingRow label="Board name" value={String(govBoard.name ?? "")} />
+                      <SettingRow label="Board name" value={govBoard.name} />
                       <SettingRow label="Members" value={String(govBoard.member_count ?? 0)} />
                       <SettingRow
                         label="Election method"
@@ -389,10 +374,10 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
                   {boards.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No boards configured</p>
                   ) : (
-                    boards.map((b: Record<string, unknown>) => (
-                      <div key={String(b.id)} className="flex items-center justify-between text-sm">
+                    boards.map((b) => (
+                      <div key={b.id} className="flex items-center justify-between text-sm">
                         <span className="font-medium">
-                          {String(b.name)}
+                          {b.name}
                           {b.is_governing_board === true && (
                             <span className="ml-2 text-xs text-muted-foreground">(Governing)</span>
                           )}

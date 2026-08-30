@@ -45,6 +45,7 @@ import { queryClient } from "../queryClient";
 const fakeBoard: RouterOutputs["board"]["detail"] = {
   id: "b1",
   name: "Old Name",
+  board_type: "other",
   elected_or_appointed: null,
   member_count: null,
   election_method: null,

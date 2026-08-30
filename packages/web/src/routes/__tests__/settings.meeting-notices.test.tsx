@@ -23,6 +23,7 @@ vi.mock("@/hooks/useCurrentUser", () => ({
 const fullBoard: RouterOutputs["board"]["detail"] = {
   id: "b2",
   name: "Planning Board",
+  board_type: "other",
   elected_or_appointed: "elected",
   member_count: 5,
   election_method: "at_large",
@@ -46,6 +47,14 @@ const fullBoard: RouterOutputs["board"]["detail"] = {
 const queryClient = setupAppQueryClient();
 
 /** Mutable so a test can change what the server returns/records between calls. */
+/** `board.list`'s four wave-2 columns, unused by this screen — see that procedure's own doc comment. */
+const LIST_EXTRAS = {
+  elected_or_appointed: "elected" as const,
+  archived_at: null,
+  is_governing_board: false,
+  active_member_count: 0,
+};
+
 const server = {
   boards: [
     {
@@ -53,13 +62,24 @@ const server = {
       name: "Select Board",
       notice_template_blocks: [{ id: "block-1", type: "letterhead" }],
       member_count: 5,
+      ...LIST_EXTRAS,
     },
-    { id: "b2", name: "Planning Board", notice_template_blocks: null, member_count: null },
+    {
+      id: "b2",
+      name: "Planning Board",
+      notice_template_blocks: null,
+      member_count: null,
+      ...LIST_EXTRAS,
+    },
   ] as Array<{
     id: string;
     name: string;
     notice_template_blocks: unknown[] | null;
     member_count: number | null;
+    elected_or_appointed: string | null;
+    archived_at: string | null;
+    is_governing_board: boolean;
+    active_member_count: number;
   }>,
   listRejects: false,
 };
@@ -95,8 +115,15 @@ describe("settings.meeting-notices", () => {
         name: "Select Board",
         notice_template_blocks: [{ id: "block-1", type: "letterhead" }],
         member_count: 5,
+        ...LIST_EXTRAS,
       },
-      { id: "b2", name: "Planning Board", notice_template_blocks: null, member_count: null },
+      {
+        id: "b2",
+        name: "Planning Board",
+        notice_template_blocks: null,
+        member_count: null,
+        ...LIST_EXTRAS,
+      },
     ];
     server.listRejects = false;
   });

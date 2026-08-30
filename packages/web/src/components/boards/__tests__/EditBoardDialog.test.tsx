@@ -1,42 +1,38 @@
 /**
- * A writer's cache invalidation is a pinnable behaviour, not a code comment.
+ * `EditBoardDialog` — `trpc.board.update` on tRPC, and its cache invalidation.
  *
- * Phase E, unit 0 final-fix pass. `EditBoardDialog` was one of the three
- * writers `docs/superpowers/plans/phase-e-conventions.md` item 8 named as
- * having a `trpc.board.pathFilter()` invalidation call with no test pinning
- * it — a reviewer confirmed deleting that line stays green across all 947
- * tests. This is that pin.
+ * Wave 2, Task 2 converted this dialog's write from a raw Supabase update
+ * (which sent a nonexistent `updated_at` column — see the component's own
+ * doc comment) to `trpc.board.update`. Real options proxy, real
+ * `QueryClient` singleton, only `globalThis.fetch` replaced.
  *
- * Same shape as `ArchiveBoardDialog.test.tsx`: the real options proxy and the
- * real QueryClient singleton run, the test seeds the cache under the key
- * `boards.$boardId.tsx` actually reads — `trpc.board.detail.queryOptions({
- * boardId }).queryKey` — saves the edit, and asserts that entry was
- * invalidated. Deleting the `pathFilter()` line from `EditBoardDialog` turns
- * this red.
+ * A writer's cache invalidation is a pinnable behaviour, not a code comment —
+ * this file's invalidation test is unit 0's original finding (Phase E, unit
+ * 0 final-fix pass: `EditBoardDialog` was one of three writers with a
+ * `trpc.board.pathFilter()` call and no test pinning it) carried forward
+ * onto the tRPC write. Deleting the `pathFilter()` line from
+ * `EditBoardDialog.tsx` still turns this red.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub } from "@/test/trpc";
 import { trpc, type RouterOutputs } from "@/lib/trpc";
 
-const { updates } = vi.hoisted(() => ({ updates: [] as string[] }));
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: (table: string) => {
-      const chain = {
-        select: () => chain,
-        update: () => chain,
-        eq: () => {
-          updates.push(table);
-          return Object.assign(Promise.resolve({ data: null, count: 0, error: null }), chain);
-        },
-      };
-      return chain;
-    },
-  }),
-}));
+// `EditBoardDialog` still reads `meeting` count off `@/hooks/useSupabase`
+// directly (whether the board has meetings, to disable the name field) —
+// not this task's file list. Mocked just enough to resolve.
+vi.mock("@/hooks/useSupabase", () => {
+  const chain: Record<string, unknown> = {
+    then: (resolve: (value: { count: number; error: null }) => void) =>
+      resolve({ count: 0, error: null }),
+  };
+  for (const m of ["select", "eq"]) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  return { useSupabase: () => ({ from: vi.fn().mockReturnValue(chain) }) };
+});
 
 import { EditBoardDialog } from "../EditBoardDialog";
 
@@ -45,6 +41,7 @@ const queryClient = setupAppQueryClient();
 const board: RouterOutputs["board"]["detail"] = {
   id: "b1",
   name: "Select Board",
+  board_type: "other",
   elected_or_appointed: "elected",
   member_count: 5,
   election_method: "at_large",
@@ -65,13 +62,17 @@ const board: RouterOutputs["board"]["detail"] = {
   auto_publish_on_approval_override: null,
 };
 
+const stub = installTRPCFetchStub({
+  "board.update": (input) => ({ id: input.boardId, name: input.name }),
+});
+
 async function save() {
   const detailKey = trpc.board.detail.queryOptions({ boardId: board.id }).queryKey;
   queryClient.setQueryData(detailKey, board);
   expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBeFalsy();
 
   const { user } = renderWithProviders(
-    <EditBoardDialog townId="town-1" town={{}} board={board} open onOpenChange={() => {}} />,
+    <EditBoardDialog townId="town-1" town={undefined} board={board} open onOpenChange={() => {}} />,
     { queryClient },
   );
 
@@ -85,12 +86,19 @@ async function save() {
   const saveButton = await screen.findByRole("button", { name: /save changes/i });
   await waitFor(() => expect(saveButton).not.toBeDisabled());
   await user.click(saveButton);
-  await waitFor(() => expect(updates).toContain("board"));
+  await waitFor(() => expect(stub.countFor("board.update")).toBe(1));
 
   return { detailKey };
 }
 
-describe("EditBoardDialog cache invalidation", () => {
+describe("EditBoardDialog", () => {
+  it("submits the edit through trpc.board.update, with no updated_at field", async () => {
+    await save();
+    const input = stub.calls[0]?.inputs["0"] as Record<string, unknown>;
+    expect(input).toMatchObject({ boardId: "b1", name: "Select Board" });
+    expect(input).not.toHaveProperty("updated_at");
+  });
+
   it("invalidates the tRPC key the board detail screen reads under", async () => {
     const { detailKey } = await save();
     await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true));

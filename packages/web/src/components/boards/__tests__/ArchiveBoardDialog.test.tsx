@@ -48,6 +48,7 @@ const queryClient = setupAppQueryClient();
 const board: RouterOutputs["board"]["detail"] = {
   id: "b1",
   name: "Select Board",
+  board_type: "other",
   elected_or_appointed: "elected",
   member_count: 5,
   election_method: "at_large",

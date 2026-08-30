@@ -3,12 +3,34 @@
  *
  * Lists all boards and committees for the current town.
  * Supports add, edit, archive actions and show/hide archived toggle.
+ *
+ * Wave 2, Task 2 — this route's three Supabase reads (`board`, active
+ * `board_member` counts grouped by board, `town`) move onto
+ * `trpc.board.list` (extended this task to carry the columns and per-board
+ * `active_member_count` this screen needs — see that procedure's own doc
+ * comment) and `trpc.town.detail`. `board.list` is deliberately unfiltered
+ * (this screen's own "show archived" toggle needs archived boards in the
+ * data it already has), ordered `name` only; the governing-board-first order
+ * this screen wants is sorted client-side below, matching `listActive`'s own
+ * doc comment's reasoning for `StaffAccountFlow.tsx` — changing `list`'s own
+ * ORDER BY would reorder it out from under its other two callers
+ * (`settings.meeting-notices.tsx`, `ProgressChecklist.tsx`).
+ *
+ * `EditBoardDialog`/`ArchiveBoardDialog` both need a board's FULL settings
+ * (`election_method`, `quorum_type`, etc.) — columns `list`'s narrower,
+ * town-wide scan does not carry, and should not: `list` runs on every visit
+ * to this page and on the dashboard (`ProgressChecklist`), so it stays cheap
+ * rather than growing to `detail`'s ~20 columns for the sake of an action a
+ * caller may never take. Opening either dialog instead fetches
+ * `trpc.board.detail` for just that one board id — the identical procedure
+ * `boards.$boardId.tsx` already uses, so a dialog opened here warms the same
+ * cache entry a follow-up visit to that board's own page would read.
  */
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Pencil, Archive } from "lucide-react";
+import { AlertTriangle, Plus, Pencil, Archive, Loader2 } from "lucide-react";
 import type { Route } from "./+types/boards";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { AddBoardDialog } from "@/components/boards/AddBoardDialog";
@@ -19,14 +41,17 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
-import type { RouterOutputs } from "@/lib/trpc";
-import { queryClient } from "@/lib/queryClient";
+import { trpc } from "@/lib/trpc";
 import { BoardListSkeleton } from "@/components/skeletons";
 
 export async function clientLoader() {
   return {};
+}
+
+/** A row's actionable identity: which board, and which dialog it opens. */
+interface SelectedBoard {
+  id: string;
+  mode: "edit" | "archive";
 }
 
 export default function BoardListPage(_props: Route.ComponentProps) {
@@ -35,74 +60,67 @@ export default function BoardListPage(_props: Route.ComponentProps) {
 
   const [showArchived, setShowArchived] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [editBoard, setEditBoard] = useState<Record<string, unknown> | null>(null);
-  const [archiveBoard, setArchiveBoard] = useState<Record<string, unknown> | null>(null);
+  const [selected, setSelected] = useState<SelectedBoard | null>(null);
 
   // ─── Reactive queries ─────────────────────────────────────────────
-  const { data: boardRows, isLoading: boardsLoading } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId ?? ""),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("town_id", townId!)
-        .order("is_governing_board", { ascending: false })
-        .order("name", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId,
+  const {
+    data: boardRows,
+    isLoading: boardsLoading,
+    isError: boardsError,
+  } = useQuery(trpc.board.list.queryOptions());
+
+  const { data: town } = useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId });
+
+  // Full settings for whichever single board a dialog is about to open for —
+  // see this file's own header comment for why this is not folded into
+  // `board.list` above.
+  const { data: selectedBoard } = useQuery({
+    ...trpc.board.detail.queryOptions({ boardId: selected?.id ?? "" }),
+    enabled: !!selected,
   });
 
-  const { data: memberCountRows } = useQuery({
-    queryKey: [...queryKeys.members.all, "counts-by-board", townId ?? ""],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board_member")
-        .select("board_id")
-        .eq("town_id", townId!)
-        .eq("status", "active")
-        .throwOnError();
-      // Group by board_id in JS since Supabase doesn't support GROUP BY directly
-      const counts: Record<string, number> = {};
-      for (const row of data ?? []) {
-        const bid = (row as Record<string, unknown>).board_id as string;
-        counts[bid] = (counts[bid] ?? 0) + 1;
+  // Sort governing board first, then alphabetically — matching the Supabase
+  // query this replaces exactly (see this file's header comment for why the
+  // sort happens here rather than in `board.list` itself).
+  const sortedBoards = useMemo(() => {
+    const rows = boardRows ?? [];
+    return [...rows].sort((a, b) => {
+      if (a.is_governing_board !== b.is_governing_board) {
+        return a.is_governing_board ? -1 : 1;
       }
-      return counts;
-    },
-    enabled: !!townId,
-  });
-
-  const { data: townRows } = useQuery({
-    queryKey: queryKeys.towns.detail(townId ?? ""),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId!)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId,
-  });
-
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
-
-  // Build member count lookup — already grouped in queryFn
-  const memberCounts = memberCountRows ?? {};
-
-  // Filter boards
-  const boards = useMemo(() => {
-    const all = (boardRows ?? []) as Record<string, unknown>[];
-    if (showArchived) return all;
-    return all.filter((b) => !b.archived_at);
-  }, [boardRows, showArchived]);
-
-  const archivedCount = useMemo(() => {
-    return ((boardRows ?? []) as Record<string, unknown>[]).filter((b) => b.archived_at).length;
+      return a.name.localeCompare(b.name);
+    });
   }, [boardRows]);
+
+  const boards = useMemo(() => {
+    if (showArchived) return sortedBoards;
+    return sortedBoards.filter((b) => !b.archived_at);
+  }, [sortedBoards, showArchived]);
+
+  const archivedCount = useMemo(
+    () => sortedBoards.filter((b) => b.archived_at).length,
+    [sortedBoards],
+  );
+
+  // A screen that renders nothing and says nothing for a failed read is the
+  // failure mode this migration exists to end (conventions item 5).
+  if (boardsError) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+          <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+            <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+            <p className="mt-3 text-sm font-medium">
+              Something went wrong loading your town's boards.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Try reloading the page. If the problem continues, contact support.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Loading state ────────────────────────────────────────────────
   if (!townId || boardsLoading) {
@@ -126,32 +144,24 @@ export default function BoardListPage(_props: Route.ComponentProps) {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
       />
-      {editBoard && (
+      {selected?.mode === "edit" && selectedBoard && (
         <EditBoardDialog
           townId={townId}
           town={town}
-          // This page still reads `board` off Supabase's untyped client
-          // (`select("*")`, not `board.detail`), so there is no router type
-          // to infer the object from here the way boards.$boardId.tsx now
-          // can — hence the explicit cast rather than a plain
-          // `Record<string, unknown>` prop. Not a widening of the dialog's
-          // contract: every field the dialog reads really is present in a
-          // `select("*")` row, including `town_id` if ArchiveBoardDialog
-          // below ever needed it again.
-          board={editBoard as RouterOutputs["board"]["detail"]}
-          open={!!editBoard}
+          board={selectedBoard}
+          open
           onOpenChange={(open) => {
-            if (!open) setEditBoard(null);
+            if (!open) setSelected(null);
           }}
         />
       )}
-      {archiveBoard && (
+      {selected?.mode === "archive" && selectedBoard && (
         <ArchiveBoardDialog
-          board={archiveBoard as RouterOutputs["board"]["detail"]}
+          board={selectedBoard}
           townId={townId}
-          open={!!archiveBoard}
+          open
           onOpenChange={(open) => {
-            if (!open) setArchiveBoard(null);
+            if (!open) setSelected(null);
           }}
         />
       )}
@@ -205,25 +215,21 @@ export default function BoardListPage(_props: Route.ComponentProps) {
             </thead>
             <tbody>
               {boards.map((board) => {
-                const id = String(board.id);
-                const name = String(board.name ?? "");
-                const electedOrAppointed = String(board.elected_or_appointed ?? "elected");
                 const isArchived = !!board.archived_at;
                 const isGoverning = board.is_governing_board === true;
-                const activeMemberCount = memberCounts[id] ?? 0;
-                const seatCount = Number(board.member_count ?? 0);
+                const isPending = selected?.id === board.id && !selectedBoard;
 
                 return (
                   <tr
-                    key={id}
+                    key={board.id}
                     className="border-b last:border-b-0 hover:bg-muted/30 transition-colors"
                   >
                     <td className="px-4 py-3">
                       <Link
-                        to={`/boards/${id}`}
+                        to={`/boards/${board.id}`}
                         className="font-medium text-primary hover:underline"
                       >
-                        {name}
+                        {board.name}
                       </Link>
                       {isGoverning && (
                         <span className="ml-2 text-xs text-muted-foreground">(Governing)</span>
@@ -231,11 +237,11 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant="outline" className="capitalize">
-                        {electedOrAppointed}
+                        {board.elected_or_appointed ?? "elected"}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {activeMemberCount} / {seatCount}
+                      {board.active_member_count} / {board.member_count ?? 0}
                     </td>
                     <td className="px-4 py-3">
                       {isArchived ? (
@@ -249,19 +255,27 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setEditBoard(board)}
+                          onClick={() => setSelected({ id: board.id, mode: "edit" })}
                           disabled={isArchived}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          {isPending && selected?.mode === "edit" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Pencil className="h-3.5 w-3.5" />
+                          )}
                           <span className="sr-only">Edit</span>
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setArchiveBoard(board)}
+                          onClick={() => setSelected({ id: board.id, mode: "archive" })}
                           disabled={isArchived}
                         >
-                          <Archive className="h-3.5 w-3.5" />
+                          {isPending && selected?.mode === "archive" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Archive className="h-3.5 w-3.5" />
+                          )}
                           <span className="sr-only">Archive</span>
                         </Button>
                       </div>

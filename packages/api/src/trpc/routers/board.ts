@@ -107,8 +107,13 @@ export const boardRouter = router({
    * at the query, instead of silently producing `undefined` deep inside a
    * settings form.
    *
-   * `board_type` is deliberately excluded: it is a real column, but nothing
-   * in that screen reads it today. Add it back the day something does.
+   * `board_type` (wave 2, Task 2) — no longer excluded. Added back the day
+   * something reads it, exactly as this comment used to promise:
+   * `routes/boards.$boardId.templates.tsx`'s auto-create effect needs it to
+   * pick which of `getDefaultTemplateSections`'s four fixed outputs to seed a
+   * brand-new board with, and that screen now reads its board row through
+   * this procedure rather than its own separate `select("id, name,
+   * board_type")`.
    */
   detail: protectedProcedure
     .input(z.object({ boardId: z.string().uuid() }))
@@ -117,6 +122,7 @@ export const boardRouter = router({
         toRows<{
           id: string;
           name: string;
+          board_type: string;
           elected_or_appointed: string | null;
           member_count: number | null;
           election_method: string | null;
@@ -138,7 +144,7 @@ export const boardRouter = router({
         }>(
           await tx.execute(sql`
             SELECT
-              id, name, elected_or_appointed, member_count, election_method,
+              id, name, board_type, elected_or_appointed, member_count, election_method,
               officer_election_method, is_governing_board, meeting_formality_override,
               minutes_style_override, quorum_type, quorum_value, motion_display_format,
               archived_at, created_at, notice_template_blocks, minutes_consent_agenda,
@@ -211,7 +217,7 @@ export const boardRouter = router({
   /**
    * `settings.meeting-notices.tsx`'s read: every board in the caller's town,
    * with just enough to render the "configured / not configured" list and
-   * drive the "copy from board" picker. Not `detail`'s 20 columns — that
+   * drive the "copy from board" picker. Not `detail`'s columns — that
    * procedure is keyed to a single board (`boardId` input) and this one is
    * keyed to the town, so it gets its own, narrower column list rather than
    * reusing `detail`'s SQL for a town-wide scan.
@@ -232,10 +238,31 @@ export const boardRouter = router({
    * `notice_template_blocks` over EVERY board in the town, archived or not,
    * so this migration is not the place to newly exclude them (that would be
    * a behavior change smuggled into a read migration, not a port of one).
-   * `settings.meeting-notices.tsx`, the other caller, ignores the extra
-   * column — an extra field a handler returns is invisible to a typed
-   * consumer that does not read it (see `test/trpc.ts`'s own "the gap runs
-   * one way" note).
+   *
+   * `elected_or_appointed`, `archived_at`, `is_governing_board` and
+   * `active_member_count` added in wave 2, Task 2, for `routes/boards.tsx` —
+   * the `/boards` list page, this procedure's THIRD caller. That screen needs
+   * exactly this shape: every board (its own "show archived" toggle is
+   * client-side, over rows this same unfiltered scan already returns) with
+   * the columns that drive its Type/Status table cells, `is_governing_board`
+   * for its own client-side sort (see "Ordering" below), and a per-board
+   * count of currently ACTIVE members for the "N / M" Members cell — checked
+   * against that route's `boards.map((board) => { ... })` block.
+   * `active_member_count` is a correlated subquery, the identical shape
+   * `stats.active_members` already runs for one board at a time, run here
+   * once per row in the town-wide scan instead of firing N separate
+   * `board.stats` calls from the list screen. Every column a given caller
+   * does not read is invisible to it — see `test/trpc.ts`'s own "the gap runs
+   * one way" note, already quoted above for `member_count`; the same
+   * reasoning now covers four extra columns instead of one.
+   *
+   * Ordering stays `name` only, unchanged from before this task: the two
+   * existing callers never asked for a different order, and `boards.tsx`
+   * needs `is_governing_board DESC, name ASC` — sorted at the call site
+   * (conventions: "sort at the call site rather than adding a second
+   * procedure", the same choice `listActive`'s own doc comment makes for
+   * `StaffAccountFlow.tsx`) rather than changing this procedure's ORDER BY
+   * out from under its other two callers.
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.withTenant(async (tx) =>
@@ -244,9 +271,17 @@ export const boardRouter = router({
         name: string;
         notice_template_blocks: unknown | null;
         member_count: number | null;
+        elected_or_appointed: string | null;
+        archived_at: string | null;
+        is_governing_board: boolean;
+        active_member_count: number;
       }>(
         await tx.execute(sql`
-          SELECT id, name, notice_template_blocks, member_count
+          SELECT
+            id, name, notice_template_blocks, member_count, elected_or_appointed, archived_at,
+            is_governing_board,
+            (SELECT count(*)::int FROM board_member
+               WHERE board_id = board.id AND status = 'active') AS active_member_count
           FROM board
           ORDER BY name
         `),

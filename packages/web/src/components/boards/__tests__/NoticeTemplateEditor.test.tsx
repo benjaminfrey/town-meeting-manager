@@ -46,6 +46,7 @@ const boardId = "b1";
 const board: RouterOutputs["board"]["detail"] = {
   id: boardId,
   name: "Select Board",
+  board_type: "other",
   elected_or_appointed: "elected",
   member_count: 5,
   election_method: "at_large",

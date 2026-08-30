@@ -44,30 +44,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-2): agendaTemplate.countForBoard
-//
-// The marker above is the machine-checkable half of this comment, and it is
-// the point: a ten-line explanation is invisible to
-// `grep -rn "TODO(phase-e-wave" packages/web/src`, so a completeness sweep
-// would read this file as finished otherwise.
-//
-// `supabase` is still needed for the agenda template count — no
-// `agendaTemplate` router exists in `packages/api/src/trpc/routers/` yet.
-// Dropping the read instead of leaving it on Supabase would be a real
-// feature regression (silently losing the template count), which is worse
-// than the migration being incomplete.
-//
-// Narrowed from the original two-item marker (fix round, Task 2): `town`
-// used to be listed here too, but `town.detail` shipped in Task 1 of this
-// same wave, before this comment was last touched. This file's own town
-// read (the Overview "effective settings" rows, and the defaults passed to
-// EditBoardDialog / MinutesWorkflowEditor) still goes through Supabase —
-// `town.detail` EXISTING is not the same as this file having been migrated
-// to use it, and that migration is real work (retyping two components'
-// props, re-checking the effective-settings mapping) left for whoever picks
-// this file up next, not a one-line fix bundled into an unrelated task.
+// `agendaTemplate.countForBoard` (wave 2, Task 1) closes the
+// `TODO(phase-e-wave-2)` marker this file used to carry for the Overview
+// tab's template count. `supabase` stays imported: this file's own town read
+// (the Overview "effective settings" rows, and the defaults passed to
+// EditBoardDialog / MinutesWorkflowEditor) is NOT in this task's file list
+// (`routes/boards.tsx`, `boards.$boardId.tsx`, `boards.$boardId.templates.tsx`,
+// `AddBoardDialog.tsx`, `EditBoardDialog.tsx`, `settings.town.tsx`,
+// `ProgressChecklist.tsx`) and stays on Supabase — `town.detail` existing is
+// not the same as this file having been migrated to use it, and that
+// migration (retyping two components' props, re-checking the
+// effective-settings mapping) is real work left for whoever picks this file
+// up next.
 import { supabase } from "@/lib/supabase";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
@@ -173,17 +163,9 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     enabled: !!townId,
   });
 
-  const { data: templateCount } = useQuery({
-    queryKey: [...queryKeys.agendaTemplates.byBoard(boardId), "count"],
-    queryFn: async () => {
-      const { count } = await supabase
-        .from("agenda_template")
-        .select("*", { count: "exact", head: true })
-        .eq("board_id", boardId)
-        .throwOnError();
-      return count ?? 0;
-    },
-  });
+  const { data: templateCount } = useQuery(
+    trpc.agendaTemplate.countForBoard.queryOptions({ boardId }),
+  );
 
   const town = townRows?.[0] as Record<string, unknown> | undefined;
   const memberCount = stats?.active_members ?? 0;
@@ -278,7 +260,15 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
       {editOpen && (
         <EditBoardDialog
           townId={townId ?? ""}
-          town={town}
+          // This file's own town read is still Supabase's untyped client
+          // (see the comment above `supabase`'s import), so there is no
+          // router type to infer `town` from here — cast at the call site,
+          // visibly, rather than widen `EditBoardDialog`'s prop back to a
+          // bag (conventions item 10). Every field `EditBoardDialog` reads
+          // off `town` (`meeting_formality`/`minutes_style`, for its two
+          // "use town default" labels) really is present in a `select("*")`
+          // row.
+          town={town as unknown as RouterOutputs["town"]["detail"] | undefined}
           board={board}
           open={editOpen}
           onOpenChange={setEditOpen}
