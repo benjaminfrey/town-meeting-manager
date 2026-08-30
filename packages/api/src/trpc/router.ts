@@ -18,6 +18,7 @@ import { router, protectedProcedure } from "./trpc.js";
 import { toRows } from "../db/rows.js";
 import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.js";
 import { townRouter } from "./routers/town.js";
+import { boardRouter } from "./routers/board.js";
 
 export const appRouter = router({
   /**
@@ -25,6 +26,11 @@ export const appRouter = router({
    * portal cannot function without — see `routers/town.ts`.
    */
   town: townRouter,
+
+  /**
+   * Board reads. No permission guard — see `routers/board.ts` for why.
+   */
+  board: boardRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

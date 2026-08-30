@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import {
   ChevronRight,
   Pencil,
@@ -43,7 +44,25 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
+// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard
+//
+// The marker above is the machine-checkable half of this comment, and it is
+// the point: a ten-line explanation is invisible to
+// `grep -rn "TODO(phase-e-wave" packages/web/src`, so a completeness sweep
+// over 66 remaining Supabase importers would read this file as finished.
+//
+// `supabase` is still needed for two reads this task does not migrate: town
+// settings (used for the Overview "effective settings" rows, and passed down
+// as defaults to EditBoardDialog / MinutesWorkflowEditor) and the agenda
+// template count. Neither has a tRPC procedure yet — there is no `town.detail`
+// or `agendaTemplate` router in `packages/api/src/trpc/routers/` today, only
+// `board` and the narrow `town.portalAddress`/`town.setPortalAddress` pair.
+// Dropping these reads instead of leaving them on Supabase would be a real
+// feature regression (silently losing the effective-settings display and the
+// template count), which is worse than the migration being incomplete. Wave 2
+// adds those routers and finishes this file.
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
@@ -89,18 +108,12 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const boardId = params.boardId;
 
-  await queryClient.ensureQueryData({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("id", boardId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  // Not wrapped in try/catch: a nonexistent or foreign board answers
+  // NOT_FOUND (see `board.detail`'s doc comment), and letting that reject the
+  // loader routes to `RouteErrorBoundary` below — visible, not the indefinite
+  // "Loading board..." spinner the old `select("*").limit(1)` produced for
+  // the same case (an empty array is neither an error nor a board).
+  await queryClient.ensureQueryData(trpc.board.detail.queryOptions({ boardId }));
 
   return { boardId };
 }
@@ -117,57 +130,27 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
   const [archiveOpen, setArchiveOpen] = useState(false);
 
   // ─── Queries ──────────────────────────────────────────────────────
-  const { data: boardRows } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("id", boardId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
 
-  const { data: activeMemberCount } = useQuery({
-    queryKey: [...queryKeys.members.byBoard(boardId), "active-count"],
-    queryFn: async () => {
-      const { count } = await supabase
-        .from("board_member")
-        .select("*", { count: "exact", head: true })
-        .eq("board_id", boardId)
-        .eq("status", "active")
-        .throwOnError();
-      return count ?? 0;
-    },
-  });
+  // `boardRows`/`activeMemberCount`/`meetingCount`/`recentMeetings` above
+  // were four Supabase reads; `board.detail` + `board.stats` +
+  // `board.recentMeetings` are the three tRPC procedures that replace them
+  // (the two count queries collapse into `stats`). tRPC supplies its own
+  // query keys, so `queryKeys.boards.detail` etc. are no longer used for
+  // these three — but they stay in `lib/queryKeys.ts` and are NOT deleted:
+  // `EditBoardDialog`, `ArchiveBoardDialog`, `NoticeTemplateEditor`,
+  // `MinutesWorkflowEditor` and roughly a dozen other route/component files
+  // still key their own Supabase reads and cache invalidations off them.
+  const {
+    data: board,
+    isLoading: isBoardLoading,
+    isError: isBoardError,
+    error: boardError,
+  } = useQuery(trpc.board.detail.queryOptions({ boardId }));
 
-  const { data: meetingCount } = useQuery({
-    queryKey: [...queryKeys.meetings.byBoard(boardId), "count"],
-    queryFn: async () => {
-      const { count } = await supabase
-        .from("meeting")
-        .select("*", { count: "exact", head: true })
-        .eq("board_id", boardId)
-        .throwOnError();
-      return count ?? 0;
-    },
-  });
+  const { data: stats } = useQuery(trpc.board.stats.queryOptions({ boardId }));
 
   const { data: recentMeetings = [] } = useQuery({
-    queryKey: [...queryKeys.meetings.byBoard(boardId), "recent"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("id, title, scheduled_date, scheduled_time, status")
-        .eq("board_id", boardId)
-        .neq("status", "cancelled")
-        .order("scheduled_date", { ascending: false })
-        .limit(5)
-        .throwOnError();
-      return data ?? [];
-    },
+    ...trpc.board.recentMeetings.queryOptions({ boardId, limit: 5 }),
     enabled: activeTab === "meetings",
   });
 
@@ -197,13 +180,40 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     },
   });
 
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
   const town = townRows?.[0] as Record<string, unknown> | undefined;
-  const memberCount = activeMemberCount ?? 0;
-  const mtgCount = meetingCount ?? 0;
+  const memberCount = stats?.active_members ?? 0;
+  const mtgCount = stats?.meetings ?? 0;
   const tmplCount = templateCount ?? 0;
 
-  if (!board) {
+  // A screen that renders nothing and says nothing for a bad boardId is the
+  // failure mode this migration exists to end — so a rejected `board.detail`
+  // (most commonly NOT_FOUND: deleted, or another town's board) gets a
+  // visible, `role="alert"` state of its own, distinct from "still loading."
+  if (isBoardError) {
+    const notFound = isTRPCClientError(boardError) && boardError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This board could not be found."
+              : "Something went wrong loading this board."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link to="/boards" className="mt-4 inline-block text-sm text-primary hover:underline">
+            Back to Boards
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (isBoardLoading || !board) {
     return (
       <div className="flex items-center justify-center p-12">
         <p className="text-sm text-muted-foreground">Loading board...</p>
@@ -212,20 +222,20 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
   }
 
   const b = {
-    id: String(board.id),
-    name: String(board.name ?? ""),
-    elected_or_appointed: String(board.elected_or_appointed ?? "elected"),
-    member_count: Number(board.member_count ?? 0),
-    election_method: String(board.election_method ?? "at_large"),
-    officer_election_method: String(board.officer_election_method ?? "vote_of_board"),
-    is_governing_board: board.is_governing_board === true,
-    meeting_formality_override: (board.meeting_formality_override as string) || null,
-    minutes_style_override: (board.minutes_style_override as string) || null,
-    quorum_type: (board.quorum_type as string) || "simple_majority",
-    quorum_value: board.quorum_value != null ? Number(board.quorum_value) : null,
-    motion_display_format: String(board.motion_display_format ?? "inline_narrative"),
-    archived_at: (board.archived_at as string) || null,
-    created_at: String(board.created_at ?? ""),
+    id: board.id,
+    name: board.name,
+    elected_or_appointed: board.elected_or_appointed ?? "elected",
+    member_count: board.member_count ?? 0,
+    election_method: board.election_method ?? "at_large",
+    officer_election_method: board.officer_election_method ?? "vote_of_board",
+    is_governing_board: board.is_governing_board,
+    meeting_formality_override: board.meeting_formality_override,
+    minutes_style_override: board.minutes_style_override,
+    quorum_type: board.quorum_type ?? "simple_majority",
+    quorum_value: board.quorum_value,
+    motion_display_format: board.motion_display_format ?? "inline_narrative",
+    archived_at: board.archived_at,
+    created_at: board.created_at,
   };
 
   const isArchived = !!b.archived_at;
@@ -270,7 +280,12 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
         />
       )}
       {archiveOpen && (
-        <ArchiveBoardDialog board={board} open={archiveOpen} onOpenChange={setArchiveOpen} />
+        <ArchiveBoardDialog
+          board={board}
+          townId={townId ?? ""}
+          open={archiveOpen}
+          onOpenChange={setArchiveOpen}
+        />
       )}
 
       {/* Breadcrumb */}

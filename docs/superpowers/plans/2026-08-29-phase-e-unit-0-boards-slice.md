@@ -17,7 +17,7 @@
 - Gates are the list in `.github/workflows/ci.yml`. Run tests as `npx turbo run test --force`; `pnpm test --force` is not a valid command, and a run reporting anything but `0 cached` proved nothing.
 - Rebuild `@town-meeting/shared` (`npx turbo run build --force`) before trusting any test result. A stale `dist` has produced both false failures and false passes in this repo.
 - `DATABASE_URL="postgres://ben@localhost:5432/postgres"`. Scratch databases get unique names and are dropped; leave the `tmm_app` role.
-- **There is no parity baseline.** The screen currently renders nothing, because the browser sends no credential and `get_current_town_id()` cannot resolve for a PostgREST request. Do not verify by comparing to current behaviour; there is none.
+- **There is no parity baseline — for the RENDERING.** The screen shows nothing today, because the browser sends no credential and `get_current_town_id()` cannot resolve for a PostgREST request. But the **query you are replacing is a specification**: its filters, ordering and limits state intent even though it returns zero rows. Dropping one of its clauses is a behaviour change, and must be deliberate and stated.
 
 ---
 
@@ -421,9 +421,19 @@ describe("router wiring", () => {
     );
   });
 
-  it("board.detail rejects an input the screen could not send", async () => {
-    const caller = appRouter.createCaller({} as never);
-    await expect(caller.board.detail({ boardId: "not-a-uuid" } as never)).rejects.toThrow();
+  it("every pinned procedure validates its input", () => {
+    // NOT via createCaller with an empty context: protectedProcedure's
+    // requireTenant middleware runs BEFORE input parsing, so such a call
+    // rejects with UNAUTHORIZED and the assertion passes for the wrong
+    // reason — it would still pass with the input schema deleted. Parse the
+    // schema directly instead. Real input handling end-to-end is covered by
+    // board.test.ts, which has a real context.
+    for (const name of ["board.detail", "board.stats", "board.recentMeetings"]) {
+      const def = appRouter._def.procedures[name]._def;
+      const schema = def.inputs?.[0];
+      expect(schema, `${name} has no input schema`).toBeDefined();
+      expect(() => schema.parse({ boardId: "not-a-uuid" })).toThrow();
+    }
   });
 });
 ```
@@ -551,10 +561,17 @@ A screen that fails silently is the condition this phase exists to end.
 Run: `cd packages/web && npx vitest run src/routes/__tests__/boards.\$boardId.test.tsx`
 Expected: PASS, both cases.
 
-- [ ] **Step 5: Confirm the screen no longer references Supabase**
+- [ ] **Step 5: Confirm only the two deliberately-kept Supabase reads remain**
 
 Run: `grep -n supabase packages/web/src/routes/boards.\$boardId.tsx`
-Expected: no output.
+Expected: NOT zero output. This screen keeps two Supabase reads on purpose — town settings (the
+Overview "effective settings" rows, and the defaults passed to `EditBoardDialog` /
+`MinutesWorkflowEditor`) and the agenda template count — because no `town.detail` or
+`agendaTemplate` router exists yet. Confirm each surviving reference is one of those two, and that
+a `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard` marker sits above them
+(conventions item 11) so a completeness sweep can find the gap by grep rather than reading the
+file. `board.detail` / `board.stats` / `board.recentMeetings` — the three reads this task migrates
+— must be gone; only the town and agenda-template reads may remain.
 
 - [ ] **Step 6: Run every gate and commit**
 
@@ -588,7 +605,55 @@ Cover, each with a code example lifted from Task 2 or Task 4:
 4. **The client call shape.** `useQuery(trpc.<router>.<procedure>.queryOptions(input))`, plus mutation + `invalidateQueries`.
 5. **Error and loading states are required, and `role="alert"` is the pin.**
 6. **The test idiom**: typed mock per screen; authorization not re-proven on the web; one wiring entry per new router.
-7. **The rule that outranks the rest:** for every security-relevant assertion, delete the guard and watch the test go red before believing it. List the four suites in this repo that could not fail, so the next author knows this is a live habit and not a slogan.
+7. **Cache invalidation — a read owns its key.** The commit that moves a read to tRPC also
+   updates every writer that was invalidating the key it abandoned, _in that same commit_. This is
+   a completion gate, not advice: after migrating a read, `grep -rn "queryKeys\.<entity>"
+packages/web/src` and update every `invalidateQueries` hit, or record why one does not apply.
+   During the transition a Supabase-backed writer invalidates **both** — the legacy key (other,
+   unmigrated screens still read it) and the tRPC filter. The legacy line goes when the last legacy
+   reader does, not before. Default to router-level `trpc.<router>.pathFilter()`, because a board
+   edit can change both `detail` and `stats` and the writer should not need to know which
+   procedures a screen calls. Show both lines verbatim. Ban bare `invalidateQueries()` with no
+   filter.
+
+   _Found the hard way in Task 4: four writers invalidated `queryKeys.boards.detail(boardId)` while
+   the screen read through tRPC's key, so a rename left the old name on screen for 60s and a saved
+   notice template came back reverted._
+
+8. **Mock the transport, not the proxy.** Task 4's test mocked `@/lib/trpc` wholesale, which
+   fabricates query keys and binds nothing to the router — renaming `name` to `nayme` in the mock
+   left `tsc --noEmit` at exit 0. Two consequences: no invalidation test is possible, because the
+   key under test is invented by the test; and any column the test does not assert on can drift
+   from the router with typecheck and tests both green. Build the real `createTRPCOptionsProxy`
+   over a client whose fetch is stubbed, so real keys are produced. At minimum require
+   `satisfies inferProcedureOutput<...>` on every mocked payload. **This is the single
+   highest-leverage item in this document** — it is the file 80 tests get copied from.
+
+9. **Settle the test-harness question once.** `packages/web/src/test/render.ts:72` builds a fresh
+   `QueryClient` per render, but `lib/trpc.ts` binds its proxy to the app singleton and every
+   `clientLoader` calls `ensureQueryData` on that singleton. Task 4 worked around it by mutating
+   the production singleton's defaults in `beforeEach` — safe under vitest's current per-file
+   isolation, but it is shared production state and it will be copied 80 times. Extend
+   `renderWithProviders` or give `lib/queryClient` a test hook. Also rule on `MockAuthProvider`
+   versus `vi.mock("@/hooks/useCurrentUser")` rather than letting each file choose.
+
+10. **The column-parity audit covers props, not just JSX.** Task 4 audited every field the screen
+    itself reads and still shipped a regression, because `ArchiveBoardDialog` reads `board.town_id`
+    off an object the screen passes down. Child components receiving a tRPC payload must take
+    `inferProcedureOutput<...>`, never `Record<string, unknown>` — the bag type is what made it
+    silent.
+
+11. **Partial migrations need a machine-checkable marker.** A file that keeps some Supabase calls
+    because no procedure exists yet must carry `// TODO(phase-e-wave-N): <procedures needed>`. Task
+    4 left a careful ten-line prose comment and no grep-able token; with 82 files still importing
+    Supabase, a sweep would read that file as done. Track "files with a remaining marker" as a
+    countdown to zero.
+
+12. **Say which error surface is canonical.** Task 4 has both a loader that throws NOT_FOUND into
+    `RouteErrorBoundary` and an in-component `role="alert"` branch for post-mount refetch failures.
+    Both are needed; say so, and say which handles what, or 80 screens will diverge.
+
+13. **The rule that outranks the rest:** for every security-relevant assertion, delete the guard and watch the test go red before believing it. List the four suites in this repo that could not fail, so the next author knows this is a live habit and not a slogan.
 
 - [ ] **Step 2: Commit**
 
@@ -602,5 +667,5 @@ git commit -m "Write down the conventions the rest of Phase E copies"
 ## Self-review notes
 
 - **Spec coverage.** This plan covers the spec's unit 0 only. Waves 1–6, the SSE transport, the 8 `hasPermission` display fixes, and the definition-of-done removal of `lib/supabase.ts` are **not** covered here by design — the spec requires unit 0 be reviewed before they start, and detailing 80 files against an unproven template would be planning against a shape that does not exist. Each wave gets its own plan, written after this one lands.
-- **Known gap, deliberate.** `boards.$boardId.tsx` has tabs (Overview, Members, Meetings, Templates, Settings) whose other tabs make their own calls. This unit migrates the Overview data only; the remaining tabs belong to wave 2. The screen will import `trpc` and, briefly, nothing else — verify no `supabase` import survives in this file even though sibling files still have theirs.
+- **Known gap, deliberate.** `boards.$boardId.tsx` has tabs (Overview, Members, Meetings, Templates, Settings) whose other tabs make their own calls. This unit migrates the Overview data only; the remaining tabs belong to wave 2. The screen imports both `trpc` and `@/lib/supabase` — dropping the town-settings and agenda-template-count reads instead of migrating them would be a feature regression (see Task 4 step 5), so those two stay on Supabase, each marked `// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard`, until wave 2 adds the routers they need.
 - **Prerequisite.** D1f must land first. It is migrating `routes/minutes.ts`, `routes/documents.ts` and `services/minutes-assembler.ts` and deletes `plugins/supabase.ts`; starting unit 0 against a moving API is avoidable churn.

@@ -9,6 +9,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -55,7 +56,7 @@ type EditBoardData = z.infer<typeof EditBoardSchema>;
 interface EditBoardDialogProps {
   townId: string;
   town: Record<string, unknown> | undefined;
-  board: Record<string, unknown>;
+  board: RouterOutputs["board"]["detail"];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -63,7 +64,7 @@ interface EditBoardDialogProps {
 export function EditBoardDialog({ townId, town, board, open, onOpenChange }: EditBoardDialogProps) {
   const supabase = useSupabase();
   const queryClient = useQueryClient();
-  const boardId = String(board.id);
+  const boardId = board.id;
 
   // Check if board has meetings (disables name editing)
   const { data: meetingCount = 0 } = useQuery({
@@ -139,6 +140,10 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+      // See ArchiveBoardDialog's comment on the matching line: the legacy
+      // key no longer reaches BoardDetailPage's tRPC-backed read, so both
+      // invalidations run during the transition.
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       onOpenChange(false);
     },
   });

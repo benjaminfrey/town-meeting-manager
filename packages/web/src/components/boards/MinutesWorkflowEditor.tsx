@@ -12,6 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { AUDIO_RETENTION_LABELS, type AudioRetentionPolicy } from "@town-meeting/shared";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,10 @@ export function MinutesWorkflowEditor({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.boards.detail(boardId),
       });
+      // See ArchiveBoardDialog's comment on the matching line: the legacy
+      // key no longer reaches BoardDetailPage's tRPC-backed board.detail
+      // read, so both invalidations run during the transition.
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       setDirty(false);
     },
   });
