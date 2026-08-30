@@ -545,6 +545,16 @@ call itself, not the whole file — a whole-file version of this check raises 12
 HEAD (files that read a migrated key in a `useQuery` far from an unrelated `invalidateQueries()`
 call); the windowed version raises zero.
 
+That contrast is real but the "windowed versus whole-file" framing above overstates what the number
+`250` itself buys: the precision comes from the match being **forward-only** from the
+`invalidateQueries(` marker, not from the width being small. Widening the forward-only window all
+the way to 999999 characters — in effect everything from the call to the end of the file — still
+raises zero false positives, while a bidirectional variant of the same check (the width measured on
+both sides of the marker, rather than only ahead of it) picks up 1, 4 and 9 of the twelve at widths
+1000, 3000 and 10000 respectively, climbing to the full 12 once its own width is unbounded — which
+is just the whole-file check by another name. `250` could be far larger with the same result; what
+actually does the work is that nothing behind the marker is ever read.
+
 Validated against `git archive` snapshots of six real commits from this wave, not assumed: it
 reproduces two of the three blocking findings a human reviewer found by hand, by file, at the commit
 each shipped — `TownSealUpload.tsx`/`settings.minutes-workflow.tsx` at `841f4db`, and
