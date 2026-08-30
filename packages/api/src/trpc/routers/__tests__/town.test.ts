@@ -37,10 +37,12 @@ import {
   contextFor,
   testDb,
   inTown,
+  expectTrpcError,
   type TestDb,
   type TownFixture,
 } from "../../__tests__/fixtures.js";
 import { appRouter } from "../../router.js";
+import { toRows } from "../../../db/rows.js";
 
 /** Fill in every column `town.detail` selects, so the round trip is exercised. */
 async function configureTown(db: TestDb, town: TownFixture): Promise<void> {
@@ -181,6 +183,335 @@ describe("town.detail", () => {
         );
 
         await expect(caller.town.detail()).rejects.toThrow(/NOT_FOUND/);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * `town.updateProfile` / `updateMeetingDefaults` / `updateMeetingRoles` /
+ * `acknowledgeRetentionPolicy` — the four writes `settings.town.tsx`'s child
+ * editors make, and the first mutations conventions item 2's write-side rules
+ * have ever run against (`town.setPortalAddress` was the only prior one).
+ * All four share one gate, `assertCanUpdateTown` — the SAME admin-only rule
+ * `setPortalAddress` already uses — so each gets the same two-test shape:
+ *
+ *   - a non-admin (staff, board_member) is refused, and NOTHING was written;
+ *   - an admin succeeds, and the row reads back changed.
+ *
+ * Every refusal here was verified by mutation per conventions item 13:
+ * deleting the procedure's `assertCanUpdateTown(await ctx.actor())` line and
+ * re-running the file turned the matching "refuses a caller who is not an
+ * administrator" test red (an admin was expected to be needed but the
+ * mutation succeeded for staff/board_member too), with every other test in
+ * the file unaffected. Restored byte-identical afterward; see the task
+ * report for the exact diffs and output.
+ */
+async function readTown(
+  db: TestDb,
+  town: TownFixture,
+): Promise<{
+  name: string;
+  state: string;
+  municipality_type: string;
+  population_range: string | null;
+  contact_name: string | null;
+  contact_role: string | null;
+  meeting_formality: string;
+  minutes_style: string;
+  presiding_officer_default: string | null;
+  minutes_recorder_default: string | null;
+  retention_policy_acknowledged_at: string | null;
+}> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(
+        sql`
+          SELECT name, state, municipality_type, population_range, contact_name,
+            contact_role, meeting_formality, minutes_style, presiding_officer_default,
+            minutes_recorder_default, retention_policy_acknowledged_at
+          FROM town WHERE id = ${town.townId}
+        `,
+      )
+      .then((r) =>
+        toRows<{
+          name: string;
+          state: string;
+          municipality_type: string;
+          population_range: string | null;
+          contact_name: string | null;
+          contact_role: string | null;
+          meeting_formality: string;
+          minutes_style: string;
+          presiding_officer_default: string | null;
+          minutes_recorder_default: string | null;
+          retention_policy_acknowledged_at: string | null;
+        }>(r, (m) => new Error(m)),
+      ),
+  );
+  return rows[0]!;
+}
+
+describe("town.updateProfile", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.town.updateProfile({
+              name: "Newcastle Renamed",
+              state: "NH",
+              municipality_type: "city",
+              population_range: "over_10000",
+              contact_name: "Someone Else",
+              contact_role: "Impostor",
+            }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readTown(db, town);
+        expect(row.name).toBe("Newcastle");
+        expect(row.state).toBe("ME");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * Documents a real gap in conventions item 2, found writing this test —
+   * see the task report. tRPC parses `.input(...)` before the resolver body
+   * runs at all, so `assertCanUpdateTown(await ctx.actor())` being the
+   * "first line of the resolver" is not the same as being the first thing
+   * the request hits. A non-admin caller who also sends invalid data is
+   * answered BAD_REQUEST, not FORBIDDEN — the authorization check never
+   * runs. `setPortalAddress`'s own input schema (`z.object({ subdomain:
+   * z.string() })`) is too permissive to ever surface this: almost any
+   * string parses, so its refusal test happened to only ever exercise the
+   * FORBIDDEN path. `updateProfile`'s stricter schema (a real character
+   * regex, real enums) makes the gap observable for the first time.
+   */
+  it("answers BAD_REQUEST rather than FORBIDDEN when a refused caller's input is also invalid", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // Same non-admin caller as above, but a name that fails the regex —
+        // zod rejects it before `updateProfile`'s resolver, and therefore
+        // before `assertCanUpdateTown`, ever runs.
+        const err = await expectTrpcError(() =>
+          caller.town.updateProfile({
+            name: "Newcastle (Invalid)",
+            state: "NH",
+            municipality_type: "city",
+            population_range: "over_10000",
+            contact_name: "Someone Else",
+            contact_role: "Impostor",
+          }),
+        );
+        expect(err.code).toBe("BAD_REQUEST");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator update the town's profile", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const result = await caller.town.updateProfile({
+          name: "New Castle",
+          state: "NH",
+          municipality_type: "city",
+          population_range: "5000_to_10000",
+          contact_name: "Jamie Clerk",
+          contact_role: "Town Clerk",
+        });
+        expect(result.name).toBe("New Castle");
+
+        const row = await readTown(db, town);
+        expect(row).toMatchObject({
+          name: "New Castle",
+          state: "NH",
+          municipality_type: "city",
+          population_range: "5000_to_10000",
+          contact_name: "Jamie Clerk",
+          contact_role: "Town Clerk",
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("town.updateMeetingDefaults", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.town.updateMeetingDefaults({
+              meeting_formality: "formal",
+              minutes_style: "narrative",
+            }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readTown(db, town);
+        // `seedTown` leaves the column defaults untouched by any refused call.
+        expect(row.meeting_formality).toBe("semi_formal");
+        expect(row.minutes_style).toBe("action");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator update the meeting formality and minutes style defaults", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        await caller.town.updateMeetingDefaults({
+          meeting_formality: "formal",
+          minutes_style: "narrative",
+        });
+
+        const row = await readTown(db, town);
+        expect(row.meeting_formality).toBe("formal");
+        expect(row.minutes_style).toBe("narrative");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("town.updateMeetingRoles", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.town.updateMeetingRoles({
+              presiding_officer_default: "moderator",
+              minutes_recorder_default: "other_staff",
+            }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readTown(db, town);
+        expect(row.presiding_officer_default).toBeNull();
+        expect(row.minutes_recorder_default).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator update the presiding officer and minutes recorder defaults", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        await caller.town.updateMeetingRoles({
+          presiding_officer_default: "moderator",
+          minutes_recorder_default: "other_staff",
+        });
+
+        const row = await readTown(db, town);
+        expect(row.presiding_officer_default).toBe("moderator");
+        expect(row.minutes_recorder_default).toBe("other_staff");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("town.acknowledgeRetentionPolicy", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() => caller.town.acknowledgeRetentionPolicy());
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readTown(db, town);
+        expect(row.retention_policy_acknowledged_at).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator acknowledge the retention policy", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const before = Date.now();
+        const result = await caller.town.acknowledgeRetentionPolicy();
+        expect(result.retention_policy_acknowledged_at).not.toBeNull();
+        expect(new Date(result.retention_policy_acknowledged_at).getTime()).toBeGreaterThanOrEqual(
+          before,
+        );
+
+        const row = await readTown(db, town);
+        expect(row.retention_policy_acknowledged_at).not.toBeNull();
       } finally {
         await app.end();
       }

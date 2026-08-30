@@ -32,11 +32,28 @@
 
 import { sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { checkSubdomain } from "@town-meeting/shared";
+import {
+  checkSubdomain,
+  MeetingFormality,
+  MinutesStyle,
+  MunicipalityType,
+  PopulationRange,
+} from "@town-meeting/shared";
 import { router, protectedProcedure } from "../trpc.js";
 import { assertCanUpdateTown } from "../authorization/rules.js";
 import { toRows } from "../../db/rows.js";
 import { z } from "zod";
+
+/**
+ * The same character rule `TownSettingsEditor`'s own zod schema enforces
+ * client-side (`packages/web/src/components/dashboard/TownSettingsEditor.tsx`).
+ * Duplicated rather than imported from `@town-meeting/shared`'s
+ * `WizardStage1Schema`, because that schema is camelCase-keyed
+ * (`townName`, `municipalityType`) for the onboarding wizard's payload shape,
+ * not this procedure's snake_case, column-named one — importing it and
+ * remapping every key would trade one duplication for a worse one.
+ */
+const TOWN_NAME_REGEX = /^[a-zA-Z0-9\s\-'.]+$/;
 
 /**
  * Is this the `town_subdomain_key` collision, and not some other write error?
@@ -217,4 +234,150 @@ export const townRouter = router({
 
       return { subdomain: checked.subdomain };
     }),
+
+  /**
+   * The fields `TownSettingsEditor` writes — the town's identity, not its
+   * meeting practice. Same admin gate as `setPortalAddress`, and the same
+   * reasoning as that procedure's own doc comment for why this is a
+   * dedicated procedure rather than one key in a generic "patch the town"
+   * endpoint: an explicit, named set of columns means a caller cannot send
+   * `{ subdomain: "..." }` through the wrong door and skip
+   * `checkSubdomain`/the uniqueness constraint, and a reviewer can see
+   * exactly what each screen is permitted to change.
+   *
+   * No `townId` input, matching `town.detail` and `setPortalAddress`: the
+   * row written is always `ctx.tenant.townId`, so there is no id for a
+   * caller to substitute.
+   */
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        name: z
+          .string()
+          .min(2, "Town name must be at least 2 characters")
+          .max(100, "Town name must be less than 100 characters")
+          .regex(TOWN_NAME_REGEX, "Invalid characters in town name"),
+        state: z.enum(["ME", "NH", "VT", "MA", "CT", "RI"]),
+        municipality_type: z.enum([
+          MunicipalityType.TOWN,
+          MunicipalityType.CITY,
+          MunicipalityType.PLANTATION,
+        ]),
+        population_range: z.enum([
+          PopulationRange.UNDER_1000,
+          PopulationRange.FROM_1000_TO_2500,
+          PopulationRange.FROM_2500_TO_5000,
+          PopulationRange.FROM_5000_TO_10000,
+          PopulationRange.OVER_10000,
+        ]),
+        contact_name: z.string().min(2, "Contact name must be at least 2 characters").max(100),
+        contact_role: z.string().min(1, "Contact role is required").max(100),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanUpdateTown(await ctx.actor());
+      await ctx.withTenant(async (tx) => {
+        await tx.execute(sql`
+          UPDATE town SET
+            name = ${input.name},
+            state = ${input.state},
+            municipality_type = ${input.municipality_type}::municipality_type,
+            population_range = ${input.population_range},
+            contact_name = ${input.contact_name},
+            contact_role = ${input.contact_role},
+            updated_at = now()
+          WHERE id = ${ctx.tenant.townId}
+        `);
+      });
+      return input;
+    }),
+
+  /**
+   * The fields `MeetingDefaultsEditor` writes. Both columns are real
+   * Postgres enums (`meeting_formality`, `minutes_style` — see
+   * `packages/api/src/db/schema.ts`), so the cast is load-bearing: an
+   * untyped string literal in the `UPDATE` would be rejected by the column
+   * type, but only after the zod `z.enum` below has already narrowed the
+   * input to a value that cast can never fail on — the same belt-and-braces
+   * shape the client's own `MeetingDefaultsSchema` already enforces.
+   */
+  updateMeetingDefaults: protectedProcedure
+    .input(
+      z.object({
+        meeting_formality: z.enum([
+          MeetingFormality.INFORMAL,
+          MeetingFormality.SEMI_FORMAL,
+          MeetingFormality.FORMAL,
+        ]),
+        minutes_style: z.enum([MinutesStyle.ACTION, MinutesStyle.SUMMARY, MinutesStyle.NARRATIVE]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanUpdateTown(await ctx.actor());
+      await ctx.withTenant(async (tx) => {
+        await tx.execute(sql`
+          UPDATE town SET
+            meeting_formality = ${input.meeting_formality}::meeting_formality,
+            minutes_style = ${input.minutes_style}::minutes_style,
+            updated_at = now()
+          WHERE id = ${ctx.tenant.townId}
+        `);
+      });
+      return input;
+    }),
+
+  /**
+   * The fields `MeetingRolesEditor` writes.
+   *
+   * Both columns are plain `text` in `schema.ts`, not Postgres enums — unlike
+   * `meeting_formality`/`minutes_style` above, there is no database
+   * constraint backing the option lists `MeetingRolesEditor` renders
+   * (`PRESIDING_OFFICER_OPTIONS`, `MINUTES_RECORDER_OPTIONS`), so this
+   * mirrors the client's own `MeetingRolesSchema` exactly: any non-empty
+   * string, not a closed set. Narrowing this procedure to an enum the schema
+   * does not enforce would be a stricter server-side rule invented rather
+   * than transcribed — the thing item 2 warns against.
+   */
+  updateMeetingRoles: protectedProcedure
+    .input(
+      z.object({
+        presiding_officer_default: z.string().min(1),
+        minutes_recorder_default: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanUpdateTown(await ctx.actor());
+      await ctx.withTenant(async (tx) => {
+        await tx.execute(sql`
+          UPDATE town SET
+            presiding_officer_default = ${input.presiding_officer_default},
+            minutes_recorder_default = ${input.minutes_recorder_default},
+            updated_at = now()
+          WHERE id = ${ctx.tenant.townId}
+        `);
+      });
+      return input;
+    }),
+
+  /**
+   * `RetentionPolicyModal`'s write: acknowledge the data retention policy.
+   *
+   * A dedicated procedure rather than a generic "set this timestamp" field
+   * for the same reason `setPortalAddress` is one: this is not a preference,
+   * it is a compliance acknowledgment (see the component's own `@see` to
+   * `docs/advisory-resolutions/1.2`), and the server — not the caller —
+   * decides the instant it happened. No input: unlike a subdomain, there is
+   * nothing here for the client to supply.
+   */
+  acknowledgeRetentionPolicy: protectedProcedure.mutation(async ({ ctx }) => {
+    assertCanUpdateTown(await ctx.actor());
+    const now = new Date().toISOString();
+    await ctx.withTenant(async (tx) => {
+      await tx.execute(sql`
+        UPDATE town SET retention_policy_acknowledged_at = ${now}, updated_at = ${now}
+        WHERE id = ${ctx.tenant.townId}
+      `);
+    });
+    return { retention_policy_acknowledged_at: now };
+  }),
 });

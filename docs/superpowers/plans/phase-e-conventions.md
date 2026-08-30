@@ -112,6 +112,27 @@ it is said plainly:
   The `translateAuthorizationErrors` middleware is applied to every procedure precisely so a rule
   thrown from inside a resolver still surfaces as FORBIDDEN rather than a 500.
 
+  **Amendment (Task 2, wave 1) — "first line of the resolver" is not "first thing the request
+  hits."** `.input(...)` parsing happens in tRPC's own pipeline BEFORE the resolver function is
+  ever called, so a non-admin caller whose input also fails validation gets BAD_REQUEST, not
+  FORBIDDEN — `assertCanUpdateTown` never runs. `setPortalAddress`'s own schema
+  (`z.object({ subdomain: z.string() })`) is too permissive to have ever surfaced this: almost any
+  string parses, so its "refuses a non-admin" test only ever exercised the FORBIDDEN path by
+  accident. `town.updateProfile`'s schema is what caught it — it has a real character regex and
+  real enums, and the first version of its refusal test used a town name containing `(`, which
+  fails that regex, and got BAD_REQUEST back instead of the FORBIDDEN the test expected. This is
+  not a bug in `updateProfile` or in `assertCanUpdateTown`; it is tRPC's ordinary, intentional
+  pipeline, and it is not wrong to answer BAD_REQUEST first — but item 2's own resolver-form example
+  invites the reader to believe the guard is the first thing that runs, and that is false whenever
+  the input schema is more than decorative. Two consequences for the next five waves: (1) write a
+  refusal test with syntactically-valid input, or the test can pass for the wrong reason (or fail
+  for the wrong reason, as this one first did); (2) if it matters that an unauthorized caller never
+  learns anything about validation rules for data it was never allowed to submit, this ordering is
+  a real, if minor, information disclosure — pin the ordering with a deliberate test (see
+  `town.updateProfile`'s "answers BAD_REQUEST rather than FORBIDDEN when a refused caller's input
+  is also invalid" in `packages/api/src/trpc/routers/__tests__/town.test.ts`) rather than treating
+  it as either a bug to fix or a non-issue to ignore silently.
+
 - **Middleware form** — `.use(requireBoardPermission(code, boardIdFrom()))` — whenever the check is
   board-scoped. It is not a style choice there: `requirePermission` refuses at module import time
   if a board-scoped code arrives with no board, and that refusal is the whole safety net. A

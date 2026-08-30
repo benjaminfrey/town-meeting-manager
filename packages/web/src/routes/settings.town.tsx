@@ -3,12 +3,23 @@
  *
  * Town profile and configuration settings. Content extracted from
  * the old dashboard.tsx route in Session UI.03.
+ *
+ * Stage 1, Phase E, Task 2 — moved the town-profile read onto `town.detail`
+ * (Task 1) and the four child editors' writes onto the matching
+ * `town.update*` / `acknowledgeRetentionPolicy` mutations. `town.detail`'s
+ * loading and error states now get their own visible states (conventions
+ * item 5); the old version rendered an indefinite skeleton or a generic
+ * "not found" message for both, which is the silent-failure mode this
+ * migration exists to end.
  */
 
 import { useState } from "react";
 import { Navigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { isTRPCClientError } from "@trpc/client";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import type { Route } from "./+types/settings.town";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { ProgressChecklist } from "@/components/dashboard/ProgressChecklist";
 import { SettingsSection, SettingRow } from "@/components/dashboard/SettingsSection";
@@ -32,7 +43,17 @@ import { RetentionPolicyModal } from "@/components/dashboard/RetentionPolicyModa
 import { Accordion } from "@/components/ui/accordion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
+// TODO(phase-e-wave-2): board.byTown (or equivalent)
+//
+// The marker above is the machine-checkable half of this comment — see
+// conventions item 11. `board`'s router has no list-by-town procedure today
+// (only `detail`/`stats`/`recentMeetings`, all single-board), so the
+// "Governing Board" and "Boards & Committees" sections below still read the
+// board list through Supabase. Dropping the read instead of leaving it on
+// Supabase would silently remove those two sections, which is a worse
+// regression than an incomplete migration.
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { DashboardStatsSkeleton, SettingsSectionSkeleton } from "@/components/skeletons";
 
 // ─── Label helpers ──────────────────────────────────────────────────
@@ -52,11 +73,24 @@ const STATE_LABELS: Record<string, string> = {
 
 // ─── Route ──────────────────────────────────────────────────────────
 
+// No `ensureQueryData(trpc.town.detail.queryOptions())` priming here, unlike
+// `boards.$boardId.tsx`'s loader — deliberately, not an oversight. This route
+// has no path param to key a loader on, and the thing that decides whether to
+// show this screen at all is `useCurrentUser().townId` (an account with no
+// tenant redirects to `/setup` below), which is only known once
+// `AuthProvider` has resolved, after the loader has already run. Priming here
+// would mean either racing that resolution or calling `town.detail` for an
+// account that has no town yet, which answers FORBIDDEN and would route to
+// `RouteErrorBoundary` for what is actually the ordinary "finish onboarding"
+// case. `people.tsx` and `boards.tsx` make the same choice for the same
+// reason. The `ErrorBoundary` export below still matters: it is what catches
+// an unrelated loader failure elsewhere in this route tree, same as any
+// other route.
 export async function clientLoader() {
   return {};
 }
 
-export default function SettingsTownPage() {
+export default function SettingsTownPage(_props: Route.ComponentProps) {
   const currentUser = useCurrentUser();
   const townId = currentUser?.townId;
 
@@ -65,19 +99,15 @@ export default function SettingsTownPage() {
   const [retentionModalOpen, setRetentionModalOpen] = useState(false);
 
   // ─── Reactive queries ───────────────────────────────────────────
-  const { data: townRows, isLoading: townLoading } = useQuery({
-    queryKey: queryKeys.towns.detail(townId ?? ""),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId!)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId,
-  });
+  // `town.detail` takes no input — see its own doc comment — so `enabled`
+  // is what stops it firing before `townId` is known, not an argument to
+  // `queryOptions()`.
+  const {
+    data: town,
+    isLoading: isTownLoading,
+    isError: isTownError,
+    error: townError,
+  } = useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId });
 
   const { data: boardRows } = useQuery({
     queryKey: queryKeys.boards.byTown(townId ?? ""),
@@ -95,7 +125,6 @@ export default function SettingsTownPage() {
     enabled: !!townId,
   });
 
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
   const boards = (boardRows ?? []) as Record<string, unknown>[];
 
   // No townId at all → user hasn't completed onboarding
@@ -103,8 +132,43 @@ export default function SettingsTownPage() {
     return <Navigate to="/setup" replace />;
   }
 
-  // townId exists but town data hasn't loaded yet — show skeleton
-  if (townLoading) {
+  // A screen that renders nothing and says nothing for a failed read is the
+  // failure mode this migration exists to end (conventions item 5) — so a
+  // rejected `town.detail` (most plausibly a corrupted tenant bridge; see
+  // that procedure's own doc comment) gets a visible, `role="alert"` state
+  // distinct from "still loading."
+  if (isTownError) {
+    const notFound = isTRPCClientError(townError) && townError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This town's profile could not be found."
+              : "Something went wrong loading your town's settings."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "Your account may not be linked to a town record. Contact support."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => window.location.reload()}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Reload
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // townId exists but the read hasn't settled yet — show skeleton
+  if (isTownLoading || !town) {
     return (
       <div className="p-6 max-w-4xl space-y-6">
         <div className="h-8 w-56 rounded-md bg-muted animate-pulse" />
@@ -114,42 +178,29 @@ export default function SettingsTownPage() {
     );
   }
 
-  // Town query settled but no data — DB not yet ready
-  if (!town) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 p-12">
-        <p className="text-sm text-muted-foreground">
-          Town data not found. This can happen if the initial sync hasn&apos;t completed yet.
-        </p>
-        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Reload
-        </Button>
-      </div>
-    );
-  }
-
-  // Cast town fields — Supabase returns native types
+  // `town.detail`'s columns are already real types (conventions item 10) —
+  // no `Record<string, unknown>` bag and no `as` casts, unlike the Supabase
+  // read this replaces. Only the nullable text columns get a UI default.
   const t = {
-    id: town.id as string,
-    name: (town.name as string) ?? "",
-    state: (town.state as string) ?? "ME",
-    municipality_type: (town.municipality_type as string) ?? "town",
-    population_range: (town.population_range as string) ?? "under_1000",
-    contact_name: (town.contact_name as string) ?? "",
-    contact_role: (town.contact_role as string) ?? "",
-    meeting_formality: (town.meeting_formality as string) ?? "informal",
-    minutes_style: (town.minutes_style as string) ?? "summary",
-    presiding_officer_default: (town.presiding_officer_default as string) ?? "chair_of_board",
-    minutes_recorder_default: (town.minutes_recorder_default as string) ?? "town_clerk",
-    staff_roles_present: town.staff_roles_present as string[] | null,
-    subdomain: town.subdomain as string | null,
-    seal_url: town.seal_url as string | null,
-    retention_policy_acknowledged_at: town.retention_policy_acknowledged_at as string | null,
-    minutes_workflow_configured_at: town.minutes_workflow_configured_at as string | null,
+    id: town.id,
+    name: town.name,
+    state: town.state,
+    municipality_type: town.municipality_type,
+    population_range: town.population_range ?? "under_1000",
+    contact_name: town.contact_name ?? "",
+    contact_role: town.contact_role ?? "",
+    meeting_formality: town.meeting_formality,
+    minutes_style: town.minutes_style,
+    presiding_officer_default: town.presiding_officer_default ?? "chair_of_board",
+    minutes_recorder_default: town.minutes_recorder_default ?? "town_clerk",
+    staff_roles_present: town.staff_roles_present,
+    subdomain: town.subdomain,
+    seal_url: town.seal_url,
+    retention_policy_acknowledged_at: town.retention_policy_acknowledged_at,
+    minutes_workflow_configured_at: town.minutes_workflow_configured_at,
   };
 
-  // staff_roles_present comes as native JSONB array from Supabase
+  // staff_roles_present is `jsonb`, typed `unknown | null` by `town.detail`
   const staffRoles: string[] = Array.isArray(t.staff_roles_present) ? t.staff_roles_present : [];
 
   const STAFF_ROLE_LABELS: Record<string, string> = {
@@ -181,7 +232,7 @@ export default function SettingsTownPage() {
         <ProgressChecklist
           townId={t.id}
           sealUrl={t.seal_url}
-          subdomain={(t as Record<string, unknown>).subdomain as string | null}
+          subdomain={t.subdomain}
           retentionAcknowledgedAt={t.retention_policy_acknowledged_at}
           minutesWorkflowConfiguredAt={t.minutes_workflow_configured_at}
           onRetentionPolicyClick={() => setRetentionModalOpen(true)}
@@ -384,3 +435,5 @@ export default function SettingsTownPage() {
     </div>
   );
 }
+
+export { RouteErrorBoundary as ErrorBoundary };

@@ -2,13 +2,18 @@
  * MeetingDefaultsEditor — inline editor for meeting formality and minutes style.
  *
  * Town-level defaults that apply to all boards unless overridden per board.
+ *
+ * Stage 1, Phase E, Task 2 — the write is `town.updateMeetingDefaults` now.
+ * Invalidates both the legacy `queryKeys.towns.detail(townId)` key and
+ * `trpc.town.pathFilter()` — see `TownSettingsEditor.tsx`'s header comment
+ * for the list of screens still reading the legacy key.
  */
 
 import { useCallback } from "react";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { MeetingFormality, MinutesStyle } from "@town-meeting/shared";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -79,30 +84,21 @@ interface MeetingDefaultsEditorProps {
 }
 
 export function MeetingDefaultsEditor({ townId, initial, onDone }: MeetingDefaultsEditorProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const { values, isValid, setValue, validate } = useWizardForm<MeetingDefaultsData>(
     MeetingDefaultsSchema,
     initial,
   );
 
-  const mutation = useMutation({
-    mutationFn: async (data: MeetingDefaultsData) => {
-      const { error } = await supabase
-        .from("town")
-        .update({
-          meeting_formality: data.meeting_formality,
-          minutes_style: data.minutes_style,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", townId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
-      onDone();
-    },
-  });
+  const mutation = useMutation(
+    trpc.town.updateMeetingDefaults.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+        void queryClient.invalidateQueries(trpc.town.pathFilter());
+        onDone();
+      },
+    }),
+  );
 
   const handleSave = useCallback(() => {
     const data = validate();

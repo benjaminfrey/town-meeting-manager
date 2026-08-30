@@ -3,13 +3,23 @@
  *
  * Edits town name, state, municipality type, population range,
  * contact name, and contact role.
+ *
+ * Stage 1, Phase E, Task 2 — the write is `town.updateProfile` now, not a raw
+ * Supabase `update()`. The mutation invalidates BOTH the legacy
+ * `queryKeys.towns.detail(townId)` key and `trpc.town.pathFilter()`
+ * (conventions item 7): `settings.town.tsx` itself moved onto the tRPC key,
+ * but `home.tsx`, `boards.tsx`, `boards.$boardId.tsx`,
+ * `meetings.$meetingId.{agenda,review,minutes}.tsx` and
+ * `settings.minutes-workflow.tsx` all still read the town row through the
+ * legacy key, so dropping that invalidation would leave every one of them
+ * stale for up to the 60s `staleTime`.
  */
 
 import { useCallback } from "react";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { MunicipalityType, PopulationRange, NEW_ENGLAND_STATES } from "@town-meeting/shared";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,32 +87,22 @@ interface TownSettingsEditorProps {
 }
 
 export function TownSettingsEditor({ townId, initial, onDone }: TownSettingsEditorProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const { values, errors, isValid, setValue, handleBlur, validate } =
     useWizardForm<TownSettingsData>(TownSettingsSchema, initial);
 
-  const mutation = useMutation({
-    mutationFn: async (data: TownSettingsData) => {
-      const { error } = await supabase
-        .from("town")
-        .update({
-          name: data.name,
-          state: data.state,
-          municipality_type: data.municipality_type,
-          population_range: data.population_range,
-          contact_name: data.contact_name,
-          contact_role: data.contact_role,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", townId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
-      onDone();
-    },
-  });
+  const mutation = useMutation(
+    trpc.town.updateProfile.mutationOptions({
+      onSuccess: () => {
+        // Legacy key stays: see this file's header comment. `pathFilter()`
+        // is what `settings.town.tsx`'s own `town.detail` read invalidates
+        // under now.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+        void queryClient.invalidateQueries(trpc.town.pathFilter());
+        onDone();
+      },
+    }),
+  );
 
   const handleSave = useCallback(() => {
     const data = validate();

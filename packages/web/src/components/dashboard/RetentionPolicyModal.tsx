@@ -5,6 +5,15 @@
  * without acknowledging. Writes timestamp to the TOWN record.
  *
  * @see docs/advisory-resolutions/1.2 — Data retention rules
+ *
+ * Stage 1, Phase E, Task 2 — the write is `town.acknowledgeRetentionPolicy`
+ * now, which takes no input (the server, not the caller, decides the
+ * instant — see the procedure's own doc comment) and resolves the row via
+ * the caller's own tenant, not `townId`. `townId` stays a required prop
+ * anyway: it is still what the legacy cache-invalidation key is built from
+ * (see `TownSettingsEditor.tsx`'s header comment for why that key stays),
+ * and every other caller of this component already has it in hand from
+ * `useCurrentUser()`.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,8 +27,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 
 interface RetentionPolicyModalProps {
   townId: string;
@@ -28,23 +37,17 @@ interface RetentionPolicyModalProps {
 }
 
 export function RetentionPolicyModal({ townId, open, onOpenChange }: RetentionPolicyModalProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from("town")
-        .update({ retention_policy_acknowledged_at: now, updated_at: now })
-        .eq("id", townId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
-      onOpenChange(false);
-    },
-  });
+  const mutation = useMutation(
+    trpc.town.acknowledgeRetentionPolicy.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+        void queryClient.invalidateQueries(trpc.town.pathFilter());
+        onOpenChange(false);
+      },
+    }),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
