@@ -4,10 +4,11 @@
  * Allows users to manage which email notifications they receive.
  * Preferences are stored in `subscriber_notification_preference`, a
  * PERSON's own preferences — not `town_notification_config` (the town's
- * SMTP/Twilio credentials, a different table with its own admin-only router,
- * `townNotificationConfig`). See `notification-preference.ts`'s own doc
- * comment for why that distinction matters and how this task's brief
- * conflated the two.
+ * SMTP/Twilio credentials, a different table with no procedure of its own;
+ * see `packages/api/src/trpc/routers/notification-preference.ts`'s own doc
+ * comment for why that distinction matters, and
+ * `docs/superpowers/plans/phase-e-conventions.md`'s "Known gaps" for why no
+ * router exists for that table).
  * Default (no row) = enabled.
  *
  * Stage 1, Phase E, wave 1, Task 4 — moved onto `notificationPreference.mine`

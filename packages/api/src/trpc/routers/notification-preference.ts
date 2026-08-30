@@ -2,9 +2,14 @@
  * `settings.notifications.tsx`'s router — a person's own notification
  * preferences (`subscriber_notification_preference`), read and written by
  * themselves. Not `town_notification_config` (the town's SMTP/Twilio
- * credentials) — that is a different table with a different router
- * (`town-notification-config.ts`); see this task's report for how the two
- * got conflated in the brief and why this file exists instead.
+ * credentials) — that is a different table, and it has NO router: a first
+ * attempt at one was reviewed and deleted in this same task (wave 1 Task 4)
+ * because nothing client-reachable touches that table today, and shipping a
+ * `select` would have been the first client path to its credentials rather
+ * than a fix. See `docs/superpowers/plans/phase-e-conventions.md`'s "Known
+ * gaps" section and the task report for the full account of how the two
+ * tables got conflated in the original brief and why this file exists
+ * instead.
  *
  * ─── Authorization ──────────────────────────────────────────────────────
  *
