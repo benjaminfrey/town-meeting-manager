@@ -70,6 +70,87 @@ function isSubdomainCollision(err: unknown): boolean {
 
 export const townRouter = router({
   /**
+   * The town's own profile and configuration, for the caller's own town.
+   *
+   * No permission guard, deliberately, for the same reason `board.ts` gives:
+   * `settings.town.tsx` (the "Town Profile" screen) carried a pure tenancy
+   * policy and nothing else — any authenticated member of a town could view
+   * it. `protectedProcedure` + `ctx.withTenant` IS that policy, and there is
+   * no `townId` input to guard in the first place: the row resolved is always
+   * `ctx.tenant.townId`, never a caller-supplied id, so this procedure cannot
+   * be asked about another town's row at all.
+   *
+   * Column list checked against every consumer of the row, not just the
+   * route's own JSX — conventions item 10, after Task 4's `board.town_id`
+   * regression:
+   *
+   *   - `settings.town.tsx`'s own `const t = { ... }` mapping and the
+   *     `STAFF_ROLE_LABELS` / `ProgressChecklist` reads built from it;
+   *   - the `initial` prop built for `<TownSettingsEditor>` (name, state,
+   *     municipality_type, population_range, contact_name, contact_role);
+   *   - the `initial` prop built for `<MeetingDefaultsEditor>`
+   *     (meeting_formality, minutes_style);
+   *   - the `initial` prop built for `<MeetingRolesEditor>`
+   *     (presiding_officer_default, minutes_recorder_default);
+   *   - `<RetentionPolicyModal>`, which takes only `townId` and writes
+   *     `retention_policy_acknowledged_at` — it reads no town column itself,
+   *     but that column is still selected here because the route's own
+   *     `ProgressChecklist` prop and settings-row summary read it back.
+   *
+   * Every name above checked against `packages/api/src/db/schema.ts`'s
+   * `town` table — none renamed or missing. Not `SELECT *`, for the same
+   * reason `board.detail` is not: a dropped column fails here, at the query,
+   * instead of silently producing `undefined` inside a settings form.
+   *
+   * Deliberately excluded because nothing on this screen or its four child
+   * editors reads them today: `created_at`, `updated_at`,
+   * `audio_retention_policy`, `auto_publish_on_approval`,
+   * `minutes_review_window_days` (the last three belong to the not-yet-built
+   * minutes-workflow settings page — conventions item 11 tracks that gap
+   * elsewhere, not here, since no procedure exists for that screen yet). Add
+   * any of these back the day something reads them.
+   */
+  detail: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.withTenant(async (tx) =>
+      toRows<{
+        id: string;
+        name: string;
+        state: string;
+        municipality_type: string;
+        population_range: string | null;
+        contact_name: string | null;
+        contact_role: string | null;
+        meeting_formality: string;
+        minutes_style: string;
+        presiding_officer_default: string | null;
+        minutes_recorder_default: string | null;
+        staff_roles_present: unknown | null;
+        subdomain: string | null;
+        seal_url: string | null;
+        retention_policy_acknowledged_at: string | null;
+        minutes_workflow_configured_at: string | null;
+      }>(
+        await tx.execute(sql`
+          SELECT
+            id, name, state, municipality_type, population_range, contact_name,
+            contact_role, meeting_formality, minutes_style, presiding_officer_default,
+            minutes_recorder_default, staff_roles_present, subdomain, seal_url,
+            retention_policy_acknowledged_at, minutes_workflow_configured_at
+          FROM town WHERE id = ${ctx.tenant.townId}
+        `),
+        (message) => new Error(`town.detail: ${message}`),
+      ),
+    );
+    const row = rows[0];
+    // Not expected in ordinary operation — `ctx.tenant.townId` comes from the
+    // caller's own bridged session, not from input — but a town row that
+    // vanished out from under a live session is still better answered as
+    // NOT_FOUND than as a thrown TypeError on `row.name`.
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    return row;
+  }),
+
+  /**
    * The town's current portal address, or `null` if it has never been set.
    *
    * Read through the tenant context, so it answers for the caller's own town

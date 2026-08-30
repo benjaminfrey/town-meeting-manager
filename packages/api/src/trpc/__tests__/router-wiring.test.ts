@@ -13,6 +13,7 @@ describe("router wiring", () => {
         "board.recentMeetings",
         "board.stats",
         "permissions",
+        "town.detail",
         "town.portalAddress",
         "town.setPortalAddress",
         "whoami",
