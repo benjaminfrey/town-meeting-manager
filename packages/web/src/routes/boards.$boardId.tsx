@@ -44,23 +44,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-2): town.detail, agendaTemplate.countForBoard
+// TODO(phase-e-wave-2): agendaTemplate.countForBoard
 //
 // The marker above is the machine-checkable half of this comment, and it is
 // the point: a ten-line explanation is invisible to
 // `grep -rn "TODO(phase-e-wave" packages/web/src`, so a completeness sweep
-// over 66 remaining Supabase importers would read this file as finished.
+// would read this file as finished otherwise.
 //
-// `supabase` is still needed for two reads this task does not migrate: town
-// settings (used for the Overview "effective settings" rows, and passed down
-// as defaults to EditBoardDialog / MinutesWorkflowEditor) and the agenda
-// template count. Neither has a tRPC procedure yet — there is no `town.detail`
-// or `agendaTemplate` router in `packages/api/src/trpc/routers/` today, only
-// `board` and the narrow `town.portalAddress`/`town.setPortalAddress` pair.
-// Dropping these reads instead of leaving them on Supabase would be a real
-// feature regression (silently losing the effective-settings display and the
-// template count), which is worse than the migration being incomplete. Wave 2
-// adds those routers and finishes this file.
+// `supabase` is still needed for the agenda template count — no
+// `agendaTemplate` router exists in `packages/api/src/trpc/routers/` yet.
+// Dropping the read instead of leaving it on Supabase would be a real
+// feature regression (silently losing the template count), which is worse
+// than the migration being incomplete.
+//
+// Narrowed from the original two-item marker (fix round, Task 2): `town`
+// used to be listed here too, but `town.detail` shipped in Task 1 of this
+// same wave, before this comment was last touched. This file's own town
+// read (the Overview "effective settings" rows, and the defaults passed to
+// EditBoardDialog / MinutesWorkflowEditor) still goes through Supabase —
+// `town.detail` EXISTING is not the same as this file having been migrated
+// to use it, and that migration is real work (retyping two components'
+// props, re-checking the effective-settings mapping) left for whoever picks
+// this file up next, not a one-line fix bundled into an unrelated task.
 import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";

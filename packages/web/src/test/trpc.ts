@@ -84,12 +84,57 @@ export type TestHandlers = Partial<{
     : never;
 }>;
 
-/** The tRPC error codes a web screen can meaningfully branch on. */
+/**
+ * The tRPC error codes a web screen can meaningfully branch on.
+ *
+ * `CONFLICT` added in Phase E, wave 1, Task 5 — `town.setPortalAddress` is
+ * the first procedure a screen test needed to simulate it for
+ * (`SetPortalAddressModal.test.tsx`). Corrected in the review round after
+ * that task shipped: the first version of this comment claimed
+ * `trpcTestError("CONFLICT")` "typechecked fine" against the pre-widening
+ * union and only failed at runtime — that is FALSE, and stated with more
+ * confidence than the one command that would have settled it. A reviewer
+ * removed `| "CONFLICT"` from this union and ran `tsc`: `TS2345: Argument of
+ * type '"CONFLICT"' is not assignable to parameter of type 'TestErrorCode'`,
+ * pointing at the exact call site. `TestHandlers`' own typing (this file's
+ * header comment) infers a handler's input/output from the real router;
+ * `trpcTestError`'s parameter is plainly typed `TestErrorCode`, so a string
+ * literal outside the union was never going to compile. There is no type
+ * hole here — there never was.
+ *
+ * What actually happened, and the real lesson: `SetPortalAddressModal.test.tsx`
+ * was written and run with `vitest` alone, which does not evaluate types, so
+ * the missing-union-member mistake surfaced as a confusing RUNTIME failure
+ * instead — `@trpc/client`'s own `transformResult` throwing
+ * `TransformResultError` ("Unable to transform response from server"),
+ * because the code did not even get far enough to be a `TestErrorCode`
+ * question; vitest just ran the (type-incorrect) code as JavaScript, `code:
+ * undefined` reached `transformResult`, and its own shape check rejected it
+ * with a message naming none of this. Seeing a confusing runtime failure and
+ * concluding something about the TYPE SYSTEM without running `tsc` first is
+ * exactly the mistake conventions item 8's "floor" section warns against — "a
+ * green vitest run is not a typecheck" cuts both ways: it also means a RED
+ * vitest run is not a type verdict either. `npx turbo run typecheck --force`
+ * would have named the real, narrower problem (a request to add `CONFLICT` to
+ * this union) in one line, instead of a paragraph of runtime archaeology.
+ *
+ * The union genuinely was incomplete, though — that part of the original
+ * diagnosis holds. Every code the API can currently answer
+ * (`NOT_FOUND`/`FORBIDDEN`/`CONFLICT`/`BAD_REQUEST`/`UNAUTHORIZED`, plus
+ * `INTERNAL_SERVER_ERROR` for the generic case) is listed below now. Add the
+ * next `TRPC_ERROR_CODE_KEY` this harness does not yet cover
+ * (`@trpc/server`'s own list has more — `PAYMENT_REQUIRED`,
+ * `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, …) the same way, at the point a
+ * real procedure needs a test to simulate it — TypeScript will refuse any
+ * call site that gets ahead of this list, which is the correct behavior and
+ * always was.
+ */
 export type TestErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"
+  | "CONFLICT"
   | "INTERNAL_SERVER_ERROR";
 
 const JSONRPC_CODE: Record<TestErrorCode, number> = {
@@ -97,6 +142,7 @@ const JSONRPC_CODE: Record<TestErrorCode, number> = {
   UNAUTHORIZED: -32001,
   FORBIDDEN: -32003,
   NOT_FOUND: -32004,
+  CONFLICT: -32009,
   INTERNAL_SERVER_ERROR: -32603,
 };
 
@@ -105,6 +151,7 @@ const HTTP_STATUS: Record<TestErrorCode, number> = {
   UNAUTHORIZED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,
+  CONFLICT: 409,
   INTERNAL_SERVER_ERROR: 500,
 };
 

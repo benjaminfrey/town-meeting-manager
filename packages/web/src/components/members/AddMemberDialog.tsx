@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
@@ -387,6 +388,11 @@ export function AddMemberDialog({
     onSuccess: (name) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
+      // `people.tsx` reads person + user_account through `person.list` now
+      // (Phase E, wave 1, Task 3); this dialog can create/change both, so it
+      // owes that read the same invalidation the legacy key above gets —
+      // conventions item 7.
+      void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added to ${boardName}`);
       resetAndClose();
     },
@@ -456,6 +462,8 @@ export function AddMemberDialog({
     onSuccess: (name) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
+      // See the sibling `saveMember` mutation's identical comment above.
+      void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added as staff`);
       resetAndClose();
     },

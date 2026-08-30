@@ -221,12 +221,19 @@ export interface RequirePermissionOptions {
 /**
  * Procedure middleware asserting the caller holds `code`.
  *
- * Place it AFTER `.input(...)` when it needs the board — tRPC parses input in
- * chain order, so a middleware added before the parser sees nothing:
+ * Place it BEFORE `.input(...)`. tRPC calls middleware and parses input in
+ * chain order — see `docs/superpowers/plans/phase-e-conventions.md` item 2 —
+ * so anything declared AFTER `.input(...)` can be preempted by validation: a
+ * refused caller who also sent malformed input gets BAD_REQUEST from the
+ * parser and this guard never runs at all. That is not a hypothetical; it is
+ * how `town.updateProfile` first shipped, and why this function now reads
+ * `getRawInput()` instead of the parsed `opts.input` (see below) — the fix
+ * that makes the correct position (before `.input()`) actually work for a
+ * board-scoped code, not merely correct in principle.
  *
  *     protectedProcedure
- *       .input(z.object({ boardId: z.uuid() }))
  *       .use(requireBoardPermission("A1", boardIdFrom()))
+ *       .input(z.object({ boardId: z.uuid() }))
  *       .mutation(...)
  *
  * For a board-scoped code, prefer `requireBoardPermission` — this function
@@ -259,7 +266,23 @@ export function requirePermission(code: PermissionCode, options: RequirePermissi
 
     let boardId: string | undefined;
     if (options.board) {
-      boardId = options.board(opts.input);
+      // `getRawInput()`, not `opts.input` — declared before `.input()`, this
+      // middleware runs before parsing, so `opts.input` is `undefined` and
+      // `options.board` would refuse every call (fail-closed, but dead).
+      // `getRawInput()` returns the UNVALIDATED body; `boardIdFrom` already
+      // narrows it at runtime and returns `undefined` on anything that is
+      // not a non-empty string at the key, and the refusal below already
+      // fires on that — so reading unvalidated input widens nothing. A junk
+      // board id fails closed exactly as it did before this change.
+      //
+      // This does mean the guard authorizes against the PRE-validation board
+      // id, while the resolver (after `.input()` runs) acts on the
+      // POST-validation one. They are the same value today for every
+      // board-scoped procedure in this repo. They would NOT be the same if
+      // an input schema ever applied `.transform()` to the board id field —
+      // do not do that; a guard must authorize the same value the resolver
+      // acts on.
+      boardId = options.board(await opts.getRawInput());
       if (!boardId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -288,4 +311,104 @@ export function requireBoardPermission(
   options: { action?: string } = {},
 ) {
   return requirePermission(code, { ...options, board });
+}
+
+/**
+ * Procedure middleware for an ACTOR-ONLY rule that is not one of the thirty
+ * `PermissionCode`-keyed action codes — the admin gates in
+ * `authorization/rules.ts`'s "Phase B report §4b" section
+ * (`assertCanUpdateTown` and its siblings), which check the caller's ROLE
+ * directly rather than resolving a delegable permission matrix.
+ *
+ * `requirePermission` is deliberately NOT reused for these. It always
+ * resolves a `PermissionCode` through `resolvePermission`, and an admin gate
+ * is deliberately not part of that system —
+ * `packages/api/src/storage/__tests__/documents.test.ts` pins exactly why,
+ * for the same rule this middleware carries: "`assertCanUpdateTown` is an
+ * ADMIN gate, not a code check: there is no action code that grants editing
+ * the town record, so an actor with a maximal matrix must still be
+ * refused." `T1` ("manage_town_settings") exists in `PERMISSIONS` and would
+ * resolve to the same answer as `assertCanUpdateTown` for every account any
+ * current template can create — but only because no template grants it.
+ * Routing this gate through `requirePermission("T1", ...)` would make that
+ * an accident of configuration rather than a fact TypeScript enforces, which
+ * is precisely the "quietly becomes delegable" failure this file's own
+ * `BOARD_SCOPED_CODES` comment warns about for a different set of codes.
+ * `requireActor` keeps the admin-gate/action-code split load-bearing instead
+ * of blurring it to reach one middleware mechanism for both.
+ *
+ * Declared before `.input()`, for the identical reason `requirePermission`
+ * is: anything declared after can be preempted by input validation — see
+ * that function's own doc comment. An admin gate needs no board id and
+ * therefore no `getRawInput()` read; it only needs the actor.
+ *
+ *     .use(requireActor(assertCanUpdateTown))
+ *
+ * ─── Why `assert` cannot be a boolean predicate, and how that is enforced ──
+ *
+ * A caller could reach for `isAdmin`/`isBoardMember` from `permission.ts`
+ * instead of an `assertCanX` — they are exactly the shape someone typing
+ * "require an admin" would grab, and this doc comment used to invite that
+ * reading. The type MUST refuse them: `assert`'s return value is discarded
+ * (only a throw refuses the caller), so `requireActor(isAdmin)` would
+ * silently call `isAdmin(actor)`, throw the boolean away, and let EVERY
+ * caller through — a guard that refuses nobody, with no runtime error and
+ * no failing test, because nothing ever inspects the return value to notice
+ * it was never a `void`.
+ *
+ * A plain `assert: (actor: Actor) => void` parameter does NOT catch this.
+ * TypeScript special-cases a `void`-returning function TYPE POSITION to
+ * accept a function that returns anything (the same rule that lets
+ * `array.forEach(i => arr.push(i))` type-check even though `.push` returns a
+ * number) — so `isAdmin`, whose real return type is `boolean`, is
+ * ASSIGNABLE to `(actor: Actor) => void` and no error is raised. Measured
+ * directly: `protectedProcedure.use(requireActor(isAdmin)).mutation(...)`
+ * compiled clean under `tsc --noEmit` before this fix.
+ *
+ * The second, conditional parameter below closes that hole WITHOUT touching
+ * that special case (a plain `(actor: Actor) => R` parameter still lets `R`
+ * infer normally — `boolean` for `isAdmin`, `void` for an `assertCanX`)
+ * because the return type is never written as a literal `=> void` for
+ * TypeScript to special-case:
+ *
+ *   - `R extends void` — an ordinary type relationship, not a function's
+ *     return-position assignability rule — is `true` only for `void` or
+ *     `undefined`, and `false` for `boolean`, `string`, or anything else.
+ *   - When `R` is `void`, the second parameter's type is the empty tuple
+ *     `[]`: nothing extra to pass, so a real `assertCanX` call site is
+ *     unaffected.
+ *   - When `R` is anything else, the second parameter's type is a
+ *     ONE-ELEMENT tuple carrying an explanatory string literal — a REQUIRED
+ *     argument nothing supplies, so `requireActor(isAdmin)` fails with
+ *     `TS2554: Expected 2 arguments, but got 1`. It is not possible to
+ *     satisfy that tuple type by accident; the only way past it is to stop
+ *     passing a value-returning function.
+ *
+ * Verified as a real compile error, not assumed: see the `@ts-expect-error`
+ * pin in `packages/api/src/trpc/__tests__/require-actor-type.test.ts`,
+ * checked by `npx turbo run typecheck --force` (vitest never evaluates
+ * `@ts-expect-error`; only `tsc` does).
+ */
+export function requireActor<R>(
+  assert: (actor: Actor) => R,
+  ..._assertMustReturnVoid: R extends void
+    ? []
+    : [
+        error: "requireActor's assert function must throw-or-return-void, like assertCanUpdateTown — not return a value that gets silently discarded. A boolean predicate such as isAdmin/isBoardMember/canX would compile here and then refuse nobody at runtime.",
+      ]
+) {
+  return middleware(async (opts) => {
+    const ctx = opts.ctx;
+    if (!ctx.actor) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "A permission check ran on a procedure with no tenant context. Permission " +
+          "checks are only meaningful for a signed-in member of a town; build the " +
+          "procedure on protectedProcedure.",
+      });
+    }
+    assert(await ctx.actor());
+    return opts.next();
+  });
 }

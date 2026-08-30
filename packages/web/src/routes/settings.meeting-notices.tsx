@@ -1,36 +1,38 @@
+/**
+ * Meeting Notice Templates — /settings/meeting-notices
+ *
+ * Stage 1, Phase E, wave 1, Task 4 — moved onto `board.list` (Task 4's own
+ * addition to `board.ts`, alongside `board.copyNoticeTemplate`) from a
+ * Supabase `select("id, name, notice_template_blocks")` scan. `board.list`'s
+ * loading and error states now get their own visible states (conventions
+ * item 5), matching `settings.town.tsx`'s pattern for the same reason.
+ *
+ * Per-block editing of a board's own template still lives on the board's own
+ * Settings tab (`<NoticeTemplateEditor>`, out of this task's scope) — this
+ * screen is only the town-wide overview and the "copy from board" shortcut.
+ */
+
 import { Link } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Copy } from "lucide-react";
+import { isTRPCClientError } from "@trpc/client";
+import { ArrowLeft, AlertTriangle, Check, Copy } from "lucide-react";
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
-import type { NoticeTemplateBlock } from "@town-meeting/shared";
 
-interface BoardWithTemplate {
-  id: string;
-  name: string;
-  notice_template_blocks: NoticeTemplateBlock[] | null;
+type BoardWithTemplate = RouterOutputs["board"]["list"][number];
+
+// No `ensureQueryData` priming — this route has no path param, and what
+// decides whether to show it at all is `useCurrentUser().townId`, only known
+// after `AuthProvider` resolves. Same choice, same reason, as
+// `settings.town.tsx`'s own `clientLoader`.
+export async function clientLoader() {
+  return {};
 }
 
 export default function MeetingNoticesSettingsPage() {
-  const currentUser = useCurrentUser();
-  const townId = currentUser?.townId;
-
-  const { data: boards = [], isLoading } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId ?? ""), "noticeTemplates"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("id, name, notice_template_blocks")
-        .eq("town_id", townId!)
-        .order("name");
-      if (error) throw error;
-      return data as BoardWithTemplate[];
-    },
-    enabled: !!townId,
-  });
+  const { data: boards = [], isLoading, isError, error } = useQuery(trpc.board.list.queryOptions());
 
   const configuredBoards = boards.filter((b) => b.notice_template_blocks !== null);
   const unconfiguredBoards = boards.filter((b) => b.notice_template_blocks === null);
@@ -52,7 +54,23 @@ export default function MeetingNoticesSettingsPage() {
         </p>
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <div
+          className="rounded-lg border bg-card p-6 text-center text-card-foreground"
+          role="alert"
+          aria-live="assertive"
+        >
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {isTRPCClientError(error) && error.data?.code === "NOT_FOUND"
+              ? "This town's boards could not be found."
+              : "Something went wrong loading your boards."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Try reloading the page. If the problem continues, contact support.
+          </p>
+        </div>
+      ) : isLoading ? (
         <div className="text-sm text-muted-foreground">Loading boards...</div>
       ) : boards.length === 0 ? (
         <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
@@ -85,27 +103,26 @@ function BoardTemplateCard({
   const isConfigured = board.notice_template_blocks !== null;
   const [showCopyDropdown, setShowCopyDropdown] = useState(false);
 
-  const copyMutation = useMutation({
-    mutationFn: async (sourceBoardId: string) => {
-      const sourceBoard = configuredBoards.find((b) => b.id === sourceBoardId);
-      if (!sourceBoard?.notice_template_blocks) throw new Error("Source board has no template");
-      const { error } = await supabase
-        .from("board")
-        .update({
-          notice_template_blocks: sourceBoard.notice_template_blocks as unknown as Record<
-            string,
-            unknown
-          >[],
-        })
-        .eq("id", board.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(board.id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown("") });
-      setShowCopyDropdown(false);
-    },
-  });
+  const copyMutation = useMutation(
+    trpc.board.copyNoticeTemplate.mutationOptions({
+      onSuccess: () => {
+        // Both invalidations run during the transition (conventions item 7):
+        // `queryKeys.boards.detail(board.id)` is still read directly by
+        // several unmigrated screens (`useQuorumCheck`,
+        // `meetings.$meetingId.tsx`, `boards.$boardId.meetings.tsx`, and
+        // others — see `grep -rn "queryKeys.boards.detail" packages/web/src`),
+        // and `trpc.board.pathFilter()` is this screen's own read
+        // (`board.list`) plus the board's `board.detail`. The PREVIOUS
+        // version of this write invalidated `queryKeys.boards.byTown("")` —
+        // an empty, always-wrong town id — which this replaces with the
+        // correctly-scoped per-board key instead of carrying the bug
+        // forward.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(board.id) });
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        setShowCopyDropdown(false);
+      },
+    }),
+  );
 
   return (
     <div className="flex items-center justify-between rounded-lg border bg-card p-4 shadow-sm">
@@ -144,7 +161,9 @@ function BoardTemplateCard({
                   <button
                     key={source.id}
                     type="button"
-                    onClick={() => copyMutation.mutate(source.id)}
+                    onClick={() =>
+                      copyMutation.mutate({ sourceBoardId: source.id, targetBoardId: board.id })
+                    }
                     disabled={copyMutation.isPending}
                     className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent transition-colors"
                   >

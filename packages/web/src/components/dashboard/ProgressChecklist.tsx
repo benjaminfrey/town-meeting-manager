@@ -6,12 +6,30 @@
  * Required items are tagged. Hides when all items are complete.
  *
  * @see docs/advisory-resolutions/2.1-onboarding-wizard-ux-spec.md — Progress Checklist
+ *
+ * Stage 1, Phase E, wave 1, Task 5 — two of this component's three own reads
+ * (`totalSeats`, the board/template counts) moved onto `board.list`, which
+ * already scans every board in the town for `settings.meeting-notices.tsx`;
+ * extending its SELECT by one column (`member_count`) was the whole change —
+ * see that procedure's own doc comment. `memberCount` (actual filled seats,
+ * from `board_member`) stays on Supabase — see the TODO marker below,
+ * conventions item 11 — that table is board-membership territory this wave
+ * deliberately leaves alone (the four board-member dialogs are wave 2's,
+ * per the task brief's own self-review notes).
+ *
+ * The "Set public portal subdomain" item is wired for the first time in this
+ * same task: `town.setPortalAddress` existed since Phase D with no caller
+ * anywhere in the product. `onSetPortalAddressClick` opens
+ * `SetPortalAddressModal` (mounted by whichever screen renders this
+ * component — `settings.town.tsx` today), the same delegation shape
+ * `onRetentionPolicyClick` already used for the retention-policy row.
  */
 
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Check, Circle, ArrowRight, PartyPopper } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,6 +145,7 @@ interface ProgressChecklistProps {
   retentionAcknowledgedAt: string | null;
   minutesWorkflowConfiguredAt: string | null;
   onRetentionPolicyClick: () => void;
+  onSetPortalAddressClick: () => void;
 }
 
 export function ProgressChecklist({
@@ -136,9 +155,16 @@ export function ProgressChecklist({
   retentionAcknowledgedAt,
   minutesWorkflowConfiguredAt,
   onRetentionPolicyClick,
+  onSetPortalAddressClick,
 }: ProgressChecklistProps) {
   const supabase = useSupabase();
 
+  // TODO(phase-e-wave-2): boardMember.countByTown (or equivalent) — no
+  // procedure reads `board_member` for this yet; that table is board-
+  // membership territory this wave (Task 5's own self-review notes: the
+  // four board-member dialogs are wave 2's). `board.list` (below) already
+  // covers the town's CONFIGURED seat total; this is the count of seats
+  // actually FILLED, a different table this wave does not touch.
   const { data: memberCount = 0 } = useQuery({
     queryKey: [...queryKeys.members.all, "count", townId],
     queryFn: async () => {
@@ -152,37 +178,19 @@ export function ProgressChecklist({
     enabled: !!townId,
   });
 
-  const { data: totalSeats = 0 } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId), "totalSeats"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("member_count")
-        .eq("town_id", townId);
-      if (error) throw error;
-      return (data ?? []).reduce((sum, b) => sum + (b.member_count ?? 0), 0);
-    },
-    enabled: !!townId,
-  });
+  // `board.list`'s one read replaces two Supabase queries at once (total
+  // configured seats, and how many boards have a notice template) — both
+  // are aggregates over the same town-wide board scan `board.list` already
+  // runs for `settings.meeting-notices.tsx`. No `WHERE town_id = ...` here:
+  // `board.list` is already tenant-scoped by RLS (conventions item 2), and
+  // it deliberately does not filter archived boards — see its own doc
+  // comment — matching what these two Supabase queries did before this
+  // migration (neither filtered `archived_at` either).
+  const { data: boardRows = [] } = useQuery(trpc.board.list.queryOptions());
 
-  // Count boards without notice templates
-  const { data: boardCounts } = useQuery({
-    queryKey: [...queryKeys.boards.byTown(townId), "templateStatus"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("id, notice_template_blocks")
-        .eq("town_id", townId);
-      if (error) throw error;
-      const total = data?.length ?? 0;
-      const configured = (data ?? []).filter((b) => b.notice_template_blocks !== null).length;
-      return { total, configured };
-    },
-    enabled: !!townId,
-  });
-
-  const totalBoardCount = boardCounts?.total ?? 0;
-  const configuredTemplateCount = boardCounts?.configured ?? 0;
+  const totalSeats = boardRows.reduce((sum, b) => sum + (b.member_count ?? 0), 0);
+  const totalBoardCount = boardRows.length;
+  const configuredTemplateCount = boardRows.filter((b) => b.notice_template_blocks !== null).length;
   const hasAllNoticeTemplates = totalBoardCount > 0 && configuredTemplateCount === totalBoardCount;
 
   const hasBoardMembers = memberCount > 0;
@@ -235,7 +243,17 @@ export function ProgressChecklist({
         : "Set public portal subdomain",
       description: "Choose your town's public URL",
       completed: hasSubdomain,
-      linkTo: "/settings",
+      // Clickable both before and after completion, UNLIKE the one-time
+      // retention-policy acknowledgment below — a set subdomain can still
+      // be changed (`town.setPortalAddress` accepts a new value at any
+      // time). That is true only while THIS ROW renders, though: once every
+      // item on the list is complete, `allComplete` below swaps the whole
+      // card for "Setup complete!" and this row — the only current path to
+      // `SetPortalAddressModal` — stops rendering at all. Not fixed here;
+      // see the conventions doc's Known Gaps for the reviewer's
+      // recommendation (a permanent field in `settings.town.tsx`'s "Your
+      // Town" section, not a row here).
+      onClick: onSetPortalAddressClick,
     },
     {
       key: "retention-policy",

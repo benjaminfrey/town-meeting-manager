@@ -49,6 +49,31 @@ describe("town.setPortalAddress", () => {
     });
   });
 
+  /**
+   * The `.trim()` regression pin (review round after Task 5). The schema's
+   * `min`/`max` used to run BEFORE trimming, while `checkSubdomain` trims
+   * FIRST — so a value that is over the limit only because of padding
+   * (65 raw characters, 63 after trimming, exactly `SUBDOMAIN_MAX_LENGTH`)
+   * used to succeed under the bare `z.string()` schema (nothing there cared
+   * about length; `checkSubdomain` trimmed and accepted 63) and would have
+   * newly FAILED at the parser once `min`/`max` were added, had `.trim()`
+   * not been added to the schema too. This proves the two layers agree.
+   */
+  it("accepts a value that is over the length limit only before trimming", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db, "Newcastle");
+      const admin = await seedActor(db, town, { role: "admin" });
+      const caller = callerFor(contextFor(db, town, admin));
+
+      const padded = " " + "a".repeat(63) + " ";
+      expect(padded.length).toBe(65);
+      expect(await caller.setPortalAddress({ subdomain: padded })).toEqual({
+        subdomain: "a".repeat(63),
+      });
+    });
+  });
+
   it("refuses a name that is not a usable DNS label", async () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
@@ -128,6 +153,38 @@ describe("town.setPortalAddress", () => {
         // still the fixture's, not one a staff account managed to set.
         subdomain: "newcastle",
       });
+    });
+  });
+
+  /**
+   * The reorder pin (conventions item 2/13), added when Task 5 of wave 1
+   * converted this procedure from resolver form to
+   * `.use(requireActor(...)).input(...)`. The test above proves the guard
+   * exists — but only with input (`"newcastle"`) that parses either way, so
+   * it cannot tell a correctly-ordered guard from one declared after
+   * `.input()`: with valid input the parser succeeds regardless of order,
+   * and the guard is what answers FORBIDDEN either way. This test sends a
+   * refused caller AND input that fails the schema's own `min(1)` — with
+   * `.use()` correctly declared first, the guard throws FORBIDDEN before the
+   * parser ever runs (probe 1, conventions item 2); if `.use()` were moved
+   * after `.input()`, the parser would run first and answer BAD_REQUEST
+   * before the guard got a chance, which is the exact defect
+   * `town.updateProfile`'s own reorder pin
+   * (`routers/__tests__/town.test.ts`) exists to catch on that procedure.
+   * Verified the same way that one was: moved this procedure's `.use(...)`
+   * to after `.input(...)` and re-ran this file — this test went red with
+   * `BAD_REQUEST`, restored byte-identical. See the task report for output.
+   */
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db, "Newcastle");
+      const actor = await seedActor(db, town, { role: "staff" });
+
+      const err = await expectTrpcError(() =>
+        callerFor(contextFor(db, town, actor)).setPortalAddress({ subdomain: "" }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
     });
   });
 });

@@ -22,6 +22,18 @@
  *
  * The checks below are a courtesy that saves a round trip, not the
  * enforcement.
+ *
+ * ─── Cache invalidation, fixed in Task 2's review round ───────────────────
+ *
+ * `sealUrl` is `town.detail`'s own `seal_url` column, read by
+ * `settings.town.tsx` and passed down as a prop. Both mutations below used
+ * to invalidate only the legacy `queryKeys.towns.detail(townId)` key — this
+ * is `settings.town.tsx` itself, the screen that renders this component, so
+ * a successful upload or removal left the seal preview AND
+ * `ProgressChecklist`'s "hasSeal" checklist item stale for up to the 60s
+ * `staleTime`, on the very screen the user was looking at. Same shape as
+ * conventions item 7's own `ArchiveBoardDialog` citation, reproduced here on
+ * the screen Task 2 migrated.
  */
 
 import { useRef, useState } from "react";
@@ -30,6 +42,7 @@ import { Upload, X, ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiJson } from "@/lib/api-client";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 
 // Matches MAX_UPLOAD_BYTES on the server.
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -58,6 +71,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      void queryClient.invalidateQueries(trpc.town.pathFilter());
       setError(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     },
@@ -73,6 +87,7 @@ export function TownSealUpload({ townId, sealUrl }: TownSealUploadProps) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+      void queryClient.invalidateQueries(trpc.town.pathFilter());
       setError(null);
     },
     onError: (err) => {

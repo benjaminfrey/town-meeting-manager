@@ -53,6 +53,9 @@ export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlo
 
   const supabase = useSupabase();
 
+  // TODO(phase-e-wave-2): board.listByTown (or equivalent) — no procedure
+  // exists yet that lists every board for a town; `board.ts` today only
+  // reads a single board by id (`detail`/`stats`/`recentMeetings`).
   // Fetch active boards for board-specific selection
   const { data: boardRows = [] } = useQuery({
     queryKey: queryKeys.boards.byTown(townId),

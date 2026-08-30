@@ -12,9 +12,24 @@ describe("router wiring", () => {
         "board.detail",
         "board.recentMeetings",
         "board.stats",
+        "board.list",
+        "board.copyNoticeTemplate",
         "permissions",
+        "person.list",
+        "person.insert",
+        "person.update",
+        "person.insertStaffAccount",
+        "person.updateGovTitle",
+        "town.acknowledgeRetentionPolicy",
+        "town.detail",
         "town.portalAddress",
         "town.setPortalAddress",
+        "town.updateMeetingDefaults",
+        "town.updateMeetingRoles",
+        "town.updateMinutesWorkflow",
+        "town.updateProfile",
+        "notificationPreference.mine",
+        "notificationPreference.setMine",
         "whoami",
       ]),
     );
@@ -44,6 +59,28 @@ describe("router wiring", () => {
       const schema = def?.inputs?.[0];
       expect(schema, `${name} has no input schema`).toBeDefined();
       expect(() => schema?.parse({ boardId: "not-a-uuid" })).toThrow();
+    }
+    // The town writes: an empty object is missing every required field for
+    // `updateProfile`/`updateMeetingDefaults`, and an out-of-enum value for
+    // `updateMeetingRoles`' free-text field would not catch a deleted schema
+    // the way a missing-required-field object does, so `{}` is used
+    // uniformly here rather than a schema-specific bad value.
+    for (const name of [
+      "town.updateProfile",
+      "town.updateMeetingDefaults",
+      "town.updateMeetingRoles",
+      "town.updateMinutesWorkflow",
+      "person.insert",
+      "person.update",
+      "person.insertStaffAccount",
+      "person.updateGovTitle",
+      "board.copyNoticeTemplate",
+      "notificationPreference.setMine",
+    ]) {
+      const def = procedures[name]?._def;
+      const schema = def?.inputs?.[0];
+      expect(schema, `${name} has no input schema`).toBeDefined();
+      expect(() => schema?.parse({})).toThrow();
     }
   });
 });

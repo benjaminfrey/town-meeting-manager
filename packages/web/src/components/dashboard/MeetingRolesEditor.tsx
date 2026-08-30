@@ -2,13 +2,18 @@
  * MeetingRolesEditor — inline editor for presiding officer and minutes recorder defaults.
  *
  * These set the default roles for new meetings; they can be overridden per meeting.
+ *
+ * Stage 1, Phase E, Task 2 — the write is `town.updateMeetingRoles` now.
+ * Invalidates both the legacy `queryKeys.towns.detail(townId)` key and
+ * `trpc.town.pathFilter()` — see `TownSettingsEditor.tsx`'s header comment
+ * for the list of screens still reading the legacy key.
  */
 
 import { useCallback } from "react";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -56,30 +61,21 @@ interface MeetingRolesEditorProps {
 }
 
 export function MeetingRolesEditor({ townId, initial, onDone }: MeetingRolesEditorProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const { values, isValid, setValue, validate } = useWizardForm<MeetingRolesData>(
     MeetingRolesSchema,
     initial,
   );
 
-  const mutation = useMutation({
-    mutationFn: async (data: MeetingRolesData) => {
-      const { error } = await supabase
-        .from("town")
-        .update({
-          presiding_officer_default: data.presiding_officer_default,
-          minutes_recorder_default: data.minutes_recorder_default,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", townId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
-      onDone();
-    },
-  });
+  const mutation = useMutation(
+    trpc.town.updateMeetingRoles.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId) });
+        void queryClient.invalidateQueries(trpc.town.pathFilter());
+        onDone();
+      },
+    }),
+  );
 
   const handleSave = useCallback(() => {
     const data = validate();

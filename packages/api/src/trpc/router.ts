@@ -19,6 +19,8 @@ import { toRows } from "../db/rows.js";
 import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.js";
 import { townRouter } from "./routers/town.js";
 import { boardRouter } from "./routers/board.js";
+import { personRouter } from "./routers/person.js";
+import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 
 export const appRouter = router({
   /**
@@ -31,6 +33,19 @@ export const appRouter = router({
    * Board reads. No permission guard — see `routers/board.ts` for why.
    */
   board: boardRouter,
+
+  /**
+   * The people directory and its writes. No permission guard on `list` —
+   * see `routers/person.ts` for why. The four writes are all admin gates.
+   */
+  person: personRouter,
+
+  /**
+   * A person's own notification preferences. No permission guard — see
+   * `routers/notification-preference.ts` for why (self-scoped by
+   * construction, not by an `assertCan*` rule).
+   */
+  notificationPreference: notificationPreferenceRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

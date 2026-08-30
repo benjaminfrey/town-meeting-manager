@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -91,6 +92,14 @@ export function MemberArchiveDialog({
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(_townId) });
+        // Archiving the account changes what `person.list` reports for this
+        // person (role/gov_title both go null) — `people.tsx` reads that
+        // through `person.list` now (Phase E, wave 1, Task 3). No such
+        // invalidation is needed when only the board seat is archived: that
+        // does not touch `person`/`user_account`, which is all `person.list`
+        // selects (see that router's own doc comment on the board_member
+        // join it deliberately omits).
+        void queryClient.invalidateQueries(trpc.person.pathFilter());
       }
       onOpenChange(false);
     },

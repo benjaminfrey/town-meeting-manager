@@ -7,16 +7,23 @@
  *   a user_account + invitation). Board assignment stays on Board → Members,
  *   where this person now appears in the "Add Member" picker.
  *
- * Reuses the person/account/invitation insert shapes from AddMemberDialog.
+ * Phase E, wave 1, Task 3 — the person and user_account writes are
+ * `trpc.person.insert`/`trpc.person.insertStaffAccount` now, both admin-gated
+ * server-side (`assertCanInsertPerson`/`assertCanInsertUserAccount`). The
+ * `invitation` write stays on Supabase:
+ * TODO(phase-e-wave-2): invitation.insert — no `invitation` router/rule
+ * exists yet, so this is a genuine partial migration, not an oversight.
  */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { z } from "zod";
 import { Loader2, ChevronLeft, IdCard, UserCog } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import {
   Dialog,
@@ -74,61 +81,56 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
     personForm.setValues(INITIAL_PERSON);
   }
 
-  async function insertPerson(): Promise<{ personId: string; name: string }> {
-    const now = new Date().toISOString();
-    const personId = crypto.randomUUID();
-    const name = personForm.values.name.trim();
-    const { error } = await supabase.from("person").insert({
-      id: personId,
-      town_id: townId,
-      name,
-      email,
-      created_at: now,
-    });
-    if (error) throw error;
-    return { personId, name };
+  /** The message a CONFLICT ("email already in use") carries; a generic one otherwise. */
+  function errorMessage(err: unknown, fallback: string): string {
+    return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
   }
 
+  const insertPerson = useMutation(trpc.person.insert.mutationOptions());
+
   const createDirectory = useMutation({
-    mutationFn: async () => (await insertPerson()).name,
+    mutationFn: async () => {
+      const person = await insertPerson.mutateAsync({
+        name: personForm.values.name.trim(),
+        email,
+      });
+      return person.name;
+    },
     onSuccess: (name) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.persons.byTown(townId),
       });
+      void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added`);
       reset();
       onOpenChange(false);
     },
-    onError: () => toast.error("Couldn't add the person — please try again."),
+    onError: (err) => toast.error(errorMessage(err, "Couldn't add the person — please try again.")),
   });
+
+  const insertStaffAccount = useMutation(trpc.person.insertStaffAccount.mutationOptions());
 
   const createStaff = useMutation({
     mutationFn: async (staffResult: StaffAccountResult) => {
       const now = new Date().toISOString();
-      const { personId, name } = await insertPerson();
-
-      const userAccountId = crypto.randomUUID();
-      const { error: uaErr } = await supabase.from("user_account").insert({
-        id: userAccountId,
-        person_id: personId,
-        town_id: townId,
-        role: "staff",
-        gov_title: staffResult.gov_title || null,
-        permissions: staffResult.permissions,
-        // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
-        // foreign key to `better_auth."user"(id)`, so an empty string is
-        // rejected with SQLSTATE 23503 and the whole insert fails. The
-        // column is nullable by design: a `user_account` exists before any
-        // login does, and invitation acceptance is what fills it in.
-        created_at: now,
+      const person = await insertPerson.mutateAsync({
+        name: personForm.values.name.trim(),
+        email,
       });
-      if (uaErr) throw uaErr;
+      const account = await insertStaffAccount.mutateAsync({
+        personId: person.id,
+        govTitle: staffResult.gov_title || null,
+        permissions: staffResult.permissions,
+      });
 
+      // TODO(phase-e-wave-2): invitation.insert — no `invitation` router or
+      // authorization rule exists yet. Kept on Supabase; see this file's
+      // header.
       const invId = crypto.randomUUID();
       const { error: invErr } = await supabase.from("invitation").insert({
         id: invId,
-        person_id: personId,
-        user_account_id: userAccountId,
+        person_id: person.id,
+        user_account_id: account.id,
         town_id: townId,
         token: crypto.randomUUID(),
         expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -142,7 +144,7 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
         /* non-critical — an admin can resend from a board roster */
       });
 
-      return name;
+      return person.name;
     },
     onSuccess: (name) => {
       void queryClient.invalidateQueries({
@@ -151,11 +153,13 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
       void queryClient.invalidateQueries({
         queryKey: queryKeys.userAccounts.byTown(townId),
       });
+      void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added as staff — invitation sent`);
       reset();
       onOpenChange(false);
     },
-    onError: () => toast.error("Couldn't create the staff account — please try again."),
+    onError: (err) =>
+      toast.error(errorMessage(err, "Couldn't create the staff account — please try again.")),
   });
 
   const saving = createDirectory.isPending || createStaff.isPending;

@@ -6,31 +6,41 @@
  * add a person decoupled from any board and edit identity here. Per-board seating
  * still happens on each board's Members tab (where these people appear in the
  * "Add Member" picker).
+ *
+ * Phase E, wave 1, Task 3 — the person + user_account halves of this read are
+ * `trpc.person.list` now, not two separate Supabase queries joined in JS. The
+ * board-membership half stays on Supabase — see the `TODO(phase-e-wave-2)`
+ * marker below and `person.ts`'s own doc comment for why that join was
+ * deliberately NOT folded into the procedure.
+ *
+ * No `ensureQueryData(trpc.person.list.queryOptions())` in `clientLoader` —
+ * deliberate, not an oversight, and the same call `settings.town.tsx` made
+ * for the identical reason (see that file's own comment, Task 2): this route
+ * sits under `AppShell`'s `ProtectedRoute`, which decides whether to render
+ * `children` at all based on `useCurrentUser().townId`, but React Router
+ * dispatches a matched route's `clientLoader` independently of whether an
+ * ancestor COMPONENT chooses to render its `<Outlet>`. Priming here would
+ * run `person.list` — and hit `protectedProcedure`'s tenant-required gate —
+ * for an authenticated user who has no town yet, turning an ordinary
+ * "finish onboarding" redirect into a `RouteErrorBoundary` failure page.
+ * `boards.tsx` makes the same choice for the same reason.
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Users, Plus, Pencil } from "lucide-react";
+import { isTRPCClientError } from "@trpc/client";
+import { Users, Plus, Pencil, AlertTriangle } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { AddPersonDialog } from "@/components/members/AddPersonDialog";
 import { EditPersonDialog } from "@/components/members/EditPersonDialog";
 
-interface PersonRow {
-  id: string;
-  name: string | null;
-  email: string | null;
-}
-interface AccountRow {
-  person_id: string;
-  role: string;
-  gov_title: string | null;
-}
 interface MembershipRow {
   person_id: string;
   board: { id: string; name: string } | null;
@@ -58,35 +68,19 @@ export default function PeoplePage() {
     email: string;
   } | null>(null);
 
-  const { data: persons = [], isLoading } = useQuery({
-    queryKey: queryKeys.persons.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("person")
-        .select("id, name, email")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name")
-        .throwOnError();
-      return (data ?? []) as PersonRow[];
-    },
-    enabled: !!townId,
-  });
+  const {
+    data: people = [],
+    isLoading,
+    isError: isPeopleError,
+    error: peopleError,
+  } = useQuery(trpc.person.list.queryOptions());
 
-  const { data: accounts = [] } = useQuery({
-    queryKey: queryKeys.userAccounts.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("user_account")
-        .select("person_id, role, gov_title")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .throwOnError();
-      return (data ?? []) as AccountRow[];
-    },
-    enabled: !!townId,
-  });
-
+  // TODO(phase-e-wave-2): boardMember.listByTown (or equivalent) — no
+  // `boardMember` router exists yet. Kept on Supabase; see `person.ts`'s own
+  // doc comment for why this join was deliberately NOT folded into
+  // `person.list` (it would make `trpc.person.pathFilter()` a key every
+  // Board → Members writer — none of them touched by this task — owed an
+  // invalidation to).
   const { data: memberships = [] } = useQuery({
     queryKey: [...queryKeys.members.all, "byTown", townId],
     queryFn: async () => {
@@ -102,7 +96,6 @@ export default function PeoplePage() {
   });
 
   const rows = useMemo(() => {
-    const accountByPerson = new Map(accounts.map((a) => [a.person_id, a]));
     const boardsByPerson = new Map<string, string[]>();
     for (const m of memberships) {
       if (!m.board) continue;
@@ -110,11 +103,10 @@ export default function PeoplePage() {
       if (!list.includes(m.board.name)) list.push(m.board.name);
       boardsByPerson.set(m.person_id, list);
     }
-    return persons.map((p) => {
-      const acct = accountByPerson.get(p.id);
+    return people.map((p) => {
       const boards = boardsByPerson.get(p.id) ?? [];
-      const role = acct
-        ? (ROLE_LABEL[acct.role] ?? acct.role)
+      const role = p.role
+        ? (ROLE_LABEL[p.role] ?? p.role)
         : boards.length > 0
           ? "Board member"
           : "No role yet";
@@ -122,13 +114,42 @@ export default function PeoplePage() {
         id: p.id,
         name: p.name ?? "Unnamed",
         email: p.email ?? "",
-        govTitle: acct?.gov_title ?? null,
+        govTitle: p.gov_title,
         role,
-        hasRole: !!acct || boards.length > 0,
+        hasRole: !!p.role || boards.length > 0,
         boards,
       };
     });
-  }, [persons, accounts, memberships]);
+  }, [people, memberships]);
+
+  // The ONLY failure surface for this read — see the header comment on why
+  // `clientLoader` deliberately does not prime `person.list` (so there is no
+  // BEFORE-mount case here for `RouteErrorBoundary` to catch, unlike
+  // `boards.$boardId.tsx`; conventions item 12's two-surface split does not
+  // apply to this route). Covers the initial fetch, a refetch, and a
+  // `staleTime` expiry alike.
+  if (isPeopleError) {
+    const notFound = isTRPCClientError(peopleError) && peopleError.data?.code === "NOT_FOUND";
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <div
+          className="rounded-lg border border-destructive/30 bg-destructive/5 p-8 text-center"
+          role="alert"
+          aria-live="assertive"
+        >
+          <AlertTriangle className="mx-auto h-8 w-8 text-destructive" aria-hidden="true" />
+          <p className="mt-3 font-medium">
+            {notFound
+              ? "This directory could not be found."
+              : "Something went wrong loading people."}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try reloading the page. If the problem continues, contact support.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
