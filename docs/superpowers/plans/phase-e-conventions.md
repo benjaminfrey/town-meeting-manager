@@ -937,7 +937,7 @@ written in: `boards.$boardId.tsx`'s `agendaTemplate.countForBoard` and `Progress
 `boardMember.countByTown` both closed (Tasks 2 and 3 respectively — before this enumeration was even
 written), `StaffAccountFlow.tsx`'s `board.listByTown` marker closed the same way (Task 3), and
 `settings.town.tsx`'s `board.byTown` marker closed too (its own Known-gaps entry above already says
-so). Re-run at HEAD, this fix round's own commit (`FIX_ROUND_SHA`):
+so). Re-run at HEAD, this fix round's own commit (`bb60e295b8ebc81e26a03206dcac6aaa6548c8ed`):
 
 ```
 $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
