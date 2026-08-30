@@ -12,6 +12,18 @@
  * board-membership half stays on Supabase — see the `TODO(phase-e-wave-2)`
  * marker below and `person.ts`'s own doc comment for why that join was
  * deliberately NOT folded into the procedure.
+ *
+ * No `ensureQueryData(trpc.person.list.queryOptions())` in `clientLoader` —
+ * deliberate, not an oversight, and the same call `settings.town.tsx` made
+ * for the identical reason (see that file's own comment, Task 2): this route
+ * sits under `AppShell`'s `ProtectedRoute`, which decides whether to render
+ * `children` at all based on `useCurrentUser().townId`, but React Router
+ * dispatches a matched route's `clientLoader` independently of whether an
+ * ancestor COMPONENT chooses to render its `<Outlet>`. Priming here would
+ * run `person.list` — and hit `protectedProcedure`'s tenant-required gate —
+ * for an authenticated user who has no town yet, turning an ordinary
+ * "finish onboarding" redirect into a `RouteErrorBoundary` failure page.
+ * `boards.tsx` makes the same choice for the same reason.
  */
 
 import { useMemo, useState } from "react";
@@ -23,7 +35,6 @@ import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
-import { queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -42,12 +53,7 @@ const ROLE_LABEL: Record<string, string> = {
   board_member: "Board member",
 };
 
-// Not wrapped in try/catch: `person.list` has no failure mode that should be
-// swallowed here — letting a rejection reach `RouteErrorBoundary` is visible,
-// not the indefinite loading state a caught-and-ignored error would produce.
-// See conventions item 12.
 export async function clientLoader() {
-  await queryClient.ensureQueryData(trpc.person.list.queryOptions());
   return {};
 }
 
