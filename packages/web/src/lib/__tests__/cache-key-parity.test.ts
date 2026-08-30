@@ -16,12 +16,15 @@
  * otherwise a reader that moved onto the tRPC key is not being invalidated
  * by this writer at all, silently, for up to the query's `staleTime`.
  *
- * `MIGRATED` is hand-maintained on purpose (four lines as of wave 2, Task 2's
- * fix round — `agendaTemplates: "agendaTemplate"` added there). Growing it
- * is exactly the moment this rule should fire for a newly-migrated entity,
- * so it stays a deliberate edit, not a derived one. Update it in the same
- * commit a router's read moves off `queryKeys.<x>` and its `pathFilter()`
- * becomes the thing writers owe (conventions item 7).
+ * `MIGRATED` is hand-maintained on purpose (seven entries as of wave 2's
+ * final whole-branch-review fix round — `members: "boardMember"`,
+ * `userAccounts: "person"` and `invitations: "boardMember"` joined
+ * `agendaTemplates: "agendaTemplate"` there, all four verified to raise zero
+ * violations at HEAD before being added). Growing it is exactly the moment
+ * this rule should fire for a newly-migrated entity, so it stays a
+ * deliberate edit, not a derived one. Update it in the same commit a
+ * router's read moves off `queryKeys.<x>` and its `pathFilter()` becomes the
+ * thing writers owe (conventions item 7).
  *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three
@@ -42,7 +45,13 @@
  * first version of the task named as a read-only legacy consumer and was
  * not), each with its own pin test.
  *
- * ─── Why the match is scoped to a window, not the whole file ──────────────
+ * ─── Why the match is forward-only from the marker, not whole-file ────────
+ *
+ * (Corrected here to match `phase-e-conventions.md`'s own correction —
+ * `a97617f` retitled item 7's identical section from "scoped to a window" to
+ * "forward-only": what actually does the work is that nothing BEHIND the
+ * `invalidateQueries(` marker is ever read, not that the window is narrow.
+ * See that item's own paragraph for the widened-window measurements.)
  *
  * A whole-file check — "does this file contain `queryKeys.towns.` ANYWHERE,
  * and does it contain `invalidateQueries(` ANYWHERE, and does it lack
@@ -117,6 +126,9 @@ const MIGRATED: Record<string, string> = {
   boards: "board",
   persons: "person",
   agendaTemplates: "agendaTemplate",
+  members: "boardMember",
+  userAccounts: "person",
+  invitations: "boardMember",
 };
 
 /**
@@ -253,7 +265,11 @@ describe("the check itself", () => {
       useQuery(queryKeys.towns.detail(townId));
       ${padding}
       onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.invitations.byTown(townId) });
+        // Deliberately a namespace NOT in MIGRATED (unlike \`invitations\`,
+        // which joined the map in this same fix round) — this fixture needs
+        // a key this check has no opinion about, not one it would now flag
+        // for real.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(townId) });
       },
       `,
     );

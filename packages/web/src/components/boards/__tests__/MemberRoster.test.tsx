@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import type { RouterOutputs } from "@/lib/trpc";
 
 // `sendInviteMutation`/`resendInviteMutation` POST to the existing REST
@@ -69,10 +69,13 @@ function rosterRow(overrides: Partial<RosterRow> & { id: string; person_id: stri
 }
 
 /** Mutable so a test can change what the server returns between renders. */
-const server = { rows: [] as RosterRow[] };
+const server = { rows: [] as RosterRow[], rosterRejects: false };
 
 const stub = installTRPCFetchStub({
-  "boardMember.roster": () => server.rows,
+  "boardMember.roster": () => {
+    if (server.rosterRejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return server.rows;
+  },
 });
 
 const defaultProps = {
@@ -90,6 +93,28 @@ function renderRoster(props = defaultProps) {
 describe("MemberRoster", () => {
   beforeEach(() => {
     server.rows = [];
+    server.rosterRejects = false;
+  });
+
+  /**
+   * Regression pin for the whole-branch review's finding: this component had
+   * no `isError`/`role="alert"` branch, so a failed fetch fell through to
+   * the same "No members added yet" text a genuinely empty board renders —
+   * worse than a blank screen, since it tells an admin the board has no
+   * members when the read simply failed. Verified by mutation: deleting the
+   * `isRosterError` branch in `MemberRoster.tsx` makes this test fail with
+   * `Unable to find role="alert"` and leaves the misleading empty-state text
+   * on screen instead.
+   */
+  it("shows an error state, not the empty-member message, when the roster fetch fails", async () => {
+    server.rosterRejects = true;
+    renderRoster({ ...defaultProps, boardName: "Planning Board" });
+
+    expect(
+      await screen.findByText("Something went wrong loading Planning Board’s members."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/No members added yet/)).not.toBeInTheDocument();
   });
 
   it("renders member names from the roster", async () => {

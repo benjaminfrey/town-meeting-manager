@@ -32,10 +32,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isTRPCClientError } from "@trpc/client";
 import { toast } from "sonner";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -63,15 +62,11 @@ interface MemberArchiveDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/**
- * The message a CONFLICT carries; a generic one otherwise. Same gate
- * `AddPersonDialog.tsx`/`AddMemberDialog.tsx` already use — only a designed
- * refusal's own message is safe to show verbatim; anything else (NOT_FOUND,
- * FORBIDDEN, a network failure) gets the fallback.
- */
-function errorMessage(err: unknown, fallback: string): string {
-  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
-}
+// `errorMessage` (the message a CONFLICT carries; a generic one otherwise —
+// only a designed refusal's own message is safe to show verbatim) moved to
+// `@/lib/trpc` in this wave's whole-branch review: this file,
+// `AddPersonDialog.tsx`, `MemberTransitionDialog.tsx` and
+// `RoleConflictDialog.tsx` each carried an identical copy.
 
 export function MemberArchiveDialog({
   member,

@@ -26,9 +26,8 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { isTRPCClientError } from "@trpc/client";
 import { toast } from "sonner";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { Loader2, AlertTriangle } from "lucide-react";
 import {
   AlertDialog,
@@ -42,16 +41,13 @@ import { Button } from "@/components/ui/button";
 import type { RoleConflictResult } from "@town-meeting/shared";
 import { ROLE_LABELS } from "@town-meeting/shared";
 
-/**
- * The message a CONFLICT carries; a generic one otherwise. Same gate
- * `AddPersonDialog.tsx`/`AddMemberDialog.tsx` already use. `archiveUserAccount`
- * does not throw CONFLICT today (its own refusals are FORBIDDEN/NOT_FOUND),
- * but the gate costs nothing to carry and matches every sibling in this file
- * family, rather than being a fourth, slightly different shape.
- */
-function errorMessage(err: unknown, fallback: string): string {
-  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
-}
+// `errorMessage` (the message a CONFLICT carries; a generic one otherwise)
+// moved to `@/lib/trpc` in this wave's whole-branch review — this file,
+// `AddPersonDialog.tsx`, `MemberTransitionDialog.tsx` and
+// `MemberArchiveDialog.tsx` each carried an identical copy. `archiveUserAccount`
+// does not throw CONFLICT today (its own refusals are FORBIDDEN/NOT_FOUND),
+// but the gate costs nothing to carry and matches every sibling in this file
+// family, rather than being a fourth, slightly different shape.
 
 interface RoleConflictDialogProps {
   personName: string;

@@ -233,6 +233,18 @@ export const agendaTemplateRouter = router({
         });
         return rows[0]!;
       } catch (err) {
+        // Matches `update`'s identical guard: `assertBoardExists` (inside
+        // the `try` above) throws its own `TRPCError({ code: "NOT_FOUND" })`
+        // for a foreign or nonexistent board, and that TRPCError would
+        // otherwise reach `isTemplateNameCollision`'s cause-chain walk
+        // before falling through to the bare `throw err` below. Safe
+        // WITHOUT this guard today only because that function returns false
+        // for a `TRPCError` (it has no `.code === "23505"` anywhere in its
+        // chain) — load-bearing on that function's internals rather than on
+        // this one being explicit about it. Added for the same defensive
+        // symmetry `update` already carries, not because a bug was
+        // reproduced here.
+        if (err instanceof TRPCError) throw err;
         if (isTemplateNameCollision(err)) {
           throw new TRPCError({
             code: "CONFLICT",

@@ -3,6 +3,22 @@
  *
  * Split-panel editor: left panel has the draggable section list,
  * right panel has the detail editor for the selected section.
+ *
+ * Named as the intended caller in both `agendaTemplate.detail`'s and
+ * `agendaTemplate.update`'s own doc comments
+ * (`packages/api/src/trpc/routers/agenda-template.ts`) since those
+ * procedures shipped in wave 2, Task 1 — but never actually wired here. This
+ * route's read (`.select("*")`) and write (`.update(...)`) still go straight
+ * through `@/lib/supabase`, and the write also bypasses
+ * `assertCanUpdateAgendaTemplate` entirely (raw Supabase update, no admin
+ * gate), the same non-admin-can-write inconsistency Task 3 closed for
+ * `DeleteTemplateDialog.tsx`. Found in this wave's whole-branch review: no
+ * task's file list or the wave plan names this route, and it carried no
+ * `TODO(phase-e-wave-2)` marker, so conventions item 11's completeness sweep
+ * read it as done. Not migrated here — that is wave 3's work — but marked so
+ * the sweep sees it.
+ *
+ * TODO(phase-e-wave-2): agendaTemplate.detail, agendaTemplate.update
  */
 
 import { useCallback, useEffect, useState } from "react";

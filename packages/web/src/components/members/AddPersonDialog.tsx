@@ -17,13 +17,12 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isTRPCClientError } from "@trpc/client";
 import { z } from "zod";
 import { Loader2, ChevronLeft, IdCard, UserCog } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import {
   Dialog,
@@ -79,11 +78,6 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
     setStep(1);
     setMode("choose");
     personForm.setValues(INITIAL_PERSON);
-  }
-
-  /** The message a CONFLICT ("email already in use") carries; a generic one otherwise. */
-  function errorMessage(err: unknown, fallback: string): string {
-    return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
   }
 
   const insertPerson = useMutation(trpc.person.insert.mutationOptions());

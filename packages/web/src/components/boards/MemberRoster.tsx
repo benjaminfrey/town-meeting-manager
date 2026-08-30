@@ -16,6 +16,19 @@
  * `grep -rn "queryKeys\.invitations" packages/web/src` names only this file)
  * onto `trpc.boardMember.pathFilter()`, the key this component's own read
  * lives under now. Per conventions item 7: a writer follows its read.
+ *
+ * **Fixed in this wave's whole-branch review:** this component had no
+ * `isError`/`role="alert"` branch at all — a failed `roster` fetch fell
+ * through to the same "No members added yet" empty state a genuinely
+ * empty board renders, which is worse than the blank screen conventions
+ * item 5 exists to end: it actively tells an admin a board has no members
+ * when the read simply failed, inviting them to re-add people who are
+ * already there. `MemberArchiveDialog`, `MemberTransitionDialog`,
+ * `AddMemberDialog`, `PermissionOverrideView`, `StaffAccountFlow` and
+ * `ProgressChecklist` share the same gap and were left as-is this round —
+ * dialogs and a checklist card, arguable rather than clearly wrong the way
+ * this table (this board's primary membership view) is. Worth a pass by
+ * whichever wave next touches those files.
  */
 
 import { useMemo, useState } from "react";
@@ -97,7 +110,7 @@ export function MemberRoster({
   const [editGovTitle, setEditGovTitle] = useState<MemberRow | null>(null);
 
   // ─── Reactive query ─────────────────────────────────────────────────
-  const { data: rosterRows = [] } = useQuery({
+  const { data: rosterRows = [], isError: isRosterError } = useQuery({
     ...trpc.boardMember.roster.queryOptions({ boardId }),
     enabled: !!boardId,
   });
@@ -223,8 +236,23 @@ export function MemberRoster({
           </div>
         )}
 
-        {/* Empty state */}
-        {filtered.length === 0 ? (
+        {/* Error state — must come before the empty state below, which a
+            failed fetch would otherwise fall through to (see this file's
+            own header comment). */}
+        {isRosterError ? (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="rounded-lg border border-destructive/30 bg-destructive/10 p-8 text-center"
+          >
+            <p className="text-sm text-destructive">
+              Something went wrong loading {boardName}&rsquo;s members.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Try reloading the page. If the problem continues, contact support.
+            </p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-lg border bg-muted/30 p-8 text-center">
             <p className="text-sm text-muted-foreground">
               No members added yet. Add your {boardName} members to get started.

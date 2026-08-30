@@ -15,8 +15,22 @@
  * existing consumer, `settings.meeting-notices.tsx`, needs archived boards
  * visible). Migrating the picker onto `board.list` would silently start
  * offering archived boards as places to schedule a new meeting — a real
- * regression, not a port. See the `TODO(phase-e-wave-2)` marker below
- * (conventions item 11) for the three procedures still owed.
+ * regression, not a port.
+ *
+ * **Corrected in this wave's whole-branch review — a wrong rule, not a
+ * missing one.** This comment (and the marker below) used to say the picker
+ * "still needs its own procedure (an archived-filtered `board.listActive` or
+ * an `activeOnly` argument on `board.list`)". That procedure now EXISTS —
+ * `board.listActive` shipped in wave 2, Task 4, and Task 5 wired it into the
+ * identical archived-filtering gap in `StaffAccountFlow.tsx`'s board picker.
+ * The reason it is not simply reused here is real, though, not stale: per
+ * `board.listActive`'s own doc comment, it orders governing boards first,
+ * then alphabetically — not `boardRows`'s plain `.order("name")` — a
+ * behavior change this route's picker has not been checked against. Whoever
+ * migrates this file next should verify that ordering difference is
+ * acceptable (or add an option) rather than swap the call blind. See the
+ * `TODO(phase-e-wave-2)` marker below (conventions item 11) for the full set
+ * of reads still owed.
  */
 
 import { useMemo, useState, useCallback } from "react";
@@ -37,15 +51,15 @@ import {
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-2): meeting.byTown, minutesDocument.pendingByTown, a
-// board picker read that filters archived_at (NOT `board.list` — see this
-// file's header comment for why that procedure is not a substitute).
+// TODO(phase-e-wave-2): meeting.byTown, minutesDocument.pendingByTown,
+// board.listActive (exists, not yet wired here — see this file's header
+// comment for the ordering difference that needs checking first).
 //
 // The marker above is the machine-checkable half of this comment (item 11)
 // — a completeness sweep greps for it, not for prose. `meetingRows` and
 // `minutesDocs` below are the two reads with no procedure at all yet;
-// `boardRows` has a near-miss (`board.list`) that is deliberately not used,
-// for the reason in this file's header comment.
+// `boardRows` has an existing candidate (`board.listActive`) that is
+// deliberately not used yet, for the reason in this file's header comment.
 //
 // This gap is genuinely wave 3+ (meeting/minutes routers), not wave 2's —
 // tagged `phase-e-wave-2` only because no wave 3-6 plan document exists yet

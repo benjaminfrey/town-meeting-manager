@@ -102,6 +102,26 @@
  * account. See that branch's own comment; a review round caught this as a
  * live defect (silent broken success, not a refusal) before it shipped.
  *
+ * **A second review round (the wave's whole-branch review) caught that the
+ * reuse branch above was scoped too widely.** `checkRoleMutualExclusivity`
+ * only knows about staff/board_member — it answers "no conflict" for an
+ * `admin` or `sys_admin` existing account, so the reuse branch reactivated
+ * and seated against THOSE too: an admin adding a board member could
+ * silently un-archive a deliberately-deactivated town-admin account, with
+ * `searchCandidates` (below) showing that person as account-less the whole
+ * time (its `LEFT JOIN ... ua.archived_at IS NULL` hides the archived row).
+ * Reactivation now only happens for an existing `board_member`-role account —
+ * the one case this router's own job (seating someone as a board member) has
+ * an opinion about. Any other existing role, archived or not, is refused
+ * with CONFLICT: reusing an admin/sys_admin/staff account for a board seat is
+ * a decision about what that account IS, which this migration inherited from
+ * no prior behavior (the pre-migration code never reached this branch for
+ * those roles either — `checkRoleMutualExclusivity` already refused staff,
+ * and no one had exercised the admin/sys_admin case before this review), so
+ * refusing rather than inventing a reactivation policy for it matches
+ * conventions item 1's "the query you are replacing is a specification" —
+ * there is no specification for this case to port.
+ *
  * ─── Phase E, wave 2, Task 4 — the membership lifecycle, added below ──────
  *
  * `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx` and
@@ -477,6 +497,27 @@ export const boardMemberRouter = router({
               message: conflict.message ?? "This person's existing account role conflicts.",
             });
           }
+          // `checkRoleMutualExclusivity` only refuses staff — it has no
+          // opinion about `admin`/`sys_admin`, so without this check the
+          // branch below would reuse (and, if archived, silently
+          // REACTIVATE) a town-admin account just because a caller is
+          // adding that person as a board member. See this file's header,
+          // "A second review round" — reproduced live before this fix: an
+          // archived `admin` account came back active with its role and
+          // permissions untouched, and `searchCandidates` had shown the
+          // operator an account-less person the whole time. Reactivation on
+          // reuse only ever makes sense for an account this router itself
+          // put here as `board_member` — refuse anything else rather than
+          // invent a policy for a case nothing before this migration ever
+          // specified.
+          if (existing.role !== "board_member") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This person already has a login account with a different role. " +
+                "Resolve that first before adding them as a board member.",
+            });
+          }
           userAccountId = existing.id;
           // Reviewer-caught defect, fixed here: this branch used to leave an
           // archived account archived while seating the person and issuing
@@ -488,6 +529,8 @@ export const boardMemberRouter = router({
           // `convertToStaff`, which updates an existing account IN PLACE
           // with `archived_at: null` rather than archive-then-insert — the
           // fix shape already lived in this codebase, just not here yet.
+          // Safe to reactivate unconditionally here because the check just
+          // above already narrowed `existing.role` to `board_member`.
           if (govTitle) {
             await tx.execute(sql`
               UPDATE user_account SET archived_at = NULL, gov_title = ${govTitle}

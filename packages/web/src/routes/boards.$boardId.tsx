@@ -44,10 +44,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { queryKeys } from "@/lib/queryKeys";
-// `agendaTemplate.countForBoard` (wave 2, Task 1) closes the
-// `TODO(phase-e-wave-2)` marker this file used to carry for the Overview
-// tab's template count. `supabase` stays imported: this file's own town read
-// (the Overview "effective settings" rows, and the defaults passed to
+// `agendaTemplate.countForBoard` (wave 2, Task 1) closed the template-count
+// half of the `TODO(phase-e-wave-2)` marker this file used to carry for the
+// Overview tab. `supabase` stays imported: this file's own town read (the
+// Overview "effective settings" rows, and the defaults passed to
 // EditBoardDialog / MinutesWorkflowEditor) is NOT in this task's file list
 // (`routes/boards.tsx`, `boards.$boardId.tsx`, `boards.$boardId.templates.tsx`,
 // `AddBoardDialog.tsx`, `EditBoardDialog.tsx`, `settings.town.tsx`,
@@ -56,6 +56,15 @@ import { queryKeys } from "@/lib/queryKeys";
 // migration (retyping two components' props, re-checking the
 // effective-settings mapping) is real work left for whoever picks this file
 // up next.
+//
+// Restored in this wave's whole-branch review: closing the template-count
+// half above dropped this file's marker entirely, which left the
+// town-settings gap below with no grep-able token — exactly the completeness
+// sweep hole conventions item 11 exists to prevent, since `town.detail`
+// existing elsewhere reads as "done" to a grep unless the marker says
+// otherwise.
+// TODO(phase-e-wave-2): town.detail (exists, not yet wired here for the
+// Overview "effective settings" read — see the paragraph above).
 import { supabase } from "@/lib/supabase";
 import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";

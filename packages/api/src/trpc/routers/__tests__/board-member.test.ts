@@ -735,6 +735,106 @@ describe("boardMember.addBoardMember", () => {
       }
     });
   });
+
+  /**
+   * The whole-branch review's finding, reproduced directly: a person whose
+   * ONLY `user_account` row is an ARCHIVED `admin`-role account. Before this
+   * fix, `addBoardMember`'s reuse branch only checked
+   * `checkRoleMutualExclusivity` (staff-only) and then reactivated ANY
+   * existing account unconditionally — an operator adding this person as a
+   * board member would silently restore their town-admin access, with
+   * `searchCandidates` showing them as account-less the whole time (its
+   * `LEFT JOIN ... ua.archived_at IS NULL` hides the archived row). Asserts
+   * the account is untouched — still archived, still `admin`, permissions
+   * unchanged — and that no seat or invitation was created, matching the
+   * "refuse, write nothing" shape the FK-existence checks in this same
+   * procedure already use.
+   */
+  it("refuses to reuse an archived admin-role account for a new board seat, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const priorAdmin = await seedActor(db, town, { role: "admin", global: ["T1"] });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE user_account SET archived_at = now() WHERE id = ${priorAdmin.userAccountId}`,
+          ),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addBoardMember({
+            personId: priorAdmin.personId,
+            boardId,
+            seatTitle: null,
+            termStart: "2026-01-01",
+            termEnd: null,
+            govTitle: null,
+            isDefaultRecSec: false,
+          }),
+        );
+        expect(err.code).toBe("CONFLICT");
+
+        const account = await readAccountByPerson(db, town, priorAdmin.personId);
+        expect(account?.id).toBe(priorAdmin.userAccountId);
+        expect(account?.role).toBe("admin");
+        expect(account?.archived_at).not.toBeNull();
+        expect(await countAccountsForPerson(db, town, priorAdmin.personId)).toBe(1);
+        expect(await countBoardMembers(db, town, priorAdmin.personId, boardId)).toBe(0);
+        expect(await countInvitationsForPerson(db, town, priorAdmin.personId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The sys_admin-role sibling of the test above — a different role that
+   * `checkRoleMutualExclusivity` also has no opinion about, checked
+   * separately so a future narrowing of the guard to only `"admin"` (instead
+   * of "anything that is not `board_member`") would be caught here.
+   */
+  it("refuses to reuse an archived sys_admin-role account for a new board seat", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const priorSysAdmin = await seedActor(db, town, { role: "sys_admin", global: [] });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE user_account SET archived_at = now() WHERE id = ${priorSysAdmin.userAccountId}`,
+          ),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addBoardMember({
+            personId: priorSysAdmin.personId,
+            boardId,
+            seatTitle: null,
+            termStart: "2026-01-01",
+            termEnd: null,
+            govTitle: null,
+            isDefaultRecSec: false,
+          }),
+        );
+        expect(err.code).toBe("CONFLICT");
+
+        const account = await readAccountByPerson(db, town, priorSysAdmin.personId);
+        expect(account?.archived_at).not.toBeNull();
+        expect(await countBoardMembers(db, town, priorSysAdmin.personId, boardId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
 });
 
 describe("boardMember.addStaffMember", () => {

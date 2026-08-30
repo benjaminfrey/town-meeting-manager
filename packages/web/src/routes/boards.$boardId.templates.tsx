@@ -9,14 +9,23 @@
  * clear-then-set default, and the auto-create insert) move onto
  * `trpc.board.detail`/`trpc.agendaTemplate.*`. `CreateTemplateDialog.tsx` and
  * `DeleteTemplateDialog.tsx` are separate components with their own writes
- * against the same table and are NOT in this task's file list — they still
- * read/write through `@/lib/supabase` and still read the legacy
- * `queryKeys.agendaTemplates.byBoard` key this route used to own, so every
- * write below invalidates BOTH that legacy key and
- * `trpc.agendaTemplate.pathFilter()` during the transition (conventions item
- * 7) — dropping the legacy invalidation would leave those two dialogs' own
- * reads (and `CreateMeetingDialog.tsx`'s board-scoped template picker, and
- * the template edit route's `.detail(templateId)` read) stale.
+ * against the same table and were NOT in this task's original file list —
+ * **corrected in the wave's final fix round: both are now migrated too.**
+ * `DeleteTemplateDialog.tsx` moved onto `trpc.agendaTemplate.delete` in
+ * `081a27e` (Task 3); `CreateTemplateDialog.tsx` was still a raw, tenancy-only
+ * Supabase insert until the whole-branch review caught it as the one
+ * user-facing path that bypassed `agendaTemplate.insert`'s admin gate — see
+ * that dialog's own header comment. Both still read the legacy
+ * `queryKeys.agendaTemplates.byBoard` key this route used to own (they
+ * predate this route's own migration and there was no reason to touch that
+ * line while converting the write next to it), so every write below still
+ * invalidates BOTH that legacy key and `trpc.agendaTemplate.pathFilter()`
+ * during the transition (conventions item 7) — dropping the legacy
+ * invalidation would leave `CreateMeetingDialog.tsx`'s board-scoped template
+ * picker and `routes/templates.tsx` (both still raw Supabase, no
+ * `TODO(phase-e-wave-2)` marker on either — see the conventions doc's
+ * Known-gaps entry) stale, along with the template edit route's
+ * `.detail(templateId)` read.
  *
  * `handleClone`'s forward hazard (flagged in Task 1's review): `sections`
  * from `agendaTemplate.list` is `unknown`, and `agendaTemplate.insert`
@@ -294,12 +303,7 @@ export default function AgendaTemplateListPage({ loaderData }: Route.ComponentPr
   return (
     <div className="p-6">
       {/* Dialogs */}
-      <CreateTemplateDialog
-        boardId={boardId}
-        townId={townId}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-      />
+      <CreateTemplateDialog boardId={boardId} open={createOpen} onOpenChange={setCreateOpen} />
       {deleteTemplate && (
         <DeleteTemplateDialog
           template={deleteTemplate}
