@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Save, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import {
@@ -96,6 +97,12 @@ export default function MinutesWorkflowSettingsPage() {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.towns.detail(townId ?? ""),
       });
+      // `minutes_workflow_configured_at` is one of `town.detail`'s own
+      // columns (`settings.town.tsx`'s ProgressChecklist reads it back) even
+      // though this screen's own read is a separate Supabase query keyed off
+      // the same legacy prefix — item 7 gates on what a WRITE could make
+      // stale, not on what the writing screen itself happens to read.
+      void queryClient.invalidateQueries(trpc.town.pathFilter());
       setRetentionPolicy(null);
       setAutoPublish(null);
       setReviewWindow(null);

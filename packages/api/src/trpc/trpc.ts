@@ -221,12 +221,19 @@ export interface RequirePermissionOptions {
 /**
  * Procedure middleware asserting the caller holds `code`.
  *
- * Place it AFTER `.input(...)` when it needs the board — tRPC parses input in
- * chain order, so a middleware added before the parser sees nothing:
+ * Place it BEFORE `.input(...)`. tRPC calls middleware and parses input in
+ * chain order — see `docs/superpowers/plans/phase-e-conventions.md` item 2 —
+ * so anything declared AFTER `.input(...)` can be preempted by validation: a
+ * refused caller who also sent malformed input gets BAD_REQUEST from the
+ * parser and this guard never runs at all. That is not a hypothetical; it is
+ * how `town.updateProfile` first shipped, and why this function now reads
+ * `getRawInput()` instead of the parsed `opts.input` (see below) — the fix
+ * that makes the correct position (before `.input()`) actually work for a
+ * board-scoped code, not merely correct in principle.
  *
  *     protectedProcedure
- *       .input(z.object({ boardId: z.uuid() }))
  *       .use(requireBoardPermission("A1", boardIdFrom()))
+ *       .input(z.object({ boardId: z.uuid() }))
  *       .mutation(...)
  *
  * For a board-scoped code, prefer `requireBoardPermission` — this function
@@ -259,7 +266,23 @@ export function requirePermission(code: PermissionCode, options: RequirePermissi
 
     let boardId: string | undefined;
     if (options.board) {
-      boardId = options.board(opts.input);
+      // `getRawInput()`, not `opts.input` — declared before `.input()`, this
+      // middleware runs before parsing, so `opts.input` is `undefined` and
+      // `options.board` would refuse every call (fail-closed, but dead).
+      // `getRawInput()` returns the UNVALIDATED body; `boardIdFrom` already
+      // narrows it at runtime and returns `undefined` on anything that is
+      // not a non-empty string at the key, and the refusal below already
+      // fires on that — so reading unvalidated input widens nothing. A junk
+      // board id fails closed exactly as it did before this change.
+      //
+      // This does mean the guard authorizes against the PRE-validation board
+      // id, while the resolver (after `.input()` runs) acts on the
+      // POST-validation one. They are the same value today for every
+      // board-scoped procedure in this repo. They would NOT be the same if
+      // an input schema ever applied `.transform()` to the board id field —
+      // do not do that; a guard must authorize the same value the resolver
+      // acts on.
+      boardId = options.board(await opts.getRawInput());
       if (!boardId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -288,4 +311,52 @@ export function requireBoardPermission(
   options: { action?: string } = {},
 ) {
   return requirePermission(code, { ...options, board });
+}
+
+/**
+ * Procedure middleware for an ACTOR-ONLY rule that is not one of the thirty
+ * `PermissionCode`-keyed action codes — the admin gates in
+ * `authorization/rules.ts`'s "Phase B report §4b" section
+ * (`assertCanUpdateTown` and its siblings), which check the caller's ROLE
+ * directly rather than resolving a delegable permission matrix.
+ *
+ * `requirePermission` is deliberately NOT reused for these. It always
+ * resolves a `PermissionCode` through `resolvePermission`, and an admin gate
+ * is deliberately not part of that system —
+ * `packages/api/src/storage/__tests__/documents.test.ts` pins exactly why,
+ * for the same rule this middleware carries: "`assertCanUpdateTown` is an
+ * ADMIN gate, not a code check: there is no action code that grants editing
+ * the town record, so an actor with a maximal matrix must still be
+ * refused." `T1` ("manage_town_settings") exists in `PERMISSIONS` and would
+ * resolve to the same answer as `assertCanUpdateTown` for every account any
+ * current template can create — but only because no template grants it.
+ * Routing this gate through `requirePermission("T1", ...)` would make that
+ * an accident of configuration rather than a fact TypeScript enforces, which
+ * is precisely the "quietly becomes delegable" failure this file's own
+ * `BOARD_SCOPED_CODES` comment warns about for a different set of codes.
+ * `requireActor` keeps the admin-gate/action-code split load-bearing instead
+ * of blurring it to reach one middleware mechanism for both.
+ *
+ * Declared before `.input()`, for the identical reason `requirePermission`
+ * is: anything declared after can be preempted by input validation — see
+ * that function's own doc comment. An admin gate needs no board id and
+ * therefore no `getRawInput()` read; it only needs the actor.
+ *
+ *     .use(requireActor(assertCanUpdateTown))
+ */
+export function requireActor(assert: (actor: Actor) => void) {
+  return middleware(async (opts) => {
+    const ctx = opts.ctx;
+    if (!ctx.actor) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "A permission check ran on a procedure with no tenant context. Permission " +
+          "checks are only meaningful for a signed-in member of a town; build the " +
+          "procedure on protectedProcedure.",
+      });
+    }
+    assert(await ctx.actor());
+    return opts.next();
+  });
 }

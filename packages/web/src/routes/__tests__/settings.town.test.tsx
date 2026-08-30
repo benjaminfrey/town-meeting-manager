@@ -37,7 +37,7 @@ vi.mock("@/lib/supabase", () => {
     }
     return chain;
   }
-  return { supabase: { from: vi.fn().mockReturnValue(makeChain())} };
+  return { supabase: { from: vi.fn().mockReturnValue(makeChain()) } };
 });
 
 // ─── Mock identity ──────────────────────────────────────────────────────
@@ -93,9 +93,18 @@ describe("settings.town", () => {
   it("shows the town's profile once the read settles", async () => {
     // The settings sections are collapsed Radix accordion panels by default
     // — their summary rows (e.g. the contact line) are not in the DOM until
-    // expanded — so this asserts on the always-visible heading and the
-    // section titles, which is enough to prove `town.detail`'s typed row
-    // reached every child without throwing.
+    // expanded, and neither are the four editors: `isEditing` starts false,
+    // so `TownSettingsEditor` / `MeetingDefaultsEditor` / `MeetingRolesEditor`
+    // never mount here and their typed `initial` props are NOT exercised by
+    // this test (F8, Task 2 fix round — an earlier version of this comment
+    // overclaimed that they were). What this test DOES prove: the route's
+    // own `const t = { ... }` mapping off `town.detail`'s row builds without
+    // throwing, the always-visible heading and section titles render (the
+    // titles are static JSX strings, not town data — they only confirm the
+    // page didn't crash before reaching them), and the two children that DO
+    // receive `town.detail`-derived props while collapsed —
+    // `ProgressChecklist` (sealUrl, subdomain, the two timestamps) and
+    // `TownSealUpload` (sealUrl) — render without error.
     renderRoute();
     expect(await screen.findByText("Town of Newcastle")).toBeInTheDocument();
     expect(await screen.findByText("Your Town")).toBeInTheDocument();

@@ -93,65 +93,127 @@ absent guard to look like an oversight:
 **A write gets the matching `assertCan*` rule from `packages/api/src/trpc/authorization/rules.ts`.**
 Do not invent a check. If the rule does not exist, add it there, next to its siblings.
 
-**Which form — middleware or resolver?** Both exist, and 80 migrations will diverge on this unless
-it is said plainly:
+**Rewritten (Task 2 fix round, wave 1).** The item used to frame the remaining question as
+"resolver versus middleware." That framing was wrong, not incomplete — see "What this item
+originally got wrong" below — and it produced a real defect in the first four mutations wave 1
+wrote. The actual rule:
 
-- **Resolver form**, first line of the resolver, when the rule needs only the `Actor`. The repo's
-  one tRPC mutation does this:
+**Authorization goes in middleware, declared BEFORE `.input()`.** That is the only position input
+parsing cannot preempt. Measured, not assumed — two probes against tRPC 11.18.0:
 
-  ```ts
-  // packages/api/src/trpc/routers/town.ts
-  setPortalAddress: protectedProcedure
-    .input(z.object({ subdomain: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      assertCanUpdateTown(await ctx.actor());
-      // ...
-    }),
-  ```
+**Probe 1 — declaration order controls whether a guard can be preempted.**
 
-  The `translateAuthorizationErrors` middleware is applied to every procedure precisely so a rule
-  thrown from inside a resolver still surfaces as FORBIDDEN rather than a 500.
+| form                        | error returned | guard ran |
+| --------------------------- | -------------- | --------- |
+| `.use(guard).input(schema)` | `FORBIDDEN`    | **yes**   |
+| `.input(schema).use(guard)` | `BAD_REQUEST`  | **no**    |
 
-  **Amendment (Task 2, wave 1) — "first line of the resolver" is not "first thing the request
-  hits."** `.input(...)` parsing happens in tRPC's own pipeline BEFORE the resolver function is
-  ever called, so a non-admin caller whose input also fails validation gets BAD_REQUEST, not
-  FORBIDDEN — `assertCanUpdateTown` never runs. `setPortalAddress`'s own schema
-  (`z.object({ subdomain: z.string() })`) is too permissive to have ever surfaced this: almost any
-  string parses, so its "refuses a non-admin" test only ever exercised the FORBIDDEN path by
-  accident. `town.updateProfile`'s schema is what caught it — it has a real character regex and
-  real enums, and the first version of its refusal test used a town name containing `(`, which
-  fails that regex, and got BAD_REQUEST back instead of the FORBIDDEN the test expected. This is
-  not a bug in `updateProfile` or in `assertCanUpdateTown`; it is tRPC's ordinary, intentional
-  pipeline, and it is not wrong to answer BAD_REQUEST first — but item 2's own resolver-form example
-  invites the reader to believe the guard is the first thing that runs, and that is false whenever
-  the input schema is more than decorative. Two consequences for the next five waves: (1) write a
-  refusal test with syntactically-valid input, or the test can pass for the wrong reason (or fail
-  for the wrong reason, as this one first did); (2) if it matters that an unauthorized caller never
-  learns anything about validation rules for data it was never allowed to submit, this ordering is
-  a real, if minor, information disclosure — pin the ordering with a deliberate test (see
-  `town.updateProfile`'s "answers BAD_REQUEST rather than FORBIDDEN when a refused caller's input
-  is also invalid" in `packages/api/src/trpc/routers/__tests__/town.test.ts`) rather than treating
-  it as either a bug to fix or a non-issue to ignore silently.
+**Probe 2 — a middleware before `.input()` cannot see the parsed input.**
 
-- **Middleware form** — `.use(requireBoardPermission(code, boardIdFrom()))` — whenever the check is
-  board-scoped. It is not a style choice there: `requirePermission` refuses at module import time
-  if a board-scoped code arrives with no board, and that refusal is the whole safety net. A
-  board-scoped rule called by hand inside a resolver skips it.
+| middleware position | `opts.input`       | `await opts.getRawInput()` |
+| ------------------- | ------------------ | -------------------------- |
+| before `.input()`   | **`undefined`**    | `{boardId: "b-1"}`         |
+| after `.input()`    | `{boardId: "b-1"}` | `{boardId: "b-1"}`         |
 
-- **Row-level rules stay in the resolver by necessity.** "These minutes are still a draft" cannot
-  be decided before the row is read. `rules.ts` provides three shapes for SELECT — `canX` answers,
-  `assertCanX` throws, `visibleX` filters — so pick rather than improvise: a list endpoint that
-  threw on the first invisible row would be unusable, and a detail endpoint that filtered would
-  return 200 with nothing.
+`.input(...).use(guard)` — declaring the parser first — REINTRODUCES the defect: a refused caller
+whose input also fails validation gets BAD_REQUEST before the guard ever runs. This is not a
+hypothetical ordering mistake; it is exactly how `town.updateProfile` first shipped (resolver form,
+which is textually always after `.input()` — see below), and the first version of its own refusal
+test caught it by accident, sending a town name containing `(` and getting BAD_REQUEST back where
+FORBIDDEN was expected.
 
-Status today, so nobody mistakes transcription for exercise: the town-level half **is** exercised
-(`town.setPortalAddress` above, with tests). The board-scoped half is not — `requirePermission`,
-`requireBoardPermission` and `boardIdFrom` in `packages/api/src/trpc/trpc.ts`, and `BoardScope`
-itself, have **zero call sites outside their own unit tests**. (Do not be misled by the grep: the
-same-named `requirePermission` in `packages/api/src/plugins/auth.ts` is a different function, a
-Fastify preHandler, and it is in use.) The part most likely to be got wrong is the part unproven
-in a real procedure.
-The first wave to add a board-scoped write should expect to amend this item, not assume it settled.
+**Actor-only rules** — `.use(requirePermission(code))` before `.input()`, for any rule keyed by one
+of the thirty `PermissionCode`s in `PERMISSIONS`:
+
+```ts
+protectedProcedure
+  .use(requirePermission("C2", { action: "to read the notification log" }))
+  .input(z.object({ ... }))
+  .mutation(...)
+```
+
+**Admin gates that are NOT `PermissionCode`-keyed** — `assertCanUpdateTown` and its siblings in
+`rules.ts`'s "Phase B report §4b" section — do NOT go through `requirePermission`. They check the
+caller's role directly, deliberately outside the delegable-permission-matrix system;
+`packages/api/src/storage/__tests__/documents.test.ts` pins exactly why for this rule: "there is no
+action code that grants editing the town record, so an actor with a maximal matrix must still be
+refused." Routing one of these through `requirePermission("T1", ...)` would answer identically
+today (nothing currently grants `T1` in any matrix) but would make "never delegable" an accident of
+configuration instead of a fact TypeScript enforces — the exact "quietly becomes delegable" failure
+this document's `BOARD_SCOPED_CODES` section warns about for a different set of codes. Use
+`requireActor` instead, added in the fix round specifically for this category:
+
+```ts
+// packages/api/src/trpc/routers/town.ts
+updateProfile: protectedProcedure
+  .use(requireActor(assertCanUpdateTown))
+  .input(z.object({ ... }))
+  .mutation(async ({ ctx, input }) => { ... }),
+```
+
+`requireActor` needs no board id and therefore no `getRawInput()` read — it only calls
+`ctx.actor()`. `translateAuthorizationErrors` still does the FORBIDDEN mapping for both forms; that
+part of the item was correct and is unchanged.
+
+**Board-scoped rules** — `.use(requireBoardPermission(code, boardIdFrom()))` before `.input()`,
+which now WORKS at that position only because of a matching fix: `requirePermission`'s board
+extractor used to read `opts.input`, which probe 2 shows is `undefined` before `.input()` runs — a
+board-scoped guard placed at the position this item requires would have refused every single call
+before the fix, fail-closed but dead. It now reads `await opts.getRawInput()` instead — the
+UNVALIDATED body. That is safe: `boardIdFrom` already narrows at runtime and returns `undefined` on
+anything that is not a non-empty string at the key, and the guard already refuses when the
+extractor yields nothing, so reading unvalidated input widens nothing a junk value could exploit.
+
+```ts
+protectedProcedure
+  .use(requireBoardPermission("A1", boardIdFrom()))
+  .input(z.object({ boardId: z.uuid() }))
+  .mutation(...)
+```
+
+**One hazard this fix introduces, stated so it does not get rediscovered the hard way:** the guard
+now authorizes against the PRE-validation board id (from `getRawInput()`) while the resolver acts
+on the POST-validation one (from `input`, after `.input()` parses). Those are the same value today
+for every board-scoped procedure in this repo. They would NOT be the same if an input schema ever
+applied `.transform()` to the board id field — the guard would authorize one board while the
+resolver acted on another. **Do not transform a value a guard authorizes on.**
+
+**Row-level rules stay in the resolver by necessity, unchanged from before.** "These minutes are
+still a draft" cannot be decided before the row is read. `rules.ts` provides three shapes for
+SELECT — `canX` answers, `assertCanX` throws, `visibleX` filters — so pick rather than improvise: a
+list endpoint that threw on the first invisible row would be unusable, and a detail endpoint that
+filtered would return 200 with nothing.
+
+**The refusal-test rule, in its enforceable form (item 13 note, restated here because it is
+specific to this item's own defect):** A refusal test must assert FORBIDDEN on input that PARSES.
+Input that fails to parse can answer BAD_REQUEST for reasons that have nothing to do with whether
+the guard ran, so a test built on it cannot tell the two apart. This is not a hypothetical either:
+the first version of `town.updateProfile`'s own regression-pin test used input that failed to
+parse, and a reviewer measured it directly — with `assertCanUpdateTown` deleted entirely, "refuses a
+caller who is not an administrator" correctly went red, but the invalid-input test **stayed
+green**, because BAD_REQUEST was the answer whether the guard existed or not. "Use valid input" as
+prose is not machine-checkable; "delete the guard and watch every refusal test go red" (item 13) is
+— but only if the test's input would otherwise have succeeded.
+
+**What this item originally got wrong.** Not "resolver versus middleware" — that framing named one
+instance of the defect (the resolver form is textually always after `.input()`, since `.mutation()`
+is the terminal step of the chain) and missed the general rule: **anything declared after
+`.input()` can be preempted by it**, including a middleware placed there by choice. The original
+item's own `setPortalAddress` example was resolver-form and never caught the ordering bug only
+because its schema (`z.object({ subdomain: z.string() })`) is too permissive for almost any string
+to fail — `setPortalAddress` itself is not yet converted to the middleware form as of this fix round
+(see its own doc comment in `town.ts` for why, and that it still owes the conversion).
+
+Status today: the Actor-only middleware form (`requireActor`) is exercised — the four `town.*`
+mutations, with tests, each guard re-verified by deletion after the conversion. The `PermissionCode`
+form (`requirePermission`) declared before `.input()` is exercised too, in
+`require-permission.test.ts`'s synthetic router, including the regression pin above — but has
+**zero call sites in a real procedure**; every real Actor-only write so far is an admin gate
+(`requireActor`), not a delegable code. The board-scoped form
+(`requireBoardPermission`/`boardIdFrom`/`getRawInput()`) is fixed and covered by a dedicated test
+proving it resolves a board and refuses correctly at the corrected position, but still has **zero
+call sites outside tests** — no procedure in this repo writes anything board-scoped yet. The first
+wave to add one should expect to amend this item again, not assume it settled.
 
 **If the action is one of the 18 board-scoped codes, the guard takes a `BoardScope` and the
 procedure must resolve the board.** The set is derived, not hand-written —
@@ -670,8 +732,12 @@ Quote the grep, not the number — the count moves with what you match, which is
 $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
 26
 $ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
-67
+63
 ```
+
+(Re-run at Task 2's fix round — the second number was 67 when this item was written and had already
+drifted to 63 one wave later. Quote the grep, not the number, is the rule this drift itself
+demonstrates: re-run it rather than trusting either figure.)
 
 The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
 and a file reaching it that way is no more migrated than one importing directly.
@@ -763,8 +829,14 @@ runs.
 
 ## Known gaps this document does not close
 
-- The board-scoped authorization form in item 2 is transcribed from `rules.ts` and `trpc.ts`, not
-  exercised — no procedure calls `requireBoardPermission` yet.
+- The board-scoped authorization form in item 2 is fixed and unit-tested (Task 2's fix round —
+  `requirePermission`'s board extractor now reads `getRawInput()` so the form actually works
+  declared before `.input()`) but still has **zero call sites in a real procedure** — no shipped
+  router calls `requireBoardPermission` yet. The mechanism is proven; the first real use is not.
+- `setPortalAddress` (`packages/api/src/trpc/routers/town.ts`) is still resolver-form, not
+  `requireActor`-form, as of Task 2's fix round. Its own permissive schema means the ordering
+  defect item 2 describes cannot fire on it today, but it is inconsistent with every other write in
+  the same file and owes the conversion — see its doc comment.
 - `TestHandlers` rejects a missing field but accepts an extra one (item 8).
 - `MockAuthProvider` is directly named in 4 files (`grep -rl "MockAuthProvider" packages/web/src`:
   `test/render.ts` and `test/mocks/auth-mock.ts`, where it is defined and wraps every render, plus

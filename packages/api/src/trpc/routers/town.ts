@@ -39,7 +39,8 @@ import {
   MunicipalityType,
   PopulationRange,
 } from "@town-meeting/shared";
-import { router, protectedProcedure } from "../trpc.js";
+import type { NewEnglandStateCode } from "@town-meeting/shared";
+import { router, protectedProcedure, requireActor } from "../trpc.js";
 import { assertCanUpdateTown } from "../authorization/rules.js";
 import { toRows } from "../../db/rows.js";
 import { z } from "zod";
@@ -132,16 +133,30 @@ export const townRouter = router({
       toRows<{
         id: string;
         name: string;
-        state: string;
-        municipality_type: string;
-        population_range: string | null;
+        // The five unions below are the SAME types the matching
+        // `update*` mutation's zod schema accepts — see conventions item 1
+        // and F5 in the Task 2 fix round: typing this row `string` and the
+        // write `z.enum([...])` let the two halves disagree, and the read
+        // side bridged the gap with unchecked `as` casts in
+        // `settings.town.tsx`. Same type on both ends means a schema drift
+        // (a renamed enum value, say) is a compile error here rather than a
+        // cast that silently keeps compiling.
+        state: NewEnglandStateCode;
+        municipality_type: MunicipalityType;
+        population_range: PopulationRange | null;
         contact_name: string | null;
         contact_role: string | null;
-        meeting_formality: string;
-        minutes_style: string;
+        meeting_formality: MeetingFormality;
+        minutes_style: MinutesStyle;
         presiding_officer_default: string | null;
         minutes_recorder_default: string | null;
-        staff_roles_present: unknown | null;
+        // Not `unknown | null`: that collapses to `unknown`, and
+        // `Array.isArray(...)` narrowing on `unknown` still hands the
+        // caller an effective `any[]`. This is a `jsonb` array of staff
+        // role strings by the same trust boundary every other column here
+        // already relies on — nothing in this file validates any column's
+        // shape against the database at runtime, this one included.
+        staff_roles_present: string[] | null;
         subdomain: string | null;
         seal_url: string | null;
         retention_policy_acknowledged_at: string | null;
@@ -199,6 +214,19 @@ export const townRouter = router({
    * onboarding, and `town_subdomain_key` would catch it anyway — as a 500,
    * after the check had already said the name was free. Letting the constraint
    * be the check means the answer is the constraint's answer.
+   *
+   * ─── Left in resolver form, not converted with the four below ────────────
+   *
+   * Conventions item 2 now requires `.use(requireActor(...))` declared before
+   * `.input()`, because anything declared after can be preempted by
+   * validation (a refused caller whose input also fails parsing gets
+   * BAD_REQUEST, never reaching the guard). This procedure's schema —
+   * `z.object({ subdomain: z.string() })` — accepts almost any string, so
+   * that failure mode cannot occur here: nothing a non-admin sends fails
+   * parsing before `assertCanUpdateTown` runs. Left unconverted in the Task 2
+   * fix round because it was out of that round's stated scope (four named
+   * mutations), not because it is exempt from the rule — a future pass should
+   * still convert it for consistency with every other write in this router.
    */
   setPortalAddress: protectedProcedure
     .input(z.object({ subdomain: z.string() }))
@@ -250,6 +278,7 @@ export const townRouter = router({
    * caller to substitute.
    */
   updateProfile: protectedProcedure
+    .use(requireActor(assertCanUpdateTown))
     .input(
       z.object({
         name: z
@@ -275,7 +304,6 @@ export const townRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      assertCanUpdateTown(await ctx.actor());
       await ctx.withTenant(async (tx) => {
         await tx.execute(sql`
           UPDATE town SET
@@ -302,6 +330,7 @@ export const townRouter = router({
    * shape the client's own `MeetingDefaultsSchema` already enforces.
    */
   updateMeetingDefaults: protectedProcedure
+    .use(requireActor(assertCanUpdateTown))
     .input(
       z.object({
         meeting_formality: z.enum([
@@ -313,7 +342,6 @@ export const townRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      assertCanUpdateTown(await ctx.actor());
       await ctx.withTenant(async (tx) => {
         await tx.execute(sql`
           UPDATE town SET
@@ -339,6 +367,7 @@ export const townRouter = router({
    * than transcribed — the thing item 2 warns against.
    */
   updateMeetingRoles: protectedProcedure
+    .use(requireActor(assertCanUpdateTown))
     .input(
       z.object({
         presiding_officer_default: z.string().min(1),
@@ -346,7 +375,6 @@ export const townRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      assertCanUpdateTown(await ctx.actor());
       await ctx.withTenant(async (tx) => {
         await tx.execute(sql`
           UPDATE town SET
@@ -369,15 +397,16 @@ export const townRouter = router({
    * decides the instant it happened. No input: unlike a subdomain, there is
    * nothing here for the client to supply.
    */
-  acknowledgeRetentionPolicy: protectedProcedure.mutation(async ({ ctx }) => {
-    assertCanUpdateTown(await ctx.actor());
-    const now = new Date().toISOString();
-    await ctx.withTenant(async (tx) => {
-      await tx.execute(sql`
-        UPDATE town SET retention_policy_acknowledged_at = ${now}, updated_at = ${now}
-        WHERE id = ${ctx.tenant.townId}
-      `);
-    });
-    return { retention_policy_acknowledged_at: now };
-  }),
+  acknowledgeRetentionPolicy: protectedProcedure
+    .use(requireActor(assertCanUpdateTown))
+    .mutation(async ({ ctx }) => {
+      const now = new Date().toISOString();
+      await ctx.withTenant(async (tx) => {
+        await tx.execute(sql`
+          UPDATE town SET retention_policy_acknowledged_at = ${now}, updated_at = ${now}
+          WHERE id = ${ctx.tenant.townId}
+        `);
+      });
+      return { retention_policy_acknowledged_at: now };
+    }),
 });

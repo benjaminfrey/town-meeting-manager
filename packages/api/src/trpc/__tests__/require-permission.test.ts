@@ -65,6 +65,26 @@ const testRouter = router({
     .use(requireBoardPermission("A1", boardIdFrom(), { action: "to schedule a meeting" }))
     .mutation(() => "scheduled" as const),
 
+  // Task 2 fix round — the guard declared BEFORE `.input()`, which is the
+  // position conventions item 2 now requires so validation cannot preempt
+  // it. Otherwise identical to `editAgenda` above. Proves two things at
+  // once: `requireBoardPermission`'s `getRawInput()` read resolves a real
+  // board id from here (where `opts.input` would be `undefined`), and a
+  // caller lacking A2 is still refused.
+  editAgendaGuardFirst: protectedProcedure
+    .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
+    .input(z.object({ boardId: z.string().uuid() }))
+    .mutation(() => "edited" as const),
+
+  // Same shape, but the input schema REJECTS the payload the tests below
+  // send — the regression pin for the whole fix round. With the guard
+  // declared first, a refused caller's invalid input must never reach the
+  // parser: the guard throws FORBIDDEN before BAD_REQUEST has a chance to.
+  editAgendaGuardFirstStrictInput: protectedProcedure
+    .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
+    .input(z.object({ boardId: z.string().uuid(), name: z.string().min(5) }))
+    .mutation(() => "edited" as const),
+
   // A procedure that reaches the database, to prove the handle works.
   countBoards: protectedProcedure.query(async ({ ctx }) =>
     ctx.withTenant(async (tx) => {
@@ -104,6 +124,76 @@ describe("requirePermission", () => {
       // permission to ask for, and support needs to know which one to grant.
       expect(err.message).toContain("A2");
       expect(err.message).toContain("edit_agenda");
+    });
+  });
+
+  it("resolves the board id and refuses correctly when the guard is declared BEFORE .input()", async () => {
+    // Probe 2 in the fix brief: a middleware declared before `.input()` sees
+    // `opts.input === undefined`. `requireBoardPermission`'s `boardIdFrom()`
+    // extractor now reads `getRawInput()` instead, specifically so this
+    // position — the one item 2 requires — actually resolves a board rather
+    // than refusing every call.
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const granted = await seedActor(db, town, { role: "staff", global: ["A2"] });
+      const denied = await seedActor(db, town, { role: "staff", global: ["A3"] });
+
+      await expect(
+        createCaller(contextFor(db, town, granted)).editAgendaGuardFirst({
+          boardId: town.boardId,
+        }),
+      ).resolves.toBe("edited");
+
+      const err = await expectForbidden(() =>
+        createCaller(contextFor(db, town, denied)).editAgendaGuardFirst({ boardId: town.boardId }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
+      expect(err.message).toContain("A2");
+    });
+  });
+
+  it("refuses FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation", async () => {
+    // The regression pin for the whole fix round, and the one item 2's
+    // original amendment could not have written: the caller below is
+    // refused AND sends input that fails `editAgendaGuardFirstStrictInput`'s
+    // schema (`name` is under 5 characters). With the guard declared before
+    // `.input()`, the guard must run first and answer FORBIDDEN before the
+    // parser ever gets a chance to answer BAD_REQUEST. `boardId` is a real
+    // uuid — this is not testing "malformed request", it is testing "one
+    // field among several fails validation", which is the realistic case a
+    // clerk hits by fat-fingering a form.
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const denied = await seedActor(db, town, { role: "staff", global: ["A3"] });
+
+      const err = await expectForbidden(() =>
+        createCaller(contextFor(db, town, denied)).editAgendaGuardFirstStrictInput({
+          boardId: town.boardId,
+          name: "no",
+        }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
+    });
+  });
+
+  it("proves the test above is not vacuous: valid-but-unauthorized ALSO answers FORBIDDEN", async () => {
+    // Complement of the test above. Both must answer FORBIDDEN for the guard
+    // to be doing real work rather than the parser accidentally agreeing
+    // with it on the invalid-input case.
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const denied = await seedActor(db, town, { role: "staff", global: ["A3"] });
+
+      const err = await expectForbidden(() =>
+        createCaller(contextFor(db, town, denied)).editAgendaGuardFirstStrictInput({
+          boardId: town.boardId,
+          name: "a valid name",
+        }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
     });
   });
 

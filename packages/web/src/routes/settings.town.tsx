@@ -200,7 +200,9 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
     minutes_workflow_configured_at: town.minutes_workflow_configured_at,
   };
 
-  // staff_roles_present is `jsonb`, typed `unknown | null` by `town.detail`
+  // staff_roles_present is `jsonb`, typed `string[] | null` by `town.detail`
+  // (F9 in the Task 2 fix round — not `unknown | null`, which collapsed to
+  // `any[]` through this same narrowing and only looked typed).
   const staffRoles: string[] = Array.isArray(t.staff_roles_present) ? t.staff_roles_present : [];
 
   const STAFF_ROLE_LABELS: Record<string, string> = {
@@ -273,14 +275,14 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
                   townId={t.id}
                   initial={{
                     name: t.name,
-                    state: t.state as "ME" | "NH" | "VT" | "MA" | "CT" | "RI",
-                    municipality_type: t.municipality_type as "town" | "city" | "plantation",
-                    population_range: t.population_range as
-                      | "under_1000"
-                      | "1000_to_2500"
-                      | "2500_to_5000"
-                      | "5000_to_10000"
-                      | "over_10000",
+                    // No `as` casts on any of the four fields below (F5 in
+                    // the Task 2 fix round): `town.detail` now types these
+                    // columns with the same unions `TownSettingsEditor`'s
+                    // own zod schema accepts, so they line up without an
+                    // unchecked narrowing at the call site.
+                    state: t.state,
+                    municipality_type: t.municipality_type,
+                    population_range: t.population_range,
                     contact_name: t.contact_name,
                     contact_role: t.contact_role,
                   }}
@@ -416,8 +418,10 @@ export default function SettingsTownPage(_props: Route.ComponentProps) {
                 <MeetingDefaultsEditor
                   townId={t.id}
                   initial={{
-                    meeting_formality: t.meeting_formality as "informal" | "semi_formal" | "formal",
-                    minutes_style: t.minutes_style as "action" | "summary" | "narrative",
+                    // No `as` casts (F5): see the equivalent note above
+                    // `TownSettingsEditor`'s `initial` prop.
+                    meeting_formality: t.meeting_formality,
+                    minutes_style: t.minutes_style,
                   }}
                   onDone={() => setEditingSection(null)}
                 />

@@ -288,19 +288,31 @@ describe("town.updateProfile", () => {
   });
 
   /**
-   * Documents a real gap in conventions item 2, found writing this test —
-   * see the task report. tRPC parses `.input(...)` before the resolver body
-   * runs at all, so `assertCanUpdateTown(await ctx.actor())` being the
-   * "first line of the resolver" is not the same as being the first thing
-   * the request hits. A non-admin caller who also sends invalid data is
-   * answered BAD_REQUEST, not FORBIDDEN — the authorization check never
-   * runs. `setPortalAddress`'s own input schema (`z.object({ subdomain:
-   * z.string() })`) is too permissive to ever surface this: almost any
-   * string parses, so its refusal test happened to only ever exercise the
-   * FORBIDDEN path. `updateProfile`'s stricter schema (a real character
-   * regex, real enums) makes the gap observable for the first time.
+   * The regression pin for the fix round that moved authorization ahead of
+   * input parsing (conventions item 2, rewritten). The FIRST version of this
+   * test asserted the opposite — `expect(err.code).toBe("BAD_REQUEST")` —
+   * because in the old resolver-form code `assertCanUpdateTown` ran inside
+   * the resolver, which tRPC calls only after `.input()` had already parsed
+   * (or rejected) the body, so a non-admin who ALSO sent invalid data got
+   * the parser's answer, never the guard's. `updateProfile` is now
+   * `.use(requireActor(assertCanUpdateTown)).input(...)` — the guard
+   * declared BEFORE the parser — so this test now sends input that fully
+   * PARSES and asserts FORBIDDEN, per the enforceable form of the rule:
+   *
+   *   A refusal test must assert FORBIDDEN on input that parses. Input that
+   *   fails to parse can answer BAD_REQUEST for reasons that have nothing to
+   *   do with whether the guard ran, so a test built on it cannot tell the
+   *   two apart — which is exactly how the first version of this test
+   *   stayed green when a reviewer deleted `assertCanUpdateTown` entirely.
+   *
+   * Deliberately distinct from "refuses a caller who is not an
+   * administrator" above only in NAME and in what it documents (the
+   * historical defect and its fix) — the assertion is intentionally the
+   * same, because that is the point: once the guard runs before the parser,
+   * "the input also happens to be invalid" stops being a special case worth
+   * a different answer.
    */
-  it("answers BAD_REQUEST rather than FORBIDDEN when a refused caller's input is also invalid", async () => {
+  it("answers FORBIDDEN on valid input from a refused caller (the ordering regression pin)", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -309,12 +321,9 @@ describe("town.updateProfile", () => {
         const actor = await seedActor(db, town, { role: "staff", global: [] });
         const caller = appRouter.createCaller(contextFor(db, town, actor));
 
-        // Same non-admin caller as above, but a name that fails the regex —
-        // zod rejects it before `updateProfile`'s resolver, and therefore
-        // before `assertCanUpdateTown`, ever runs.
         const err = await expectTrpcError(() =>
           caller.town.updateProfile({
-            name: "Newcastle (Invalid)",
+            name: "Newcastle Renamed Again",
             state: "NH",
             municipality_type: "city",
             population_range: "over_10000",
@@ -322,7 +331,7 @@ describe("town.updateProfile", () => {
             contact_role: "Impostor",
           }),
         );
-        expect(err.code).toBe("BAD_REQUEST");
+        expect(err.code).toBe("FORBIDDEN");
       } finally {
         await app.end();
       }

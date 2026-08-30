@@ -55,7 +55,11 @@ describe("router wiring", () => {
     // `updateMeetingRoles`' free-text field would not catch a deleted schema
     // the way a missing-required-field object does, so `{}` is used
     // uniformly here rather than a schema-specific bad value.
-    for (const name of ["town.updateProfile", "town.updateMeetingDefaults", "town.updateMeetingRoles"]) {
+    for (const name of [
+      "town.updateProfile",
+      "town.updateMeetingDefaults",
+      "town.updateMeetingRoles",
+    ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
       expect(schema, `${name} has no input schema`).toBeDefined();

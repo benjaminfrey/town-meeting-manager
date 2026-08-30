@@ -60,9 +60,7 @@ async function acknowledge() {
   );
 
   await user.click(screen.getByRole("button", { name: /i acknowledge this retention policy/i }));
-  await waitFor(() =>
-    expect(stub.countFor("town.acknowledgeRetentionPolicy")).toBeGreaterThan(0),
-  );
+  await waitFor(() => expect(stub.countFor("town.acknowledgeRetentionPolicy")).toBeGreaterThan(0));
 
   return { legacyKey, detailKey };
 }
