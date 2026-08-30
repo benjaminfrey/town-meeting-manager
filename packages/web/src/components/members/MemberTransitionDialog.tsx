@@ -9,6 +9,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
 import type { PermissionsMatrix, UserRole } from "@town-meeting/shared";
@@ -235,6 +236,11 @@ export function MemberTransitionDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(townId) });
+      // This mutation creates a `user_account` — `person.list` (which
+      // `people.tsx` now reads through, Phase E wave 1 Task 3) would
+      // otherwise show this person as having no role until the 60s
+      // `staleTime` expired.
+      void queryClient.invalidateQueries(trpc.person.pathFilter());
       onOpenChange(false);
     },
   });

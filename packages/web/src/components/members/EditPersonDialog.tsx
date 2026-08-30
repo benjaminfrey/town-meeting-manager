@@ -3,15 +3,18 @@
  *
  * Fills a gap: there was no name/email edit UI before (only EditGovTitleDialog
  * for the gov_title, which lives on the user_account). Gated to admins (T2);
- * RLS also enforces it.
+ * the server's own `assertCanUpdatePerson` (Phase E, wave 1, Task 3,
+ * `trpc.person.update`) enforces it too now, not just the UI gate.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import {
   Dialog,
   DialogContent,
@@ -63,23 +66,24 @@ export function EditPersonDialog({ person, townId, open, onOpenChange }: EditPer
   });
   const emailTaken = dupRows.length > 0;
 
-  const save = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("person")
-        .update({ name: form.values.name.trim(), email })
-        .eq("id", person.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.persons.byTown(townId),
-      });
-      toast.success("Person updated");
-      onOpenChange(false);
-    },
-    onError: () => toast.error("Couldn't update the person — please try again."),
-  });
+  const save = useMutation(
+    trpc.person.update.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.persons.byTown(townId),
+        });
+        void queryClient.invalidateQueries(trpc.person.pathFilter());
+        toast.success("Person updated");
+        onOpenChange(false);
+      },
+      onError: (err) =>
+        toast.error(
+          isTRPCClientError(err) && err.data?.code === "CONFLICT"
+            ? err.message
+            : "Couldn't update the person — please try again.",
+        ),
+    }),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -117,7 +121,9 @@ export function EditPersonDialog({ person, townId, open, onOpenChange }: EditPer
             Cancel
           </Button>
           <Button
-            onClick={() => save.mutate()}
+            onClick={() =>
+              save.mutate({ personId: person.id, name: form.values.name.trim(), email })
+            }
             disabled={!form.isValid || emailTaken || save.isPending}
           >
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

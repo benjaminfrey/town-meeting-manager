@@ -13,6 +13,11 @@ describe("router wiring", () => {
         "board.recentMeetings",
         "board.stats",
         "permissions",
+        "person.list",
+        "person.insert",
+        "person.update",
+        "person.insertStaffAccount",
+        "person.updateGovTitle",
         "town.acknowledgeRetentionPolicy",
         "town.detail",
         "town.portalAddress",
@@ -59,6 +64,10 @@ describe("router wiring", () => {
       "town.updateProfile",
       "town.updateMeetingDefaults",
       "town.updateMeetingRoles",
+      "person.insert",
+      "person.update",
+      "person.insertStaffAccount",
+      "person.updateGovTitle",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
