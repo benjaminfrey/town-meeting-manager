@@ -86,12 +86,21 @@
  * pre-existing product gap (the current, unmigrated code hits the identical
  * unique-constraint collision as a raw, uncaught 500 in this exact scenario —
  * traced, not guessed, against `AddMemberDialog.tsx`'s original two
- * `mutationFn`s), not one of this task's three named hazards, and is called
- * out in the task report rather than redesigned here. `addStaffMember` needs
- * no equivalent check: `user_account_person_id_key` refuses ANY second
- * account for the same person regardless of role, so the collision handler
- * already shared with `person.insertStaffAccount` (`isAccountAlreadyExistsCollision`)
- * covers it structurally.
+ * `mutationFn`s), not one of this task's three named hazards. Named in full,
+ * with the fix shape, in `phase-e-conventions.md`'s Known-gaps entry "Both
+ * doors from staff to board_member dead-end at `RoleConflictDialog`" — do not
+ * redesign it here; that entry is the record of what the fix should be and
+ * why it was deferred. `addStaffMember` needs no equivalent check:
+ * `user_account_person_id_key` refuses ANY second account for the same
+ * person regardless of role, so the collision handler already shared with
+ * `person.insertStaffAccount` (`isAccountAlreadyExistsCollision`) covers it
+ * structurally.
+ *
+ * A DIFFERENT case — no role conflict, but the existing account is
+ * archived — is NOT a gap: `addBoardMember`'s reuse branch reactivates it
+ * (`archived_at = NULL`) rather than seating the person against a still-dead
+ * account. See that branch's own comment; a review round caught this as a
+ * live defect (silent broken success, not a refusal) before it shipped.
  */
 
 import { sql } from "drizzle-orm";
@@ -295,6 +304,19 @@ export const boardMemberRouter = router({
    * `active_board_count` is a correlated subquery — the same shape
    * `board.stats.active_members` and `board.list.active_member_count` already
    * use, summed per PERSON instead of per board here.
+   *
+   * `ua.archived_at IS NULL` — NOT `roster`'s shape. The Supabase read this
+   * replaces (`AddMemberDialog.tsx`'s original `uaRows` query) filtered
+   * `.is("archived_at", null)`, so a person whose only account is archived
+   * came back with `role: null` — the UI treats them as account-less and
+   * lets `handleSelectPerson` route them into the "create a fresh account"
+   * branch. Dropping the filter here (as a first version of this procedure
+   * did) surfaces the archived account's role/id to the client, which is the
+   * same "reuse an archived account without reviving it" shape the review
+   * caught in `addBoardMember` below — this filter is this read's half of
+   * that fix, not a stylistic choice. Contrast with `roster`, which
+   * deliberately keeps an archived account visible (that screen NEEDS to
+   * show archived state) — two different questions, two different answers.
    */
   searchCandidates: protectedProcedure
     .input(z.object({ boardId: z.string().uuid(), query: z.string().min(2).max(200) }))
@@ -316,7 +338,7 @@ export const boardMemberRouter = router({
               (SELECT count(*)::int FROM board_member
                  WHERE person_id = p.id AND status = 'active') AS active_board_count
             FROM person p
-            LEFT JOIN user_account ua ON ua.person_id = p.id
+            LEFT JOIN user_account ua ON ua.person_id = p.id AND ua.archived_at IS NULL
             WHERE p.archived_at IS NULL
               AND (p.name ILIKE ${pattern} OR p.email ILIKE ${pattern})
               AND NOT EXISTS (
@@ -387,9 +409,13 @@ export const boardMemberRouter = router({
         const name = await getPersonName(tx, input.personId);
         const govTitle = input.govTitle?.trim() || null;
 
-        const existingRows = toRows<{ id: string; role: UserRole }>(
+        // NOT filtered to `archived_at IS NULL` — this lookup has to see an
+        // archived row too, both to run the mutual-exclusivity check against
+        // its real role and to REACTIVATE it below rather than silently
+        // reuse it still-archived (see that branch's own comment).
+        const existingRows = toRows<{ id: string; role: UserRole; archived_at: string | null }>(
           await tx.execute(sql`
-            SELECT id, role FROM user_account WHERE person_id = ${input.personId}
+            SELECT id, role, archived_at FROM user_account WHERE person_id = ${input.personId}
           `),
           (message) => new Error(`boardMember.addBoardMember: ${message}`),
         );
@@ -405,9 +431,24 @@ export const boardMemberRouter = router({
             });
           }
           userAccountId = existing.id;
+          // Reviewer-caught defect, fixed here: this branch used to leave an
+          // archived account archived while seating the person and issuing
+          // an invitation anyway — `tenant-context.ts` refuses a session for
+          // any `archived_at IS NOT NULL` account, so that person could
+          // accept the invitation and never get a session, with no error
+          // anywhere. `archived_at = NULL` unconditionally (a no-op if it
+          // was already null) mirrors `MemberTransitionDialog.tsx`'s
+          // `convertToStaff`, which updates an existing account IN PLACE
+          // with `archived_at: null` rather than archive-then-insert — the
+          // fix shape already lived in this codebase, just not here yet.
           if (govTitle) {
             await tx.execute(sql`
-              UPDATE user_account SET gov_title = ${govTitle} WHERE id = ${userAccountId}
+              UPDATE user_account SET archived_at = NULL, gov_title = ${govTitle}
+              WHERE id = ${userAccountId}
+            `);
+          } else {
+            await tx.execute(sql`
+              UPDATE user_account SET archived_at = NULL WHERE id = ${userAccountId}
             `);
           }
         } else {

@@ -51,7 +51,10 @@ interface PermissionOverrideViewProps {
 export function PermissionOverrideView({ permissions, townId }: PermissionOverrideViewProps) {
   // Phase E, wave 2, Task 3 — see `StaffAccountFlow.tsx`'s identical comment:
   // this was the same raw Supabase read (`board`, `archived_at IS NULL`),
-  // now `board.listActive`.
+  // now `board.listActive` — including that same file's note on the order
+  // change (`is_governing_board DESC, name ASC`, not strict alphabetical).
+  // This view only uses `boards` to resolve a `board_id` to a name for
+  // display (`boards.find(...)`), so the order is invisible here regardless.
   const { data: boardRows = [] } = useQuery({
     ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,

@@ -150,9 +150,15 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
       void queryClient.invalidateQueries({
         queryKey: queryKeys.persons.byTown(townId),
       });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.userAccounts.byTown(townId),
-      });
+      // `queryKeys.userAccounts.byTown` invalidation removed (Phase E, wave
+      // 2, Task 3 fix round): Task 3 moved `MemberRoster.tsx`/
+      // `AddMemberDialog.tsx`'s reads off that key onto `boardMember.roster`/
+      // `.searchCandidates`, which were its last two readers — nothing in
+      // the app reads `queryKeys.userAccounts.byTown` any more
+      // (`grep -rn "queryKeys\.userAccounts\.byTown" packages/web/src`),
+      // so invalidating it here was dead. Per conventions item 7, "the
+      // legacy line stays because other, unmigrated screens still read that
+      // key. It goes when the last legacy reader does" — it just did.
       void queryClient.invalidateQueries(trpc.person.pathFilter());
       toast.success(`${name} added as staff — invitation sent`);
       reset();

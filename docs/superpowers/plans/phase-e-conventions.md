@@ -1197,3 +1197,34 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   row, stops being reachable — but "the card hides" and "the card is replaced by a different card"
   are different claims, and only the second is what the component's own `if (allComplete) { return
 <Card>...</Card>; }` branch actually does.
+- **Both doors from staff to board_member dead-end at `RoleConflictDialog`.** Wave 2, Task 3 shipped
+  `AddMemberDialog`'s server-side mutual-exclusivity check in `boardMember.addBoardMember`
+  (`packages/api/src/trpc/routers/board-member.ts`), and a review round of that same task found the
+  archived-account-reuse defect immediately upstream of it (sequenced here for exactly that reason —
+  both are the same underlying question: what does an EXISTING `user_account` row mean when a new
+  write wants to seat its person as something else). `RoleConflictDialog.tsx`'s `archiveAccount`
+  mutation only sets `archived_at` on the conflicting account; it does not delete the row, and
+  `user_account_person_id_key` is unique on `person_id` alone, unfiltered by `archived_at`. So after
+  an admin resolves a staff→board_member conflict through that dialog, the row conflicting a moment
+  ago still exists with `role = 'staff'` — and `addBoardMember`'s mutual-exclusivity check (correctly)
+  refuses it again, every time, with no way through. The identical trap exists in
+  `MemberTransitionDialog.tsx`'s `to_board_member` transition, which routes through the same
+  `RoleConflictDialog`. An administrator correcting a mis-assigned role under Maine 30-A M.R.S.A.
+  §2605 has nowhere to go today.
+
+  The review confirmed `RoleConflictDialog`'s own refusal is correct and should NOT change: the old,
+  pre-migration code hit this identical case as an uncaught `23505` with no `onError` and no toast at
+  all — strictly worse — and the unique constraint really is unconditional, so refusing is the honest
+  answer for a write that has not decided what an archived row means. Inventing an un-archive policy
+  inside a port would be a design decision smuggled into a migration, which is exactly the failure
+  mode conventions item 1's "the query you are replacing is a specification" exists to prevent.
+
+  The fix shape already exists in this codebase and should not be re-derived: `MemberTransitionDialog
+.tsx`'s `convertToStaff` mutation handles the MIRROR direction (board_member → staff) correctly
+  already — when the person already has an account, it `UPDATE`s that row in place
+  (`role: 'staff', archived_at: null, ...`) rather than archiving it and inserting a fresh one.
+  `addBoardMember`'s own reuse branch was fixed the same way in the same review round (`archived_at =
+NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialog` or the
+  board_member-seating path should apply the identical "update in place" shape to the direction that
+  still dead-ends, rather than treating this as an open design question — it is not; only the wiring
+  is missing.

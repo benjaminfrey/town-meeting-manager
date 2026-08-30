@@ -96,7 +96,11 @@ export function MemberArchiveDialog({
       // still changes that read's own `status` column for this row.
       void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(_townId) });
+        // `queryKeys.userAccounts.byTown` invalidation removed (Phase E,
+        // wave 2, Task 3 fix round) — that key has no reader left anywhere
+        // in the app (see `AddPersonDialog.tsx`'s identical comment for the
+        // grep). `trpc.boardMember.pathFilter()` above already covers the
+        // account-archived case this key used to reach.
         // Archiving the account changes what `person.list` reports for this
         // person (role/gov_title both go null) — `people.tsx` reads that
         // through `person.list` now (Phase E, wave 1, Task 3). No such

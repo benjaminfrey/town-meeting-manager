@@ -102,4 +102,18 @@ describe("ArchiveBoardDialog cache invalidation", () => {
     const { listKey } = await archive();
     await waitFor(() => expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true));
   });
+
+  it("invalidates trpc.boardMember.pathFilter() — this dialog archives every active board_member row", async () => {
+    // Phase E, wave 2, Task 3 fix round: this was the fourth writer of the
+    // abandoned `queryKeys.members.byBoard` key, missed in that task's own
+    // commit and caught in review — `cache-key-parity.test.ts` cannot catch
+    // it, because `members` is deliberately not in that check's `MIGRATED`
+    // map (see board-member.ts's own header for why).
+    const rosterKey = trpc.boardMember.roster.queryOptions({ boardId: board.id }).queryKey;
+    queryClient.setQueryData(rosterKey, []);
+    expect(queryClient.getQueryState(rosterKey)?.isInvalidated).toBeFalsy();
+
+    await archive();
+    await waitFor(() => expect(queryClient.getQueryState(rosterKey)?.isInvalidated).toBe(true));
+  });
 });

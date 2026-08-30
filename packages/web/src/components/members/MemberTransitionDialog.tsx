@@ -243,7 +243,9 @@ export function MemberTransitionDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(townId) });
+      // `queryKeys.userAccounts.byTown` invalidation removed (Phase E, wave
+      // 2, Task 3 fix round) — see `AddPersonDialog.tsx`'s identical comment
+      // for why: that key has no reader left anywhere in the app.
       // This mutation creates a `user_account` — `person.list` (which
       // `people.tsx` now reads through, Phase E wave 1 Task 3) would
       // otherwise show this person as having no role until the 60s

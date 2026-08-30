@@ -58,6 +58,15 @@ export function StaffAccountFlow({ townId, onComplete, onBack }: StaffAccountFlo
   // `board.list`, which deliberately includes archived boards for its two
   // other callers). `townId` comes off the caller's own tenant context on
   // the server, not from this component, so it is no longer a query input.
+  //
+  // Order changed, undocumented until this review round: the Supabase read
+  // this replaced ordered by `name` only; `board.listActive` orders
+  // `is_governing_board DESC, name ASC` (for `settings.town.tsx`'s "governing
+  // board sorts first" need — see that procedure's own doc comment). This
+  // board-selection checkbox list renders in that governing-board-first
+  // order now, not strict alphabetical. Same rows, harmless reorder — no
+  // other caller of `board.listActive` needs strict alphabetical order
+  // either, so a third procedure was not worth adding for this.
   const { data: boardRows = [] } = useQuery({
     ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,

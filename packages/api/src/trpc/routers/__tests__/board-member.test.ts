@@ -314,6 +314,46 @@ describe("boardMember.searchCandidates", () => {
     });
   });
 
+  /**
+   * Review-round fix: a person whose ONLY account is archived must come back
+   * as account-less (`role: null`, `user_account_id: null`), matching what
+   * `AddMemberDialog.tsx`'s original Supabase read did
+   * (`.is("archived_at", null)` on `user_account`). Without this filter, the
+   * client would surface the archived account's role/id, which is the same
+   * "silently reuse an archived account" shape the review caught in
+   * `addBoardMember` — this is that read's own half of the fix.
+   */
+  it("does not surface a person's ARCHIVED account — they come back account-less", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const archivedActor = await seedActor(db, town, { role: "board_member", global: [] });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE person SET name = 'Casey Archived' WHERE id = ${archivedActor.personId}`,
+          ),
+        );
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE user_account SET archived_at = now() WHERE id = ${archivedActor.userAccountId}`,
+          ),
+        );
+        const actor = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.boardMember.searchCandidates({ boardId, query: "casey" });
+
+        const row = rows.find((r) => r.id === archivedActor.personId);
+        expect(row).toMatchObject({ role: null, user_account_id: null });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("answers NOT_FOUND for a board in another town", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
@@ -640,6 +680,56 @@ describe("boardMember.addBoardMember", () => {
 
         expect(await countAccountsForPerson(db, town, boardMember.personId)).toBe(1);
         expect(await countBoardMembers(db, town, boardMember.personId, secondBoard)).toBe(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The review-round defect, reproduced directly: seat a person whose ONLY
+   * `user_account` row is an ARCHIVED `board_member`-role account (the exact
+   * state `MemberArchiveDialog`'s "also archive user account" leaves behind,
+   * or a person removed from every board and later re-added). Before the
+   * fix, `addBoardMember` reused that row's id without clearing
+   * `archived_at` — the person was seated and invited, but
+   * `tenant-context.ts` refuses a session for any `archived_at IS NOT NULL`
+   * account, so they could accept the invitation and never get a session,
+   * with no error anywhere. Asserts the account is un-archived, not just
+   * that the seat and invitation exist — that is the exact distinction the
+   * defect hid behind.
+   */
+  it("reactivates an archived board_member-role account when reusing it for a new seat", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE user_account SET archived_at = now() WHERE id = ${boardMember.userAccountId}`,
+          ),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await caller.boardMember.addBoardMember({
+          personId: boardMember.personId,
+          boardId,
+          seatTitle: null,
+          termStart: "2026-01-01",
+          termEnd: null,
+          govTitle: null,
+          isDefaultRecSec: false,
+        });
+
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.id).toBe(boardMember.userAccountId);
+        expect(account?.archived_at).toBeNull();
+        expect(await countBoardMembers(db, town, boardMember.personId, boardId)).toBe(1);
+        expect(await countInvitationsForPerson(db, town, boardMember.personId)).toBe(1);
       } finally {
         await app.end();
       }
