@@ -9,6 +9,13 @@
  * `user_account`, which is all `person.list` selects. Both branches are
  * covered below so the conditional itself is exercised, not just the happy
  * path.
+ *
+ * `trpc.boardMember.pathFilter()` (Phase E, wave 2, Task 3) fires
+ * UNCONDITIONALLY — `MemberRoster.tsx`'s roster read now lives under that
+ * key, and even the "board seat only" branch changes what it returns (the
+ * seat's own `status`). Verified by mutation: deleting that
+ * `invalidateQueries(trpc.boardMember.pathFilter())` line from
+ * `MemberArchiveDialog.tsx` turns the new test below red.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -82,6 +89,19 @@ describe("MemberArchiveDialog cache invalidation", () => {
 
     const { user } = renderDialog(onOpenChange);
     await user.click(screen.getByRole("switch", { name: /also archive user account/i }));
+    await user.click(screen.getByRole("button", { name: /archive member/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.boardMember.pathFilter() — the key MemberRoster reads under — even when only the seat is archived", async () => {
+    const key = trpc.boardMember.roster.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(key, []);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+    const onOpenChange = vi.fn();
+
+    const { user } = renderDialog(onOpenChange);
+    // "Also archive user account" switch stays off — the seat-only branch.
     await user.click(screen.getByRole("button", { name: /archive member/i }));
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));

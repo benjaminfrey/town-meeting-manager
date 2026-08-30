@@ -14,10 +14,15 @@ describe("router wiring", () => {
         "board.stats",
         "board.list",
         "board.listActive",
-        "board.memberCount",
         "board.insert",
         "board.update",
         "board.copyNoticeTemplate",
+        "boardMember.memberCount",
+        "boardMember.roster",
+        "boardMember.searchCandidates",
+        "boardMember.personEmailExists",
+        "boardMember.addBoardMember",
+        "boardMember.addStaffMember",
         "agendaTemplate.list",
         "agendaTemplate.detail",
         "agendaTemplate.countForBoard",
@@ -65,7 +70,12 @@ describe("router wiring", () => {
       string,
       { _def: { inputs?: Array<{ parse: (input: unknown) => unknown }> } } | undefined
     >;
-    for (const name of ["board.detail", "board.stats", "board.recentMeetings"]) {
+    for (const name of [
+      "board.detail",
+      "board.stats",
+      "board.recentMeetings",
+      "boardMember.roster",
+    ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
       expect(schema, `${name} has no input schema`).toBeDefined();
@@ -88,6 +98,10 @@ describe("router wiring", () => {
       "board.copyNoticeTemplate",
       "board.insert",
       "board.update",
+      "boardMember.searchCandidates",
+      "boardMember.personEmailExists",
+      "boardMember.addBoardMember",
+      "boardMember.addStaffMember",
       "agendaTemplate.list",
       "agendaTemplate.detail",
       "agendaTemplate.countForBoard",

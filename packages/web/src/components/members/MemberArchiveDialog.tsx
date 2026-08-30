@@ -90,6 +90,11 @@ export function MemberArchiveDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
+      // (Phase E, wave 2, Task 3) — unconditionally, unlike the
+      // `trpc.person.pathFilter()` call below: archiving JUST the board seat
+      // still changes that read's own `status` column for this row.
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.userAccounts.byTown(_townId) });
         // Archiving the account changes what `person.list` reports for this

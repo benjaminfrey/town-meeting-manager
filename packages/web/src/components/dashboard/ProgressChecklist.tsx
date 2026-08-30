@@ -14,10 +14,12 @@
  * see that procedure's own doc comment.
  *
  * Wave 2, Task 2 — `memberCount` (actual filled seats, from `board_member`)
- * moves onto `board.memberCount` now, closing the `TODO(phase-e-wave-2)`
- * marker Task 1 of this wave shipped that procedure to answer. It lives on
- * `board.ts`, not a new `boardMember` router — see that procedure's own doc
- * comment for why (Task 3's write surface owns `board_member` next).
+ * moved onto `board.memberCount`, closing the `TODO(phase-e-wave-2)` marker
+ * Task 1 of this wave shipped that procedure to answer. Task 3 has now
+ * shipped `board_member`'s real write surface (`packages/api/src/trpc/
+ * routers/board-member.ts`) and relocated `memberCount` there — its subject
+ * is `board_member` rows, which is that router's noun, not `board`'s. This
+ * component now reads `trpc.boardMember.memberCount`.
  *
  * The "Set public portal subdomain" item is wired for the first time in this
  * same task: `town.setPortalAddress` existed since Phase D with no caller
@@ -155,12 +157,13 @@ export function ProgressChecklist({
   onRetentionPolicyClick,
   onSetPortalAddressClick,
 }: ProgressChecklistProps) {
-  // `board.memberCount` (wave 2, Task 1) — every `board_member` row in the
-  // town, active or archived, matching what this Supabase read counted
-  // before it (see that procedure's own doc comment for why archived stays
-  // included). `board.list` (below) already covers the town's CONFIGURED
-  // seat total; this is the count of seats actually FILLED.
-  const { data: memberCount = 0 } = useQuery(trpc.board.memberCount.queryOptions());
+  // `boardMember.memberCount` (wave 2, Task 1, relocated in Task 3) — every
+  // `board_member` row in the town, active or archived, matching what this
+  // Supabase read counted before it (see that procedure's own doc comment
+  // for why archived stays included). `board.list` (below) already covers
+  // the town's CONFIGURED seat total; this is the count of seats actually
+  // FILLED.
+  const { data: memberCount = 0 } = useQuery(trpc.boardMember.memberCount.queryOptions());
 
   // `board.list`'s one read replaces two Supabase queries at once (total
   // configured seats, and how many boards have a notice template) — both

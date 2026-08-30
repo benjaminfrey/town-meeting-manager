@@ -9,6 +9,11 @@
  * `person.list` does not select (see `person.ts`'s own doc comment), so no
  * invalidation is owed there.
  *
+ * All three mutations DO invalidate `trpc.boardMember.pathFilter()` (Phase E,
+ * wave 2, Task 3) — `MemberRoster.tsx`'s roster read moved onto
+ * `boardMember.roster`, and every one of these three writes changes a row
+ * that read selects.
+ *
  * `member.user_account_id` is `null` in the fixture below so
  * `handleTransitionSelect`'s mutual-exclusivity check does not route through
  * `RoleConflictDialog` — that check only fires when the person already HAS
@@ -96,6 +101,30 @@ describe("MemberTransitionDialog cache invalidation", () => {
 
   it("invalidates trpc.person.pathFilter() when converting to staff", async () => {
     const key = trpc.person.list.queryOptions().queryKey;
+    queryClient.setQueryData(key, []);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderDialog(vi.fn());
+    await user.click(screen.getByText("Convert to staff"));
+    await user.click(screen.getByText("finish-staff"));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.boardMember.pathFilter() — the key MemberRoster reads under — even when only archiving the membership", async () => {
+    const key = trpc.boardMember.roster.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(key, []);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderDialog(vi.fn());
+    await user.click(screen.getByText("Archive board membership"));
+    await user.click(screen.getByRole("button", { name: /archive membership/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.boardMember.pathFilter() when converting to staff", async () => {
+    const key = trpc.boardMember.roster.queryOptions({ boardId: "b1" }).queryKey;
     queryClient.setQueryData(key, []);
     expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
 

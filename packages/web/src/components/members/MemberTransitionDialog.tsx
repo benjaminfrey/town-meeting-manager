@@ -157,6 +157,9 @@ export function MemberTransitionDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+      // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
+      // (Phase E, wave 2, Task 3) — this mutation changes that row's status.
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       onOpenChange(false);
     },
   });
@@ -184,6 +187,11 @@ export function MemberTransitionDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(targetBoardId) });
+      // This seats the person on a NEW board — both that board's roster and
+      // the town-wide `boardMember.memberCount` change. Router-level filter,
+      // not per-board, per conventions item 7 ("a writer should not have to
+      // know which procedures some screen happens to call").
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       onOpenChange(false);
     },
   });
@@ -241,6 +249,9 @@ export function MemberTransitionDialog({
       // otherwise show this person as having no role until the 60s
       // `staleTime` expired.
       void queryClient.invalidateQueries(trpc.person.pathFilter());
+      // Archives the board seat AND writes `user_account` — both roster
+      // fields `boardMember.roster` selects.
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
       onOpenChange(false);
     },
   });

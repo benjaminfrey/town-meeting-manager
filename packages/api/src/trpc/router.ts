@@ -19,6 +19,7 @@ import { toRows } from "../db/rows.js";
 import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.js";
 import { townRouter } from "./routers/town.js";
 import { boardRouter } from "./routers/board.js";
+import { boardMemberRouter } from "./routers/board-member.js";
 import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
@@ -35,6 +36,16 @@ export const appRouter = router({
    * `routers/board.ts` for why.
    */
   board: boardRouter,
+
+  /**
+   * Board membership: seats, the staff/board-member accounts that come with
+   * them, and the invitations both paths issue. `memberCount` has no
+   * permission guard (tenancy-only, moved from `board.ts`); `roster`,
+   * `searchCandidates` and `personEmailExists` are tenancy-only reads for the
+   * same reason; `addBoardMember` and `addStaffMember` are admin gates — see
+   * `routers/board-member.ts`.
+   */
+  boardMember: boardMemberRouter,
 
   /**
    * Agenda template reads and writes, scoped to one board at a time. No

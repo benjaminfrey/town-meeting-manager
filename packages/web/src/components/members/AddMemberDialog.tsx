@@ -6,20 +6,40 @@
  *
  * Enforces mutual exclusivity between staff and board_member roles.
  * Creates PERSON, USER_ACCOUNT, BOARD_MEMBERS, and INVITATION records.
+ *
+ * ─── Phase E, wave 2, Task 3 — the largest single migration in the wave ───
+ *
+ * This file made 14 raw Supabase calls (5 reads, 9 writes, counted directly
+ * against the pre-migration version) — every one replaced below by a
+ * `boardMember`/`person` procedure. See `packages/api/src/trpc/routers/
+ * board-member.ts`'s own header for the three hazards this migration closes
+ * (the FK-bypasses-RLS checks on `personId`/`boardId`, the permissions
+ * matrix's "write exactly what was sent" contract, and the invitation
+ * token now generated in the database instead of the browser).
+ *
+ * Reads: `boardMember.searchCandidates` replaces the four-way merge of
+ * `person` search + `user_account` by town + `board_member` active-counts by
+ * town + `board_member` active-on-this-board by town; `boardMember
+ * .personEmailExists` replaces the fifth (the live email-uniqueness check).
+ *
+ * Writes: a NEW person is created with `person.insert` FIRST (the same
+ * two-step shape `AddPersonDialog` already uses), then the resulting id is
+ * handed to `boardMember.addBoardMember` or `boardMember.addStaffMember` —
+ * both take an EXISTING `personId` only. See `board-member.ts`'s header for
+ * why person creation is not folded into either of those two procedures.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, trpcClient } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import { Loader2, Search, UserPlus, ChevronLeft } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
-import { checkRoleMutualExclusivity, ALL_PERMISSION_ACTIONS } from "@town-meeting/shared";
-import type { PermissionAction, PermissionsMatrix, UserRole } from "@town-meeting/shared";
+import { checkRoleMutualExclusivity } from "@town-meeting/shared";
+import type { UserRole } from "@town-meeting/shared";
 import {
   Dialog,
   DialogContent,
@@ -79,7 +99,6 @@ export function AddMemberDialog({
   open,
   onOpenChange,
 }: AddMemberDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2>(1);
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,130 +120,26 @@ export function AddMemberDialog({
   const personForm = useWizardForm(NewPersonSchema, INITIAL_PERSON);
 
   // ─── Search ─────────────────────────────────────────────────────────
-  const searchTerm = searchQuery.trim().length >= 2 ? `%${searchQuery.trim()}%` : "";
-
-  const { data: personRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), "search", searchTerm],
-    queryFn: async () => {
-      const term = searchQuery.trim();
-      const { data, error } = await supabase
-        .from("person")
-        .select("*")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%`);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!searchTerm,
+  // `boardMember.searchCandidates` replaces the four-way merge this used to
+  // be (`person` search + `user_account` by town + `board_member`
+  // active-counts by town + `board_member` active-on-this-board by town) —
+  // the server now does the exclusion and the count in one query. `.min(2)`
+  // on the procedure's own input mirrors this `enabled` gate, so a caller
+  // that bypasses the client cannot force a town-wide scan on an empty or
+  // one-character pattern.
+  const trimmedSearch = searchQuery.trim();
+  const { data: searchResults = [] } = useQuery({
+    ...trpc.boardMember.searchCandidates.queryOptions({ boardId, query: trimmedSearch }),
+    enabled: trimmedSearch.length >= 2,
   });
 
-  const { data: uaRows = [] } = useQuery({
-    queryKey: queryKeys.userAccounts.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_account")
-        .select("*")
-        .eq("town_id", townId)
-        .is("archived_at", null);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!townId,
-  });
-
-  const { data: bmRows = [] } = useQuery({
-    queryKey: [...queryKeys.members.all, "activeCounts", townId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board_member")
-        .select("person_id")
-        .eq("town_id", townId)
-        .eq("status", "active");
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!townId,
-  });
-
-  // Check existing membership on this board
-  const { data: existingMemberRows = [] } = useQuery({
-    queryKey: [...queryKeys.members.byBoard(boardId), "personIds"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board_member")
-        .select("person_id")
-        .eq("board_id", boardId)
-        .eq("status", "active");
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!boardId,
-  });
-
-  const existingMemberPersonIds = useMemo(
-    () => new Set(existingMemberRows.map((r) => String(r.person_id))),
-    [existingMemberRows],
-  );
-
-  // Build user account lookup
-  const uaMap = useMemo(() => {
-    const map = new Map<string, { id: string; role: string; archived_at: string | null }>();
-    for (const ua of uaRows) {
-      map.set(String(ua.person_id), {
-        id: String(ua.id),
-        role: String(ua.role ?? ""),
-        archived_at: (ua.archived_at as string) || null,
-      });
-    }
-    return map;
-  }, [uaRows]);
-
-  // Build board member count lookup
-  const bmCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const bm of bmRows) {
-      const personId = String(bm.person_id);
-      map.set(personId, (map.get(personId) ?? 0) + 1);
-    }
-    return map;
-  }, [bmRows]);
-
-  // Search results
-  const searchResults: SelectedPerson[] = useMemo(() => {
-    return personRows
-      .filter((p) => !existingMemberPersonIds.has(String(p.id)))
-      .map((p) => {
-        const personId = String(p.id);
-        const ua = uaMap.get(personId);
-        return {
-          id: personId,
-          name: String(p.name ?? ""),
-          email: String(p.email ?? ""),
-          role: ua?.role ?? null,
-          user_account_id: ua?.id ?? null,
-          active_board_count: bmCountMap.get(personId) ?? 0,
-        };
-      });
-  }, [personRows, uaMap, bmCountMap, existingMemberPersonIds]);
-
-  // Check email uniqueness
+  // Check email uniqueness — `boardMember.personEmailExists` replaces the
+  // fifth read.
   const emailToCheck = personForm.values.email.toLowerCase().trim();
-  const { data: emailCheckRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), "emailCheck", emailToCheck],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("person")
-        .select("id")
-        .eq("town_id", townId)
-        .eq("email", emailToCheck)
-        .limit(1);
-      if (error) throw error;
-      return data;
-    },
+  const { data: emailExists = false } = useQuery({
+    ...trpc.boardMember.personEmailExists.queryOptions({ email: emailToCheck }),
     enabled: !!emailToCheck && emailToCheck.includes("@"),
   });
-  const emailExists = emailCheckRows.length > 0;
 
   // ─── Step 1: Select person ─────────────────────────────────────────
   const handleSelectPerson = (person: SelectedPerson) => {
@@ -279,113 +194,38 @@ export function AddMemberDialog({
     }
   };
 
+  // `person.insert` — the first step for a brand-new person, shared by both
+  // mutations below. See this file's header for why person creation is a
+  // separate call rather than folded into `boardMember.addBoardMember`/
+  // `.addStaffMember`.
+  const { mutateAsync: insertPerson } = useMutation(trpc.person.insert.mutationOptions());
+
+  /** An existing person's id, or a freshly created one for `selectedPerson.id === ""`. */
+  async function resolvePersonId(): Promise<string> {
+    if (!selectedPerson) throw new Error("No person selected");
+    if (selectedPerson.id) return selectedPerson.id;
+    const created = await insertPerson({
+      name: selectedPerson.name,
+      email: selectedPerson.email,
+    });
+    return created.id;
+  }
+
   // ─── Save board member ─────────────────────────────────────────────
   const { mutate: saveBoardMember, isPending: isSavingBoardMember } = useMutation({
     mutationFn: async () => {
-      if (!selectedPerson) throw new Error("No person selected");
-      const now = new Date().toISOString();
-      let personId = selectedPerson.id;
-
-      // Create new person if needed
-      if (!personId) {
-        personId = crypto.randomUUID();
-        const { error } = await supabase.from("person").insert({
-          id: personId,
-          town_id: townId,
-          name: selectedPerson.name,
-          email: selectedPerson.email,
-          created_at: now,
-        });
-        if (error) throw error;
-      }
-
-      // Create or update user_account
-      let userAccountId = selectedPerson.user_account_id;
-      if (!userAccountId) {
-        userAccountId = crypto.randomUUID();
-        const emptyPerms: PermissionsMatrix = {
-          global: {} as Record<PermissionAction, boolean>,
-          board_overrides: [],
-        };
-        // Initialize all to false
-        for (const action of ALL_PERMISSION_ACTIONS) {
-          emptyPerms.global[action] = false;
-        }
-
-        const { error } = await supabase.from("user_account").insert({
-          id: userAccountId,
-          person_id: personId,
-          town_id: townId,
-          role: "board_member",
-          gov_title: bmConfig.gov_title.trim() || null,
-          permissions: emptyPerms,
-          // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
-          // foreign key to `better_auth."user"(id)`, so an empty string is
-          // rejected with SQLSTATE 23503 and the whole insert fails. The
-          // column is nullable by design: a `user_account` exists before any
-          // login does, and invitation acceptance is what fills it in.
-          created_at: now,
-        });
-        if (error) throw error;
-      } else if (bmConfig.gov_title.trim()) {
-        // Update gov_title on existing account
-        const { error } = await supabase
-          .from("user_account")
-          .update({ gov_title: bmConfig.gov_title.trim() })
-          .eq("id", userAccountId);
-        if (error) throw error;
-      }
-
-      // Unset previous default rec sec if needed
-      if (bmConfig.is_default_rec_sec) {
-        const { error } = await supabase
-          .from("board_member")
-          .update({ is_default_rec_sec: false })
-          .eq("board_id", boardId)
-          .eq("is_default_rec_sec", true);
-        if (error) throw error;
-      }
-
-      // Create board_members entry
-      const bmId = crypto.randomUUID();
-      const { error: bmError } = await supabase.from("board_member").insert({
-        id: bmId,
-        person_id: personId,
-        board_id: boardId,
-        town_id: townId,
-        seat_title: bmConfig.seat_title.trim() || null,
-        term_start: bmConfig.term_start || null,
-        term_end: bmConfig.term_end || null,
-        status: "active",
-        is_default_rec_sec: bmConfig.is_default_rec_sec,
-        created_at: now,
+      const personId = await resolvePersonId();
+      return trpcClient.boardMember.addBoardMember.mutate({
+        personId,
+        boardId,
+        seatTitle: bmConfig.seat_title.trim() || null,
+        termStart: bmConfig.term_start,
+        termEnd: bmConfig.term_end || null,
+        govTitle: bmConfig.gov_title.trim() || null,
+        isDefaultRecSec: bmConfig.is_default_rec_sec,
       });
-      if (bmError) throw bmError;
-
-      // Create invitation
-      const invId = crypto.randomUUID();
-      const token = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { error: invError } = await supabase.from("invitation").insert({
-        id: invId,
-        person_id: personId,
-        user_account_id: userAccountId,
-        town_id: townId,
-        token,
-        expires_at: expiresAt,
-        status: "pending",
-        created_at: now,
-      });
-      if (invError) throw invError;
-
-      // Fire invitation email (best-effort, non-blocking)
-      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
-        // Non-critical — admin can resend from member roster
-      });
-
-      return selectedPerson.name;
     },
-    onSuccess: (name) => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
       // `people.tsx` reads person + user_account through `person.list` now
@@ -393,79 +233,51 @@ export function AddMemberDialog({
       // owes that read the same invalidation the legacy key above gets —
       // conventions item 7.
       void queryClient.invalidateQueries(trpc.person.pathFilter());
-      toast.success(`${name} added to ${boardName}`);
+      // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
+      // (this task) — same reasoning, new key.
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+      // Fire invitation email (best-effort, non-blocking) — same as the
+      // original mutationFn's direct call, now against the id the server
+      // handed back rather than one this component generated itself.
+      void apiFetch(`/api/invitations/${result.invitationId}/send`, { method: "POST" }).catch(
+        () => {
+          // Non-critical — admin can resend from member roster
+        },
+      );
+      toast.success(`${result.name} added to ${boardName}`);
       resetAndClose();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to add board member");
     },
   });
 
   // ─── Save staff ───────────────────────────────────────────────────
   const { mutate: saveStaff, isPending: isSavingStaff } = useMutation({
     mutationFn: async (staffResult: StaffAccountResult) => {
-      if (!selectedPerson) throw new Error("No person selected");
-      const now = new Date().toISOString();
-      let personId = selectedPerson.id;
-
-      // Create new person if needed
-      if (!personId) {
-        personId = crypto.randomUUID();
-        const { error } = await supabase.from("person").insert({
-          id: personId,
-          town_id: townId,
-          name: selectedPerson.name,
-          email: selectedPerson.email,
-          created_at: now,
-        });
-        if (error) throw error;
-      }
-
-      // Create user_account as staff
-      const userAccountId = crypto.randomUUID();
-      const { error: uaError } = await supabase.from("user_account").insert({
-        id: userAccountId,
-        person_id: personId,
-        town_id: townId,
-        role: "staff",
-        gov_title: staffResult.gov_title || null,
+      const personId = await resolvePersonId();
+      return trpcClient.boardMember.addStaffMember.mutate({
+        personId,
+        govTitle: staffResult.gov_title || null,
         permissions: staffResult.permissions,
-        // NOT `auth_user_id: ""`. Stage 1 Task C1 made this column a real
-        // foreign key to `better_auth."user"(id)`, so an empty string is
-        // rejected with SQLSTATE 23503 and the whole insert fails. The
-        // column is nullable by design: a `user_account` exists before any
-        // login does, and invitation acceptance is what fills it in.
-        created_at: now,
       });
-      if (uaError) throw uaError;
-
-      // Create invitation
-      const invId = crypto.randomUUID();
-      const token = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { error: invError } = await supabase.from("invitation").insert({
-        id: invId,
-        person_id: personId,
-        user_account_id: userAccountId,
-        town_id: townId,
-        token,
-        expires_at: expiresAt,
-        status: "pending",
-        created_at: now,
-      });
-      if (invError) throw invError;
-
-      // Fire invitation email (best-effort, non-blocking)
-      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
-        // Non-critical — admin can resend from member roster
-      });
-
-      return selectedPerson.name;
     },
-    onSuccess: (name) => {
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.persons.byTown(townId) });
-      // See the sibling `saveMember` mutation's identical comment above.
+      // See the sibling `saveBoardMember` mutation's identical comment above.
       void queryClient.invalidateQueries(trpc.person.pathFilter());
-      toast.success(`${name} added as staff`);
+      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+      void apiFetch(`/api/invitations/${result.invitationId}/send`, { method: "POST" }).catch(
+        () => {
+          // Non-critical — admin can resend from member roster
+        },
+      );
+      toast.success(`${result.name} added as staff`);
       resetAndClose();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to add staff member");
     },
   });
 
@@ -544,7 +356,7 @@ export function AddMemberDialog({
               </div>
 
               {/* Search results */}
-              {searchTerm && searchResults.length > 0 && (
+              {trimmedSearch.length >= 2 && searchResults.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground">
                     {searchResults.length} result
@@ -556,7 +368,7 @@ export function AddMemberDialog({
                         key={person.id}
                         type="button"
                         className="w-full text-left rounded-lg border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                        onClick={() => handleSelectPerson(person)}
+                        onClick={() => handleSelectPerson({ ...person, email: person.email ?? "" })}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -588,7 +400,7 @@ export function AddMemberDialog({
               )}
 
               {/* No results + create option */}
-              {searchTerm && searchResults.length === 0 && !showCreateForm && (
+              {trimmedSearch.length >= 2 && searchResults.length === 0 && !showCreateForm && (
                 <div className="text-center py-4">
                   <p className="text-sm text-muted-foreground mb-2">No matching people found.</p>
                   <Button
@@ -611,7 +423,7 @@ export function AddMemberDialog({
               )}
 
               {/* Create new person button when there are results */}
-              {searchTerm && searchResults.length > 0 && !showCreateForm && (
+              {trimmedSearch.length >= 2 && searchResults.length > 0 && !showCreateForm && (
                 <Button
                   variant="outline"
                   size="sm"

@@ -5,8 +5,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
-import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Check, X, Minus } from "lucide-react";
 import { PERMISSIONS } from "@town-meeting/shared";
 import type { PermissionsMatrix, PermissionAction } from "@town-meeting/shared";
@@ -50,31 +49,15 @@ interface PermissionOverrideViewProps {
 }
 
 export function PermissionOverrideView({ permissions, townId }: PermissionOverrideViewProps) {
-  const supabase = useSupabase();
-
+  // Phase E, wave 2, Task 3 — see `StaffAccountFlow.tsx`'s identical comment:
+  // this was the same raw Supabase read (`board`, `archived_at IS NULL`),
+  // now `board.listActive`.
   const { data: boardRows = [] } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId,
   });
 
-  const boards = useMemo(
-    () =>
-      ((boardRows ?? []) as Record<string, unknown>[]).map((b) => ({
-        id: String(b.id),
-        name: String(b.name),
-      })),
-    [boardRows],
-  );
+  const boards = useMemo(() => boardRows.map((b) => ({ id: b.id, name: b.name })), [boardRows]);
 
   // Find boards that have overrides
   const overriddenBoards = useMemo(() => {

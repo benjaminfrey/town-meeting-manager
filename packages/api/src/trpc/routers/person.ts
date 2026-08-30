@@ -146,8 +146,13 @@ function isAccountAlreadyExistsCollision(err: unknown): boolean {
  * reference it by id — see this file's header for why `insertStaffAccount`
  * needs this and `update`/`updateGovTitle` do not (their own UPDATE is
  * itself RLS-scoped; there is no FK to bypass).
+ *
+ * Exported (Phase E, wave 2, Task 3) so `board-member.ts` can run the
+ * identical check for its own FK-bearing writes (`addBoardMember`,
+ * `addStaffMember`) rather than duplicating the query — the same reuse
+ * `board.ts` already set up for `assertBoardExists`.
  */
-async function assertPersonExists(tx: TenantTx, personId: string): Promise<void> {
+export async function assertPersonExists(tx: TenantTx, personId: string): Promise<void> {
   const rows = toRows<{ id: string }>(
     await tx.execute(sql`SELECT id FROM person WHERE id = ${personId}`),
     (message) => new Error(`person.assertPersonExists: ${message}`),
@@ -171,8 +176,12 @@ async function assertPersonExists(tx: TenantTx, personId: string): Promise<void>
  * procedure does not call `normalisePermissionsMatrix` either; it persists
  * exactly the object the client sent, the same as `AddPersonDialog`'s
  * current direct Supabase insert does.
+ *
+ * Exported (Phase E, wave 2, Task 3) so `board-member.ts`'s `addStaffMember`
+ * — `AddMemberDialog`'s staff path — can reuse this exact contract rather
+ * than redeclaring it with a chance to narrow it by accident.
  */
-const PermissionsMatrixInput = z.object({
+export const PermissionsMatrixInput = z.object({
   global: z.record(z.string(), z.boolean()).default({}),
   board_overrides: z
     .array(

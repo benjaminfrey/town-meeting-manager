@@ -2,10 +2,10 @@
  * Board reads and writes.
  *
  * No permission guard on the reads (`detail`, `stats`, `recentMeetings`,
- * `list`, `listActive`, `memberCount`), deliberately: `board` carried a pure
- * tenancy policy and nothing else, so any authenticated member of a town may
- * read that town's boards. `protectedProcedure` + `ctx.withTenant` is exactly
- * that rule. `copyNoticeTemplate`, `insert` and `update` are the exceptions —
+ * `list`, `listActive`), deliberately: `board` carried a pure tenancy policy
+ * and nothing else, so any authenticated member of a town may read that
+ * town's boards. `protectedProcedure` + `ctx.withTenant` is exactly that
+ * rule. `copyNoticeTemplate`, `insert` and `update` are the exceptions —
  * they are writes, and get the matching admin gate (`assertCanUpdateBoard` or
  * `assertCanInsertBoard`), `.use(requireActor(...))` before `.input()` per
  * conventions item 2.
@@ -28,25 +28,24 @@
  *
  * ─── Task 1, wave 2 — the four markers wave 1 left ────────────────────────
  *
- * `listActive` and `memberCount` below answer two of the four
- * `TODO(phase-e-wave-2)` markers wave 1 left naming procedures this task
- * owes: `board.byTown` (`settings.town.tsx`) and `board.listByTown`
- * (`StaffAccountFlow.tsx`) become `listActive`; `boardMember.countByTown`
- * (`ProgressChecklist.tsx`) becomes `memberCount`. See each procedure's own
- * doc comment for why. The third and fourth markers —
- * `agendaTemplate.countForBoard` (`boards.$boardId.tsx`) and the write rules
- * this task also owes (`assertCanInsert/Update/DeleteAgendaTemplate`) — live
- * in the new `agenda-template.ts` router, not here.
+ * `listActive` below answers one of the four `TODO(phase-e-wave-2)` markers
+ * wave 1 left naming procedures this task owes: `board.byTown`
+ * (`settings.town.tsx`) and `board.listByTown` (`StaffAccountFlow.tsx`)
+ * become `listActive`. See its own doc comment for why. The other three
+ * markers — `agendaTemplate.countForBoard` (`boards.$boardId.tsx`), the
+ * write rules this task also owes (`assertCanInsert/Update/DeleteAgendaTemplate`,
+ * living in the new `agenda-template.ts` router), and `boardMember.countByTown`
+ * (`ProgressChecklist.tsx`) — are answered elsewhere.
  *
- * `boardMember.countByTown` names a `boardMember` router that does not exist.
- * Deliberately not created for one read: this task's own file list is
- * `board.ts` (extend) and a new `agenda-template.ts`, and `board_member` is
- * wave 2 Task 3's write surface (`AddMemberDialog` and its siblings) — a
- * dedicated router for a single count, ahead of any write landing there,
- * would be the router Task 3 then has to either reuse awkwardly or abandon.
- * `memberCount` lives here instead, next to `stats`, which already runs the
- * identical per-board query — this is that same shape, summed across the
- * town instead of scoped to one board.
+ * `boardMember.countByTown` WAS answered here, temporarily, as `memberCount`
+ * (wave 2, Task 1) — no `boardMember` router existed yet, and creating one
+ * for a single count ahead of any write landing there would have been a
+ * router Task 3 then had to either reuse awkwardly or abandon. Task 3 has
+ * now shipped that router's real write surface
+ * (`packages/api/src/trpc/routers/board-member.ts` — `AddMemberDialog` and
+ * its siblings), so `memberCount` moved there — it counts `board_member`
+ * rows, which is that router's noun by conventions item 1, not `board`'s.
+ * `ProgressChecklist.tsx` now reads `trpc.boardMember.memberCount`.
  */
 
 import { sql } from "drizzle-orm";
@@ -346,38 +345,6 @@ export const boardRouter = router({
         (message) => new Error(`board.listActive: ${message}`),
       ),
     );
-  }),
-
-  /**
-   * `ProgressChecklist.tsx`'s "Board members added (N of M seats)" row —
-   * marker `boardMember.countByTown`, see this file's header for why it lives
-   * here rather than in a new `boardMember` router.
-   *
-   * Counts EVERY `board_member` row in the town, active or archived — no
-   * `status = 'active'` filter, unlike `stats.active_members` above. That is
-   * not an oversight: the Supabase query this replaces
-   * (`ProgressChecklist.tsx`'s own `useQuery`, before this task) had no
-   * status filter either, and the checklist's own copy — "Board members
-   * added" — is asking whether anyone has EVER been seated, not how many
-   * seats are currently filled. Narrowing to active-only here would be a
-   * behavior change smuggled into a read migration, not a port of one — see
-   * conventions item 1's "the query you are replacing is a specification".
-   *
-   * Returns a bare number, not `{ count }`: the client's own `data ?? 0`
-   * already expects a scalar (`ProgressChecklist.tsx`'s `memberCount`), and
-   * there is exactly one value to name.
-   */
-  memberCount: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.withTenant(async (tx) =>
-      toRows<{ count: number }>(
-        await tx.execute(sql`
-          SELECT count(*)::int AS count FROM board_member
-        `),
-        (message) => new Error(`board.memberCount: ${message}`),
-      ),
-    );
-    // The ::int cast is load-bearing — see `stats`'s identical note above.
-    return rows[0]?.count ?? 0;
   }),
 
   /**

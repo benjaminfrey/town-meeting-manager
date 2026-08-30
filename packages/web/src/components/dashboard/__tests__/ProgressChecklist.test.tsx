@@ -1,13 +1,16 @@
 /**
- * `ProgressChecklist`'s `memberCount` read — wave 2, Task 2.
+ * `ProgressChecklist`'s `memberCount` read — wave 2, Task 2 (relocated in
+ * Task 3).
  *
  * Closes the `TODO(phase-e-wave-2)` marker naming `boardMember.countByTown`:
- * Task 1 of this wave shipped `board.memberCount` to answer it (it lives on
- * `board.ts`, not a new `boardMember` router — see that procedure's own doc
- * comment). This is the first test this component has had; its other two
- * reads (`board.list`, for `totalSeats`/notice-template counts) already moved
- * onto tRPC in wave 1 with no test of their own, so this file covers all of
- * this component's data now rather than just the one read this task touched.
+ * Task 1 of this wave shipped `board.memberCount` to answer it, temporarily
+ * (no `boardMember` router existed yet). Task 3 shipped that router's real
+ * write surface and relocated `memberCount` there — this component now reads
+ * `trpc.boardMember.memberCount`. This is the first test this component has
+ * had; its other two reads (`board.list`, for `totalSeats`/notice-template
+ * counts) already moved onto tRPC in wave 1 with no test of their own, so
+ * this file covers all of this component's data now rather than just the one
+ * read this task touched.
  *
  * Real options proxy, real `QueryClient`; only `globalThis.fetch` replaced —
  * see `boards.$boardId.test.tsx` for why that distinction matters.
@@ -37,7 +40,7 @@ installTRPCFetchStub({
       active_member_count: 3,
     },
   ],
-  "board.memberCount": () => server.memberCount,
+  "boardMember.memberCount": () => server.memberCount,
 });
 
 function renderChecklist() {

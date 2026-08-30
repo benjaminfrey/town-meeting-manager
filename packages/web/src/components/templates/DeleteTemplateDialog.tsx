@@ -1,18 +1,15 @@
 /**
- * DeleteTemplateDialog — still writes directly through Supabase (RLS,
- * tenancy-only), not migrated in wave 2, Task 2. `agendaTemplate.insert` and
- * `.setDefault` are admin-gated (`assertCanInsertAgendaTemplate` etc. in
- * `authorization/rules.ts`), so a half-migrated state exists today: a
- * non-admin cannot clone a template or set one as default (both answer
- * FORBIDDEN), but CAN still delete one through this dialog. Recorded here
- * for whoever migrates this component onto `agendaTemplate.delete` — that
- * migration is real work (this file is not in wave 2 Task 2's file list)
- * and should decide deliberately whether delete stays tenancy-only or picks
- * up the same admin gate its siblings already have, not inherit whichever
- * answer falls out of being the last file touched.
+ * DeleteTemplateDialog — `agendaTemplate.delete`'s write.
+ *
+ * Was a raw, tenancy-only Supabase delete while `agendaTemplate.insert` and
+ * `.setDefault` were already admin-gated (`assertCanInsertAgendaTemplate`
+ * etc. in `authorization/rules.ts`) — a non-admin could not clone a template
+ * or set one as default, but COULD still delete one through this dialog.
+ * `agendaTemplate.delete` (`packages/api/src/trpc/routers/agenda-template.ts`)
+ * already existed, admin-gated, with no caller; wired here (Phase E, wave 2,
+ * Task 3) closing that inconsistency.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
@@ -40,16 +37,12 @@ export function DeleteTemplateDialog({
   open,
   onOpenChange,
 }: DeleteTemplateDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
 
   const isDefault = !!template.is_default;
 
   const { mutate: deleteTemplate, isPending: isDeleting } = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.from("agenda_template").delete().eq("id", template.id);
-      if (error) throw error;
-    },
+    ...trpc.agendaTemplate.delete.mutationOptions(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) });
       // `boards.$boardId.templates.tsx`'s own list read moved onto
@@ -81,7 +74,11 @@ export function DeleteTemplateDialog({
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-          <Button variant="destructive" onClick={() => deleteTemplate()} disabled={isDeleting}>
+          <Button
+            variant="destructive"
+            onClick={() => deleteTemplate({ templateId: template.id })}
+            disabled={isDeleting}
+          >
             {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Delete Template
           </Button>

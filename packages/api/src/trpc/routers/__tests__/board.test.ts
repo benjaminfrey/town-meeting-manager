@@ -493,9 +493,9 @@ describe("board.list", () => {
    * `active_member_count` — wave 2, Task 2, added for `routes/boards.tsx`
    * (see this procedure's own doc comment). `active_member_count` gets its
    * own assertion distinguishing active from archived board members —
-   * exactly the `board.memberCount`-vs-`board.stats.active_members`
-   * distinction this file already exercises elsewhere, reproduced here for a
-   * town-wide scan instead of a single board.
+   * exactly the `boardMember.memberCount`-vs-`board.stats.active_members`
+   * distinction `board-member.test.ts`/this file already exercise elsewhere,
+   * reproduced here for a town-wide scan instead of a single board.
    */
   it("returns each board's type/archived/governing columns and its ACTIVE member count only", async () => {
     await withTestDb(async (client) => {
@@ -599,57 +599,6 @@ describe("board.listActive", () => {
         const rows = await caller.board.listActive();
 
         expect(rows.some((r) => r.name === "Their Committee")).toBe(false);
-      } finally {
-        await app.end();
-      }
-    });
-  });
-});
-
-describe("board.memberCount", () => {
-  it("counts every board_member row in the town, active AND archived", async () => {
-    await withTestDb(async (client) => {
-      const app = await connectAsAppRole(client);
-      try {
-        const db = testDb(app);
-        const town = await seedTown(db);
-        const boardId = await seedBoard(db, town, { name: "Assessors" });
-        const p1 = await seedPerson(db, town, "Active One");
-        const p2 = await seedPerson(db, town, "Former Member");
-        await seedBoardMember(db, town, boardId, p1, "active");
-        // Archived, deliberately NOT excluded — see this procedure's own
-        // doc comment: unlike `stats.active_members`, this count has no
-        // `status = 'active'` filter, matching the Supabase query it
-        // replaces exactly. A reintroduced `AND status = 'active'` would
-        // make this test see 1, not 2.
-        await seedBoardMember(db, town, boardId, p2, "archived");
-        const actor = await seedActor(db, town, { role: "staff", global: [] });
-
-        const caller = appRouter.createCaller(contextFor(db, town, actor));
-        const count = await caller.board.memberCount();
-
-        expect(count).toBe(2);
-        expect(typeof count).toBe("number");
-      } finally {
-        await app.end();
-      }
-    });
-  });
-
-  it("does not count another town's board_member rows", async () => {
-    await withTestDb(async (client) => {
-      const app = await connectAsAppRole(client);
-      try {
-        const db = testDb(app);
-        const mine = await seedTown(db, "Newcastle");
-        const theirs = await seedTown(db, "Bristol");
-        const theirBoard = await seedBoard(db, theirs, { name: "Their Committee" });
-        const theirPerson = await seedPerson(db, theirs, "Their Member");
-        await seedBoardMember(db, theirs, theirBoard, theirPerson, "active");
-        const actor = await seedActor(db, mine, { role: "staff", global: [] });
-
-        const caller = appRouter.createCaller(contextFor(db, mine, actor));
-        expect(await caller.board.memberCount()).toBe(0);
       } finally {
         await app.end();
       }

@@ -9,7 +9,10 @@
  * `ProgressChecklist`'s last remaining own Supabase read (`memberCount`, off
  * `board_member`) onto `board.memberCount` — both stubbed below like every
  * other tRPC procedure, closing the two `TODO(phase-e-wave-2)` markers this
- * file used to work around.
+ * file used to work around. Wave 2, Task 3 relocated `memberCount` onto
+ * `boardMember.memberCount` — its subject is `board_member` rows, the new
+ * router's noun (see that procedure's own doc comment); the stub key below
+ * moved with it.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -68,7 +71,7 @@ const stub = installTRPCFetchStub({
       officer_election_method: "vote_of_board",
     },
   ],
-  "board.memberCount": () => 3,
+  "boardMember.memberCount": () => 3,
 });
 
 function renderRoute() {
