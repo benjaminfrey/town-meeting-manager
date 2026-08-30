@@ -127,11 +127,6 @@ export const queryKeys = {
     byTown: (townId: string) => ["invitations", "byTown", townId] as const,
   },
 
-  // Notification preferences
-  notificationPreferences: {
-    mine: ["notificationPreferences", "mine"] as const,
-  },
-
   // Notice templates (stored on board.notice_template_blocks)
   noticeTemplates: {
     byBoard: (boardId: string) => ["noticeTemplates", boardId] as const,

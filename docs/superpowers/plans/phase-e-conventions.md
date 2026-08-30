@@ -913,6 +913,24 @@ runs.
   `requirePermission`'s board extractor now reads `getRawInput()` so the form actually works
   declared before `.input()`) but still has **zero call sites in a real procedure** — no shipped
   router calls `requireBoardPermission` yet. The mechanism is proven; the first real use is not.
+- `assertCanSelectTownNotificationConfig` / `assertCanInsertTownNotificationConfig` /
+  `assertCanUpdateTownNotificationConfig` are tested as pure functions
+  (`packages/api/src/trpc/__tests__/admin-gates.test.ts`) but **no procedure calls them** — wave 1
+  Task 4 built one, a reviewer proved it was the wrong direction, and it was deleted. The reasoning
+  that survives, for whichever wave builds the real screen: `town_notification_config`'s RLS
+  (`town_notification_config_tenant_isolation`, `0000_baseline.sql`) is **tenancy-only** over the
+  town's SMTP/Twilio credentials, exactly like `board`'s policy — but unlike `board`, tenancy is not
+  enough here, and today NOTHING client-reachable queries this table at all (the browser's Supabase
+  client sends no service credential, so a request against it resolves no rows). Do not pattern-match
+  `board.ts`'s "no guard, tenancy is enough" comment onto this table: that reasoning is exactly how an
+  implementer ships a `select` that hands the raw Postmark token to any admin's browser, turning zero
+  client exposure into admin-gated-but-still-client-reachable exposure — a real improvement over an
+  ungated read that does not exist, and still the wrong direction for a screen nobody has designed.
+  Separately, and worth recording rather than fixing in passing: the column is named
+  `postmark_server_token_encrypted` and its own DB comment says "decrypted only at send time," but
+  nothing in this repository encrypts or decrypts it — `lib/postmark.ts` reads and uses it as a
+  plaintext token (see that file's own doc comment). Any future write path for this column inherits
+  that contradiction and should not paper over it.
 - `setPortalAddress` (`packages/api/src/trpc/routers/town.ts`) is still resolver-form, not
   `requireActor`-form, as of Task 2's fix round. Its own permissive schema means the ordering
   defect item 2 describes cannot fire on it today, but it is inconsistent with every other write in

@@ -30,9 +30,6 @@ describe("router wiring", () => {
         "town.updateProfile",
         "notificationPreference.mine",
         "notificationPreference.setMine",
-        "townNotificationConfig.select",
-        "townNotificationConfig.insert",
-        "townNotificationConfig.update",
         "whoami",
       ]),
     );
@@ -79,8 +76,6 @@ describe("router wiring", () => {
       "person.updateGovTitle",
       "board.copyNoticeTemplate",
       "notificationPreference.setMine",
-      "townNotificationConfig.insert",
-      "townNotificationConfig.update",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
