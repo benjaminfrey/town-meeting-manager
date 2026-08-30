@@ -20,6 +20,8 @@ import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.
 import { townRouter } from "./routers/town.js";
 import { boardRouter } from "./routers/board.js";
 import { personRouter } from "./routers/person.js";
+import { notificationPreferenceRouter } from "./routers/notification-preference.js";
+import { townNotificationConfigRouter } from "./routers/town-notification-config.js";
 
 export const appRouter = router({
   /**
@@ -38,6 +40,20 @@ export const appRouter = router({
    * see `routers/person.ts` for why. The four writes are all admin gates.
    */
   person: personRouter,
+
+  /**
+   * A person's own notification preferences. No permission guard — see
+   * `routers/notification-preference.ts` for why (self-scoped by
+   * construction, not by an `assertCan*` rule).
+   */
+  notificationPreference: notificationPreferenceRouter,
+
+  /**
+   * The town's SMTP/Twilio configuration. Admin-gated on every procedure —
+   * see `routers/town-notification-config.ts`, including why this router
+   * has no UI caller yet.
+   */
+  townNotificationConfig: townNotificationConfigRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

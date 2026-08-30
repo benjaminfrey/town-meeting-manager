@@ -34,6 +34,7 @@ import { sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   checkSubdomain,
+  AudioRetentionPolicy,
   MeetingFormality,
   MinutesStyle,
   MunicipalityType,
@@ -113,20 +114,21 @@ export const townRouter = router({
    *   - `<RetentionPolicyModal>`, which takes only `townId` and writes
    *     `retention_policy_acknowledged_at` — it reads no town column itself,
    *     but that column is still selected here because the route's own
-   *     `ProgressChecklist` prop and settings-row summary read it back.
+   *     `ProgressChecklist` prop and settings-row summary read it back;
+   *   - `settings.minutes-workflow.tsx` (Task 4, wave 1): its own `settings`
+   *     object, built off this same row, reads `audio_retention_policy`,
+   *     `auto_publish_on_approval`, `minutes_review_window_days` and
+   *     `minutes_workflow_configured_at` (the last one was already selected
+   *     above, for `ProgressChecklist`).
    *
    * Every name above checked against `packages/api/src/db/schema.ts`'s
    * `town` table — none renamed or missing. Not `SELECT *`, for the same
    * reason `board.detail` is not: a dropped column fails here, at the query,
    * instead of silently producing `undefined` inside a settings form.
    *
-   * Deliberately excluded because nothing on this screen or its four child
-   * editors reads them today: `created_at`, `updated_at`,
-   * `audio_retention_policy`, `auto_publish_on_approval`,
-   * `minutes_review_window_days` (the last three belong to the not-yet-built
-   * minutes-workflow settings page — conventions item 11 tracks that gap
-   * elsewhere, not here, since no procedure exists for that screen yet). Add
-   * any of these back the day something reads them.
+   * Deliberately excluded because nothing on this screen or its five child
+   * editors reads them today: `created_at`, `updated_at`. Add either back the
+   * day something reads it.
    */
   detail: protectedProcedure.query(async ({ ctx }) => {
     const rows = await ctx.withTenant(async (tx) =>
@@ -161,13 +163,23 @@ export const townRouter = router({
         seal_url: string | null;
         retention_policy_acknowledged_at: string | null;
         minutes_workflow_configured_at: string | null;
+        // Plain `text`/`boolean`/`integer` columns, not Postgres enums (see
+        // `packages/api/src/db/schema.ts`'s `town` table) — unlike
+        // `state`/`municipality_type`/etc above, there is no database
+        // constraint backing `AudioRetentionPolicy`'s option list, so this is
+        // typed the same permissive way `board.audio_retention_policy_override`
+        // already is elsewhere in this file's sibling router (`board.ts`).
+        audio_retention_policy: string;
+        auto_publish_on_approval: boolean;
+        minutes_review_window_days: number;
       }>(
         await tx.execute(sql`
           SELECT
             id, name, state, municipality_type, population_range, contact_name,
             contact_role, meeting_formality, minutes_style, presiding_officer_default,
             minutes_recorder_default, staff_roles_present, subdomain, seal_url,
-            retention_policy_acknowledged_at, minutes_workflow_configured_at
+            retention_policy_acknowledged_at, minutes_workflow_configured_at,
+            audio_retention_policy, auto_publish_on_approval, minutes_review_window_days
           FROM town WHERE id = ${ctx.tenant.townId}
         `),
         (message) => new Error(`town.detail: ${message}`),
@@ -408,5 +420,56 @@ export const townRouter = router({
         `);
       });
       return { retention_policy_acknowledged_at: now };
+    }),
+
+  /**
+   * `settings.minutes-workflow.tsx`'s write: the town-wide defaults for the
+   * minutes approval workflow (Advisory 3.5 §6.1). Same admin gate as every
+   * other write in this file — this is town configuration, not a per-user
+   * preference, and the product has always said an administrator owns it.
+   *
+   * `minutes_workflow_configured_at` is set on first save only, via
+   * `COALESCE`, matching the Supabase-backed version of this screen this
+   * procedure replaces: the CLIENT decided whether to send the timestamp by
+   * checking whether it was already set, which is a read-then-write race
+   * against a concurrent save. Doing it in the same statement as the write,
+   * server-side, removes the race — the column is set exactly once, by
+   * whichever save happens to land first, and every later save leaves it
+   * alone.
+   */
+  updateMinutesWorkflow: protectedProcedure
+    .use(requireActor(assertCanUpdateTown))
+    .input(
+      z.object({
+        audio_retention_policy: z.enum([
+          AudioRetentionPolicy.PURGE_ON_APPROVAL,
+          AudioRetentionPolicy.RETAIN_30_DAYS,
+          AudioRetentionPolicy.RETAIN_90_DAYS,
+          AudioRetentionPolicy.RETAIN_INDEFINITELY,
+        ]),
+        auto_publish_on_approval: z.boolean(),
+        minutes_review_window_days: z.number().int().min(1).max(30),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rows = await ctx.withTenant(async (tx) =>
+        toRows<{ minutes_workflow_configured_at: string | null }>(
+          await tx.execute(sql`
+            UPDATE town SET
+              audio_retention_policy = ${input.audio_retention_policy},
+              auto_publish_on_approval = ${input.auto_publish_on_approval},
+              minutes_review_window_days = ${input.minutes_review_window_days},
+              minutes_workflow_configured_at = COALESCE(minutes_workflow_configured_at, now()),
+              updated_at = now()
+            WHERE id = ${ctx.tenant.townId}
+            RETURNING minutes_workflow_configured_at
+          `),
+          (message) => new Error(`town.updateMinutesWorkflow: ${message}`),
+        ),
+      );
+      return {
+        ...input,
+        minutes_workflow_configured_at: rows[0]?.minutes_workflow_configured_at ?? null,
+      };
     }),
 });

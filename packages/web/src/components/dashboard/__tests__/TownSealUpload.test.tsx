@@ -49,6 +49,9 @@ const fullTown = {
   seal_url: null,
   retention_policy_acknowledged_at: null,
   minutes_workflow_configured_at: null,
+  audio_retention_policy: "retain_30_days",
+  auto_publish_on_approval: false,
+  minutes_review_window_days: 7,
 } satisfies RouterOutputs["town"]["detail"];
 
 function seedKeys() {

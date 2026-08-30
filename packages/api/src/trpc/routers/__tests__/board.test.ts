@@ -31,10 +31,12 @@ import {
   seedBoard,
   testDb,
   inTown,
+  expectTrpcError,
   type TestDb,
   type TownFixture,
 } from "../../__tests__/fixtures.js";
 import { appRouter } from "../../router.js";
+import { toRows } from "../../../db/rows.js";
 
 /** A person with no user_account — board_member seats one directly. */
 async function seedPerson(db: TestDb, town: TownFixture, name: string): Promise<string> {
@@ -79,6 +81,33 @@ async function seedMeeting(
     `);
   });
   return id;
+}
+
+async function setNoticeTemplate(
+  db: TestDb,
+  town: TownFixture,
+  boardId: string,
+  blocks: unknown[] | null,
+): Promise<void> {
+  const json = blocks === null ? null : JSON.stringify(blocks);
+  await inTown(db, town, async (tx) => {
+    await tx.execute(sql`
+      UPDATE board SET notice_template_blocks = ${json}::jsonb WHERE id = ${boardId}
+    `);
+  });
+}
+
+async function readNoticeTemplate(
+  db: TestDb,
+  town: TownFixture,
+  boardId: string,
+): Promise<unknown[] | null> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(sql`SELECT notice_template_blocks FROM board WHERE id = ${boardId}`)
+      .then((r) => toRows<{ notice_template_blocks: unknown[] | null }>(r, (m) => new Error(m))),
+  );
+  return rows[0]?.notice_template_blocks ?? null;
 }
 
 describe("board.detail", () => {
@@ -306,6 +335,183 @@ describe("board.recentMeetings", () => {
         await expect(caller.board.recentMeetings({ boardId: foreign })).rejects.toThrow(
           /NOT_FOUND/,
         );
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.list", () => {
+  it("returns every board in the caller's town, configured and not", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const configured = await seedBoard(db, town, { name: "Planning Board Extra" });
+        await setNoticeTemplate(db, town, configured, [{ id: "b1", type: "letterhead" }]);
+        const unconfigured = await seedBoard(db, town, { name: "Recreation Committee" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.board.list();
+
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        expect(byId.get(configured)?.notice_template_blocks).toEqual([
+          { id: "b1", type: "letterhead" },
+        ]);
+        expect(byId.get(unconfigured)?.notice_template_blocks).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not return another town's boards", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        await seedBoard(db, theirs, { name: "Their Committee" });
+        const actor = await seedActor(db, mine, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+        const rows = await caller.board.list();
+
+        expect(rows.some((r) => r.name === "Their Committee")).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.copyNoticeTemplate", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const source = await seedBoard(db, town, { name: "Source Board" });
+        await setNoticeTemplate(db, town, source, [{ id: "b1", type: "letterhead" }]);
+        const target = await seedBoard(db, town, { name: "Target Board" });
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.board.copyNoticeTemplate({ sourceBoardId: source, targetBoardId: target }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        expect(await readNoticeTemplate(db, town, target)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // `sourceBoardId` fails `.uuid()` at parse time — see `town.test.ts`'s
+        // identical pin for why this is the discriminator, not "input that
+        // parses".
+        const err = await expectTrpcError(() =>
+          caller.board.copyNoticeTemplate({
+            sourceBoardId: "not-a-uuid",
+            targetBoardId: randomUUID(),
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator copy one board's notice template onto another", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const source = await seedBoard(db, town, { name: "Source Board" });
+        const blocks = [
+          { id: "b1", type: "letterhead" },
+          { id: "b2", type: "rich_text" },
+        ];
+        await setNoticeTemplate(db, town, source, blocks);
+        const target = await seedBoard(db, town, { name: "Target Board" });
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const result = await caller.board.copyNoticeTemplate({
+          sourceBoardId: source,
+          targetBoardId: target,
+        });
+        expect(result.notice_template_blocks).toEqual(blocks);
+
+        expect(await readNoticeTemplate(db, town, target)).toEqual(blocks);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a source board in another town, and writes nothing to the target", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreignSource = await seedBoard(db, theirs, { name: "Their Board" });
+        await setNoticeTemplate(db, theirs, foreignSource, [{ id: "b1", type: "letterhead" }]);
+        const target = await seedBoard(db, mine, { name: "Target Board" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.copyNoticeTemplate({ sourceBoardId: foreignSource, targetBoardId: target }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+
+        expect(await readNoticeTemplate(db, mine, target)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a target board in another town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const source = await seedBoard(db, mine, { name: "Source Board" });
+        await setNoticeTemplate(db, mine, source, [{ id: "b1", type: "letterhead" }]);
+        const foreignTarget = await seedBoard(db, theirs, { name: "Their Board" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.copyNoticeTemplate({ sourceBoardId: source, targetBoardId: foreignTarget }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
       } finally {
         await app.end();
       }

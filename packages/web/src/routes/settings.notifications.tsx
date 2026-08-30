@@ -2,20 +2,30 @@
  * Notification Preferences Page — /settings/notifications
  *
  * Allows users to manage which email notifications they receive.
- * Preferences are stored in subscriber_notification_preference table.
+ * Preferences are stored in `subscriber_notification_preference`, a
+ * PERSON's own preferences — not `town_notification_config` (the town's
+ * SMTP/Twilio credentials, a different table with its own admin-only router,
+ * `townNotificationConfig`). See `notification-preference.ts`'s own doc
+ * comment for why that distinction matters and how this task's brief
+ * conflated the two.
  * Default (no row) = enabled.
+ *
+ * Stage 1, Phase E, wave 1, Task 4 — moved onto `notificationPreference.mine`
+ * / `.setMine` from a direct Supabase read/write. Neither procedure carries
+ * an `assertCan*` guard: both are scoped to the caller's own person by
+ * construction (there is no `personId` input to substitute), which is a
+ * self-service action, not one of `rules.ts`'s admin gates.
  */
 
 import { useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bell, BellOff, Smartphone } from "lucide-react";
+import { AlertTriangle, Bell, BellOff, Smartphone } from "lucide-react";
 import type { Route } from "./+types/settings.notifications";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { useSupabase } from "@/hooks/useSupabase";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
-import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -88,24 +98,18 @@ const NOTIFICATION_SETTINGS: NotificationSetting[] = [
 
 export default function NotificationPreferencesPage() {
   const currentUser = useCurrentUser();
-  const supabase = useSupabase();
-  const queryClient = useQueryClient();
 
   // Fetch existing preferences. Subscribers are PERSON records, not
   // user_account records (see supabase/migrations/20260827000001_canonicalize_notifications.sql) —
-  // so this keys on currentUser.personId, not currentUser.id (the auth
-  // user id).
-  const { data: prefs = [] } = useQuery({
-    queryKey: queryKeys.notificationPreferences.mine,
-    queryFn: async () => {
-      if (!currentUser?.personId) return [];
-      const { data, error } = await supabase
-        .from("subscriber_notification_preference")
-        .select("event_type, channel, enabled")
-        .eq("person_id", currentUser.personId);
-      if (error) throw error;
-      return data as Array<{ event_type: string; channel: string; enabled: boolean }>;
-    },
+  // `notificationPreference.mine` resolves the caller's `personId` through
+  // the tenant-bridged session server-side, so there is no id for this
+  // screen to pass at all.
+  const {
+    data: prefs = [],
+    isLoading: isPrefsLoading,
+    isError: isPrefsError,
+  } = useQuery({
+    ...trpc.notificationPreference.mine.queryOptions(),
     enabled: !!currentUser?.personId,
   });
 
@@ -121,32 +125,26 @@ export default function NotificationPreferencesPage() {
   const isEnabled = (eventType: string) => prefMap.get(eventType) ?? true;
 
   // Mutation: toggle a preference
-  const toggleMutation = useMutation({
-    mutationFn: async ({ eventType, enabled }: { eventType: string; enabled: boolean }) => {
-      if (!currentUser?.personId || !currentUser.townId) throw new Error("Not authenticated");
-      const { error } = await supabase.from("subscriber_notification_preference").upsert(
-        {
-          person_id: currentUser.personId,
-          town_id: currentUser.townId,
-          event_type: eventType,
-          channel: "email",
-          enabled,
-        },
-        { onConflict: "person_id,channel,event_type" },
-      );
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.notificationPreferences.mine });
-    },
-    onError: () => {
-      toast.error("Failed to update notification preference");
-    },
-  });
+  const queryClient = useQueryClient();
+  const toggleMutation = useMutation(
+    trpc.notificationPreference.setMine.mutationOptions({
+      onSuccess: () => {
+        // This screen was the ONLY reader of the legacy
+        // `queryKeys.notificationPreferences.mine` key (grep confirms), so —
+        // unlike most writes in this phase — there is no legacy line to keep
+        // alongside `trpc.notificationPreference.pathFilter()` (conventions
+        // item 7).
+        void queryClient.invalidateQueries(trpc.notificationPreference.pathFilter());
+      },
+      onError: () => {
+        toast.error("Failed to update notification preference");
+      },
+    }),
+  );
 
   const handleToggle = useCallback(
     (eventType: string, enabled: boolean) => {
-      toggleMutation.mutate({ eventType, enabled });
+      toggleMutation.mutate({ event_type: eventType, channel: "email", enabled });
     },
     [toggleMutation],
   );
@@ -167,44 +165,65 @@ export default function NotificationPreferencesPage() {
         {/* Push Notifications */}
         <PushNotificationCard />
 
-        {categories.map((category, catIdx) => {
-          const items = NOTIFICATION_SETTINGS.filter((s) => s.category === category);
-          return (
-            <Card key={category}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{category}</CardTitle>
-                <CardDescription className="text-sm">
-                  Email notifications for {category.toLowerCase()} events
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-0">
-                {items.map((setting, idx) => (
-                  <div key={setting.eventType}>
-                    {idx > 0 && <hr className="my-3 border-border" />}
-                    <div className="flex items-start justify-between gap-4 py-1">
-                      <div className="space-y-0.5">
-                        <Label
-                          htmlFor={`pref-${setting.eventType}`}
-                          className="text-sm font-medium leading-none cursor-pointer"
-                        >
-                          {setting.label}
-                        </Label>
-                        <p className="text-xs text-muted-foreground">{setting.description}</p>
+        {/* Email preferences: loading/error states are their own, distinct
+            from the Push card above, which does not depend on this read
+            (conventions item 5 — a screen that renders nothing and says
+            nothing for a failed read is the failure mode this migration
+            exists to end). */}
+        {isPrefsError ? (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-4 text-sm text-destructive"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              Something went wrong loading your email notification preferences. Try reloading the
+              page.
+            </span>
+          </div>
+        ) : isPrefsLoading ? (
+          <p className="text-sm text-muted-foreground">Loading your email preferences...</p>
+        ) : (
+          categories.map((category, catIdx) => {
+            const items = NOTIFICATION_SETTINGS.filter((s) => s.category === category);
+            return (
+              <Card key={category}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">{category}</CardTitle>
+                  <CardDescription className="text-sm">
+                    Email notifications for {category.toLowerCase()} events
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-0">
+                  {items.map((setting, idx) => (
+                    <div key={setting.eventType}>
+                      {idx > 0 && <hr className="my-3 border-border" />}
+                      <div className="flex items-start justify-between gap-4 py-1">
+                        <div className="space-y-0.5">
+                          <Label
+                            htmlFor={`pref-${setting.eventType}`}
+                            className="text-sm font-medium leading-none cursor-pointer"
+                          >
+                            {setting.label}
+                          </Label>
+                          <p className="text-xs text-muted-foreground">{setting.description}</p>
+                        </div>
+                        <Switch
+                          id={`pref-${setting.eventType}`}
+                          checked={isEnabled(setting.eventType)}
+                          onCheckedChange={(checked) => handleToggle(setting.eventType, checked)}
+                          disabled={toggleMutation.isPending}
+                          aria-label={`Toggle ${setting.label} notifications`}
+                        />
                       </div>
-                      <Switch
-                        id={`pref-${setting.eventType}`}
-                        checked={isEnabled(setting.eventType)}
-                        onCheckedChange={(checked) => handleToggle(setting.eventType, checked)}
-                        disabled={toggleMutation.isPending}
-                        aria-label={`Toggle ${setting.label} notifications`}
-                      />
                     </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          );
-        })}
+                  ))}
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
 
         {/* Info footer */}
         <p className="text-xs text-muted-foreground">

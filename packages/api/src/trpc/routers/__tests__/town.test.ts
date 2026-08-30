@@ -61,7 +61,10 @@ async function configureTown(db: TestDb, town: TownFixture): Promise<void> {
         staff_roles_present = '["town_clerk", "deputy_clerk"]'::jsonb,
         seal_url = 'https://example.test/seal.png',
         retention_policy_acknowledged_at = '2026-01-15T12:00:00Z',
-        minutes_workflow_configured_at = '2026-02-01T09:30:00Z'
+        minutes_workflow_configured_at = '2026-02-01T09:30:00Z',
+        audio_retention_policy = 'retain_90_days',
+        auto_publish_on_approval = true,
+        minutes_review_window_days = 10
       WHERE id = ${town.townId}
     `);
   });
@@ -98,6 +101,9 @@ describe("town.detail", () => {
           staff_roles_present: ["town_clerk", "deputy_clerk"],
           subdomain: "newcastle",
           seal_url: "https://example.test/seal.png",
+          audio_retention_policy: "retain_90_days",
+          auto_publish_on_approval: true,
+          minutes_review_window_days: 10,
         });
         expect(new Date(result.retention_policy_acknowledged_at!).toISOString()).toBe(
           "2026-01-15T12:00:00.000Z",
@@ -224,6 +230,10 @@ async function readTown(
   presiding_officer_default: string | null;
   minutes_recorder_default: string | null;
   retention_policy_acknowledged_at: string | null;
+  audio_retention_policy: string;
+  auto_publish_on_approval: boolean;
+  minutes_review_window_days: number;
+  minutes_workflow_configured_at: string | null;
 }> {
   const rows = await inTown(db, town, (tx) =>
     tx
@@ -231,7 +241,9 @@ async function readTown(
         sql`
           SELECT name, state, municipality_type, population_range, contact_name,
             contact_role, meeting_formality, minutes_style, presiding_officer_default,
-            minutes_recorder_default, retention_policy_acknowledged_at
+            minutes_recorder_default, retention_policy_acknowledged_at,
+            audio_retention_policy, auto_publish_on_approval, minutes_review_window_days,
+            minutes_workflow_configured_at
           FROM town WHERE id = ${town.townId}
         `,
       )
@@ -248,6 +260,10 @@ async function readTown(
           presiding_officer_default: string | null;
           minutes_recorder_default: string | null;
           retention_policy_acknowledged_at: string | null;
+          audio_retention_policy: string;
+          auto_publish_on_approval: boolean;
+          minutes_review_window_days: number;
+          minutes_workflow_configured_at: string | null;
         }>(r, (m) => new Error(m)),
       ),
   );
@@ -572,6 +588,139 @@ describe("town.acknowledgeRetentionPolicy", () => {
 
         const row = await readTown(db, town);
         expect(row.retention_policy_acknowledged_at).not.toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * `town.updateMinutesWorkflow` — `settings.minutes-workflow.tsx`'s write.
+ * Same admin gate, same two-test-plus-reorder-pin shape as every other
+ * `town.*` write above.
+ */
+describe("town.updateMinutesWorkflow", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.town.updateMinutesWorkflow({
+              audio_retention_policy: "retain_90_days",
+              auto_publish_on_approval: true,
+              minutes_review_window_days: 14,
+            }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readTown(db, town);
+        // `seedTown` leaves the column defaults untouched by any refused call.
+        expect(row.audio_retention_policy).toBe("retain_30_days");
+        expect(row.auto_publish_on_approval).toBe(false);
+        expect(row.minutes_review_window_days).toBe(7);
+        expect(row.minutes_workflow_configured_at).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // `minutes_review_window_days` exceeds the max(30) — fails `.input()`
+        // parsing. See `town.updateProfile`'s identical pin for the full
+        // account of why this is the discriminator, not "input that parses".
+        const err = await expectTrpcError(() =>
+          caller.town.updateMinutesWorkflow({
+            audio_retention_policy: "retain_90_days",
+            auto_publish_on_approval: true,
+            minutes_review_window_days: 999,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator update the minutes workflow defaults, and sets the configured-at timestamp on first save", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const before = Date.now();
+        const result = await caller.town.updateMinutesWorkflow({
+          audio_retention_policy: "retain_90_days",
+          auto_publish_on_approval: true,
+          minutes_review_window_days: 14,
+        });
+        expect(result.minutes_workflow_configured_at).not.toBeNull();
+        expect(new Date(result.minutes_workflow_configured_at!).getTime()).toBeGreaterThanOrEqual(
+          before,
+        );
+
+        const row = await readTown(db, town);
+        expect(row).toMatchObject({
+          audio_retention_policy: "retain_90_days",
+          auto_publish_on_approval: true,
+          minutes_review_window_days: 14,
+        });
+        expect(row.minutes_workflow_configured_at).not.toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not move the configured-at timestamp on a second save", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const first = await caller.town.updateMinutesWorkflow({
+          audio_retention_policy: "retain_90_days",
+          auto_publish_on_approval: true,
+          minutes_review_window_days: 14,
+        });
+
+        const second = await caller.town.updateMinutesWorkflow({
+          audio_retention_policy: "purge_on_approval",
+          auto_publish_on_approval: false,
+          minutes_review_window_days: 5,
+        });
+
+        expect(second.minutes_workflow_configured_at).toBe(first.minutes_workflow_configured_at);
+
+        const row = await readTown(db, town);
+        expect(row).toMatchObject({
+          audio_retention_policy: "purge_on_approval",
+          auto_publish_on_approval: false,
+          minutes_review_window_days: 5,
+        });
       } finally {
         await app.end();
       }

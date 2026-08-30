@@ -12,6 +12,8 @@ describe("router wiring", () => {
         "board.detail",
         "board.recentMeetings",
         "board.stats",
+        "board.list",
+        "board.copyNoticeTemplate",
         "permissions",
         "person.list",
         "person.insert",
@@ -24,7 +26,13 @@ describe("router wiring", () => {
         "town.setPortalAddress",
         "town.updateMeetingDefaults",
         "town.updateMeetingRoles",
+        "town.updateMinutesWorkflow",
         "town.updateProfile",
+        "notificationPreference.mine",
+        "notificationPreference.setMine",
+        "townNotificationConfig.select",
+        "townNotificationConfig.insert",
+        "townNotificationConfig.update",
         "whoami",
       ]),
     );
@@ -64,10 +72,15 @@ describe("router wiring", () => {
       "town.updateProfile",
       "town.updateMeetingDefaults",
       "town.updateMeetingRoles",
+      "town.updateMinutesWorkflow",
       "person.insert",
       "person.update",
       "person.insertStaffAccount",
       "person.updateGovTitle",
+      "board.copyNoticeTemplate",
+      "notificationPreference.setMine",
+      "townNotificationConfig.insert",
+      "townNotificationConfig.update",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];

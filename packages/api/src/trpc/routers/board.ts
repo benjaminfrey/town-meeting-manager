@@ -1,28 +1,34 @@
 /**
- * Board reads.
+ * Board reads, and — as of Task 4, wave 1 — the first two board writes.
  *
- * No permission guard, deliberately: `board` carried a pure tenancy policy and
- * nothing else, so any authenticated member of a town may read that town's
- * boards. `protectedProcedure` + `ctx.withTenant` is exactly that rule. Writes
- * are admin-gated (`assertCanUpdateBoard`) and are not in this router yet.
+ * No permission guard on the three original reads (`detail`, `stats`,
+ * `recentMeetings`) or on `list` below, deliberately: `board` carried a pure
+ * tenancy policy and nothing else, so any authenticated member of a town may
+ * read that town's boards. `protectedProcedure` + `ctx.withTenant` is exactly
+ * that rule. `copyNoticeTemplate` is the exception — it is a write, and gets
+ * the matching admin gate, `assertCanUpdateBoard`, `.use(requireActor(...))`
+ * before `.input()` per conventions item 2.
  *
  * A board that does not exist, or belongs to another town, answers NOT_FOUND
- * from all three procedures here — `detail`, `stats`, and `recentMeetings`
- * alike. That is a deliberate, and enforced, convention: `detail`'s query
- * already had to answer this question (a missing row), but `stats`'s
- * correlated subqueries and `recentMeetings`'s filtered scan do not — they
- * degrade to `{0,0}` and `[]` for an id that never existed just as readily as
- * for a real board with no members or meetings yet. A caller of `stats` alone
- * (no `detail` in the same screen) would render a convincing, empty-but-real
- * looking board for an id that is not there. `assertBoardExists` below closes
- * that gap for the two counting procedures explicitly, rather than leaving it
- * to be noticed the first time a screen calls one without the other.
+ * from every procedure here that names a specific board — `detail`, `stats`,
+ * `recentMeetings`, and `copyNoticeTemplate`'s two board ids. That is a
+ * deliberate, and enforced, convention: `detail`'s query already had to
+ * answer this question (a missing row), but `stats`'s correlated subqueries
+ * and `recentMeetings`'s filtered scan do not — they degrade to `{0,0}` and
+ * `[]` for an id that never existed just as readily as for a real board with
+ * no members or meetings yet. A caller of `stats` alone (no `detail` in the
+ * same screen) would render a convincing, empty-but-real looking board for an
+ * id that is not there. `assertBoardExists` below closes that gap for the two
+ * counting procedures explicitly, and `copyNoticeTemplate` reuses it for its
+ * source board — see that procedure's own doc comment for why its target
+ * board needs no separate call to it.
  */
 
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure } from "../trpc.js";
+import { router, protectedProcedure, requireActor } from "../trpc.js";
+import { assertCanUpdateBoard } from "../authorization/rules.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
 
@@ -151,6 +157,87 @@ export const boardRouter = router({
           `),
           (message) => new Error(`board.recentMeetings: ${message}`),
         );
+      });
+    }),
+
+  /**
+   * `settings.meeting-notices.tsx`'s read: every board in the caller's town,
+   * with just enough to render the "configured / not configured" list and
+   * drive the "copy from board" picker. Not `detail`'s 20 columns — that
+   * procedure is keyed to a single board (`boardId` input) and this one is
+   * keyed to the town, so it gets its own, narrower column list rather than
+   * reusing `detail`'s SQL for a town-wide scan.
+   *
+   * No `archived_at IS NULL` filter: the Supabase query this replaces
+   * (`settings.meeting-notices.tsx`'s own `useQuery`, before this task) had
+   * none either — see conventions' "the query you are replacing is a
+   * specification" rule. An archived board still needs its notice template
+   * visible to whoever is deciding what to copy from.
+   */
+  list: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) =>
+      toRows<{ id: string; name: string; notice_template_blocks: unknown | null }>(
+        await tx.execute(sql`
+          SELECT id, name, notice_template_blocks
+          FROM board
+          ORDER BY name
+        `),
+        (message) => new Error(`board.list: ${message}`),
+      ),
+    );
+  }),
+
+  /**
+   * `settings.meeting-notices.tsx`'s "Copy from board" write: replace
+   * `targetBoardId`'s notice template with `sourceBoardId`'s, in one
+   * statement, entirely server-side.
+   *
+   * The client-side version this replaces sent the ALREADY-FETCHED source
+   * board's `notice_template_blocks` back up as the mutation's payload — a
+   * client-trusted copy of server data, and (per conventions item 3) a
+   * tenant-scoped read the client had no business re-asserting. Reading the
+   * source INSIDE the same `UPDATE ... SET x = (SELECT ...)` statement, under
+   * `ctx.withTenant`, means RLS scopes both halves of the copy identically to
+   * the caller's own town — there is no window for a client to substitute a
+   * different board's blocks than the one RLS would show it, and no round
+   * trip carrying a potentially large block array back up to the server.
+   *
+   * `assertBoardExists` runs for `sourceBoardId` only. A `sourceBoardId`
+   * naming no row (or another town's row, invisible under RLS) makes the
+   * subquery answer NULL, which would silently blank the target's template
+   * instead of failing — exactly the FK-bypasses-RLS-shaped silent failure
+   * conventions item 3 warns about, for a subquery rather than a foreign key.
+   * `targetBoardId` needs no separate check: the `UPDATE ... WHERE id =
+   * ${targetBoardId}` itself returns zero rows for a target that does not
+   * exist or belongs to another town (RLS again), and `RETURNING` catches
+   * that directly below — a second `assertBoardExists` call would just repeat
+   * the same query the `UPDATE` already runs.
+   */
+  copyNoticeTemplate: protectedProcedure
+    .use(requireActor(assertCanUpdateBoard))
+    .input(
+      z.object({
+        sourceBoardId: z.string().uuid(),
+        targetBoardId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertBoardExists(tx, input.sourceBoardId);
+        const rows = toRows<{ id: string; notice_template_blocks: unknown | null }>(
+          await tx.execute(sql`
+            UPDATE board
+            SET notice_template_blocks = (
+              SELECT notice_template_blocks FROM board WHERE id = ${input.sourceBoardId}
+            )
+            WHERE id = ${input.targetBoardId}
+            RETURNING id, notice_template_blocks
+          `),
+          (message) => new Error(`board.copyNoticeTemplate: ${message}`),
+        );
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return row;
       });
     }),
 });
