@@ -202,18 +202,30 @@ instance of the defect (the resolver form is textually always after `.input()`, 
 is the terminal step of the chain) and missed the general rule: **anything declared after
 `.input()` can be preempted by it**, including a middleware placed there by choice. The original
 item's own `setPortalAddress` example was resolver-form and never caught the ordering bug only
-because its schema (`z.object({ subdomain: z.string() })`) is too permissive for almost any string
-to fail — `setPortalAddress` itself is not yet converted to the middleware form as of this fix round
-(see its own doc comment in `town.ts` for why, and that it still owes the conversion).
+because its schema (`z.object({ subdomain: z.string() })`) WAS too permissive for almost any string
+to fail. **Historical note, not current status — see below:** at the time this paragraph was
+written (Task 2's fix round), `setPortalAddress` was still unconverted and its schema was still
+that permissive bare `z.string()`. Both are fixed now (Task 5): the procedure is
+`.use(requireActor(...)).input(...)` like every other write in `town.ts`, and its schema is real
+enough to carry its own reorder pin — see its own doc comment in `town.ts` for the conversion, and
+the "Status today" paragraph immediately below for the current count.
 
 Status today: the Actor-only middleware form (`requireActor`) is exercised — six `town.*`
 mutations now: `updateProfile`, `updateMeetingDefaults`, `updateMeetingRoles`,
 `acknowledgeRetentionPolicy` (Task 2's fix round) and `updateMinutesWorkflow` (Task 4) were already
 converted; Task 5 converts `setPortalAddress`, the sixth and last write in `town.ts`, with tests,
-each guard re-verified by deletion after the conversion, AND `updateProfile` AND `setPortalAddress`
-specifically carry a second pin that catches
-a REORDER (`.use()` moved back after `.input()`), not only a deletion — see item 13 for why that
-distinction matters and could not be skipped. `setPortalAddress`'s own reorder pin is also the proof
+each guard re-verified by deletion after the conversion. Five of the six carry a SECOND pin that
+catches a REORDER (`.use()` moved back after `.input()`), not only a deletion — see item 13 for why
+that distinction matters and could not be skipped: `updateProfile` (Task 2's fix round),
+`updateMinutesWorkflow` (Task 4), and `updateMeetingDefaults`/`updateMeetingRoles`/`setPortalAddress`
+(all three added in the review round after Task 5 first shipped — the first version of this task had
+the pin only on `setPortalAddress` itself, and a reviewer caught that
+`updateMeetingDefaults`/`updateMeetingRoles` had shipped without one despite both being
+`.input()`-bearing `requireActor` writes exactly like the others). `acknowledgeRetentionPolicy` is
+the one procedure with no reorder pin and none needed: it takes no `.input()` at all (the server
+decides the timestamp, not the caller — see its own doc comment), so there is no parseable-or-not
+input for a reordered guard to be preempted by; "every mutation gets a reorder pin" only applies
+where there is an input to preempt with. `setPortalAddress`'s own reorder pin is also the proof
 that the item 2 rewrite's diagnosis was right: its schema used to be a bare `z.string()`, "too
 permissive for almost any string to fail," and literally could not have supported a reorder pin
 until Task 5 tightened it — see that procedure's own doc comment. The
@@ -797,14 +809,36 @@ $ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | gr
 was itself down from 67 one wave earlier. Quote the grep, not the number, is the rule this drift
 itself demonstrates: re-run it rather than trusting any of these three figures.)
 
-`grep -rn "TODO(phase-e-wave" packages/web/src | wc -l` answers **15** at the same point — UP from
-whatever it was before Task 5, not down, because Task 5 added two new deliberate gaps
-(`ProgressChecklist.tsx`'s `memberCount`, `home.tsx`'s three remaining Supabase reads) at the same
-time it closed two others (`home.tsx`'s town read migrated onto `town.detail`;
-`boards.$boardId.tsx`'s marker was already narrowed to one item by Task 2, confirmed still accurate
-by Task 5, not touched further). This countdown is not monotonic within a wave — a task can
-legitimately raise it by naming a gap explicitly that was previously silent. It only has to reach
-zero once `packages/web/src/lib/supabase.ts` itself is deleted (see this item's own closing
+Do NOT run `grep -rn "TODO(phase-e-wave" packages/web/src | wc -l` and report the raw number as
+"how many gaps remain" — corrected here after the first version of this document did exactly that
+and reported **15**, which a reviewer showed measures the wrong thing. That count mixes actual
+markers with PROSE MENTIONS of a marker (a header comment saying "see the `TODO(phase-e-wave-2)`
+marker below," a test file's own comment citing one) — of the 15, only 8 are lines where the
+comment's content actually IS the token, and even that undercounts distinct GAPS by one:
+`AddPersonDialog.tsx` carries the identical marker twice (its file-header doc comment at line 14 AND
+an inline comment at line 126, both `invitation.insert`) for what is one gap, not two. The
+grep that isolates real markers — anchored so the comment's own first word must be the token, not a
+sentence mentioning it — answers 8:
+
+```
+$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+8
+```
+
+Those 8 lines name 7 distinct gaps: `ProgressChecklist.tsx` (`boardMember.countByTown`),
+`StaffAccountFlow.tsx` (`board.listByTown` — stale, see the Known-gaps bullet below),
+`AddPersonDialog.tsx` (`invitation.insert`, marked twice), `home.tsx` (`meeting.byTown` /
+`minutesDocument.pendingByTown` / a board-picker read), `settings.town.tsx` (`board.byTown`),
+`boards.$boardId.tsx` (`agendaTemplate.countForBoard`), `people.tsx`
+(`boardMember.listByTown`). Whether the count is 15, 8, or 7 depends entirely on what you constrain
+the grep to — quote the grep used, always, and prefer describing the gaps by name (as the bullets
+below do) over reporting a bare count that a reader cannot check without also re-deriving which
+lines you meant.
+
+This countdown is not monotonic within a wave regardless of which grep measures it — a task can
+legitimately raise it by naming a gap explicitly that was previously silent (Task 5 added
+`ProgressChecklist.tsx`'s `memberCount` gap while closing `home.tsx`'s town-header read). It only has
+to reach zero once `packages/web/src/lib/supabase.ts` itself is deleted (see this item's own closing
 paragraph); tracking it per-task is for visibility, not for proving progress every single time.
 
 The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
@@ -1010,9 +1044,37 @@ runs.
 - The wave inherited one existing, unrelated staleness while Task 5 was in the neighborhood:
   `StaffAccountFlow.tsx`'s `// TODO(phase-e-wave-2): board.listByTown` marker says "no procedure
   exists yet that lists every board for a town" — no longer true; `board.list` has existed since
-  Task 4. Not the same gap as `home.tsx`'s board picker above (that one needs `board.list` to filter
-  `archived_at`, which is a real change to make), but `StaffAccountFlow.tsx` itself was not touched by
-  this task's declared scope (`routes/home.tsx` and `components/dashboard/ProgressChecklist.tsx`
-  only) and a component this wave did not test should not be edited on the strength of reading its
-  comment alone. Left for whichever wave touches that file next; flagged here so it is not
-  rediscovered as if new.
+  Task 4. **This IS the same gap as `home.tsx`'s board picker above, not a different one** —
+  corrected here after a reviewer caught the first version of this bullet claiming otherwise:
+  `StaffAccountFlow.tsx:64` filters `.is("archived_at", null)`, identical to `home.tsx`'s board
+  picker, for the identical reason (offering an archived board as a place to assign a new staff
+  account's board seat is the same wrong answer as offering it as a place to schedule a meeting).
+  Whichever wave migrates this file must NOT swap it onto `board.list` as-is — that would ship
+  exactly the archived-board regression Task 5 declined for `home.tsx`. `StaffAccountFlow.tsx`
+  itself was not touched by this task's declared scope (`routes/home.tsx` and
+  `components/dashboard/ProgressChecklist.tsx` only), so the stale comment is documented here rather
+  than edited on the strength of reading it alone. Left for whichever wave touches that file next.
+- **Named wave-2 item: `SetPortalAddressModal` has exactly one door, and it disappears.**
+  `ProgressChecklist`'s "portal-subdomain" row (`onSetPortalAddressClick`) is the ONLY UI path to
+  `SetPortalAddressModal` anywhere in the product. Once every checklist item is complete — not
+  hypothetically; this is the intended end state of onboarding — `ProgressChecklist` stops rendering
+  the row list at all (see the next bullet) and nothing else opens that modal, so an administrator
+  who wants to CHANGE an already-set subdomain later has no path to do it. `RetentionPolicyModal` has
+  the identical one-door shape and it is fine there, because retention acknowledgment is genuinely
+  one-time; a portal subdomain is not — the product may need to rename a town, correct a typo, or
+  free up a name. Reviewer's recommendation, to save whoever picks this up from re-deriving it: the
+  right home is a permanent field in `settings.town.tsx`'s "Your Town" `SettingsSection` (next to
+  town name/state/municipality — see that section's existing `summary`/`editor` shape), not another
+  onboarding-checklist row — an administrator looking to rename their portal address would look in
+  town settings, not in a setup checklist they already finished. Not built in Task 5: out of that
+  task's two named files (`routes/home.tsx`, `components/dashboard/ProgressChecklist.tsx`), and
+  `settings.town.tsx` is a third file with its own accordion sections this task did not otherwise
+  touch beyond mounting the modal itself.
+- **`ProgressChecklist`'s "all complete" state is a swap, not a disappearance — precise mechanism,
+  since a wave-5 report first stated this imprecisely and a reviewer corrected it.** When
+  `completedCount === items.length`, the component does not render nothing: it renders a _different_
+  card ("Setup complete!", `PartyPopper` icon, two lines of static text) in place of the checklist
+  rows. The user-visible effect is the same either way — the "portal-subdomain" row, and every other
+  row, stops being reachable — but "the card hides" and "the card is replaced by a different card"
+  are different claims, and only the second is what the component's own `if (allComplete) { return
+<Card>...</Card>; }` branch actually does.

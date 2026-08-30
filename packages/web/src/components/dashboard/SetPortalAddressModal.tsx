@@ -101,6 +101,19 @@ export function SetPortalAddressModal({
     mutation.mutate({ subdomain: checked.subdomain });
   };
 
+  // `mutation.error.message` is shown verbatim, not remapped by CODE the way
+  // `checkSubdomain`'s messages are above. Noted in review, not fixed
+  // further here: in the CONFLICT and generic-BAD_REQUEST cases the server's
+  // message IS the right thing to show (see `town.setPortalAddress`'s own
+  // doc comment for why its CONFLICT message is written for a clerk to
+  // read). The one case this would render badly — a ZodError's own
+  // `.message`, which tRPC's default formatter leaves as raw multi-line
+  // JSON — is not reachable through this modal: `checkSubdomain` above runs
+  // first and blocks every input the schema would also reject, so the
+  // mutation only ever fires with input the schema is guaranteed to accept.
+  // It IS reachable by any OTHER caller of `setPortalAddress` (a future
+  // screen, a script) that skips the client-side check; this component just
+  // isn't the place that needs to solve it, since it never triggers it.
   const serverErrorMessage = mutation.isError
     ? isTRPCClientError(mutation.error)
       ? mutation.error.message

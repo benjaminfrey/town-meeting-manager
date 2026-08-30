@@ -89,24 +89,45 @@ export type TestHandlers = Partial<{
  *
  * `CONFLICT` added in Phase E, wave 1, Task 5 — `town.setPortalAddress` is
  * the first procedure a screen test needed to simulate it for
- * (`SetPortalAddressModal.test.tsx`). Before that, every `trpcTestError`
- * call in this codebase exercised one of the other five, so this code path
- * was never run: `JSONRPC_CODE`/`HTTP_STATUS` are `Record<TestErrorCode,
- * number>`, and TypeScript would have caught a missing entry HERE, at this
- * file — but nothing enforces that the STRING passed to `trpcTestError` at a
- * call site is actually a `TestErrorCode` member versus any other string tRPC
- * defines (`"CONFLICT"` was a plain string until this widening, so a call
- * site could pass it and typecheck yet look up `undefined` in both records
- * below). The result was not a compile error — `errorEnvelope` happily built
- * `{ code: undefined, data: { httpStatus: undefined, ... } }` — it was
- * `@trpc/client`'s own `transformResult` throwing `TransformResultError`
- * ("Unable to transform response from server") the first time a test tried
- * to read the mutation's error, because a JSON-RPC error object without a
- * numeric `code` fails that function's own shape check. A green vitest run
- * would not have caught this either way; only running the test caught it, on
- * the first attempt, which is why this comment records it — the fix is
- * closing the actual gap (this record has no member for `"CONFLICT"`), not
- * only making that one test pass.
+ * (`SetPortalAddressModal.test.tsx`). Corrected in the review round after
+ * that task shipped: the first version of this comment claimed
+ * `trpcTestError("CONFLICT")` "typechecked fine" against the pre-widening
+ * union and only failed at runtime — that is FALSE, and stated with more
+ * confidence than the one command that would have settled it. A reviewer
+ * removed `| "CONFLICT"` from this union and ran `tsc`: `TS2345: Argument of
+ * type '"CONFLICT"' is not assignable to parameter of type 'TestErrorCode'`,
+ * pointing at the exact call site. `TestHandlers`' own typing (this file's
+ * header comment) infers a handler's input/output from the real router;
+ * `trpcTestError`'s parameter is plainly typed `TestErrorCode`, so a string
+ * literal outside the union was never going to compile. There is no type
+ * hole here — there never was.
+ *
+ * What actually happened, and the real lesson: `SetPortalAddressModal.test.tsx`
+ * was written and run with `vitest` alone, which does not evaluate types, so
+ * the missing-union-member mistake surfaced as a confusing RUNTIME failure
+ * instead — `@trpc/client`'s own `transformResult` throwing
+ * `TransformResultError` ("Unable to transform response from server"),
+ * because the code did not even get far enough to be a `TestErrorCode`
+ * question; vitest just ran the (type-incorrect) code as JavaScript, `code:
+ * undefined` reached `transformResult`, and its own shape check rejected it
+ * with a message naming none of this. Seeing a confusing runtime failure and
+ * concluding something about the TYPE SYSTEM without running `tsc` first is
+ * exactly the mistake conventions item 8's "floor" section warns against — "a
+ * green vitest run is not a typecheck" cuts both ways: it also means a RED
+ * vitest run is not a type verdict either. `npx turbo run typecheck --force`
+ * would have named the real, narrower problem (a request to add `CONFLICT` to
+ * this union) in one line, instead of a paragraph of runtime archaeology.
+ *
+ * The union genuinely was incomplete, though — that part of the original
+ * diagnosis holds. Every code the API can currently answer
+ * (`NOT_FOUND`/`FORBIDDEN`/`CONFLICT`/`BAD_REQUEST`/`UNAUTHORIZED`, plus
+ * `INTERNAL_SERVER_ERROR` for the generic case) is listed below now. Add the
+ * next `TRPC_ERROR_CODE_KEY` this harness does not yet cover
+ * (`@trpc/server`'s own list has more — `PAYMENT_REQUIRED`,
+ * `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, …) the same way, at the point a
+ * real procedure needs a test to simulate it — TypeScript will refuse any
+ * call site that gets ahead of this list, which is the correct behavior and
+ * always was.
  */
 export type TestErrorCode =
   | "BAD_REQUEST"

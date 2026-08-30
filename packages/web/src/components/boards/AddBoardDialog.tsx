@@ -10,6 +10,7 @@ import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -138,6 +139,16 @@ export function AddBoardDialog({ townId, town, open, onOpenChange }: AddBoardDia
     },
     onSuccess: (id) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+      // `ProgressChecklist`'s `totalSeats` and notice-template-count rows
+      // read `board.list` now (Phase E, wave 1, Task 5), not the legacy
+      // `queryKeys.boards.byTown` key this dialog still invalidates above
+      // for the (still-unmigrated) `/boards` list screen. Without this line
+      // a new board's seats and "N of M boards configured" denominator
+      // stayed stale for up to the 60s `staleTime` — see
+      // `AddBoardDialog.test.tsx` for the pin (conventions item 7/8: found
+      // by the review round after Task 5, the third time this exact shape
+      // of gap shipped in this wave).
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       onOpenChange(false);
       void navigate(`/boards/${id}`);
     },

@@ -242,18 +242,35 @@ export const townRouter = router({
    * `town.updateProfile` shipped with before its reorder pin caught it (see
    * that procedure's doc comment and `routers/__tests__/town.test.ts`).
    *
-   * The schema below is real now: `min`/`max` on `SUBDOMAIN_MAX_LENGTH`, not
-   * a bare `z.string()`. `checkSubdomain` still owns every semantic rule
-   * (character set, reserved names, casing) — the schema only narrows enough
-   * to give a non-admin caller SOME input that fails to parse, which is what
-   * `town-portal-address.test.ts`'s reorder pin needs to exist at all. An
-   * empty or over-long subdomain now answers BAD_REQUEST from the parser
-   * either way (guard correctly placed or not), same as before this
-   * conversion — the two existing "not a usable DNS label" cases this
-   * schema newly catches (`""`, `"a".repeat(64)`) were always going to be
-   * BAD_REQUEST, just from a different layer. See that test file's own
-   * reorder pin for the case that actually distinguishes the two orderings:
-   * a REFUSED caller sending that same invalid input.
+   * The schema below is real now: `trim()` then `min`/`max` on
+   * `SUBDOMAIN_MAX_LENGTH`, not a bare `z.string()`. `checkSubdomain` still
+   * owns every semantic rule (character set, reserved names, casing) — the
+   * schema only narrows enough to give a non-admin caller SOME input that
+   * fails to parse, which is what `town-portal-address.test.ts`'s reorder
+   * pin needs to exist at all. An empty or over-long subdomain now answers
+   * BAD_REQUEST from the parser either way (guard correctly placed or not) —
+   * the two existing "not a usable DNS label" cases this schema newly
+   * catches (`""`, `"a".repeat(64)`) were always going to be BAD_REQUEST,
+   * just from a different layer.
+   *
+   * `.trim()` is load-bearing, not decoration, and was missing in the first
+   * version of this conversion — caught in review. `checkSubdomain` trims
+   * BEFORE measuring length; this schema's `min`/`max` used to run on the
+   * UNTRIMMED string. `" " + "a".repeat(63) + " "` (65 raw characters, 63
+   * after trimming — exactly the max) therefore SUCCEEDED under the old bare
+   * `z.string()` schema (parsing didn't care, `checkSubdomain` trimmed first
+   * and accepted 63) and would have newly FAILED here as `too_big` without
+   * `.trim()` on this schema — a real behavior narrowing this conversion
+   * would have introduced, not merely relocated. Unreachable through
+   * `SetPortalAddressModal` (nothing pads a value with leading/trailing
+   * spaces before submitting), so never shipped as a user-facing regression,
+   * but `caller.setPortalAddress(...)` was and is a real API a future
+   * caller could hit directly. `.trim()` here makes this schema and
+   * `checkSubdomain` agree on what "63 characters" means.
+   *
+   * See `town-portal-address.test.ts`'s own reorder pin for the case that
+   * actually distinguishes correctly-ordered from reordered: a REFUSED
+   * caller sending input that ALSO fails to parse.
    */
   setPortalAddress: protectedProcedure
     .use(requireActor(assertCanUpdateTown))
@@ -261,6 +278,7 @@ export const townRouter = router({
       z.object({
         subdomain: z
           .string()
+          .trim()
           .min(1, "A portal address is required.")
           .max(
             SUBDOMAIN_MAX_LENGTH,

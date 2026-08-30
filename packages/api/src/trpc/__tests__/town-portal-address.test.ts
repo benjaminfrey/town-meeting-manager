@@ -49,6 +49,31 @@ describe("town.setPortalAddress", () => {
     });
   });
 
+  /**
+   * The `.trim()` regression pin (review round after Task 5). The schema's
+   * `min`/`max` used to run BEFORE trimming, while `checkSubdomain` trims
+   * FIRST — so a value that is over the limit only because of padding
+   * (65 raw characters, 63 after trimming, exactly `SUBDOMAIN_MAX_LENGTH`)
+   * used to succeed under the bare `z.string()` schema (nothing there cared
+   * about length; `checkSubdomain` trimmed and accepted 63) and would have
+   * newly FAILED at the parser once `min`/`max` were added, had `.trim()`
+   * not been added to the schema too. This proves the two layers agree.
+   */
+  it("accepts a value that is over the length limit only before trimming", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db, "Newcastle");
+      const admin = await seedActor(db, town, { role: "admin" });
+      const caller = callerFor(contextFor(db, town, admin));
+
+      const padded = " " + "a".repeat(63) + " ";
+      expect(padded.length).toBe(65);
+      expect(await caller.setPortalAddress({ subdomain: padded })).toEqual({
+        subdomain: "a".repeat(63),
+      });
+    });
+  });
+
   it("refuses a name that is not a usable DNS label", async () => {
     await withTestDb(async (client) => {
       const db = testDb(client);

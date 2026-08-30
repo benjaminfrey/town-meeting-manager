@@ -243,9 +243,16 @@ export function ProgressChecklist({
         : "Set public portal subdomain",
       description: "Choose your town's public URL",
       completed: hasSubdomain,
-      // Always clickable, completed or not — a set subdomain can still be
-      // changed (`town.setPortalAddress` accepts a new value at any time),
-      // unlike the one-time retention-policy acknowledgment below.
+      // Clickable both before and after completion, UNLIKE the one-time
+      // retention-policy acknowledgment below — a set subdomain can still
+      // be changed (`town.setPortalAddress` accepts a new value at any
+      // time). That is true only while THIS ROW renders, though: once every
+      // item on the list is complete, `allComplete` below swaps the whole
+      // card for "Setup complete!" and this row — the only current path to
+      // `SetPortalAddressModal` — stops rendering at all. Not fixed here;
+      // see the conventions doc's Known Gaps for the reviewer's
+      // recommendation (a permanent field in `settings.town.tsx`'s "Your
+      // Town" section, not a row here).
       onClick: onSetPortalAddressClick,
     },
     {

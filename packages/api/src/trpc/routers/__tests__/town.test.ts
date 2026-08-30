@@ -470,6 +470,33 @@ describe("town.updateMeetingDefaults", () => {
     });
   });
 
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // `meeting_formality: "bogus"` is not one of the three enum members
+        // — fails `.input()` parsing. See `town.updateProfile`'s identical
+        // pin for the full account of why this is the discriminator, not
+        // "input that parses".
+        const err = await expectTrpcError(() =>
+          caller.town.updateMeetingDefaults({
+            // @ts-expect-error — deliberately not a member of the enum
+            meeting_formality: "bogus",
+            minutes_style: "narrative",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("lets an administrator update the meeting formality and minutes style defaults", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
@@ -517,6 +544,32 @@ describe("town.updateMeetingRoles", () => {
         const row = await readTown(db, town);
         expect(row.presiding_officer_default).toBeNull();
         expect(row.minutes_recorder_default).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // An empty `presiding_officer_default` fails the schema's own
+        // `.min(1)` — fails `.input()` parsing. See `town.updateProfile`'s
+        // identical pin for the full account of why this is the
+        // discriminator, not "input that parses".
+        const err = await expectTrpcError(() =>
+          caller.town.updateMeetingRoles({
+            presiding_officer_default: "",
+            minutes_recorder_default: "other_staff",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
       } finally {
         await app.end();
       }
