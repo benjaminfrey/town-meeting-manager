@@ -155,6 +155,15 @@ updateProfile: protectedProcedure
 `ctx.actor()`. `translateAuthorizationErrors` still does the FORBIDDEN mapping for both forms; that
 part of the item was correct and is unchanged.
 
+**Parked, not closed:** `requireActor`'s generic-plus-conditional-tuple type check (see its own doc
+comment in `trpc.ts`) closes the realistic accidental path — `requireActor(isAdmin)` and
+`requireActor(isBoardMember)` both fail to compile — but a predicate explicitly WIDENED to
+`(actor: Actor) => void`, or `as`-cast at the call site, still passes silently, because that is
+ordinary TypeScript structural typing rather than a hole this file's mechanism can close. Ruled real
+but low-priority in Task 2's review: closing it needs a nominal brand on `assertCanX`'s return type
+across roughly 46 assert functions, priced and deliberately declined rather than spent here — noted
+so a future wave does not spend a round rediscovering the option instead of finding this sentence.
+
 **Board-scoped rules** — `.use(requireBoardPermission(code, boardIdFrom()))` before `.input()`,
 which now WORKS at that position only because of a matching fix: `requirePermission`'s board
 extractor used to read `opts.input`, which probe 2 shows is `undefined` before `.input()` runs — a
@@ -177,6 +186,39 @@ on the POST-validation one (from `input`, after `.input()` parses). Those are th
 for every board-scoped procedure in this repo. They would NOT be the same if an input schema ever
 applied `.transform()` to the board id field — the guard would authorize one board while the
 resolver acted on another. **Do not transform a value a guard authorizes on.**
+
+**Two more write-guard shapes shipped this wave (Task 3), and neither fits the two named above.**
+Both belong here rather than staying visible only in one router's own header comment, because the
+next wave's author is the one who needs to find them.
+
+**A subject-carrying middleware.** `assertCanUpdateUserAccount` in `rules.ts` does not fit
+`requireActor`'s `(actor: Actor) => R` shape — it takes a second argument,
+`subject: { userAccountId, columns }`, because its self-branch authorizes the ROW ("is this the
+caller's own account?"), not the actor alone. `packages/api/src/trpc/routers/person.ts`'s
+`updateGovTitle` (~line 186) handles this with `requireOwnAccountColumns`, a one-off local
+middleware — not a new export on `trpc.ts`; nothing else in the app needs this exact shape yet, and
+that file's own header warns that being wrong there is "wrong 70 times over." Declared before
+`.input()`, it reads `userAccountId` off the UNVALIDATED body via `getRawInput()` — the identical
+mechanism `requireBoardPermission`/`boardIdFrom` already use for a board id — and supplies `columns`
+as a compile-time constant per call site, never derived from input. **This is the example to send a
+wave-3 author who has a rule keyed on something other than the actor alone:** the board-scoped form
+below is still unexercised outside its own tests, but this shape is not — it is live, in `person.ts`,
+today.
+
+**A write with no `assertCan*` at all, correctly.** `packages/api/src/trpc/routers/notification-preference.ts`'s
+`setMine` carries no guard, and that is deliberate too — but for a different reason than `board.ts`'s
+"tenancy is enough" reads above. `setMine` writes a person's OWN notification preferences, and
+`person_id` is taken from `ctx.tenant.personId` — the caller's own bridged session — never from the
+request body. There is no `personId` input field a caller could substitute, so scoping holds by
+construction; an application-level `assertCan*` check would add nothing on top of "there is nothing
+to authorize against." **Read the rule above ("A write gets the matching `assertCan*` rule … If the
+rule does not exist, add it there") as conditional on there being something to authorize, not as
+unconditional.** An author with a genuinely self-scoped write who follows it literally has two ways
+to go wrong: invent a rule that only duplicates what construction already guarantees, or — the
+dangerous branch — add a `personId` input parameter so there is something to authorize against,
+which reopens exactly the hole this design closes. Check first whether the write's own scoping value
+comes from `ctx.tenant` rather than client input; if it does, no guard is the correct answer, and
+`notification-preference.ts`'s own header states the reasoning in full.
 
 **Row-level rules stay in the resolver by necessity, unchanged from before.** "These minutes are
 still a draft" cannot be decided before the row is read. `rules.ts` provides three shapes for
@@ -232,11 +274,16 @@ until Task 5 tightened it — see that procedure's own doc comment. The
 `PermissionCode` form (`requirePermission`) declared before `.input()` is exercised too, in
 `require-permission.test.ts`'s synthetic router, including its own reorder pin — but has **zero
 call sites in a real procedure**; every real Actor-only write so far is an admin gate
-(`requireActor`), not a delegable code. The board-scoped form
-(`requireBoardPermission`/`boardIdFrom`/`getRawInput()`) is fixed and covered by a dedicated test
-proving it resolves a board and refuses correctly at the corrected position, but still has **zero
-call sites outside tests** — no procedure in this repo writes anything board-scoped yet. The first
-wave to add one should expect to amend this item again, not assume it settled.
+(`requireActor`), not a delegable code. The board-SCOPED form specifically
+(`requireBoardPermission`/`boardIdFrom` keyed to one of the 18 `BOARD_SCOPED_CODES`) is fixed and
+covered by a dedicated test proving it resolves a board and refuses correctly at the corrected
+position, but still has **zero call sites outside tests** — no procedure in this repo authorizes
+anything board-scoped yet. The first wave to add one should expect to amend this item again, not
+assume it settled. **The underlying `getRawInput()` TECHNIQUE this form popularized is a different
+claim and is no longer test-only** — `person.ts`'s `requireOwnAccountColumns` (the subject-carrying
+shape documented above) reads a different field off `getRawInput()` the identical way, for a
+different reason, and ships in a real procedure today. Do not read "zero call sites outside tests"
+as covering the mechanism in general; it is scoped to the board-scoped form specifically.
 
 **The example files a reader lands on now match this item's own rule.** `board-scope.test.ts`'s
 four board-scoped procedures and `require-permission.test.ts`'s `editAgenda`/`scheduleMeeting` used
@@ -482,6 +529,32 @@ _Found the hard way in Task 4: four writers — `EditBoardDialog`, `ArchiveBoard
 while the screen had moved to tRPC's key. A rename left the old name on screen for the full 60s
 `staleTime`, and a saved notice template came back reverted._
 
+### This rule is now a test, not just a paragraph
+
+This exact rule was violated three more times after Task 4 named it — blocking review in Tasks 2, 3
+and 5 — by implementers who had all read this item. Naming a rule in a document a human has to
+remember to re-check is not enough; `packages/web/src/lib/__tests__/cache-key-parity.test.ts` checks
+it mechanically, on every `npx turbo run test`, and fails with a filename instead of waiting for a
+reviewer's grep.
+
+What it checks: for every `invalidateQueries(` call in a non-test file, if the call's own argument
+names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (currently
+`towns`/`boards`/`persons`), the same file must also call the matching `trpc.<router>.pathFilter()`
+somewhere. The match is scoped to roughly 250 characters measured from inside the `invalidateQueries(`
+call itself, not the whole file — a whole-file version of this check raises 12 false positives at
+HEAD (files that read a migrated key in a `useQuery` far from an unrelated `invalidateQueries()`
+call); the windowed version raises zero.
+
+Validated against `git archive` snapshots of six real commits from this wave, not assumed: it
+reproduces two of the three blocking findings a human reviewer found by hand, by file, at the commit
+each shipped — `TownSealUpload.tsx`/`settings.minutes-workflow.tsx` at `841f4db`, and
+`AddBoardDialog.tsx` (its only violation) at `7a17fa6` — and raises zero violations at HEAD (`2d78964`).
+It does **not** reproduce the third named finding, "the four person writers at `3b22df8`" — and that
+is not a scoping miss: by that commit those files already called `trpc.person.pathFilter()`; what was
+actually missing and fixed at `4f8b3fc` was the WRITER TEST pinning each call (item 8's "pin the
+writers, not just the readers"), a different failure mode from a missing invalidation call. See the
+Known-gaps entry below for the untuned second half that would close that gap too.
+
 ---
 
 ## 8. Mock the transport, not the proxy
@@ -627,10 +700,16 @@ Verified by mutation: deleting `ArchiveBoardDialog`'s `pathFilter()` line turns 
 `EditBoardDialog`, `NoticeTemplateEditor` and `MinutesWorkflowEditor` now have the same pin, in
 `__tests__/EditBoardDialog.test.tsx`, `__tests__/NoticeTemplateEditor.test.tsx` and
 `__tests__/MinutesWorkflowEditor.test.tsx` — all three verified the same way: delete the
-`pathFilter()` line, watch the new test go red, restore it.
+`pathFilter()` line, watch the new test go red, restore it. **Two more joined in this wave's fix
+round:** `AddBoardDialog.tsx`, pinned in `__tests__/AddBoardDialog.test.tsx`, and
+`routes/settings.meeting-notices.tsx`, pinned in `routes/__tests__/settings.meeting-notices.test.tsx`
+— both had shipped their `pathFilter()` call without the pin and were caught in review; both
+verified the identical way. Six writers carry the pin as of `2d78964`. That roster is what goes
+stale first, not the pin discipline itself — re-run `grep -rl "\.pathFilter()" packages/web/src`
+rather than trust the count above staying current.
 
 **Write the pin the same commit a writer's `pathFilter()` call lands, not on a later wave.** These
-four calls already exist and already serve an already-migrated screen; deferring the pin to
+six calls already exist and already serve an already-migrated screen; deferring the pin to
 "whichever wave migrates \[the screen]" is what let a reviewer delete one and get 947 green tests
 in the meantime. A wave that adds a new writer against an already-migrated read owes it the pin in
 the same commit, for the identical reason.
@@ -711,30 +790,34 @@ publishes its own `AuthContext`, created in `test/mocks/auth-mock.ts`. `useCurre
 `user:` configures a context the component under test never reads.
 
 This is not a hypothesis. Quoting the greps rather than the bare numbers, because the bare numbers
-are exactly what drifted here — twice, in two different documents, disagreeing with each other and
-with the tree:
+are exactly what drifted here — **three times now**, not twice: this section's own previous count
+(17 / 8 / 3) was already stale by the end of this wave, which alone added 18 new test files. Re-run
+these before citing them anywhere else; the figures below are current as of `2d78964` and nothing
+pins them to stay that way — the commands are what stay true:
 
 ```
 $ grep -rl "renderWithProviders(" packages/web/src | grep -v test/render.ts | wc -l
-17
+35
 $ grep -rl 'vi.mock("@/hooks/useCurrentUser"' packages/web/src | grep -v test/render.ts | wc -l
-8
+12
 $ grep -rl 'vi.mock("@/hooks/useCurrentUser"' packages/web/src | grep -v test/render.ts \
     | xargs grep -l 'vi.mock("@/providers/AuthProvider"' | wc -l
 3
 ```
 
-The second grep, run unfiltered against `test/render.ts`, answers 9 — that file's own doc comment
+The second grep, run unfiltered against `test/render.ts`, answers 13 — that file's own doc comment
 above quotes the `vi.mock` call as prose, and a bare grep cannot tell a comment from code. Exclude
 it. (The first grep needs the same exclusion for the same reason: `render.ts` also quotes
 `renderWithProviders(...)` in its own doc comments and defines the function itself, so it matches
 without being a caller.)
 
-Of the 17 files that call `renderWithProviders`, not one reaches `useCurrentUser` through
-`MockAuthProvider`: the files that depend on identity mock the hook directly (8 repo-wide), and the
-3 that also mock `@/providers/AuthProvider` return a literal from `useAuth` rather than routing to
-`useMockAuth`. `useMockAuth` has **zero callers** outside its own module. `MockAuthProvider` is
-inert everywhere it is used — see the Known gaps entry below for what "everywhere" is countable as.
+Of the 35 files that call `renderWithProviders` (up from 17 when this item was first written — this
+wave's 18 new test files roughly doubled it), not one reaches `useCurrentUser` through
+`MockAuthProvider`: the files that depend on identity mock the hook directly (12 repo-wide, up from
+8), and the 3 that also mock `@/providers/AuthProvider` return a literal from `useAuth` rather than
+routing to `useMockAuth` — that count has not moved. `useMockAuth` has **zero callers** outside its
+own module. `MockAuthProvider` is inert everywhere it is used — see the Known gaps entry below for
+what "everywhere" is countable as.
 
 The rule for Phase E is therefore one mechanism, the one that works:
 
@@ -992,17 +1075,31 @@ runs.
 - `TestHandlers` rejects a missing field but accepts an extra one (item 8).
 - `test/trpc.ts`'s `TestErrorCode` union had five members, not every code a real procedure can
   answer — found in Task 5 writing `SetPortalAddressModal.test.tsx`, the first test in this codebase
-  to simulate a MUTATION's error response rather than a query's. `trpcTestError("CONFLICT")`
-  typechecked fine (the string is not itself constrained at the call site) and failed at runtime with
-  `TransformResultError: Unable to transform response from server` — `@trpc/client`'s own
-  `transformResult` requires a numeric `error.error.code`, and `JSONRPC_CODE`/`HTTP_STATUS` being
-  `Record<TestErrorCode, number>` had no `CONFLICT` entry to look up, so the envelope built
-  `{ code: undefined, ... }`. Not a compile-time gap — nothing in `TestHandlers`' own typing catches
-  an error CODE the way it catches an output SHAPE. Fixed by adding `CONFLICT` to the union and both
-  records (`-32009` / `409`, from `@trpc/server`'s own `TRPC_ERROR_CODES_BY_KEY`); the same shape of
-  gap exists for every other `TRPC_ERROR_CODE_KEY` this harness does not yet list
-  (`PAYMENT_REQUIRED`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, …) — add the next one the same
-  way, at the point a real procedure needs a test to simulate it, not preemptively.
+  to simulate a MUTATION's error response rather than a query's. **Corrected here after the review
+  round: the first version of this bullet claimed `trpcTestError("CONFLICT")` "typechecked fine (the
+  string is not itself constrained at the call site)" and called the gap "not a compile-time gap."
+  Both halves are false, and `test/trpc.ts`'s own doc comment on `TestErrorCode` now says so — this
+  bullet previously contradicted it.** `trpcTestError`'s parameter is plainly typed `TestErrorCode`,
+  and `TestHandlers`' own typing infers a handler's input/output from the real router, so a string
+  literal outside the union was never going to compile; verified by mutation, removing `| "CONFLICT"`
+  from the union answers `TS2345: Argument of type '"CONFLICT"' is not assignable to parameter of
+type 'TestErrorCode'` at the `SetPortalAddressModal.test.tsx` call site and `TS2353: ... 'CONFLICT'
+does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself — the check is in
+  the function signature, not in `TestHandlers`, and it fires at the call site. What actually
+  happened: `SetPortalAddressModal.test.tsx` was written and run with `vitest` alone, which does not
+  evaluate types, so the missing union member surfaced instead as a confusing RUNTIME failure —
+  `@trpc/client`'s own `transformResult` throwing `TransformResultError` ("Unable to transform
+  response from server"), because `code: undefined` reached it before the type question was ever
+  asked. Seeing a confusing runtime failure and concluding something about the type system without
+  running `tsc` first is exactly the mistake item 8's "floor" section warns against — a green vitest
+  run is not a typecheck, and a RED vitest run is not a type verdict either. The union genuinely was
+  incomplete, though — that part of the original diagnosis holds, and closing it is real work, not a
+  false alarm: fixed by adding `CONFLICT` to the union and both records (`-32009` / `409`, from
+  `@trpc/server`'s own `TRPC_ERROR_CODES_BY_KEY`) — a three-place edit (the union, `JSONRPC_CODE`,
+  `HTTP_STATUS`) — and the same shape of gap exists for every other `TRPC_ERROR_CODE_KEY` this
+  harness does not yet list (`PAYMENT_REQUIRED`, `PRECONDITION_FAILED`, `TOO_MANY_REQUESTS`, …) — add
+  the next one the same way, at the point a real procedure needs a test to simulate it, not
+  preemptively.
 - `MockAuthProvider` is directly named in 4 files (`grep -rl "MockAuthProvider" packages/web/src`:
   `test/render.ts` and `test/mocks/auth-mock.ts`, where it is defined and wraps every render, plus
   `PermissionGate.test.tsx` and `boards.$boardId.test.tsx`, the two tests that reach it by name). It
@@ -1010,6 +1107,16 @@ runs.
   implicitly — `render.ts` wraps every render in it unconditionally — so retiring it touches every
   caller, not only the 4 that name it.
 - `router-wiring.test.ts` pins only the procedure names it lists.
+- **`cache-key-parity.test.ts` (item 7) checks only that a `pathFilter()` call exists in the file —
+  not that every `pathFilter()`-calling writer is itself pinned by a writer test (item 8).** That
+  second check — "does every file calling `trpc.<router>.pathFilter()` have a test that asserts the
+  invalidation actually happens" — is the one that would reach "the four person writers at
+  `3b22df8`" (the finding the shipped check above cannot). Deliberately not shipped this round: an
+  earlier pass at it was reported to raise three false positives at HEAD and to need tuning before it
+  could ship without teaching people to ignore it (item 13's exact concern with a check that cries
+  wolf). Not reattempted here either — this task's brief named it explicitly out of scope. Available
+  as a starting point for whichever wave next hits this gap, not as a finished check; re-derive the
+  false-positive count rather than trust three.
 - `boards.$boardId.tsx` still reads two things through `@/lib/supabase`: town settings (the
   Overview "effective settings" rows, and the defaults passed to
   `EditBoardDialog`/`MinutesWorkflowEditor`) and the agenda template count. **Not the same gap for
@@ -1026,9 +1133,11 @@ runs.
   Supabase, all named in the file's own `// TODO(phase-e-wave-2)` marker: `meetingRows` and
   `minutesDocs` have no router at all (`meeting`, `minutesDocument`); `boardRows` — the "which board
   is meeting" picker — has a near-miss in `board.list` (added by Task 4, extended by Task 5) that is
-  DELIBERATELY not used, because `board.list` does not filter `archived_at` (by design — its one
-  existing caller, `settings.meeting-notices.tsx`, needs archived boards visible for the "copy
-  template" picker) while the picker's original Supabase query does. Reusing `board.list` here would
+  DELIBERATELY not used, because `board.list` does not filter `archived_at` (by design — its two
+  existing callers both need archived boards visible: `settings.meeting-notices.tsx`, for the "copy
+  template" picker, and `ProgressChecklist.tsx`, for its totalSeats/notice-template-completion
+  aggregates — the second joined `board.list` in the same task, Task 5, that wrote this bullet)
+  while the picker's original Supabase query does. Reusing `board.list` here would
   silently start offering archived boards as places to schedule a NEW meeting — a regression smuggled
   into a read migration, the exact failure mode item 1's "the query you are replacing is a
   specification" language exists to prevent. The board picker still needs its own procedure (an
