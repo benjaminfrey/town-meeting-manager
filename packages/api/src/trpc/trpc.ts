@@ -343,8 +343,60 @@ export function requireBoardPermission(
  * therefore no `getRawInput()` read; it only needs the actor.
  *
  *     .use(requireActor(assertCanUpdateTown))
+ *
+ * ─── Why `assert` cannot be a boolean predicate, and how that is enforced ──
+ *
+ * A caller could reach for `isAdmin`/`isBoardMember` from `permission.ts`
+ * instead of an `assertCanX` — they are exactly the shape someone typing
+ * "require an admin" would grab, and this doc comment used to invite that
+ * reading. The type MUST refuse them: `assert`'s return value is discarded
+ * (only a throw refuses the caller), so `requireActor(isAdmin)` would
+ * silently call `isAdmin(actor)`, throw the boolean away, and let EVERY
+ * caller through — a guard that refuses nobody, with no runtime error and
+ * no failing test, because nothing ever inspects the return value to notice
+ * it was never a `void`.
+ *
+ * A plain `assert: (actor: Actor) => void` parameter does NOT catch this.
+ * TypeScript special-cases a `void`-returning function TYPE POSITION to
+ * accept a function that returns anything (the same rule that lets
+ * `array.forEach(i => arr.push(i))` type-check even though `.push` returns a
+ * number) — so `isAdmin`, whose real return type is `boolean`, is
+ * ASSIGNABLE to `(actor: Actor) => void` and no error is raised. Measured
+ * directly: `protectedProcedure.use(requireActor(isAdmin)).mutation(...)`
+ * compiled clean under `tsc --noEmit` before this fix.
+ *
+ * The second, conditional parameter below closes that hole WITHOUT touching
+ * that special case (a plain `(actor: Actor) => R` parameter still lets `R`
+ * infer normally — `boolean` for `isAdmin`, `void` for an `assertCanX`)
+ * because the return type is never written as a literal `=> void` for
+ * TypeScript to special-case:
+ *
+ *   - `R extends void` — an ordinary type relationship, not a function's
+ *     return-position assignability rule — is `true` only for `void` or
+ *     `undefined`, and `false` for `boolean`, `string`, or anything else.
+ *   - When `R` is `void`, the second parameter's type is the empty tuple
+ *     `[]`: nothing extra to pass, so a real `assertCanX` call site is
+ *     unaffected.
+ *   - When `R` is anything else, the second parameter's type is a
+ *     ONE-ELEMENT tuple carrying an explanatory string literal — a REQUIRED
+ *     argument nothing supplies, so `requireActor(isAdmin)` fails with
+ *     `TS2554: Expected 2 arguments, but got 1`. It is not possible to
+ *     satisfy that tuple type by accident; the only way past it is to stop
+ *     passing a value-returning function.
+ *
+ * Verified as a real compile error, not assumed: see the `@ts-expect-error`
+ * pin in `packages/api/src/trpc/__tests__/require-actor-type.test.ts`,
+ * checked by `npx turbo run typecheck --force` (vitest never evaluates
+ * `@ts-expect-error`; only `tsc` does).
  */
-export function requireActor(assert: (actor: Actor) => void) {
+export function requireActor<R>(
+  assert: (actor: Actor) => R,
+  ..._assertMustReturnVoid: R extends void
+    ? []
+    : [
+        error: "requireActor's assert function must throw-or-return-void, like assertCanUpdateTown — not return a value that gets silently discarded. A boolean predicate such as isAdmin/isBoardMember/canX would compile here and then refuse nobody at runtime.",
+      ]
+) {
   return middleware(async (opts) => {
     const ctx = opts.ctx;
     if (!ctx.actor) {

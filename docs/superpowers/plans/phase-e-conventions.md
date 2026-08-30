@@ -184,16 +184,18 @@ SELECT — `canX` answers, `assertCanX` throws, `visibleX` filters — so pick r
 list endpoint that threw on the first invisible row would be unusable, and a detail endpoint that
 filtered would return 200 with nothing.
 
-**The refusal-test rule, in its enforceable form (item 13 note, restated here because it is
-specific to this item's own defect):** A refusal test must assert FORBIDDEN on input that PARSES.
-Input that fails to parse can answer BAD_REQUEST for reasons that have nothing to do with whether
-the guard ran, so a test built on it cannot tell the two apart. This is not a hypothetical either:
-the first version of `town.updateProfile`'s own regression-pin test used input that failed to
-parse, and a reviewer measured it directly — with `assertCanUpdateTown` deleted entirely, "refuses a
-caller who is not an administrator" correctly went red, but the invalid-input test **stayed
-green**, because BAD_REQUEST was the answer whether the guard existed or not. "Use valid input" as
-prose is not machine-checkable; "delete the guard and watch every refusal test go red" (item 13) is
-— but only if the test's input would otherwise have succeeded.
+**The refusal-test rule, restated (it was over-strict the first time — see item 13 for the full
+correction, which is where this belongs since it is general test discipline, not specific to this
+item's defect):** a refusal test must assert **FORBIDDEN**. That is the whole rule. An earlier
+version of this item said "on input that parses," which is a heuristic that happened to fit the
+first symptom found, not the actual discriminator — and stated as an absolute it forbids the
+ordering pin two paragraphs down, which is deliberately built on input that does NOT parse, because
+that is the only way to catch a guard declared in the wrong position. What actually distinguishes a
+real pin from a vacuous one is the asserted CODE: a test asserting `BAD_REQUEST` can stay green with
+the guard fully deleted (the parser alone still produces `BAD_REQUEST` for bad input, guard or no
+guard) — which is exactly how the first version of `town.updateProfile`'s regression-pin test
+stayed green when a reviewer deleted `assertCanUpdateTown` entirely. A test asserting `FORBIDDEN`
+cannot pass that way, regardless of whether its input happens to parse.
 
 **What this item originally got wrong.** Not "resolver versus middleware" — that framing named one
 instance of the defect (the resolver form is textually always after `.input()`, since `.mutation()`
@@ -205,15 +207,25 @@ to fail — `setPortalAddress` itself is not yet converted to the middleware for
 (see its own doc comment in `town.ts` for why, and that it still owes the conversion).
 
 Status today: the Actor-only middleware form (`requireActor`) is exercised — the four `town.*`
-mutations, with tests, each guard re-verified by deletion after the conversion. The `PermissionCode`
-form (`requirePermission`) declared before `.input()` is exercised too, in
-`require-permission.test.ts`'s synthetic router, including the regression pin above — but has
-**zero call sites in a real procedure**; every real Actor-only write so far is an admin gate
+mutations, with tests, each guard re-verified by deletion after the conversion, AND `updateProfile`
+specifically carries a second pin that catches a REORDER (`.use()` moved back after `.input()`), not
+only a deletion — see item 13 for why that distinction matters and could not be skipped. The
+`PermissionCode` form (`requirePermission`) declared before `.input()` is exercised too, in
+`require-permission.test.ts`'s synthetic router, including its own reorder pin — but has **zero
+call sites in a real procedure**; every real Actor-only write so far is an admin gate
 (`requireActor`), not a delegable code. The board-scoped form
 (`requireBoardPermission`/`boardIdFrom`/`getRawInput()`) is fixed and covered by a dedicated test
 proving it resolves a board and refuses correctly at the corrected position, but still has **zero
 call sites outside tests** — no procedure in this repo writes anything board-scoped yet. The first
 wave to add one should expect to amend this item again, not assume it settled.
+
+**The example files a reader lands on now match this item's own rule.** `board-scope.test.ts`'s
+four board-scoped procedures and `require-permission.test.ts`'s `editAgenda`/`scheduleMeeting` used
+to declare `.input().use(guard)` — the preemptable order — because they predate this item's
+rewrite and nothing about what THEY test (board-override resolution) depends on declaration order.
+They were reordered in the same fix round that added the reorder pin above, specifically because an
+author who greps this codebase for a working example and copies the first board-scoped procedure
+they find should not land on the wrong order by accident.
 
 **If the action is one of the 18 board-scoped codes, the guard takes a `BoardScope` and the
 procedure must resolve the board.** The set is derived, not hand-written —
@@ -808,6 +820,35 @@ Two of those were found by mutating something that had just been written and was
 the tests passed, and it checked **nothing** — that type is nested, so `"board.detail"` was never
 a key and `inferProcedureInput` of a sub-router is `never`. The tell was the error message naming
 `board` rather than `board.detail`. The harness scope bug was the same shape: green, and untrue.
+
+A seventh, from Task 2's fix round (wave 1): the same wave's own regression-pin test for
+`town.updateProfile` asserted `BAD_REQUEST` on input that failed to parse, and "delete the guard
+and watch it go red" was never actually run against it before it shipped. A reviewer ran it: with
+`assertCanUpdateTown` deleted entirely, the test **stayed green**, because the parser alone still
+answers `BAD_REQUEST` for bad input whether or not a guard exists to run first. This is what item 2
+now states as the general rule and repeats here because test discipline is where people look for
+it: **a refusal test must assert `FORBIDDEN`, full stop.** Not "on input that parses" — that
+qualifier was itself an over-correction from the same fix round (see item 2), and stated as an
+absolute it would have forbidden the very test that fixes this: the reorder pin below is built on
+input that does NOT parse, on purpose, because that is the only way to catch a guard declared after
+`.input()` instead of before it.
+
+**A guard can be deleted-and-caught while still being misplaced, and item 13's own mutation does
+not by itself tell the two apart.** Deleting a guard proves it existed. It says nothing about WHERE
+it was declared, because deletion removes the guard from both a correctly-ordered and a
+wrongly-ordered procedure identically. The same reviewer proved this on `town.updateProfile`
+directly: moved its `.use(requireActor(...))` from before `.input()` to after it — reproducing the
+exact shipped defect on live code, not a synthetic router — and ran the whole API package.
+**42 files, 565 tests, all green.** Every existing refusal test on that procedure used input that
+parses, so none of them could see the reorder; the parser still ran and, for valid input, still
+succeeded either way. The fix was a SECOND kind of pin, not a stronger version of the first: a test
+whose input does NOT parse, so that a guard which no longer runs before the parser is answered by
+the parser (`BAD_REQUEST`) instead of the guard (`FORBIDDEN`) — see `town.updateProfile`'s "answers
+FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)" in
+`packages/api/src/trpc/routers/__tests__/town.test.ts`, and the equivalent in
+`require-permission.test.ts`'s synthetic router. Verify a reorder pin the way the deletion pin is
+verified — move the `.use()` after `.input()`, confirm the specific test (and only that shape of
+test) goes red, restore.
 
 If your mutation does not go red, you have not written a test. You have written a comment that
 runs.

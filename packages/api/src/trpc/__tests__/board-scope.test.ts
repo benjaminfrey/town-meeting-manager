@@ -376,21 +376,25 @@ const codeFor = (action: PermissionAction): PermissionCode =>
 
 /** A router covering the codes the two templates grant that have a guard. */
 const templateRouter = router({
+  // `.use(...)` declared BEFORE `.input(...)` on all four — the position
+  // conventions item 2 requires (Task 2's fix round: `.input().use(guard)`
+  // is the preemptable order this test suite must not model, since item 2
+  // points readers at real files, not only prose, for the correct shape).
   editAgenda: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }))
     .use(requireBoardPermission("A2", boardIdFrom()))
+    .input(z.object({ boardId: z.string().uuid() }))
     .mutation(() => "ok" as const),
   recordAttendance: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }))
     .use(requireBoardPermission("M2", boardIdFrom()))
+    .input(z.object({ boardId: z.string().uuid() }))
     .mutation(() => "ok" as const),
   recordMotion: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }))
     .use(requireBoardPermission("M3", boardIdFrom()))
+    .input(z.object({ boardId: z.string().uuid() }))
     .mutation(() => "ok" as const),
   editMinutes: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }))
     .use(requireBoardPermission("R1", boardIdFrom()))
+    .input(z.object({ boardId: z.string().uuid() }))
     .mutation(() => "ok" as const),
 
   /**

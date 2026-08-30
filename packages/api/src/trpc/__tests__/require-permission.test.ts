@@ -47,9 +47,13 @@ const testRouter = router({
   // Board-scoped: A2 on agenda items. A2 used to be checked globally here,
   // which is the shape `TEMPLATE_BOARD_SPECIFIC_STAFF` breaks on — it grants
   // A2 per board and nothing globally.
+  // `.use(...)` declared BEFORE `.input(...)` — the position conventions
+  // item 2 requires. Task 2's fix round reordered this (it used to be
+  // `.input().use()`, the preemptable shape) because item 2 points readers
+  // at real files as the copyable example, not only at its own prose.
   editAgenda: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }))
     .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
+    .input(z.object({ boardId: z.string().uuid() }))
     .mutation(() => "edited" as const),
 
   // A code that is NOT board-scoped: C2, the notification settings. No
@@ -61,8 +65,8 @@ const testRouter = router({
 
   // Board-scoped: A1 on meeting creation, board read from the input.
   scheduleMeeting: protectedProcedure
-    .input(z.object({ boardId: z.string().uuid().optional() }))
     .use(requireBoardPermission("A1", boardIdFrom(), { action: "to schedule a meeting" }))
+    .input(z.object({ boardId: z.string().uuid().optional() }))
     .mutation(() => "scheduled" as const),
 
   // Task 2 fix round — the guard declared BEFORE `.input()`, which is the

@@ -296,23 +296,26 @@ describe("town.updateProfile", () => {
    * (or rejected) the body, so a non-admin who ALSO sent invalid data got
    * the parser's answer, never the guard's. `updateProfile` is now
    * `.use(requireActor(assertCanUpdateTown)).input(...)` — the guard
-   * declared BEFORE the parser — so this test now sends input that fully
-   * PARSES and asserts FORBIDDEN, per the enforceable form of the rule:
+   * declared BEFORE the parser.
    *
-   *   A refusal test must assert FORBIDDEN on input that parses. Input that
-   *   fails to parse can answer BAD_REQUEST for reasons that have nothing to
-   *   do with whether the guard ran, so a test built on it cannot tell the
-   *   two apart — which is exactly how the first version of this test
-   *   stayed green when a reviewer deleted `assertCanUpdateTown` entirely.
+   * The enforceable rule (corrected in review — see item 2 and item 13): a
+   * refusal test must assert FORBIDDEN, full stop. "On input that parses"
+   * was the first draft of this rule and it is too strong: it would forbid
+   * the NEXT test below, which is deliberately built on input that does
+   * NOT parse, because that is the only way to catch a reordered guard (see
+   * that test's own comment). What actually distinguishes a real pin from a
+   * vacuous one is not the input — it is the ASSERTED CODE: a test that
+   * asserts `BAD_REQUEST` can stay green with the guard fully deleted (the
+   * parser alone still produces `BAD_REQUEST` for bad input, guard or no
+   * guard), which is exactly how the first version of THIS test failed to
+   * catch its own deletion. A test that asserts `FORBIDDEN` cannot.
    *
-   * Deliberately distinct from "refuses a caller who is not an
-   * administrator" above only in NAME and in what it documents (the
-   * historical defect and its fix) — the assertion is intentionally the
-   * same, because that is the point: once the guard runs before the parser,
-   * "the input also happens to be invalid" stops being a special case worth
-   * a different answer.
+   * This one uses valid input, so it is a clean pin for "the guard exists
+   * and ran" — nothing about the parser can produce FORBIDDEN, so if this
+   * passes, the guard is what answered. It does NOT, by itself, prove the
+   * guard is positioned before `.input()` — see the next test for that.
    */
-  it("answers FORBIDDEN on valid input from a refused caller (the ordering regression pin)", async () => {
+  it("answers FORBIDDEN on valid input from a refused caller (proves the guard ran)", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -324,6 +327,54 @@ describe("town.updateProfile", () => {
         const err = await expectTrpcError(() =>
           caller.town.updateProfile({
             name: "Newcastle Renamed Again",
+            state: "NH",
+            municipality_type: "city",
+            population_range: "over_10000",
+            contact_name: "Someone Else",
+            contact_role: "Impostor",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The ordering pin, on the REAL procedure — not only on the synthetic
+   * router in `require-permission.test.ts`. Review finding: nothing in this
+   * file caught `updateProfile`'s `.use()` being moved back after
+   * `.input()` — the reviewer did exactly that, reproducing the shipped
+   * defect on live code, and ran the whole package: 565 tests, all green.
+   * The test above couldn't have caught it (valid input never reaches the
+   * parser's failure path either way), and neither could a plain
+   * "refuses a non-admin" test with any other valid payload.
+   *
+   * This test sends a non-admin caller AND input that fails validation (the
+   * `name` regex). With the guard correctly declared before `.input()`, the
+   * guard throws FORBIDDEN and the parser never runs at all — probe 1 in the
+   * fix brief showed this directly: `.use(guard).input(schema)` never
+   * reaches the parser when the guard refuses. If `.use()` is moved after
+   * `.input()`, the parser runs FIRST and answers BAD_REQUEST before the
+   * guard ever gets a chance — which is the exact regression this test
+   * exists to catch. Verified directly (fix round, not a permanent
+   * artifact): moved `updateProfile`'s `.use(...)` to after `.input(...)`
+   * and re-ran this file — this test went red with `BAD_REQUEST`, restored
+   * byte-identical. See the task report for the command and full output.
+   */
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.town.updateProfile({
+            name: "Newcastle (Invalid)",
             state: "NH",
             municipality_type: "city",
             population_range: "over_10000",
