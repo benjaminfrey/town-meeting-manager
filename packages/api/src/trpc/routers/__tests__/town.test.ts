@@ -9,16 +9,26 @@
  *
  * `town.detail` differs from `board.detail` in one way that matters for what
  * gets tested here: it takes no `townId` input. The row it resolves is
- * always `ctx.tenant.townId`, so there is no id for a caller to guess or
- * substitute, and no `NOT_FOUND`-for-a-foreign-row case to prove — that
- * whole class of attack does not exist for this procedure. What CAN still be
- * wrong is the tenant bridge itself: if `ctx.withTenant`/RLS scoping broke,
- * a caller could get back another town's row without ever asking for it.
- * `does not return another town's profile` below is the shape that would
- * catch that.
+ * always `ctx.tenant.townId`, so there is no id for a CALLER to guess or
+ * substitute — the id-guessing class of attack `board.detail`'s `NOT_FOUND`
+ * closes (conventions item 3) does not exist for this procedure. What CAN
+ * still be wrong is the tenant bridge itself: if `ctx.withTenant`/RLS
+ * scoping broke, a caller could get back another town's row without ever
+ * asking for it (`does not return another town's profile` below), OR the
+ * bridge could hand this procedure a `townId` that names no real town at
+ * all — the exact failure mode the commit immediately preceding this phase
+ * ("Bridge a Better Auth session to app.town_id, and refuse when it cannot")
+ * exists to guard against upstream. `answers NOT_FOUND when the tenant
+ * bridge names a town that does not exist` below proves this procedure's own
+ * half of that: `contextFor()` only builds a `TrpcContext` shape, it does
+ * not require its `town`/`seeded` arguments to correspond to real rows, and
+ * `town.detail` never calls `ctx.actor()` — so a hand-built context carrying
+ * a never-seeded `townId`, with no `seedTown`/`seedActor` at all, reaches
+ * the procedure exactly as a corrupted bridge would.
  */
 
 import { describe, it, expect } from "vitest";
+import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { withTestDb, connectAsAppRole } from "../../../test/db-harness.js";
 import {
@@ -144,6 +154,33 @@ describe("town.detail", () => {
         ]);
 
         expect(fromBoardMember).toEqual(fromAdmin);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND when the tenant bridge names a town that does not exist", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        // Deliberately no `seedTown`/`seedActor`: this simulates a corrupted
+        // or stale tenant bridge, not an attacker-supplied id (there is none
+        // to supply — see the file header). `contextFor()` only needs its
+        // `town`/`seeded` arguments to have the right SHAPE, and
+        // `town.detail` never calls `ctx.actor()`, so nothing here forces a
+        // real row to exist first.
+        const ghostTown: TownFixture = {
+          townId: randomUUID(),
+          boardId: randomUUID(),
+          otherBoardId: randomUUID(),
+        };
+        const caller = appRouter.createCaller(
+          contextFor(db, ghostTown, { personId: randomUUID(), userAccountId: randomUUID() }),
+        );
+
+        await expect(caller.town.detail()).rejects.toThrow(/NOT_FOUND/);
       } finally {
         await app.end();
       }
