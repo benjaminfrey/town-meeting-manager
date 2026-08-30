@@ -316,11 +316,13 @@ every query in the cache, which hides exactly the bug this item is about: a writ
 invalidates everything is indistinguishable from a writer that invalidates the right key, so the
 day someone narrows it, the missing key surfaces as a bug in a screen nobody touched.
 
-The one carve-out already in the tree, and it is a real one:
-`packages/web/src/lib/connection-error-handler.ts:54` calls bare `invalidateQueries()` after a
-Realtime reconnect. That is not a writer — nothing local changed; the client has no idea WHAT went
-stale while the socket was down, and "everything" is the correct answer. A connection-level
-recovery may invalidate globally. A mutation may not. Do not "fix" that handler on a grep.
+The one carve-out already in the tree, and it is a real one: `initConnectionErrorHandler` in
+`packages/web/src/lib/connection-error-handler.ts` calls bare `invalidateQueries()` in its
+`status === "SUBSCRIBED"` reconnect branch, after a Realtime reconnect. That is not a writer —
+nothing local changed; the client has no idea WHAT went stale while the socket was down, and
+"everything" is the correct answer. A connection-level recovery may invalidate globally. A mutation
+may not. Do not "fix" that handler on a grep. (Cited by symbol, not line number — see item 1: a
+line number is correct only until the cited file's next edit.)
 
 _Found the hard way in Task 4: four writers — `EditBoardDialog`, `ArchiveBoardDialog`,
 `NoticeTemplateEditor`, `MinutesWorkflowEditor` — invalidated `queryKeys.boards.detail(boardId)`
@@ -486,6 +488,13 @@ If a payload genuinely cannot go through `installTRPCFetchStub`, it still carrie
 `satisfies inferProcedureOutput<...>` (or `satisfies RouterOutputs["router"]["procedure"]`, which
 `packages/web/src/lib/trpc.ts` exports for exactly this). A mocked payload with no `satisfies` is
 not reviewable.
+
+**A green vitest run is not a typecheck.** `satisfies inferProcedureOutput<...>` is checked by
+`tsc`, not by vitest — vitest transpiles and runs the file without ever evaluating a `satisfies`
+clause. Unit 0's own final fix wave shipped two pin tests with an under-typed `setQueryData`
+payload: vitest passed both, and only `npx turbo run typecheck --force`, run as its own step,
+caught the gap. Run typecheck separately every time; a passing test run says nothing about whether
+a payload still matches the procedure's real shape.
 
 ---
 
@@ -681,6 +690,12 @@ This is a live habit in this repo because the alternative has already happened h
 
 Unit 0 added a fifth to the list before it was fixed: 940 tests that could not notice a deleted
 cache invalidation (item 8).
+
+A sixth, also from unit 0's own final fix wave: two pin tests carried an under-typed `setQueryData`
+payload, and vitest passed both. A green vitest run is not a typecheck — vitest never evaluates a
+`satisfies` clause, it only runs the code around it. Only `npx turbo run typecheck --force`, run as
+its own step, caught the gap (see item 8's floor). Believing "tests pass" without also running
+typecheck is the same mistake as believing a mutation went red without watching it happen.
 
 A rewritten test is not a migrated test. The remaining Supabase-mocking test files are
 **rewritten**, not adapted — an adapted chainable mock is how each of the four above began.
