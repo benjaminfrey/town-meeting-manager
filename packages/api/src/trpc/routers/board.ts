@@ -1,18 +1,19 @@
 /**
- * Board reads, and — as of Task 4, wave 1 — the first two board writes.
+ * Board reads and writes.
  *
- * No permission guard on the three original reads (`detail`, `stats`,
- * `recentMeetings`) or on `list` below, deliberately: `board` carried a pure
+ * No permission guard on the reads (`detail`, `stats`, `recentMeetings`,
+ * `list`, `listActive`, `memberCount`), deliberately: `board` carried a pure
  * tenancy policy and nothing else, so any authenticated member of a town may
  * read that town's boards. `protectedProcedure` + `ctx.withTenant` is exactly
- * that rule. `copyNoticeTemplate` is the exception — it is a write, and gets
- * the matching admin gate, `assertCanUpdateBoard`, `.use(requireActor(...))`
- * before `.input()` per conventions item 2.
+ * that rule. `copyNoticeTemplate`, `insert` and `update` are the exceptions —
+ * they are writes, and get the matching admin gate (`assertCanUpdateBoard` or
+ * `assertCanInsertBoard`), `.use(requireActor(...))` before `.input()` per
+ * conventions item 2.
  *
  * A board that does not exist, or belongs to another town, answers NOT_FOUND
  * from every procedure here that names a specific board — `detail`, `stats`,
- * `recentMeetings`, and `copyNoticeTemplate`'s two board ids. That is a
- * deliberate, and enforced, convention: `detail`'s query already had to
+ * `recentMeetings`, `update`, and `copyNoticeTemplate`'s two board ids. That
+ * is a deliberate, and enforced, convention: `detail`'s query already had to
  * answer this question (a missing row), but `stats`'s correlated subqueries
  * and `recentMeetings`'s filtered scan do not — they degrade to `{0,0}` and
  * `[]` for an id that never existed just as readily as for a real board with
@@ -21,14 +22,38 @@
  * id that is not there. `assertBoardExists` below closes that gap for the two
  * counting procedures explicitly, and `copyNoticeTemplate` reuses it for its
  * source board — see that procedure's own doc comment for why its target
- * board needs no separate call to it.
+ * board needs no separate call to it. Exported (Task 1, wave 2) so
+ * `agenda-template.ts` can reuse the identical check for ITS board-scoped
+ * reads/writes rather than duplicating the query.
+ *
+ * ─── Task 1, wave 2 — the four markers wave 1 left ────────────────────────
+ *
+ * `listActive` and `memberCount` below answer two of the four
+ * `TODO(phase-e-wave-2)` markers wave 1 left naming procedures this task
+ * owes: `board.byTown` (`settings.town.tsx`) and `board.listByTown`
+ * (`StaffAccountFlow.tsx`) become `listActive`; `boardMember.countByTown`
+ * (`ProgressChecklist.tsx`) becomes `memberCount`. See each procedure's own
+ * doc comment for why. The third and fourth markers —
+ * `agendaTemplate.countForBoard` (`boards.$boardId.tsx`) and the write rules
+ * this task also owes (`assertCanInsert/Update/DeleteAgendaTemplate`) — live
+ * in the new `agenda-template.ts` router, not here.
+ *
+ * `boardMember.countByTown` names a `boardMember` router that does not exist.
+ * Deliberately not created for one read: this task's own file list is
+ * `board.ts` (extend) and a new `agenda-template.ts`, and `board_member` is
+ * wave 2 Task 3's write surface (`AddMemberDialog` and its siblings) — a
+ * dedicated router for a single count, ahead of any write landing there,
+ * would be the router Task 3 then has to either reuse awkwardly or abandon.
+ * `memberCount` lives here instead, next to `stats`, which already runs the
+ * identical per-board query — this is that same shape, summed across the
+ * town instead of scoped to one board.
  */
 
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, requireActor } from "../trpc.js";
-import { assertCanUpdateBoard } from "../authorization/rules.js";
+import { assertCanInsertBoard, assertCanUpdateBoard } from "../authorization/rules.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
 
@@ -36,13 +61,36 @@ import type { TenantTx } from "../../db/with-tenant.js";
  * Confirm the board exists in the caller's own town before answering a
  * question ABOUT it. Relies on RLS the same way `detail` does: the row is
  * invisible, not merely filtered, if it belongs to another town.
+ *
+ * Exported so `agenda-template.ts` can run the identical check for its own
+ * board-scoped procedures — see this file's header.
  */
-async function assertBoardExists(tx: TenantTx, boardId: string): Promise<void> {
+export async function assertBoardExists(tx: TenantTx, boardId: string): Promise<void> {
   const rows = toRows<{ id: string }>(
     await tx.execute(sql`SELECT id FROM board WHERE id = ${boardId}`),
     (message) => new Error(`board.assertBoardExists: ${message}`),
   );
   if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+/**
+ * Is this the `board_name_unique_per_town` collision, and not some other
+ * write error? Checked by constraint name, not just `23505` — see
+ * `town.ts`'s `isSubdomainCollision`, whose reasoning and depth-limited
+ * `cause`-chain walk this mirrors exactly (Drizzle wraps a driver failure in
+ * `DrizzleQueryError` and keeps the original on `cause`).
+ */
+function isBoardNameCollision(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < 8 && current; depth += 1) {
+    const e = current as { code?: unknown; constraint_name?: unknown; constraint?: unknown };
+    if (e.code === "23505") {
+      const constraint = e.constraint_name ?? e.constraint;
+      return constraint === "board_name_unique_per_town" || constraint === undefined;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 export const boardRouter = router({
@@ -206,6 +254,237 @@ export const boardRouter = router({
       ),
     );
   }),
+
+  /**
+   * Every active (non-archived) board in the caller's town, for a picker that
+   * must never offer an archived board as a place to schedule a meeting or
+   * seat a staff member — the hazard wave 1 named and refused to paper over
+   * (see this file's header and `phase-e-conventions.md`'s Known Gaps for
+   * `home.tsx` and `StaffAccountFlow.tsx`).
+   *
+   * Deliberately one procedure serving BOTH markers wave 1 left rather than
+   * two near-identical scans:
+   *
+   *   - `settings.town.tsx`'s "Governing Board" and "Boards & Committees"
+   *     sections (marker `board.byTown`) read `id`, `name`, `member_count`,
+   *     `is_governing_board`, `election_method`, `officer_election_method` —
+   *     checked against that route's `boards.find(...)` /
+   *     `boards.map(...)` blocks — and order `is_governing_board DESC, name
+   *     ASC` so the governing board sorts first;
+   *   - `StaffAccountFlow.tsx`'s board-specific-template picker (marker
+   *     `board.listByTown`) reads only `id`/`name`, ordered by name. The four
+   *     extra columns are invisible to a consumer that does not read them —
+   *     see `test/trpc.ts`'s "the gap runs one way" note, quoted in `list`'s
+   *     own comment above — and the governing-board-first order is a strict
+   *     RE-ordering only when a town's governing board is not already first
+   *     alphabetically; harmless for a board-selection list, and worth a
+   *     second procedure only if a future caller needs strict alphabetical
+   *     order AND the archived filter AND cannot tolerate the extra columns,
+   *     which no current caller does.
+   *
+   * Not `list` with a parameter: `list` is read by
+   * `settings.meeting-notices.tsx` and `ProgressChecklist.tsx`, both of which
+   * NEED archived boards visible (see `list`'s own doc comment) — a shared
+   * procedure would force one shape or the other to lose columns it needs, or
+   * force every caller to pass a flag whose default some caller would
+   * inevitably get wrong. Two procedures, two answers, matching the two
+   * different questions "every board" and "every board someone could still be
+   * assigned to" actually ask.
+   */
+  listActive: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) =>
+      toRows<{
+        id: string;
+        name: string;
+        member_count: number | null;
+        is_governing_board: boolean;
+        election_method: string | null;
+        officer_election_method: string | null;
+      }>(
+        await tx.execute(sql`
+          SELECT id, name, member_count, is_governing_board, election_method,
+            officer_election_method
+          FROM board
+          WHERE archived_at IS NULL
+          ORDER BY is_governing_board DESC, name ASC
+        `),
+        (message) => new Error(`board.listActive: ${message}`),
+      ),
+    );
+  }),
+
+  /**
+   * `ProgressChecklist.tsx`'s "Board members added (N of M seats)" row —
+   * marker `boardMember.countByTown`, see this file's header for why it lives
+   * here rather than in a new `boardMember` router.
+   *
+   * Counts EVERY `board_member` row in the town, active or archived — no
+   * `status = 'active'` filter, unlike `stats.active_members` above. That is
+   * not an oversight: the Supabase query this replaces
+   * (`ProgressChecklist.tsx`'s own `useQuery`, before this task) had no
+   * status filter either, and the checklist's own copy — "Board members
+   * added" — is asking whether anyone has EVER been seated, not how many
+   * seats are currently filled. Narrowing to active-only here would be a
+   * behavior change smuggled into a read migration, not a port of one — see
+   * conventions item 1's "the query you are replacing is a specification".
+   *
+   * Returns a bare number, not `{ count }`: the client's own `data ?? 0`
+   * already expects a scalar (`ProgressChecklist.tsx`'s `memberCount`), and
+   * there is exactly one value to name.
+   */
+  memberCount: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.withTenant(async (tx) =>
+      toRows<{ count: number }>(
+        await tx.execute(sql`
+          SELECT count(*)::int AS count FROM board_member
+        `),
+        (message) => new Error(`board.memberCount: ${message}`),
+      ),
+    );
+    // The ::int cast is load-bearing — see `stats`'s identical note above.
+    return rows[0]?.count ?? 0;
+  }),
+
+  /**
+   * `AddBoardDialog`'s write: create a new board.
+   *
+   * `board_type`, `district_based`, `staggered_terms` and `is_governing_board`
+   * are not in the input schema below and are not set explicitly in the
+   * `INSERT` either — the dialog never offers a control for any of them and
+   * always sends the column's own DB default (`'other'`, `false`, `false`,
+   * `false`), so omitting them and letting the default apply IS sending what
+   * the dialog sends, with one fewer literal to keep in sync with the schema.
+   * `officer_election_method` is different: it has NO db default (nullable,
+   * defaults to `NULL`) but the dialog always sends `'vote_of_board'`, so that
+   * one IS set explicitly below — omitting it would silently change the
+   * column from always-`'vote_of_board'` to always-`NULL`, a real behavior
+   * change. `seat_titles` — a form field the dialog collects but its own
+   * `mutationFn` never actually sends (checked directly against
+   * `AddBoardDialog.tsx`'s insert payload) — is left out here too, matching
+   * what ships today rather than fixing a pre-existing gap this task was not
+   * asked to close.
+   *
+   * `id` is database-generated, not client-supplied. Returns just enough for
+   * the dialog to navigate to the new board's detail page.
+   */
+  insert: protectedProcedure
+    .use(requireActor(assertCanInsertBoard))
+    .input(
+      z.object({
+        name: z.string().min(2, "Name must be at least 2 characters").max(100),
+        elected_or_appointed: z.enum(["elected", "appointed"]),
+        member_count: z.number().int().min(0).max(25),
+        election_method: z.enum(["at_large", "role_titled"]),
+        meeting_formality_override: z.enum(["informal", "semi_formal", "formal"]).nullable(),
+        minutes_style_override: z.enum(["action", "summary", "narrative"]).nullable(),
+        quorum_type: z.enum(["simple_majority", "two_thirds", "three_quarters", "fixed_number"]),
+        quorum_value: z.number().int().min(1).max(25).nullable(),
+        motion_display_format: z.enum(["block_format", "inline_narrative"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const rows = await ctx.withTenant(async (tx) =>
+          toRows<{ id: string; name: string }>(
+            await tx.execute(sql`
+              INSERT INTO board (
+                town_id, name, elected_or_appointed, member_count, election_method,
+                officer_election_method, meeting_formality_override, minutes_style_override,
+                quorum_type, quorum_value, motion_display_format
+              )
+              VALUES (
+                ${ctx.tenant.townId}, ${input.name}, ${input.elected_or_appointed},
+                ${input.member_count}, ${input.election_method}, 'vote_of_board',
+                ${input.meeting_formality_override}::meeting_formality,
+                ${input.minutes_style_override}::minutes_style,
+                ${input.quorum_type}, ${input.quorum_value}, ${input.motion_display_format}
+              )
+              RETURNING id, name
+            `),
+            (message) => new Error(`board.insert: ${message}`),
+          ),
+        );
+        return rows[0]!;
+      } catch (err) {
+        if (isBoardNameCollision(err)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `A board named "${input.name}" already exists in your town.`,
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
+
+  /**
+   * `EditBoardDialog`'s write: the same fields `insert` accepts, minus the
+   * ones that are set once at creation and never re-sent by that dialog
+   * (`board_type`, `officer_election_method`, `district_based`,
+   * `staggered_terms`, `is_governing_board` — checked against
+   * `EditBoardDialog.tsx`'s own update payload, which omits every one of
+   * them).
+   *
+   * NOT_FOUND for a `boardId` naming no row, or a row in another town —
+   * `board_tenant_isolation` makes the `UPDATE` affect zero rows for either
+   * case identically (conventions item 3), the same pattern `person.update`
+   * uses. No separate `assertBoardExists` call: unlike `insert`'s FK-free
+   * write, this procedure's only board reference IS the `UPDATE ... WHERE id
+   * = ...` itself, and `RETURNING` already answers the existence question —
+   * a second check would just repeat the same query.
+   */
+  update: protectedProcedure
+    .use(requireActor(assertCanUpdateBoard))
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        name: z.string().min(2, "Name must be at least 2 characters").max(100),
+        elected_or_appointed: z.enum(["elected", "appointed"]),
+        member_count: z.number().int().min(0).max(25),
+        election_method: z.enum(["at_large", "role_titled"]),
+        meeting_formality_override: z.enum(["informal", "semi_formal", "formal"]).nullable(),
+        minutes_style_override: z.enum(["action", "summary", "narrative"]).nullable(),
+        quorum_type: z.enum(["simple_majority", "two_thirds", "three_quarters", "fixed_number"]),
+        quorum_value: z.number().int().min(1).max(25).nullable(),
+        motion_display_format: z.enum(["block_format", "inline_narrative"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const rows = await ctx.withTenant(async (tx) =>
+          toRows<{ id: string; name: string }>(
+            await tx.execute(sql`
+              UPDATE board SET
+                name = ${input.name},
+                elected_or_appointed = ${input.elected_or_appointed},
+                member_count = ${input.member_count},
+                election_method = ${input.election_method},
+                meeting_formality_override = ${input.meeting_formality_override}::meeting_formality,
+                minutes_style_override = ${input.minutes_style_override}::minutes_style,
+                quorum_type = ${input.quorum_type},
+                quorum_value = ${input.quorum_value},
+                motion_display_format = ${input.motion_display_format}
+              WHERE id = ${input.boardId}
+              RETURNING id, name
+            `),
+            (message) => new Error(`board.update: ${message}`),
+          ),
+        );
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return row;
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        if (isBoardNameCollision(err)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `A board named "${input.name}" already exists in your town.`,
+            cause: err,
+          });
+        }
+        throw err;
+      }
+    }),
 
   /**
    * `settings.meeting-notices.tsx`'s "Copy from board" write: replace

@@ -19,6 +19,7 @@ import { toRows } from "../db/rows.js";
 import { PERMISSION_CODES, resolvePermission } from "./authorization/permission.js";
 import { townRouter } from "./routers/town.js";
 import { boardRouter } from "./routers/board.js";
+import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 
@@ -30,9 +31,16 @@ export const appRouter = router({
   town: townRouter,
 
   /**
-   * Board reads. No permission guard — see `routers/board.ts` for why.
+   * Board reads and writes. No permission guard on the reads — see
+   * `routers/board.ts` for why.
    */
   board: boardRouter,
+
+  /**
+   * Agenda template reads and writes, scoped to one board at a time. No
+   * permission guard on the reads — see `routers/agenda-template.ts` for why.
+   */
+  agendaTemplate: agendaTemplateRouter,
 
   /**
    * The people directory and its writes. No permission guard on `list` —

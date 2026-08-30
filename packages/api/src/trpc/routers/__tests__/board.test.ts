@@ -110,6 +110,67 @@ async function readNoticeTemplate(
   return rows[0]?.notice_template_blocks ?? null;
 }
 
+/** Every column `board.insert`/`board.update` can touch, plus the ones they hardcode or omit. */
+interface RawBoardRow {
+  name: string;
+  board_type: string;
+  elected_or_appointed: string | null;
+  member_count: number | null;
+  election_method: string | null;
+  officer_election_method: string | null;
+  district_based: boolean;
+  staggered_terms: boolean;
+  is_governing_board: boolean;
+  meeting_formality_override: string | null;
+  minutes_style_override: string | null;
+  quorum_type: string | null;
+  quorum_value: number | null;
+  motion_display_format: string | null;
+  archived_at: string | null;
+}
+
+async function readBoard(
+  db: TestDb,
+  town: TownFixture,
+  boardId: string,
+): Promise<RawBoardRow | null> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(
+        sql`
+        SELECT name, board_type, elected_or_appointed, member_count, election_method,
+          officer_election_method, district_based, staggered_terms, is_governing_board,
+          meeting_formality_override, minutes_style_override, quorum_type, quorum_value,
+          motion_display_format, archived_at
+        FROM board WHERE id = ${boardId}
+      `,
+      )
+      .then((r) => toRows<RawBoardRow>(r, (m) => new Error(m))),
+  );
+  return rows[0] ?? null;
+}
+
+async function countBoardsNamed(db: TestDb, town: TownFixture, name: string): Promise<number> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(sql`SELECT count(*)::int AS count FROM board WHERE name = ${name}`)
+      .then((r) => toRows<{ count: number }>(r, (m) => new Error(m))),
+  );
+  return rows[0]?.count ?? 0;
+}
+
+/** The full, valid `board.insert`/`board.update` payload shape, minus `name`. */
+const VALID_BOARD_FIELDS = {
+  elected_or_appointed: "elected" as const,
+  member_count: 5,
+  election_method: "at_large" as const,
+  meeting_formality_override: null,
+  minutes_style_override: null,
+  quorum_type: "simple_majority" as const,
+  quorum_value: null,
+  motion_display_format: "inline_narrative" as const,
+};
+
 describe("board.detail", () => {
   it("returns a board of the caller's own town", async () => {
     await withTestDb(async (client) => {
@@ -417,6 +478,380 @@ describe("board.list", () => {
         const rows = await caller.board.list();
 
         expect(rows.some((r) => r.name === "Their Committee")).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.listActive", () => {
+  it("excludes an archived board, catching a dropped archived_at filter", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const active = await seedBoard(db, town, { name: "Active Committee" });
+        const archived = await seedBoard(db, town, { name: "Archived Committee" });
+        await inTown(db, town, (tx) =>
+          tx.execute(sql`UPDATE board SET archived_at = now() WHERE id = ${archived}`),
+        );
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.board.listActive();
+
+        expect(rows.some((r) => r.id === active)).toBe(true);
+        expect(rows.some((r) => r.id === archived)).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("orders the governing board first, then alphabetically", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        // seedTown's own two boards ("Select Board", "Planning Board") are
+        // both non-governing, so alphabetical order alone would put
+        // "Planning Board" first — this only catches a dropped
+        // `is_governing_board DESC` if the governing board's name would
+        // otherwise sort LAST.
+        const governing = await seedBoard(db, town, { name: "Zoning Board of Appeals" });
+        await inTown(db, town, (tx) =>
+          tx.execute(sql`UPDATE board SET is_governing_board = true WHERE id = ${governing}`),
+        );
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.board.listActive();
+
+        expect(rows[0]?.id).toBe(governing);
+        expect(rows.slice(1).map((r) => r.name)).toEqual(["Planning Board", "Select Board"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not return another town's boards", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        await seedBoard(db, theirs, { name: "Their Committee" });
+        const actor = await seedActor(db, mine, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+        const rows = await caller.board.listActive();
+
+        expect(rows.some((r) => r.name === "Their Committee")).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.memberCount", () => {
+  it("counts every board_member row in the town, active AND archived", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const p1 = await seedPerson(db, town, "Active One");
+        const p2 = await seedPerson(db, town, "Former Member");
+        await seedBoardMember(db, town, boardId, p1, "active");
+        // Archived, deliberately NOT excluded — see this procedure's own
+        // doc comment: unlike `stats.active_members`, this count has no
+        // `status = 'active'` filter, matching the Supabase query it
+        // replaces exactly. A reintroduced `AND status = 'active'` would
+        // make this test see 1, not 2.
+        await seedBoardMember(db, town, boardId, p2, "archived");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const count = await caller.board.memberCount();
+
+        expect(count).toBe(2);
+        expect(typeof count).toBe("number");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not count another town's board_member rows", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirBoard = await seedBoard(db, theirs, { name: "Their Committee" });
+        const theirPerson = await seedPerson(db, theirs, "Their Member");
+        await seedBoardMember(db, theirs, theirBoard, theirPerson, "active");
+        const actor = await seedActor(db, mine, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+        expect(await caller.board.memberCount()).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.insert", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.board.insert({ name: "New Committee", ...VALID_BOARD_FIELDS }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        expect(await countBoardsNamed(db, town, "New Committee")).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // `name: ""` fails `.min(2)` at parse time.
+        const err = await expectTrpcError(() =>
+          caller.board.insert({ name: "", ...VALID_BOARD_FIELDS }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator create a board, hardcoding the fields the dialog never sends", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const result = await caller.board.insert({
+          name: "Harbor Committee",
+          elected_or_appointed: "appointed",
+          member_count: 7,
+          election_method: "role_titled",
+          meeting_formality_override: "formal",
+          minutes_style_override: "narrative",
+          quorum_type: "fixed_number",
+          quorum_value: 4,
+          motion_display_format: "block_format",
+        });
+        expect(result.name).toBe("Harbor Committee");
+
+        const row = await readBoard(db, town, result.id);
+        expect(row).toMatchObject({
+          name: "Harbor Committee",
+          elected_or_appointed: "appointed",
+          member_count: 7,
+          election_method: "role_titled",
+          meeting_formality_override: "formal",
+          minutes_style_override: "narrative",
+          quorum_type: "fixed_number",
+          quorum_value: 4,
+          motion_display_format: "block_format",
+          // Hardcoded, never client-supplied — see `insert`'s own doc
+          // comment for why each is set (or left to its DB default) rather
+          // than exposed as input.
+          board_type: "other",
+          officer_election_method: "vote_of_board",
+          district_based: false,
+          staggered_terms: false,
+          is_governing_board: false,
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers CONFLICT for a name already used in the caller's town, and writes nothing new", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        // seedTown already creates a board named "Select Board".
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.insert({ name: "Select Board", ...VALID_BOARD_FIELDS }),
+        );
+        expect(err.code).toBe("CONFLICT");
+        expect(await countBoardsNamed(db, town, "Select Board")).toBe(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.update", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Recreation Committee" });
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.board.update({ boardId, name: "Renamed", ...VALID_BOARD_FIELDS }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const row = await readBoard(db, town, boardId);
+        expect(row?.name).toBe("Recreation Committee");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // `boardId` fails `.uuid()` at parse time.
+        const err = await expectTrpcError(() =>
+          caller.board.update({ boardId: "not-a-uuid", name: "Renamed", ...VALID_BOARD_FIELDS }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator update a board's configuration", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Recreation Committee" });
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const result = await caller.board.update({
+          boardId,
+          name: "Parks & Recreation Committee",
+          elected_or_appointed: "appointed",
+          member_count: 9,
+          election_method: "role_titled",
+          meeting_formality_override: "semi_formal",
+          minutes_style_override: "action",
+          quorum_type: "two_thirds",
+          quorum_value: null,
+          motion_display_format: "block_format",
+        });
+        expect(result.name).toBe("Parks & Recreation Committee");
+
+        const row = await readBoard(db, town, boardId);
+        expect(row).toMatchObject({
+          name: "Parks & Recreation Committee",
+          member_count: 9,
+          election_method: "role_titled",
+          meeting_formality_override: "semi_formal",
+          minutes_style_override: "action",
+          quorum_type: "two_thirds",
+          motion_display_format: "block_format",
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a board in another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreign = await seedBoard(db, theirs, { name: "Their Board" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.update({ boardId: foreign, name: "Hijacked", ...VALID_BOARD_FIELDS }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+
+        const row = await readBoard(db, theirs, foreign);
+        expect(row?.name).toBe("Their Board");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers CONFLICT when renaming to a name already used in the same town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Recreation Committee" });
+        // seedTown already creates a board named "Select Board".
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.update({ boardId, name: "Select Board", ...VALID_BOARD_FIELDS }),
+        );
+        expect(err.code).toBe("CONFLICT");
+
+        const row = await readBoard(db, town, boardId);
+        expect(row?.name).toBe("Recreation Committee");
       } finally {
         await app.end();
       }
