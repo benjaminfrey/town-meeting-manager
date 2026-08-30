@@ -93,6 +93,12 @@ async function save() {
 
 describe("EditBoardDialog", () => {
   it("submits the edit through trpc.board.update, with no updated_at field", async () => {
+    // The `not.toHaveProperty` assertion below is a weak runtime signal, not
+    // the real protection — `board.update`'s Zod schema has no `updated_at`
+    // field, so `tsc` already refuses any call site that tries to send one
+    // (verified: reintroducing it in `EditBoardDialog.tsx`'s `mutateAsync`
+    // call is a compile error, not a test failure). Kept anyway as a cheap,
+    // literal check on what the stub actually received.
     await save();
     const input = stub.calls[0]?.inputs["0"] as Record<string, unknown>;
     expect(input).toMatchObject({ boardId: "b1", name: "Select Board" });

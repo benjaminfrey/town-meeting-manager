@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import {
@@ -78,6 +79,11 @@ export function CreateTemplateDialog({
     },
     onSuccess: (id) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) });
+      // See `DeleteTemplateDialog.tsx`'s identical line: `boards.$boardId.templates.tsx`'s
+      // list read moved onto `trpc.agendaTemplate.list` (wave 2, Task 2), so
+      // a template created here was missing from that list on back-navigation
+      // for up to the 60s `staleTime` without this call.
+      void queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
       onOpenChange(false);
       setName("");
       void navigate(`/boards/${boardId}/templates/${id}/edit`);

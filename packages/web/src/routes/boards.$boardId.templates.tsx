@@ -28,7 +28,17 @@
  * to a partial clone (parseSections drops only the sections that do not
  * parse) instead of failing the whole clone. The local `agenda_template`
  * table has 0 rows, so this is still reasoned rather than measured against a
- * real bad row — see the task report.
+ * real bad row — see the task report. A dropped section is never silent,
+ * either: `handleClone` compares the raw section count against what
+ * `parseSections` actually kept and surfaces the difference (see
+ * `rawSectionCount` below).
+ *
+ * `handleClone`/`handleSetDefault` both call `agendaTemplate.insert`/
+ * `setDefault`, which are admin-gated (Task 1's design). Both used to
+ * `void`-reject silently on `FORBIDDEN` — a non-admin clicking Clone or the
+ * default star saw nothing happen at all, the identical failure mode fixed
+ * for the auto-create effect above. `actionError` now covers all three
+ * write paths with one mechanism.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -73,6 +83,37 @@ function sectionsAsJsonString(sections: unknown): string {
   return typeof sections === "string" ? sections : JSON.stringify(sections ?? []);
 }
 
+/**
+ * How many sections a stored `sections` value held BEFORE `parseSections`
+ * dropped any that failed `AgendaTemplateSectionSchema` — the same
+ * double-encoding-tolerant parse `parseSections` itself does, duplicated
+ * here (rather than changing that shared helper's return shape, which
+ * `TemplatePreviewSheet.tsx` and the template edit route also depend on)
+ * because `parseSections` only reports what survived, not what did not.
+ */
+function rawSectionCount(sections: unknown): number {
+  try {
+    let raw: unknown = JSON.parse(sectionsAsJsonString(sections));
+    if (typeof raw === "string") raw = JSON.parse(raw);
+    return Array.isArray(raw) ? raw.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A human explanation for a rejected admin-gated write, shared by the
+ * auto-create effect, `handleClone` and `handleSetDefault` — all three call
+ * an `agendaTemplate.*` procedure gated by `assertCanInsert/UpdateAgendaTemplate`
+ * (Task 1's design), so all three can answer FORBIDDEN for a non-admin.
+ */
+function describeActionError(err: unknown, action: string): string {
+  if (isTRPCClientError(err) && err.data?.code === "FORBIDDEN") {
+    return `Ask a town administrator to ${action}.`;
+  }
+  return "Something went wrong. Please try again.";
+}
+
 export default function AgendaTemplateListPage({ loaderData }: Route.ComponentProps) {
   const { boardId } = loaderData;
   const navigate = useNavigate();
@@ -103,6 +144,24 @@ export default function AgendaTemplateListPage({ loaderData }: Route.ComponentPr
    * explanation.
    */
   const [autoCreateError, setAutoCreateError] = useState<string | null>(null);
+  /**
+   * Set when `handleClone` or `handleSetDefault` rejects (most plausibly
+   * `FORBIDDEN` for a non-admin, same reasoning as `autoCreateError` above).
+   * Both used to `void`-reject with no `onError`/`isError` branch at all —
+   * a refused click did nothing visible, which is the same silent-refusal
+   * failure the auto-create effect was fixed for, just at two more call
+   * sites.
+   */
+  const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * Set when `handleClone` succeeds but `parseSections` dropped one or more
+   * sections that failed `AgendaTemplateSectionSchema` — see this file's
+   * header comment on the forward hazard. Not an error: the clone did
+   * succeed, just with fewer sections than the original, and that
+   * difference is otherwise invisible (the table just shows a smaller
+   * "N sections" count with no explanation of why).
+   */
+  const [cloneNotice, setCloneNotice] = useState<string | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────
   const {
@@ -149,11 +208,7 @@ export default function AgendaTemplateListPage({ loaderData }: Route.ComponentPr
         sections: getDefaultTemplateSections(boardType),
         isDefault: true,
       }).catch((err: unknown) => {
-        setAutoCreateError(
-          isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
-            ? "Ask a town administrator to set up this board's first agenda template."
-            : "Something went wrong creating a default template.",
-        );
+        setAutoCreateError(describeActionError(err, "set up this board's first agenda template"));
       });
     }
   }, [templatesLoading, templates, townId, board, boardId, boardType, insertTemplateAsync]);
@@ -165,20 +220,38 @@ export default function AgendaTemplateListPage({ loaderData }: Route.ComponentPr
       // Zod schema `agendaTemplate.insert` validates against, client-side,
       // so a section that would fail the server's validation is dropped here
       // instead of turning the whole clone into a BAD_REQUEST.
+      const rawCount = rawSectionCount(template.sections);
       const sections = parseSections(sectionsAsJsonString(template.sections));
-      await insertTemplate.mutateAsync({
-        boardId,
-        name: `Copy of ${template.name}`,
-        sections,
-        isDefault: false,
-      });
+      try {
+        await insertTemplate.mutateAsync({
+          boardId,
+          name: `Copy of ${template.name}`,
+          sections,
+          isDefault: false,
+        });
+        setActionError(null);
+        setCloneNotice(
+          sections.length < rawCount
+            ? `Cloned "${template.name}" with ${sections.length} of ${rawCount} sections — ` +
+                `the rest could not be copied.`
+            : null,
+        );
+      } catch (err) {
+        setCloneNotice(null);
+        setActionError(describeActionError(err, "clone this template"));
+      }
     },
     [insertTemplate, boardId],
   );
 
   const handleSetDefault = useCallback(
     async (templateId: string) => {
-      await setDefaultTemplate.mutateAsync({ templateId });
+      try {
+        await setDefaultTemplate.mutateAsync({ templateId });
+        setActionError(null);
+      } catch (err) {
+        setActionError(describeActionError(err, "set this template as the default"));
+      }
     },
     [setDefaultTemplate],
   );
@@ -273,6 +346,25 @@ export default function AgendaTemplateListPage({ loaderData }: Route.ComponentPr
           Create Template
         </Button>
       </div>
+
+      {actionError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {actionError}
+        </div>
+      )}
+
+      {cloneNotice && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          {cloneNotice}
+        </div>
+      )}
 
       {/* Template table */}
       {templates.length === 0 ? (

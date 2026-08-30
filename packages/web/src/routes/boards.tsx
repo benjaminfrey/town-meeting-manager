@@ -27,7 +27,7 @@
  * cache entry a follow-up visit to that board's own page would read.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Plus, Pencil, Archive, Loader2 } from "lucide-react";
@@ -61,6 +61,13 @@ export default function BoardListPage(_props: Route.ComponentProps) {
   const [showArchived, setShowArchived] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedBoard | null>(null);
+  /**
+   * Set when the on-demand `board.detail` fetch below rejects. Without this,
+   * a rejected fetch left `isPending` (derived from `selected && !selectedBoard`)
+   * true forever -- the Edit/Archive button spun with nothing said, since
+   * neither `selected` nor `selectedBoard` ever changed on their own.
+   */
+  const [selectedBoardError, setSelectedBoardError] = useState<string | null>(null);
 
   // ─── Reactive queries ─────────────────────────────────────────────
   const {
@@ -74,10 +81,21 @@ export default function BoardListPage(_props: Route.ComponentProps) {
   // Full settings for whichever single board a dialog is about to open for —
   // see this file's own header comment for why this is not folded into
   // `board.list` above.
-  const { data: selectedBoard } = useQuery({
+  const { data: selectedBoard, isError: isSelectedBoardError } = useQuery({
     ...trpc.board.detail.queryOptions({ boardId: selected?.id ?? "" }),
     enabled: !!selected,
   });
+
+  useEffect(() => {
+    if (isSelectedBoardError && selected) {
+      setSelectedBoardError(
+        selected.mode === "edit"
+          ? "Could not load this board to edit it. Try again."
+          : "Could not load this board to archive it. Try again.",
+      );
+      setSelected(null);
+    }
+  }, [isSelectedBoardError, selected]);
 
   // Sort governing board first, then alphabetically — matching the Supabase
   // query this replaces exactly (see this file's header comment for why the
@@ -180,6 +198,16 @@ export default function BoardListPage(_props: Route.ComponentProps) {
         </Button>
       </div>
 
+      {selectedBoardError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {selectedBoardError}
+        </div>
+      )}
+
       {/* Show archived toggle */}
       {archivedCount > 0 && (
         <div className="mb-4 flex items-center gap-2">
@@ -255,7 +283,10 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setSelected({ id: board.id, mode: "edit" })}
+                          onClick={() => {
+                            setSelectedBoardError(null);
+                            setSelected({ id: board.id, mode: "edit" });
+                          }}
                           disabled={isArchived}
                         >
                           {isPending && selected?.mode === "edit" ? (
@@ -268,7 +299,10 @@ export default function BoardListPage(_props: Route.ComponentProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setSelected({ id: board.id, mode: "archive" })}
+                          onClick={() => {
+                            setSelectedBoardError(null);
+                            setSelected({ id: board.id, mode: "archive" });
+                          }}
                           disabled={isArchived}
                         >
                           {isPending && selected?.mode === "archive" ? (

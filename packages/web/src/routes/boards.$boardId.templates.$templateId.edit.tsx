@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -157,6 +158,13 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
       queryClient.invalidateQueries({
         queryKey: queryKeys.agendaTemplates.byBoard(boardId),
       });
+      // `boards.$boardId.templates.tsx`'s list read moved onto
+      // `trpc.agendaTemplate.list` (wave 2, Task 2) — the two legacy-key
+      // invalidations above no longer reach it. This route was originally
+      // named as only a legacy READER of `queryKeys.agendaTemplates`; it is
+      // also a WRITER, and the same gap applies (`cache-key-parity.test.ts`'s
+      // `MIGRATED` entry for `agendaTemplates`).
+      queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
     } finally {
       setIsSaving(false);
     }

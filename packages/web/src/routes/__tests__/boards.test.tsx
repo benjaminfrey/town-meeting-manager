@@ -101,6 +101,7 @@ const boardDetail = {
 const server = {
   boards: [activeBoard, archivedBoard] as (typeof activeBoard | typeof archivedBoard)[],
   listRejects: false,
+  detailRejects: false,
 };
 
 const stub = installTRPCFetchStub({
@@ -129,7 +130,10 @@ const stub = installTRPCFetchStub({
     auto_publish_on_approval: false,
     minutes_review_window_days: 7,
   }),
-  "board.detail": () => boardDetail,
+  "board.detail": () => {
+    if (server.detailRejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return boardDetail;
+  },
 });
 
 function renderRoute() {
@@ -196,5 +200,28 @@ describe("board list", () => {
 
     await waitFor(() => expect(stub.countFor("board.list")).toBeGreaterThan(before));
     expect(await screen.findByText("Renamed Board")).toBeInTheDocument();
+  });
+
+  it("says so, and stops spinning, when the per-row trpc.board.detail fetch rejects", async () => {
+    // Without this, `isPending` (derived from `selected && !selectedBoard`)
+    // stayed true forever on a rejected fetch — the Edit button spun with
+    // nothing said, since neither `selected` nor `selectedBoard` changed on
+    // their own. See `boards.tsx`'s own `selectedBoardError` doc comment.
+    server.boards = [activeBoard, archivedBoard];
+    server.listRejects = false;
+    server.detailRejects = true;
+    const { user } = renderRoute();
+
+    await screen.findByText("Select Board");
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    expect(
+      await screen.findByText("Could not load this board to edit it. Try again."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    // The button itself stopped spinning — `selected` was cleared, so
+    // `EditBoardDialog` never mounted.
+    expect(screen.queryByRole("button", { name: /save changes/i })).not.toBeInTheDocument();
   });
 });

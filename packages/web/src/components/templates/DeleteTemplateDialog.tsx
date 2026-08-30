@@ -1,6 +1,20 @@
+/**
+ * DeleteTemplateDialog — still writes directly through Supabase (RLS,
+ * tenancy-only), not migrated in wave 2, Task 2. `agendaTemplate.insert` and
+ * `.setDefault` are admin-gated (`assertCanInsertAgendaTemplate` etc. in
+ * `authorization/rules.ts`), so a half-migrated state exists today: a
+ * non-admin cannot clone a template or set one as default (both answer
+ * FORBIDDEN), but CAN still delete one through this dialog. Recorded here
+ * for whoever migrates this component onto `agendaTemplate.delete` — that
+ * migration is real work (this file is not in wave 2 Task 2's file list)
+ * and should decide deliberately whether delete stays tenancy-only or picks
+ * up the same admin gate its siblings already have, not inherit whichever
+ * answer falls out of being the last file touched.
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -38,6 +52,12 @@ export function DeleteTemplateDialog({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaTemplates.byBoard(boardId) });
+      // `boards.$boardId.templates.tsx`'s own list read moved onto
+      // `trpc.agendaTemplate.list` (wave 2, Task 2); the legacy key above no
+      // longer reaches it. Found by a reviewer: deleting a template through
+      // this dialog left it on screen for the full 60s `staleTime` — see
+      // `cache-key-parity.test.ts`'s `MIGRATED` entry for `agendaTemplates`.
+      void queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
       onOpenChange(false);
     },
   });

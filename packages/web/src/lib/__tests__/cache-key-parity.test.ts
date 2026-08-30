@@ -16,11 +16,31 @@
  * otherwise a reader that moved onto the tRPC key is not being invalidated
  * by this writer at all, silently, for up to the query's `staleTime`.
  *
- * `MIGRATED` is three lines, hand-maintained on purpose. Growing it
+ * `MIGRATED` is hand-maintained on purpose (four lines as of wave 2, Task 2's
+ * fix round — `agendaTemplates: "agendaTemplate"` added there). Growing it
  * is exactly the moment this rule should fire for a newly-migrated entity,
  * so it stays a deliberate edit, not a derived one. Update it in the same
  * commit a router's read moves off `queryKeys.<x>` and its `pathFilter()`
  * becomes the thing writers owe (conventions item 7).
+ *
+ * The `agendaTemplates` entry is the rule's own cautionary tale: the first
+ * version of wave 2 Task 2 left it out, reasoning that two of its three
+ * writers (`CreateTemplateDialog.tsx`, `DeleteTemplateDialog.tsx`) were
+ * outside that task's file list and adding the namespace would fail the
+ * check against files the task hadn't touched. That is exactly backwards —
+ * conventions item 7 is explicit that file-list scope does not exempt a
+ * writer from this rule, and "the writer is outside the migrating file" is
+ * the ORDINARY shape of the bug this check exists to catch, not a reason to
+ * suppress it. A reviewer found the resulting regression directly: deleting
+ * a template through `DeleteTemplateDialog` left it on screen for the full
+ * 60s `staleTime`, because the dialog invalidated `queryKeys.agendaTemplates`
+ * while `boards.$boardId.templates.tsx` had already moved its read onto
+ * `trpc.agendaTemplate.list`. Fixed in the same round by adding the
+ * `pathFilter()` call to all three writers of the legacy key
+ * (`CreateTemplateDialog.tsx`, `DeleteTemplateDialog.tsx`, and
+ * `boards.$boardId.templates.$templateId.edit.tsx` — a third writer the
+ * first version of the task named as a read-only legacy consumer and was
+ * not), each with its own pin test.
  *
  * ─── Why the match is scoped to a window, not the whole file ──────────────
  *
@@ -96,6 +116,7 @@ const MIGRATED: Record<string, string> = {
   towns: "town",
   boards: "board",
   persons: "person",
+  agendaTemplates: "agendaTemplate",
 };
 
 /**

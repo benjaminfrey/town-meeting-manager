@@ -42,6 +42,7 @@ const fixedSection = {
 const server = {
   boardDetailRejects: false,
   insertForbidden: false,
+  setDefaultForbidden: false,
   templates: [
     { id: "t1", name: "Standard Agenda", is_default: true, sections: [fixedSection] },
     { id: "t2", name: "Special Session", is_default: false, sections: [] },
@@ -80,7 +81,10 @@ const stub = installTRPCFetchStub({
     if (server.insertForbidden) trpcTestError("FORBIDDEN");
     return { id: "new-template", name: input.name };
   },
-  "agendaTemplate.setDefault": (input) => ({ id: input.templateId, is_default: true }),
+  "agendaTemplate.setDefault": (input) => {
+    if (server.setDefaultForbidden) trpcTestError("FORBIDDEN");
+    return { id: input.templateId, is_default: true };
+  },
 });
 
 function renderRoute() {
@@ -193,5 +197,74 @@ describe("agenda template list", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("shows a real explanation, not silence, when a non-admin's clone is refused", async () => {
+    // `handleClone` used to `void`-reject with no `onError`/`isError`
+    // branch at all — a refused click did nothing visible. Same failure
+    // mode as auto-create above, fixed the same way.
+    server.boardDetailRejects = false;
+    server.insertForbidden = true;
+    server.setDefaultForbidden = false;
+    server.templates = [
+      { id: "t1", name: "Standard Agenda", is_default: true, sections: [fixedSection] },
+    ];
+    const { user } = renderRoute();
+    await screen.findByText("Standard Agenda");
+
+    await user.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(
+      await screen.findByText("Ask a town administrator to clone this template."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("shows a real explanation, not silence, when a non-admin's set-default is refused", async () => {
+    server.boardDetailRejects = false;
+    server.insertForbidden = false;
+    server.setDefaultForbidden = true;
+    server.templates = [
+      { id: "t1", name: "Standard Agenda", is_default: true, sections: [] },
+      { id: "t2", name: "Special Session", is_default: false, sections: [] },
+    ];
+    const { user } = renderRoute();
+    await screen.findByText("Special Session");
+
+    await user.click(screen.getByRole("button", { name: "Set as default" }));
+
+    expect(
+      await screen.findByText("Ask a town administrator to set this template as the default."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("says so when a clone drops a section that fails AgendaTemplateSectionSchema", async () => {
+    // Measurable without a real bad row after all (Task 1's review flagged
+    // this as reasoned-not-measured, given the local table's 0 rows) —
+    // `installTRPCFetchStub`'s `agendaTemplate.list` handler can simply
+    // return a malformed section directly.
+    server.boardDetailRejects = false;
+    server.insertForbidden = false;
+    server.templates = [
+      {
+        id: "t1",
+        name: "Standard Agenda",
+        is_default: true,
+        sections: [fixedSection, { title: "Missing required fields" }],
+      },
+    ];
+    const { user } = renderRoute();
+    await screen.findByText("Standard Agenda");
+
+    await user.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(
+      await screen.findByText(
+        'Cloned "Standard Agenda" with 1 of 2 sections — the rest could not be copied.',
+      ),
+    ).toBeInTheDocument();
+    const call = stub.calls.find((c) => c.paths.includes("agendaTemplate.insert"));
+    expect((call?.inputs["0"] as { sections: unknown[] }).sections).toHaveLength(1);
   });
 });
