@@ -101,6 +101,49 @@
  * (`archived_at = NULL`) rather than seating the person against a still-dead
  * account. See that branch's own comment; a review round caught this as a
  * live defect (silent broken success, not a refusal) before it shipped.
+ *
+ * ─── Phase E, wave 2, Task 4 — the membership lifecycle, added below ──────
+ *
+ * `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx` and
+ * `RoleConflictDialog.tsx` between them made 11 raw Supabase calls (the
+ * master plan's own "measured scope" table undercounted this file's own
+ * contribution — see this task's report for the corrected numbers). Four
+ * procedures below replace all of them except `RoleConflictDialog`'s single
+ * write, which is `person.archiveUserAccount` — a `user_account` write
+ * belongs in `person.ts`, which already owns every other write to that
+ * table, not here.
+ *
+ * `otherActiveCount` is one read shared by two dialogs (`MemberArchiveDialog`
+ * and `MemberTransitionDialog`'s "archive" branch both asked the identical
+ * question: does this person hold an active seat on any OTHER board?). Both
+ * filtered by `board_id != <this board>`, not by excluding this specific
+ * `board_member` row's id — the two are equivalent given
+ * `board_member_unique_active` (a person cannot hold two ACTIVE seats on the
+ * same board), so `archiveMembership` below reuses the identical shape
+ * in-transaction rather than a second filter form.
+ *
+ * `addToBoard` is `MemberTransitionDialog`'s "Add to different board" write —
+ * misleadingly named `moveMembership` client-side (the CURRENT membership
+ * stays active; this only ADDS a seat on another board), kept as-is on the
+ * client since renaming it was not asked for. It seats an EXISTING person
+ * (who already has an account) on an additional board — no account or
+ * invitation write, unlike `addBoardMember`. Still takes two client-supplied
+ * ids that become foreign keys (`person_id`, `board_id`), so it gets the
+ * identical `assertPersonExists`/`assertBoardExists` pair.
+ *
+ * `convertToStaff` is `MemberTransitionDialog`'s board_member→staff
+ * transition: archive every ACTIVE `board_member` row for the person, then
+ * either UPDATE their existing `user_account` in place (`role: 'staff'`,
+ * `archived_at: NULL`) or INSERT a fresh one — the identical "update in
+ * place rather than archive-then-insert" shape `addBoardMember`'s own reuse
+ * branch already uses, cited here rather than re-derived (see
+ * `phase-e-conventions.md`'s "Both doors from staff to board_member dead-end
+ * at `RoleConflictDialog`" — this is the shape that entry says to reuse).
+ * Guarded by `assertCanInsertUserAccount` alone: both actions this procedure
+ * performs (archiving a board seat, minting/updating a staff account) are
+ * flat `assertAdmin` gates with no row-specific branch, so one admin check
+ * covers both — there is no second, weaker caller who could reach only one
+ * half.
  */
 
 import { sql } from "drizzle-orm";
@@ -109,7 +152,11 @@ import { z } from "zod";
 import { checkRoleMutualExclusivity } from "@town-meeting/shared";
 import type { UserRole } from "@town-meeting/shared";
 import { router, protectedProcedure, requireActor } from "../trpc.js";
-import { assertCanInsertBoardMember, assertCanInsertUserAccount } from "../authorization/rules.js";
+import {
+  assertCanInsertBoardMember,
+  assertCanInsertUserAccount,
+  assertCanUpdateBoardMember,
+} from "../authorization/rules.js";
 import { assertBoardExists } from "./board.js";
 import { assertPersonExists, PermissionsMatrixInput } from "./person.js";
 import { toRows } from "../../db/rows.js";
@@ -576,6 +623,197 @@ export const boardMemberRouter = router({
         });
 
         return { name, invitationId };
+      });
+    }),
+
+  /**
+   * Shared by `MemberArchiveDialog.tsx` and `MemberTransitionDialog.tsx`'s
+   * "archive" branch: does this person hold an ACTIVE seat on any board
+   * OTHER than `excludeBoardId`? Both dialogs use the answer only to decide
+   * whether archiving this seat may also offer archiving the account — see
+   * this file's header.
+   */
+  otherActiveCount: protectedProcedure
+    .input(z.object({ personId: z.string().uuid(), excludeBoardId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.withTenant(async (tx) =>
+        toRows<{ count: number }>(
+          await tx.execute(sql`
+            SELECT count(*)::int AS count FROM board_member
+            WHERE person_id = ${input.personId}
+              AND board_id != ${input.excludeBoardId}
+              AND status = 'active'
+          `),
+          (message) => new Error(`boardMember.otherActiveCount: ${message}`),
+        ),
+      );
+      return rows[0]?.count ?? 0;
+    }),
+
+  /**
+   * `MemberArchiveDialog.tsx`'s write, and `MemberTransitionDialog.tsx`'s
+   * "archive" transition (which never sends `archiveAccount`, matching that
+   * dialog's own UI — no toggle for it there).
+   *
+   * `archiveAccount` is recomputed here from the database, not trusted from
+   * the client: the client's own "no other active memberships" gate already
+   * disables the toggle in that case, but a caller who bypassed the UI could
+   * still send `archiveAccount: true` alongside a person who, by the time
+   * this runs, holds another active seat. Recomputing the same
+   * `otherActiveCount` question in-transaction and silently skipping the
+   * account archive (rather than throwing) mirrors what the UI would have
+   * prevented, without turning a stale toggle into a hard error for a
+   * concurrent edit.
+   */
+  archiveMembership: protectedProcedure
+    .use(requireActor(assertCanUpdateBoardMember))
+    .input(
+      z.object({
+        boardMemberId: z.string().uuid(),
+        archiveAccount: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string; person_id: string; board_id: string }>(
+          await tx.execute(sql`
+            SELECT id, person_id, board_id FROM board_member WHERE id = ${input.boardMemberId}
+          `),
+          (message) => new Error(`boardMember.archiveMembership: ${message}`),
+        );
+        const seat = rows[0];
+        if (!seat) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await tx.execute(sql`
+          UPDATE board_member SET status = 'archived', term_end = CURRENT_DATE
+          WHERE id = ${input.boardMemberId}
+        `);
+
+        let archivedAccount = false;
+        if (input.archiveAccount) {
+          const otherActive = toRows<{ count: number }>(
+            await tx.execute(sql`
+              SELECT count(*)::int AS count FROM board_member
+              WHERE person_id = ${seat.person_id}
+                AND board_id != ${seat.board_id}
+                AND status = 'active'
+            `),
+            (message) => new Error(`boardMember.archiveMembership: ${message}`),
+          )[0]?.count;
+
+          if (!otherActive) {
+            const accountRows = toRows<{ id: string }>(
+              await tx.execute(
+                sql`SELECT id FROM user_account WHERE person_id = ${seat.person_id}`,
+              ),
+              (message) => new Error(`boardMember.archiveMembership: ${message}`),
+            );
+            const account = accountRows[0];
+            if (account) {
+              await tx.execute(sql`
+                UPDATE user_account SET archived_at = now() WHERE id = ${account.id}
+              `);
+              archivedAccount = true;
+            }
+          }
+        }
+
+        return { archivedAccount };
+      });
+    }),
+
+  /**
+   * `MemberTransitionDialog.tsx`'s "Add to different board" write — see this
+   * file's header for why it is not folded into `addBoardMember` (no account
+   * or invitation write here; the person already has one).
+   */
+  addToBoard: protectedProcedure
+    .use(requireActor(assertCanInsertBoardMember))
+    .input(z.object({ personId: z.string().uuid(), boardId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertPersonExists(tx, input.personId);
+        await assertBoardExists(tx, input.boardId);
+
+        try {
+          await tx.execute(sql`
+            INSERT INTO board_member (person_id, board_id, town_id, term_start, status)
+            VALUES (${input.personId}, ${input.boardId}, ${ctx.tenant.townId},
+                    CURRENT_DATE, 'active'::board_member_status)
+          `);
+        } catch (err) {
+          if (isBoardMemberSeatCollision(err)) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "This person already has an active seat on this board.",
+              cause: err,
+            });
+          }
+          throw err;
+        }
+
+        return { boardId: input.boardId };
+      });
+    }),
+
+  /**
+   * `MemberTransitionDialog.tsx`'s board_member→staff transition — see this
+   * file's header for the "update in place, not archive-then-insert" shape
+   * and why one guard covers both writes this makes.
+   */
+  convertToStaff: protectedProcedure
+    .use(requireActor(assertCanInsertUserAccount))
+    .input(
+      z.object({
+        personId: z.string().uuid(),
+        govTitle: z.string().max(100).nullable(),
+        permissions: PermissionsMatrixInput,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertPersonExists(tx, input.personId);
+        const govTitle = input.govTitle?.trim() || null;
+        const permissionsJson = JSON.stringify(input.permissions);
+
+        await tx.execute(sql`
+          UPDATE board_member SET status = 'archived', term_end = CURRENT_DATE
+          WHERE person_id = ${input.personId} AND status = 'active'
+        `);
+
+        const existingRows = toRows<{ id: string }>(
+          await tx.execute(sql`SELECT id FROM user_account WHERE person_id = ${input.personId}`),
+          (message) => new Error(`boardMember.convertToStaff: ${message}`),
+        );
+        const existing = existingRows[0];
+
+        if (existing) {
+          await tx.execute(sql`
+            UPDATE user_account
+            SET role = 'staff'::user_role, permissions = ${permissionsJson}::jsonb,
+                gov_title = ${govTitle}, archived_at = NULL
+            WHERE id = ${existing.id}
+          `);
+        } else {
+          try {
+            await tx.execute(sql`
+              INSERT INTO user_account (person_id, town_id, role, gov_title, permissions)
+              VALUES (${input.personId}, ${ctx.tenant.townId}, 'staff'::user_role,
+                      ${govTitle}, ${permissionsJson}::jsonb)
+            `);
+          } catch (err) {
+            if (isAccountAlreadyExistsCollision(err)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "This person already has a login account.",
+                cause: err,
+              });
+            }
+            throw err;
+          }
+        }
+
+        return { personId: input.personId };
       });
     }),
 });

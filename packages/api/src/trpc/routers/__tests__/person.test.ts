@@ -715,3 +715,133 @@ async function readPersonsNamed(
       .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
   );
 }
+
+/** `user_account.archived_at` for one row — `archiveUserAccount`'s own suite needs this column, `readAccount` above does not select it. */
+async function readArchivedAt(
+  db: TestDb,
+  town: TownFixture,
+  userAccountId: string,
+): Promise<string | null | undefined> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(sql`SELECT archived_at FROM user_account WHERE id = ${userAccountId}`)
+      .then((r) => toRows<{ archived_at: string | null }>(r, (m) => new Error(m))),
+  );
+  return rows[0]?.archived_at;
+}
+
+/**
+ * `person.archiveUserAccount` — `RoleConflictDialog.tsx`'s write (Phase E,
+ * wave 2, Task 4). Same guard shape as `updateGovTitle` above
+ * (`requireOwnAccountColumns`), so its refusal suite mirrors that one's
+ * exactly: `archived_at` is also `ADMIN_ONLY_USER_ACCOUNT_COLUMNS`, so the
+ * self-branch must not cover it either — a non-admin archiving their OWN
+ * account is refused the same as archiving someone else's.
+ */
+describe("person.archiveUserAccount", () => {
+  it("refuses a non-admin caller trying to archive another account, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const otherActor = await seedActor(db, town, { role: "staff", global: [] });
+        const target = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, otherActor));
+
+        const err = await expectTrpcError(() =>
+          caller.person.archiveUserAccount({ userAccountId: target.userAccountId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readArchivedAt(db, town, target.userAccountId)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a non-admin caller archiving their OWN account", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const self = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, self));
+
+        const err = await expectTrpcError(() =>
+          caller.person.archiveUserAccount({ userAccountId: self.userAccountId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readArchivedAt(db, town, self.userAccountId)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const self = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, self));
+
+        // `userAccountId` fails `.uuid()` — the guard reads it off the RAW
+        // body, so it still runs and refuses before the parser gets a
+        // chance to.
+        const err = await expectTrpcError(() =>
+          caller.person.archiveUserAccount({ userAccountId: "not-a-uuid" }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a user_account belonging to another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirAccount = await seedActor(db, theirs, { role: "staff", global: [] });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.person.archiveUserAccount({ userAccountId: theirAccount.userAccountId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readArchivedAt(db, theirs, theirAccount.userAccountId)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("archives the account as an administrator", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db, "Newcastle");
+        const target = await seedActor(db, town, { role: "staff", global: [] });
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const result = await caller.person.archiveUserAccount({
+          userAccountId: target.userAccountId,
+        });
+        expect(result.user_account_id).toBe(target.userAccountId);
+        expect(await readArchivedAt(db, town, target.userAccountId)).not.toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});

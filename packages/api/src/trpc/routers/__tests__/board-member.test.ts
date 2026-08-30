@@ -874,3 +874,527 @@ describe("boardMember.addStaffMember", () => {
     });
   });
 });
+
+/** `board_member.status` for one row, for asserting the archive actually landed. */
+async function readSeatStatus(
+  db: TestDb,
+  town: TownFixture,
+  boardMemberId: string,
+): Promise<string | undefined> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(sql`SELECT status FROM board_member WHERE id = ${boardMemberId}`)
+      .then((r) => toRows<{ status: string }>(r, (m) => new Error(m))),
+  );
+  return rows[0]?.status;
+}
+
+describe("boardMember.otherActiveCount", () => {
+  it("counts active seats on OTHER boards, excluding the named board and archived seats", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardA = await seedBoard(db, town, { name: "Assessors" });
+        const boardB = await seedBoard(db, town, { name: "Planning" });
+        const boardC = await seedBoard(db, town, { name: "Library" });
+        const personId = await seedPerson(db, town, "Multi Seat");
+        await seedBoardMember(db, town, boardA, personId, "active");
+        await seedBoardMember(db, town, boardB, personId, "active");
+        await seedBoardMember(db, town, boardC, personId, "archived");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const count = await caller.boardMember.otherActiveCount({
+          personId,
+          excludeBoardId: boardA,
+        });
+
+        expect(count).toBe(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("boardMember.archiveMembership", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const personId = await seedPerson(db, town, "Seated");
+        await seedBoardMember(db, town, boardId, personId, "active");
+        // `seedBoardMember` (this file's local wrapper) does not return the
+        // id; fetch it back directly.
+        const [row] = await inTown(db, town, (tx) =>
+          tx
+            .execute(sql`SELECT id FROM board_member WHERE person_id = ${personId}`)
+            .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
+        );
+        const boardMemberId = row!.id;
+
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.archiveMembership({ boardMemberId, archiveAccount: false }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readSeatStatus(db, town, boardMemberId)).toBe("active");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.boardMember.archiveMembership({
+            boardMemberId: "not-a-uuid",
+            archiveAccount: false,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a boardMemberId in another town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirBoard = await seedBoard(db, theirs, { name: "Their Committee" });
+        const theirPerson = await seedPerson(db, theirs, "Their Member");
+        await seedBoardMember(db, theirs, theirBoard, theirPerson, "active");
+        const [theirRow] = await inTown(db, theirs, (tx) =>
+          tx
+            .execute(sql`SELECT id FROM board_member WHERE person_id = ${theirPerson}`)
+            .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
+        );
+        const admin = await seedActor(db, mine, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.archiveMembership({
+            boardMemberId: theirRow!.id,
+            archiveAccount: false,
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readSeatStatus(db, theirs, theirRow!.id)).toBe("active");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("archives the seat and sets term_end to today, leaving the account untouched by default", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardId, boardMember.personId, "active");
+        const [row] = await inTown(db, town, (tx) =>
+          tx
+            .execute(
+              sql`SELECT id FROM board_member WHERE person_id = ${boardMember.personId} AND board_id = ${boardId}`,
+            )
+            .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const result = await caller.boardMember.archiveMembership({
+          boardMemberId: row!.id,
+          archiveAccount: false,
+        });
+
+        expect(result.archivedAccount).toBe(false);
+        expect(await readSeatStatus(db, town, row!.id)).toBe("archived");
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.archived_at).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("also archives the account when requested and no other active membership exists", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardId, boardMember.personId, "active");
+        const [row] = await inTown(db, town, (tx) =>
+          tx
+            .execute(
+              sql`SELECT id FROM board_member WHERE person_id = ${boardMember.personId} AND board_id = ${boardId}`,
+            )
+            .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const result = await caller.boardMember.archiveMembership({
+          boardMemberId: row!.id,
+          archiveAccount: true,
+        });
+
+        expect(result.archivedAccount).toBe(true);
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.archived_at).not.toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The recompute-not-trust half: even if a caller sends `archiveAccount:
+   * true`, a second ACTIVE seat on another board must stop the account from
+   * being archived — the exact gate the client's own UI enforces by
+   * disabling the toggle, reproduced here against the real database rather
+   * than assumed from the client sending the "right" value.
+   */
+  it("does NOT archive the account when another active membership exists, even if archiveAccount is sent true", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardA = await seedBoard(db, town, { name: "Assessors" });
+        const boardB = await seedBoard(db, town, { name: "Planning" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardA, boardMember.personId, "active");
+        await seedBoardMember(db, town, boardB, boardMember.personId, "active");
+        const [row] = await inTown(db, town, (tx) =>
+          tx
+            .execute(
+              sql`SELECT id FROM board_member WHERE person_id = ${boardMember.personId} AND board_id = ${boardA}`,
+            )
+            .then((r) => toRows<{ id: string }>(r, (m) => new Error(m))),
+        );
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const result = await caller.boardMember.archiveMembership({
+          boardMemberId: row!.id,
+          archiveAccount: true,
+        });
+
+        expect(result.archivedAccount).toBe(false);
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.archived_at).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("boardMember.addToBoard", () => {
+  it("refuses a caller who is not an administrator, and seats no one", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Planning" });
+        const personId = await seedPerson(db, town, "Existing Member");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.boardMember.addToBoard({ personId, boardId }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        expect(await countBoardMembers(db, town, personId, boardId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addToBoard({ personId: "not-a-uuid", boardId: "not-a-uuid" }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a personId belonging to another town, and seats no one", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const boardId = await seedBoard(db, mine, { name: "Planning" });
+        const theirPersonId = await seedPerson(db, theirs, "Their Person");
+        const admin = await seedActor(db, mine, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addToBoard({ personId: theirPersonId, boardId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await countBoardMembers(db, theirs, theirPersonId, boardId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a boardId belonging to another town, and seats no one", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const personId = await seedPerson(db, mine, "My Person");
+        const theirBoardId = await seedBoard(db, theirs, { name: "Their Committee" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addToBoard({ personId, boardId: theirBoardId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await countBoardMembers(db, mine, personId, theirBoardId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("adds an active seat for an existing person, without touching their account", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const firstBoard = await seedBoard(db, town, { name: "Assessors" });
+        const secondBoard = await seedBoard(db, town, { name: "Planning" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, firstBoard, boardMember.personId, "active");
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await caller.boardMember.addToBoard({
+          personId: boardMember.personId,
+          boardId: secondBoard,
+        });
+
+        expect(await countBoardMembers(db, town, boardMember.personId, secondBoard)).toBe(1);
+        expect(await countAccountsForPerson(db, town, boardMember.personId)).toBe(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers CONFLICT when the person already has an active seat on this board", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardId, boardMember.personId, "active");
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.addToBoard({ personId: boardMember.personId, boardId }),
+        );
+        expect(err.code).toBe("CONFLICT");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("boardMember.convertToStaff", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardId, boardMember.personId, "active");
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.boardMember.convertToStaff({
+              personId: boardMember.personId,
+              govTitle: null,
+              permissions: { global: {}, board_overrides: [] },
+            }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.role).toBe("board_member");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.boardMember.convertToStaff({
+            personId: "not-a-uuid",
+            govTitle: null,
+            permissions: { global: {}, board_overrides: [] },
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a personId belonging to another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirPersonId = await seedPerson(db, theirs, "Their Person");
+        const admin = await seedActor(db, mine, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+        const err = await expectTrpcError(() =>
+          caller.boardMember.convertToStaff({
+            personId: theirPersonId,
+            govTitle: null,
+            permissions: { global: {}, board_overrides: [] },
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await countAccountsForPerson(db, theirs, theirPersonId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("archives every active board seat and UPDATES the existing account in place — not archive-then-insert", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        const boardMember = await seedActor(db, town, { role: "board_member", global: [] });
+        await seedBoardMember(db, town, boardId, boardMember.personId, "active");
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await caller.boardMember.convertToStaff({
+          personId: boardMember.personId,
+          govTitle: "  Deputy Clerk  ",
+          permissions: { global: { A2: true }, board_overrides: [] },
+        });
+
+        const [seat] = await inTown(db, town, (tx) =>
+          tx
+            .execute(sql`SELECT status FROM board_member WHERE person_id = ${boardMember.personId}`)
+            .then((r) => toRows<{ status: string }>(r, (m) => new Error(m))),
+        );
+        expect(seat?.status).toBe("archived");
+
+        // Same account id — proves UPDATE in place, not archive-then-insert.
+        const account = await readAccountByPerson(db, town, boardMember.personId);
+        expect(account?.id).toBe(boardMember.userAccountId);
+        expect(account).toMatchObject({ role: "staff", gov_title: "Deputy Clerk" });
+        expect(account?.archived_at).toBeNull();
+        expect(account?.permissions).toEqual({ global: { A2: true }, board_overrides: [] });
+        expect(await countAccountsForPerson(db, town, boardMember.personId)).toBe(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("creates a fresh staff account for a person with none, and archives no seat (they had none)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const personId = await seedPerson(db, town, "Accountless");
+        const admin = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await caller.boardMember.convertToStaff({
+          personId,
+          govTitle: null,
+          permissions: { global: {}, board_overrides: [] },
+        });
+
+        const account = await readAccountByPerson(db, town, personId);
+        expect(account).toMatchObject({ role: "staff" });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});

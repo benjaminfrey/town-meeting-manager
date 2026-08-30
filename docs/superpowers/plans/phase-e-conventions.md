@@ -1228,3 +1228,62 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   board_member-seating path should apply the identical "update in place" shape to the direction that
   still dead-ends, rather than treating this as an open design question — it is not; only the wiring
   is missing.
+- **Closed in Task 4** — this bullet's own last paragraph is now stale: `MemberTransitionDialog.tsx`'s
+  `to_board_member` transition was, at the time it was written, unreachable from any UI (`MemberRoster`
+  only ever passes `member.role: "board_member"` into this dialog, so its `RadioGroup` never offers a
+  "convert to board_member" option) — the "identical trap" described was a latent shape in the code,
+  not a live path a user could hit. `archiveMembership`/`addToBoard`/`convertToStaff` (the three real
+  writes Task 4 added) do not touch that branch at all. Left exactly as found rather than wired up: this
+  task's brief named three files (`MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`,
+  `RoleConflictDialog.tsx`), not a new UI surface, and building the missing `to_board_member` radio
+  option is a product decision (what does "convert a staff member back to board_member" even offer —
+  a board picker?) this task was not asked to make.
+- **A task dispatch's own "measured scope" can be wrong — verify against the file, or the plan's own
+  table, before trusting it (Task 4).** A dispatch summarizing this task claimed `MemberArchiveDialog.tsx`
+  was "already fully migrated, 0 supabase calls" and that only 2 raw inserts remained in
+  `MemberTransitionDialog.tsx`. Both were checked directly against the files (`grep -n '\.from('`,
+  accounting for a `supabase\n  .from(...)` line break the naive `grep "supabase\."` the dispatch
+  presumably used would miss) and were wrong: `MemberArchiveDialog.tsx` still had all 3 of its original
+  sites (1 read, 2 writes, both inside one `mutationFn`) — only its writer-invalidation lines had been
+  added, not its data layer; `MemberTransitionDialog.tsx` had all 7 (2 reads, 5 writes), exactly matching
+  the number the MASTER PLAN's own "measured scope" table already recorded at commit `a165049` — a
+  number that document had been carrying correctly the whole time. The plan document itself was the
+  authority to check against, and was right; the dispatch's own restatement of it was not. Re-run the
+  grep, or re-read the plan's own table, before accepting a summary's scope claim — the same "quote the
+  grep, not the number" discipline item 11 already states for marker counts applies just as much to a
+  file's own remaining-sites count.
+- **Recompute a client's destructive-option request server-side; do not trust the toggle
+  (Task 4).** `MemberArchiveDialog`'s "also archive the user account" switch is disabled client-side
+  when the person holds another active board seat — but a caller bypassing that UI could still send
+  `archiveAccount: true` for a person who, by the time the mutation runs, holds one. `archiveMembership`
+  answers this the way `addBoardMember`'s mutual-exclusivity check already answers a stronger version of
+  the same question ("check the ACTUAL database state, not what the client believes it to be"): it
+  recomputes `otherActiveCount` in the same transaction and silently declines to archive the account if
+  the answer disagrees with what the client assumed, rather than trusting the boolean or throwing on a
+  stale value. Silent decline, not a refusal, because this is a race on informational state the client
+  read moments earlier, not an authorization boundary — the caller is still allowed to archive the seat;
+  only the SECOND effect (archiving the account) is the one whose precondition gets re-checked. Contrast
+  with an FK from client input (item 3), which is always refused (`NOT_FOUND`) rather than silently
+  adjusted, because there the caller has no legitimate reading of "the row doesn't exist right now" to
+  race against — the two are different hazards and warrant different answers, not the same guard reused
+  twice.
+- **`AddPersonDialog.tsx`'s `invitation.insert` and `people.tsx`'s `boardMember.listByTown` markers are
+  still open — checked directly in Task 4, not assumed closed by Task 3's `boardMember` router.**
+  `board-member.ts`'s `insertInvitation` is a private helper used only by `addBoardMember`/
+  `addStaffMember`; it is not a callable procedure `AddPersonDialog` (which never seats anyone on a
+  board) could reach, and `AddPersonDialog`'s own flow — `person.insert` → `person.insertStaffAccount` →
+  a bare invitation write — has no seat to hang an invitation off of the way those two do.
+  `boardMember.roster` is scoped to ONE board and `boardMember.memberCount` returns a bare count;
+  neither answers `people.tsx`'s actual question ("for every person in the town, which board names do
+  they hold a seat on"), which needs a town-wide `board_member` JOIN `board` grouped by person — a
+  procedure that does not exist yet. Both markers stay exactly as they were.
+- **`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
+  re-labeled to a specific wave number in Task 4.** A dispatch for this task asked for it to be re-tagged
+  to "the wave that will own them," on the reasoning that `meeting`/`minutesDocument` are wave 3+ work —
+  correct as far as it goes (this wave's own "Measured scope" table and Global Constraints both say this
+  wave is board/membership only), but no wave 3–6 plan document exists yet (only
+  `2026-08-29-phase-e-wave-1-identity-and-settings.md`, `2026-08-29-phase-e-unit-0-boards-slice.md` and
+  this wave's own plan exist in `docs/superpowers/plans/` as of Task 4). Guessing a specific wave number
+  with nothing to check it against would be exactly the kind of unverified claim this document exists to
+  prevent. Left as `TODO(phase-e-wave-2)` — mis-scoped but honestly so — for whoever writes the wave 3
+  plan to retag with an actual number.

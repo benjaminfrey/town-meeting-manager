@@ -4,11 +4,24 @@
  * Archives the board_members entry (status='archived', term_end=today).
  * If the person has no other active board memberships, optionally
  * archives the user_account.
+ *
+ * Phase E, wave 2, Task 4 — moved onto `boardMember.otherActiveCount` and
+ * `boardMember.archiveMembership`. The master plan's own "measured scope"
+ * table already counted this file at 3 sites / 2 writes (unchanged since
+ * wave 1) — a task dispatch that described it as "already fully migrated,
+ * 0 supabase calls" was checked against the file directly and was wrong;
+ * see this task's report.
+ *
+ * `otherActiveMemberships` and the "also archive account" decision now both
+ * happen server-side in `archiveMembership` — the client sends
+ * `archiveAccount` as a request, not an instruction; the server recomputes
+ * whether another active membership exists and silently declines to archive
+ * the account if one does, rather than trusting a stale client toggle. See
+ * that procedure's own doc comment.
  */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
@@ -46,73 +59,50 @@ export function MemberArchiveDialog({
   open,
   onOpenChange,
 }: MemberArchiveDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [archiveAccount, setArchiveAccount] = useState(false);
 
   // Check for other active board memberships
   const { data: otherActiveMemberships = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byPerson(member.person_id), "otherActive", boardId],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("board_member")
-        .select("*", { count: "exact", head: true })
-        .eq("person_id", member.person_id)
-        .neq("board_id", boardId)
-        .eq("status", "active");
-      if (error) throw error;
-      return count ?? 0;
-    },
+    ...trpc.boardMember.otherActiveCount.queryOptions({
+      personId: member.person_id,
+      excludeBoardId: boardId,
+    }),
     enabled: !!member.person_id,
   });
   const hasOtherMemberships = otherActiveMemberships > 0;
 
-  const { mutate: archiveMember, isPending: isArchiving } = useMutation({
-    mutationFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const now = new Date().toISOString();
+  const willArchiveAccount = archiveAccount && !hasOtherMemberships;
 
-      // Archive board membership
-      const { error: bmError } = await supabase
-        .from("board_member")
-        .update({ status: "archived", term_end: today })
-        .eq("id", member.id);
-      if (bmError) throw bmError;
-
-      // Optionally archive user account
-      if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
-        const { error: uaError } = await supabase
-          .from("user_account")
-          .update({ archived_at: now })
-          .eq("id", member.user_account_id);
-        if (uaError) throw uaError;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
-      // (Phase E, wave 2, Task 3) — unconditionally, unlike the
-      // `trpc.person.pathFilter()` call below: archiving JUST the board seat
-      // still changes that read's own `status` column for this row.
-      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
-      if (archiveAccount && member.user_account_id && !hasOtherMemberships) {
-        // `queryKeys.userAccounts.byTown` invalidation removed (Phase E,
-        // wave 2, Task 3 fix round) — that key has no reader left anywhere
-        // in the app (see `AddPersonDialog.tsx`'s identical comment for the
-        // grep). `trpc.boardMember.pathFilter()` above already covers the
-        // account-archived case this key used to reach.
-        // Archiving the account changes what `person.list` reports for this
-        // person (role/gov_title both go null) — `people.tsx` reads that
-        // through `person.list` now (Phase E, wave 1, Task 3). No such
-        // invalidation is needed when only the board seat is archived: that
-        // does not touch `person`/`user_account`, which is all `person.list`
-        // selects (see that router's own doc comment on the board_member
-        // join it deliberately omits).
-        void queryClient.invalidateQueries(trpc.person.pathFilter());
-      }
-      onOpenChange(false);
-    },
-  });
+  const archiveMemberMutation = useMutation(
+    trpc.boardMember.archiveMembership.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+        // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
+        // (Phase E, wave 2, Task 3) — unconditionally, unlike the
+        // `trpc.person.pathFilter()` call below: archiving JUST the board seat
+        // still changes that read's own `status` column for this row.
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        if (willArchiveAccount) {
+          // `queryKeys.userAccounts.byTown` invalidation removed (Phase E,
+          // wave 2, Task 3 fix round) — that key has no reader left anywhere
+          // in the app (see `AddPersonDialog.tsx`'s identical comment for the
+          // grep). `trpc.boardMember.pathFilter()` above already covers the
+          // account-archived case this key used to reach.
+          // Archiving the account changes what `person.list` reports for this
+          // person (role/gov_title both go null) — `people.tsx` reads that
+          // through `person.list` now (Phase E, wave 1, Task 3). No such
+          // invalidation is needed when only the board seat is archived: that
+          // does not touch `person`/`user_account`, which is all `person.list`
+          // selects (see that router's own doc comment on the board_member
+          // join it deliberately omits).
+          void queryClient.invalidateQueries(trpc.person.pathFilter());
+        }
+        onOpenChange(false);
+      },
+    }),
+  );
+  const isArchiving = archiveMemberMutation.isPending;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -165,7 +155,16 @@ export function MemberArchiveDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isArchiving}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => archiveMember()} disabled={isArchiving}>
+          <Button
+            variant="destructive"
+            onClick={() =>
+              archiveMemberMutation.mutate({
+                boardMemberId: member.id,
+                archiveAccount: willArchiveAccount,
+              })
+            }
+            disabled={isArchiving}
+          >
             {isArchiving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Archive Member
           </Button>
