@@ -233,9 +233,24 @@ export const personRouter = router({
    *
    * Column list checked against `routes/people.tsx`'s `rows` mapping: `id`,
    * `name`, `email` build the row identity; `role`/`gov_title` build the
-   * label; `user_account_id` is what `EditGovTitleDialog` needs to call
-   * `updateGovTitle`. Not `SELECT *`, for the same reason as every other
-   * procedure in this phase — conventions item 1.
+   * label. Not `SELECT *`, for the same reason as every other procedure in
+   * this phase — conventions item 1.
+   *
+   * `user_account_id` was here once, justified as "what `EditGovTitleDialog`
+   * needs to call `updateGovTitle`" — wrong, caught in review: that dialog is
+   * mounted only from `MemberRoster.tsx`, fed by its own Supabase query, not
+   * from this procedure. `people.tsx` never read the column either. Dropped
+   * rather than re-justified; add it back, with a real caller named, the day
+   * something reads it.
+   *
+   * No `WHERE p.town_id = ...` — deliberately, matching `board.ts`'s reads:
+   * `person_tenant_isolation` is `FORCE ROW LEVEL SECURITY`, so a session
+   * scoped to this tenant already cannot see another town's `person` rows.
+   * Adding the comparison back would be the "second town-id comparison in
+   * TypeScript" item 2 warns against — a weaker duplicate of RLS that people
+   * eventually trust instead of RLS itself. The `user_account` half of the
+   * `LEFT JOIN` was already RLS-only (no `ua.town_id` check); this makes both
+   * halves consistent rather than picking one style per column.
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     const rows = await ctx.withTenant(async (tx) =>
@@ -243,18 +258,17 @@ export const personRouter = router({
         id: string;
         name: string;
         email: string | null;
-        user_account_id: string | null;
         role: UserRole | null;
         gov_title: string | null;
       }>(
         await tx.execute(sql`
           SELECT
             p.id, p.name, p.email,
-            ua.id AS user_account_id, ua.role, ua.gov_title
+            ua.role, ua.gov_title
           FROM person p
           LEFT JOIN user_account ua
             ON ua.person_id = p.id AND ua.archived_at IS NULL
-          WHERE p.town_id = ${ctx.tenant.townId} AND p.archived_at IS NULL
+          WHERE p.archived_at IS NULL
           ORDER BY p.name
         `),
         (message) => new Error(`person.list: ${message}`),

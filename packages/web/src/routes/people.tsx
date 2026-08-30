@@ -122,9 +122,12 @@ export default function PeoplePage() {
     });
   }, [people, memberships]);
 
-  // A failure AFTER mount — a refetch, a `staleTime` expiry. The `clientLoader`
-  // above handles the BEFORE-mount case by letting a rejection reach
-  // `RouteErrorBoundary` (conventions item 12); this branch is the other half.
+  // The ONLY failure surface for this read — see the header comment on why
+  // `clientLoader` deliberately does not prime `person.list` (so there is no
+  // BEFORE-mount case here for `RouteErrorBoundary` to catch, unlike
+  // `boards.$boardId.tsx`; conventions item 12's two-surface split does not
+  // apply to this route). Covers the initial fetch, a refetch, and a
+  // `staleTime` expiry alike.
   if (isPeopleError) {
     const notFound = isTRPCClientError(peopleError) && peopleError.data?.code === "NOT_FOUND";
     return (

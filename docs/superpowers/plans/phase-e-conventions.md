@@ -265,6 +265,45 @@ async function assertBoardExists(tx: TenantTx, boardId: string): Promise<void> {
 
 `stats` and `recentMeetings` both call it before counting.
 
+### A foreign key is a hole RLS does not close
+
+Any FK pointing at a tenant-scoped row is a hole RLS does not close. PostgreSQL's own documentation
+says so directly: uniqueness, primary key and foreign key constraint enforcement **bypasses row
+security** to preserve data integrity. So an INSERT that takes a foreign key from client input and
+relies on the FK alone to keep it in-tenant is not protected by `FORCE ROW LEVEL SECURITY` at all —
+the constraint will happily reference a row RLS would otherwise hide from the caller's own `SELECT`s.
+
+This was not theoretical. Phase E wave 1 Task 3's `person.insertStaffAccount` takes a `personId` and
+inserts a `user_account` referencing it via `user_account_person_id_fkey`. Without an explicit
+existence check, a reviewer reproduced this directly: as Newcastle's admin, calling
+`insertStaffAccount` with **Bristol's** `personId` succeeded — no error, no refusal — and wrote
+`user_account{town_id: Newcastle, person_id: <Bristol's person>}`. Bristol's own admin can neither
+see this row (RLS hides it) nor delete it, and it consumes `user_account_person_id_key`, so that
+Bristol person can **never** get an account in their own town — a permanent, silent `CONFLICT` for
+a person who did nothing wrong.
+
+**Every insert that takes a foreign key from client input needs an explicit tenant-scoped existence
+check first**, run through `ctx.withTenant` (so RLS actually filters it) before the write that
+references the id. `board.ts`'s `assertBoardExists` and `person.ts`'s `assertPersonExists` are the
+two existing instances of the pattern — same shape, same reason, written independently before this
+item existed to name the rule:
+
+```ts
+async function assertPersonExists(tx: TenantTx, personId: string): Promise<void> {
+  const rows = toRows<{ id: string }>(
+    await tx.execute(sql`SELECT id FROM person WHERE id = ${personId}`),
+    (message) => new Error(`person.assertPersonExists: ${message}`),
+  );
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+}
+```
+
+This is not specific to `person`. Every FK-bearing write in the ~75 remaining screens is a candidate
+— `board_member`, `invitation`, `meeting`, `minutes_*` and anything else that inserts a row carrying
+a foreign key whose target table is tenant-scoped. Verify the gap the way it was found here: delete
+the existence check, attempt the cross-tenant write, and confirm it is refused (NOT_FOUND) rather
+than silently succeeding.
+
 ---
 
 ## 4. The client call shape

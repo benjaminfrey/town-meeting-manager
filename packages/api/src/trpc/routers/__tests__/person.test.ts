@@ -135,21 +135,12 @@ describe("person.list", () => {
         const rows = await caller.person.list();
 
         const byId = new Map(rows.map((r) => [r.id, r]));
-        expect(byId.get(admin.personId)).toMatchObject({
-          user_account_id: admin.userAccountId,
-          role: "admin",
-          gov_title: null,
-        });
+        expect(byId.get(admin.personId)).toMatchObject({ role: "admin", gov_title: null });
         expect(byId.get(staff.personId)).toMatchObject({
-          user_account_id: staff.userAccountId,
           role: "staff",
           gov_title: "Town Clerk",
         });
-        expect(byId.get(directoryOnly)).toMatchObject({
-          user_account_id: null,
-          role: null,
-          gov_title: null,
-        });
+        expect(byId.get(directoryOnly)).toMatchObject({ role: null, gov_title: null });
       } finally {
         await app.end();
       }
@@ -201,7 +192,7 @@ describe("person.list", () => {
         const byId = new Map(rows.map((r) => [r.id, r]));
 
         expect(byId.has(archivedPersonId)).toBe(false);
-        expect(byId.get(staff.personId)).toMatchObject({ user_account_id: null, role: null });
+        expect(byId.get(staff.personId)).toMatchObject({ role: null, gov_title: null });
       } finally {
         await app.end();
       }
