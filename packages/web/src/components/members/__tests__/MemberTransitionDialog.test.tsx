@@ -17,13 +17,23 @@
  * `RoleConflictDialog` — that check only fires when the person already HAS
  * an account, which is exactly the branch `convertToStaff` treats
  * differently (update-in-place vs. insert) but is not what this file tests.
+ *
+ * `onError` (review round): `addToBoard` and `convertToStaff` both throw
+ * DESIGNED `CONFLICT`s this dialog was silently swallowing before this task's
+ * fix round — "This person already has an active seat on this board" /
+ * "already has a login account". Both pinned below with the stub actually
+ * throwing, not merely asserted from reading the component's source.
  */
 
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { toast } from "sonner";
 
 // Radix `Select` (the "move to different board" target picker) calls
 // `hasPointerCapture`/`releasePointerCapture`/`scrollIntoView` on open and
@@ -70,7 +80,7 @@ const otherBoard = {
   officer_election_method: null,
 };
 
-const server = { otherActiveCount: 0 };
+const server = { otherActiveCount: 0, addToBoardFails: false, convertToStaffFails: false };
 
 const stub = installTRPCFetchStub({
   "boardMember.otherActiveCount": () => server.otherActiveCount,
@@ -89,8 +99,19 @@ const stub = installTRPCFetchStub({
     },
   ],
   "boardMember.archiveMembership": () => ({ archivedAccount: false }),
-  "boardMember.addToBoard": (input) => ({ boardId: input.boardId }),
-  "boardMember.convertToStaff": (input) => ({ personId: input.personId }),
+  "boardMember.addToBoard": (input) => {
+    if (server.addToBoardFails) trpcTestError("CONFLICT");
+    return { boardId: input.boardId };
+  },
+  "boardMember.convertToStaff": (input) => {
+    if (server.convertToStaffFails) trpcTestError("CONFLICT");
+    return { personId: input.personId };
+  },
+});
+
+beforeEach(() => {
+  server.addToBoardFails = false;
+  server.convertToStaffFails = false;
 });
 
 function renderDialog(onOpenChange: () => void) {
@@ -227,5 +248,43 @@ describe("MemberTransitionDialog", () => {
     await user.click(screen.getByRole("button", { name: /add to board/i }));
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  /**
+   * `trpcTestError("CONFLICT")` sets the envelope's `message` to the code
+   * string itself (`test/trpc.ts`'s own `errorEnvelope`), not a realistic
+   * copy — so `"CONFLICT"` here is standing in for whatever real message
+   * `boardMember.addToBoard` actually throws ("This person already has an
+   * active seat on this board."). What this test verifies is that the
+   * CONFLICT branch of `errorMessage` reads `err.message` through to the
+   * toast rather than the generic fallback, and that the dialog does not
+   * close — not the literal copy.
+   */
+  it("toasts the server's CONFLICT message and leaves the dialog open when addToBoard is refused", async () => {
+    server.addToBoardFails = true;
+    const onOpenChange = vi.fn();
+    const { user } = renderDialog(onOpenChange);
+
+    await user.click(await screen.findByText("Add to different board"));
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "Planning Board" }));
+    await user.click(screen.getByRole("button", { name: /add to board/i }));
+
+    await waitFor(() => expect(stub.countFor("boardMember.addToBoard")).toBe(1));
+    expect(toast.error).toHaveBeenCalledWith("CONFLICT");
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("toasts the server's CONFLICT message and leaves the dialog open when convertToStaff is refused", async () => {
+    server.convertToStaffFails = true;
+    const onOpenChange = vi.fn();
+    const { user } = renderDialog(onOpenChange);
+
+    await user.click(await screen.findByText("Convert to staff"));
+    await user.click(screen.getByText("finish-staff"));
+
+    await waitFor(() => expect(stub.countFor("boardMember.convertToStaff")).toBe(1));
+    expect(toast.error).toHaveBeenCalledWith("CONFLICT");
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

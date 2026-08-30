@@ -6,19 +6,38 @@
  * no test file at all before this task (the master plan's "measured scope"
  * table counted it at 1 site / 1 write, and it carried no `QueryClient`
  * reference to invalidate anything with).
+ *
+ * `onError` (review round): this dialog had none before. `archiveUserAccount`
+ * does not throw CONFLICT today (see its own doc comment), so the refusal
+ * pinned below is `NOT_FOUND` — a real code the procedure DOES answer, for a
+ * stale `userAccountId` — and gets the FALLBACK message, not a server one,
+ * since `errorMessage`'s gate is CONFLICT-only.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { toast } from "sonner";
 import { RoleConflictDialog } from "../RoleConflictDialog";
 
 const queryClient = setupAppQueryClient();
 
+const server = { fails: false };
+
 const stub = installTRPCFetchStub({
-  "person.archiveUserAccount": (input) => ({ user_account_id: input.userAccountId }),
+  "person.archiveUserAccount": (input) => {
+    if (server.fails) trpcTestError("NOT_FOUND");
+    return { user_account_id: input.userAccountId };
+  },
+});
+
+beforeEach(() => {
+  server.fails = false;
 });
 
 function renderDialog(onResolved: () => void, onOpenChange: (open: boolean) => void) {
@@ -79,5 +98,19 @@ describe("RoleConflictDialog", () => {
     await user.click(screen.getByRole("button", { name: /archive staff account & continue/i }));
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("toasts an error, does not call onResolved, and leaves the dialog open when the archive is refused", async () => {
+    server.fails = true;
+    const onResolved = vi.fn();
+    const onOpenChange = vi.fn();
+    const { user } = renderDialog(onResolved, onOpenChange);
+
+    await user.click(screen.getByRole("button", { name: /archive staff account & continue/i }));
+
+    await waitFor(() => expect(stub.countFor("person.archiveUserAccount")).toBe(1));
+    expect(toast.error).toHaveBeenCalledWith("Couldn't archive this account — please try again.");
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

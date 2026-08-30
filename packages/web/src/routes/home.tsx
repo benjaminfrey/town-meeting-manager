@@ -46,6 +46,12 @@ import { queryKeys } from "@/lib/queryKeys";
 // `minutesDocs` below are the two reads with no procedure at all yet;
 // `boardRows` has a near-miss (`board.list`) that is deliberately not used,
 // for the reason in this file's header comment.
+//
+// This gap is genuinely wave 3+ (meeting/minutes routers), not wave 2's —
+// tagged `phase-e-wave-2` only because no wave 3-6 plan document exists yet
+// to retag it against (checked in Task 4: `docs/superpowers/plans/` has only
+// unit 0, wave 1, and wave 2). Retag with the real wave number once that
+// plan lands, rather than reading "wave-2" here as this wave's own debt.
 import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";

@@ -17,11 +17,23 @@
  * `archiveAccount` as a request, not an instruction; the server recomputes
  * whether another active membership exists and silently declines to archive
  * the account if one does, rather than trusting a stale client toggle. See
- * that procedure's own doc comment.
+ * that procedure's own doc comment. `onSuccess` reads the server's own
+ * `{ archivedAccount }` answer back, not the client's `willArchiveAccount`
+ * guess, to decide whether `trpc.person.pathFilter()` needs invalidating —
+ * review round: the first version of this file branched on the client's own
+ * value here, which would have under-invalidated on exactly the race the
+ * server-side recompute exists to handle.
+ *
+ * Review round: added `onError` — designed refusals (there are none today on
+ * this specific mutation, but the shape is shared with `MemberTransitionDialog`'s
+ * `addToBoard`/`convertToStaff`, which do throw `CONFLICT`) must not be
+ * silently swallowed, per conventions item 5.
  */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
+import { toast } from "sonner";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
@@ -47,15 +59,23 @@ interface MemberArchiveDialogProps {
     gov_title: string | null;
   };
   boardId: string;
-  townId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * The message a CONFLICT carries; a generic one otherwise. Same gate
+ * `AddPersonDialog.tsx`/`AddMemberDialog.tsx` already use — only a designed
+ * refusal's own message is safe to show verbatim; anything else (NOT_FOUND,
+ * FORBIDDEN, a network failure) gets the fallback.
+ */
+function errorMessage(err: unknown, fallback: string): string {
+  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
 }
 
 export function MemberArchiveDialog({
   member,
   boardId,
-  townId: _townId,
   open,
   onOpenChange,
 }: MemberArchiveDialogProps) {
@@ -76,14 +96,19 @@ export function MemberArchiveDialog({
 
   const archiveMemberMutation = useMutation(
     trpc.boardMember.archiveMembership.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (result) => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
         // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
         // (Phase E, wave 2, Task 3) — unconditionally, unlike the
         // `trpc.person.pathFilter()` call below: archiving JUST the board seat
         // still changes that read's own `status` column for this row.
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
-        if (willArchiveAccount) {
+        // `result.archivedAccount` — the SERVER's own answer — not the
+        // client's `willArchiveAccount` guess: `archiveMembership` recomputes
+        // whether the account was actually archived (see this file's header
+        // and that procedure's own doc comment), so this is the one place
+        // that recompute's result is worth reading back, not re-derived.
+        if (result.archivedAccount) {
           // `queryKeys.userAccounts.byTown` invalidation removed (Phase E,
           // wave 2, Task 3 fix round) — that key has no reader left anywhere
           // in the app (see `AddPersonDialog.tsx`'s identical comment for the
@@ -99,6 +124,9 @@ export function MemberArchiveDialog({
           void queryClient.invalidateQueries(trpc.person.pathFilter());
         }
         onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't archive this membership — please try again."));
       },
     }),
   );

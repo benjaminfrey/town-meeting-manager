@@ -451,7 +451,6 @@ export function MemberRoster({
         <MemberArchiveDialog
           member={archiveMember}
           boardId={boardId}
-          townId={townId}
           open={!!archiveMember}
           onOpenChange={(open) => {
             if (!open) setArchiveMember(null);

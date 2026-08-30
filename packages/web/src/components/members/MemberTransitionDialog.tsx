@@ -19,10 +19,21 @@
  * `is_governing_board DESC, name ASC`, not strict alphabetical; accepted as
  * a harmless reorder, same call `StaffAccountFlow.tsx`'s own doc comment
  * already made for this procedure.
+ *
+ * Review round: all three mutations gained `onError`. `addToBoard` and
+ * `convertToStaff` both throw DESIGNED `CONFLICT`s ("This person already has
+ * an active seat on this board" / "already has a login account") that this
+ * dialog was silently swallowing — the dialog stayed open, the button
+ * re-enabled, and nothing was said, conventions item 5's exact failure mode.
+ * Not a regression (the pre-migration Supabase code was equally silent on a
+ * `23505`), but worth closing while every write in this file is being
+ * touched anyway.
  */
 
 import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
+import { toast } from "sonner";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
@@ -66,6 +77,15 @@ interface MemberTransitionDialogProps {
 }
 
 type TransitionType = "archive" | "move_board" | "to_staff" | "to_board_member";
+
+/**
+ * The message a CONFLICT carries; a generic one otherwise. Same gate
+ * `AddPersonDialog.tsx`/`AddMemberDialog.tsx` already use — only a designed
+ * refusal's own message is safe to show verbatim.
+ */
+function errorMessage(err: unknown, fallback: string): string {
+  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
+}
 
 export function MemberTransitionDialog({
   member,
@@ -154,6 +174,9 @@ export function MemberTransitionDialog({
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
         onOpenChange(false);
       },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't archive this membership — please try again."));
+      },
     }),
   );
   const isArchivingPending = archiveMembershipMutation.isPending;
@@ -169,6 +192,9 @@ export function MemberTransitionDialog({
         // know which procedures some screen happens to call").
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
         onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't add this board membership — please try again."));
       },
     }),
   );
@@ -190,6 +216,9 @@ export function MemberTransitionDialog({
         // fields `boardMember.roster` selects.
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
         onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't convert this member to staff — please try again."));
       },
     }),
   );

@@ -1207,10 +1207,23 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `user_account_person_id_key` is unique on `person_id` alone, unfiltered by `archived_at`. So after
   an admin resolves a staff→board_member conflict through that dialog, the row conflicting a moment
   ago still exists with `role = 'staff'` — and `addBoardMember`'s mutual-exclusivity check (correctly)
-  refuses it again, every time, with no way through. The identical trap exists in
+  refuses it again, every time, with no way through. An administrator correcting a mis-assigned role
+  under Maine 30-A M.R.S.A. §2605 has nowhere to go today through THIS door.
+
+  **Corrected in Task 4, wave 2 — the sentence above about a second, identical door is wrong; the rest
+  of this bullet is not.** This paragraph originally also claimed "the identical trap exists in
   `MemberTransitionDialog.tsx`'s `to_board_member` transition, which routes through the same
-  `RoleConflictDialog`. An administrator correcting a mis-assigned role under Maine 30-A M.R.S.A.
-  §2605 has nowhere to go today.
+  `RoleConflictDialog`." Checked directly: that transition has no UI path at all — `MemberRoster.tsx`
+  is the only caller of `MemberTransitionDialog`, always with `member.role: "board_member"`, and the
+  dialog's own `RadioGroup` never renders a "convert to board_member" option (dead at `081a27e`,
+  before this task, too — not a regression this task introduced). `handleTransitionSelect` and the
+  mutual-exclusivity `useMemo` both still branch on `"to_board_member"`, so the TYPE and the dead
+  branches exist, but nothing in the component ever sets `transition` to that value. There was never a
+  second live door here to dead-end. **This does NOT close the bullet.** The `AddMemberDialog` door —
+  `boardMember.addBoardMember`'s mutual-exclusivity check, which runs BEFORE its reactivation branch
+  (`packages/api/src/trpc/routers/board-member.ts:473` as of this correction) — still refuses every
+  time, exactly as the rest of this bullet, including its last paragraph's fix-shape citation, already
+  says. One of the two doors described here was never real; the other is still shut.
 
   The review confirmed `RoleConflictDialog`'s own refusal is correct and should NOT change: the old,
   pre-migration code hit this identical case as an uncaught `23505` with no `onError` and no toast at
@@ -1228,16 +1241,7 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   board_member-seating path should apply the identical "update in place" shape to the direction that
   still dead-ends, rather than treating this as an open design question — it is not; only the wiring
   is missing.
-- **Closed in Task 4** — this bullet's own last paragraph is now stale: `MemberTransitionDialog.tsx`'s
-  `to_board_member` transition was, at the time it was written, unreachable from any UI (`MemberRoster`
-  only ever passes `member.role: "board_member"` into this dialog, so its `RadioGroup` never offers a
-  "convert to board_member" option) — the "identical trap" described was a latent shape in the code,
-  not a live path a user could hit. `archiveMembership`/`addToBoard`/`convertToStaff` (the three real
-  writes Task 4 added) do not touch that branch at all. Left exactly as found rather than wired up: this
-  task's brief named three files (`MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`,
-  `RoleConflictDialog.tsx`), not a new UI surface, and building the missing `to_board_member` radio
-  option is a product decision (what does "convert a staff member back to board_member" even offer —
-  a board picker?) this task was not asked to make.
+
 - **A task dispatch's own "measured scope" can be wrong — verify against the file, or the plan's own
   table, before trusting it (Task 4).** A dispatch summarizing this task claimed `MemberArchiveDialog.tsx`
   was "already fully migrated, 0 supabase calls" and that only 2 raw inserts remained in

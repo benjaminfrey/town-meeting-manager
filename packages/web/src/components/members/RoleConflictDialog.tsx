@@ -19,9 +19,15 @@
  * (`person.list`'s join drops an archived account's role entirely;
  * `boardMember.roster` selects `user_account_archived_at` unconditionally),
  * so both are invalidated below, per conventions item 7.
+ *
+ * Review round: added `onError` — this dialog had none before, and a refused
+ * write (e.g. a stale `userAccountId` answering NOT_FOUND) left the button
+ * re-enabled with no explanation, conventions item 5's exact failure mode.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Loader2, AlertTriangle } from "lucide-react";
 import {
@@ -35,6 +41,17 @@ import {
 import { Button } from "@/components/ui/button";
 import type { RoleConflictResult } from "@town-meeting/shared";
 import { ROLE_LABELS } from "@town-meeting/shared";
+
+/**
+ * The message a CONFLICT carries; a generic one otherwise. Same gate
+ * `AddPersonDialog.tsx`/`AddMemberDialog.tsx` already use. `archiveUserAccount`
+ * does not throw CONFLICT today (its own refusals are FORBIDDEN/NOT_FOUND),
+ * but the gate costs nothing to carry and matches every sibling in this file
+ * family, rather than being a fourth, slightly different shape.
+ */
+function errorMessage(err: unknown, fallback: string): string {
+  return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
+}
 
 interface RoleConflictDialogProps {
   personName: string;
@@ -66,6 +83,9 @@ export function RoleConflictDialog({
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
         onResolved();
         onOpenChange(false);
+      },
+      onError: (err) => {
+        toast.error(errorMessage(err, "Couldn't archive this account — please try again."));
       },
     }),
   );
