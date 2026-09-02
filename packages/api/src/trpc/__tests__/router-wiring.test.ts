@@ -50,6 +50,11 @@ describe("router wiring", () => {
         "town.updateProfile",
         "notificationPreference.mine",
         "notificationPreference.setMine",
+        "meeting.byTown",
+        "meeting.byBoard",
+        "meeting.detail",
+        "meeting.insert",
+        "meeting.cancel",
         "whoami",
       ]),
     );
@@ -79,6 +84,8 @@ describe("router wiring", () => {
       "board.stats",
       "board.recentMeetings",
       "boardMember.roster",
+      "meeting.byBoard",
+      "meeting.detail",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
@@ -111,6 +118,8 @@ describe("router wiring", () => {
       "boardMember.addToBoard",
       "boardMember.convertToStaff",
       "person.archiveUserAccount",
+      "meeting.insert",
+      "meeting.cancel",
       "agendaTemplate.list",
       "agendaTemplate.detail",
       "agendaTemplate.countForBoard",

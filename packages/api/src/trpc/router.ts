@@ -23,6 +23,7 @@ import { boardMemberRouter } from "./routers/board-member.js";
 import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
+import { meetingRouter } from "./routers/meeting.js";
 
 export const appRouter = router({
   /**
@@ -65,6 +66,15 @@ export const appRouter = router({
    * construction, not by an `assertCan*` rule).
    */
   notificationPreference: notificationPreferenceRouter,
+
+  /**
+   * Meetings: a town-wide list (the kanban), a board-scoped list, one
+   * meeting's detail, and two writes. `insert`/`cancel` are this codebase's
+   * first real call sites for the board-scoped half of conventions item 2
+   * — see `routers/meeting.ts` for why `cancel`'s guard is not a copy of
+   * `insert`'s.
+   */
+  meeting: meetingRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

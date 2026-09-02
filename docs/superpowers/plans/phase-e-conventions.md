@@ -272,18 +272,91 @@ that the item 2 rewrite's diagnosis was right: its schema used to be a bare `z.s
 permissive for almost any string to fail," and literally could not have supported a reorder pin
 until Task 5 tightened it — see that procedure's own doc comment. The
 `PermissionCode` form (`requirePermission`) declared before `.input()` is exercised too, in
-`require-permission.test.ts`'s synthetic router, including its own reorder pin — but has **zero
-call sites in a real procedure**; every real Actor-only write so far is an admin gate
-(`requireActor`), not a delegable code. The board-SCOPED form specifically
-(`requireBoardPermission`/`boardIdFrom` keyed to one of the 18 `BOARD_SCOPED_CODES`) is fixed and
-covered by a dedicated test proving it resolves a board and refuses correctly at the corrected
-position, but still has **zero call sites outside tests** — no procedure in this repo authorizes
-anything board-scoped yet. The first wave to add one should expect to amend this item again, not
-assume it settled. **The underlying `getRawInput()` TECHNIQUE this form popularized is a different
-claim and is no longer test-only** — `person.ts`'s `requireOwnAccountColumns` (the subject-carrying
-shape documented above) reads a different field off `getRawInput()` the identical way, for a
-different reason, and ships in a real procedure today. Do not read "zero call sites outside tests"
-as covering the mechanism in general; it is scoped to the board-scoped form specifically.
+`require-permission.test.ts`'s synthetic router, including its own reorder pin — but the GLOBAL
+shape (a code with no board) still has **zero call sites in a real procedure** as of wave 3; every
+real Actor-only write so far is an admin gate (`requireActor`), not a delegable code, and this
+wave's own delegable-code write (`meeting.insert`) is board-scoped, not global. ~~The board-SCOPED
+form specifically ... still has **zero call sites outside tests** — no procedure in this repo
+authorizes anything board-scoped yet.~~ — **closed in wave 3, Task 1.** `meeting.insert` calls
+`requireBoardPermission("A1", boardIdFrom())` for real — see "Wave 3, Task 1 — the board-scoped
+form's first real call site, and what it found" below for what that first use found the item got
+right and what it did not yet say. **The underlying `getRawInput()` TECHNIQUE this form popularized
+is a different claim and is no longer test-only** — `person.ts`'s `requireOwnAccountColumns` (the
+subject-carrying shape documented above) reads a different field off `getRawInput()` the identical
+way, for a different reason, and ships in a real procedure today. Do not read "zero call sites" for
+the GLOBAL `requirePermission` form as covering the board-scoped form too; they are tracked
+separately here because they answer different questions, and only one of the two closed this wave.
+
+**Wave 3, Task 1 — the board-scoped form's first real call site, and what it found.** `meeting.insert`
+(`packages/api/src/trpc/routers/meeting.ts`) is `.use(requireBoardPermission("A1", boardIdFrom())).input(...)`,
+exactly the shape this item's example code has shown for three waves with nothing behind it. The case
+this whole mechanism exists for — a global grant REVOKED on one board refuses there and still allows
+the same actor elsewhere, and the mirror case the two `designated_boards` templates actually produce
+(nothing globally, granted on one board only) — is now exercised by a real procedure for the first
+time (`meeting.test.ts`'s "honours a REVOKING board override" / "honours a GRANTING board override"
+tests). **What the item got right:** the mechanism worked exactly as specified, first try, for a
+single-code write. `requireBoardPermission("A1", boardIdFrom())` needed no changes and no fix round —
+`assertCanInsertMeeting(actor, scope)` and `assertPermission(actor, "A1", {boardId, ...})` are the
+identical call, so using the code form through the middleware IS calling the rule, not a shortcut
+around it (see `meeting.ts`'s own header for why it does not additionally import and call
+`assertCanInsertMeeting` directly).
+
+**What the item got wrong, or rather did not yet say: a `BoardScope`-taking rule with more than one
+code needs a FIFTH guard shape this item does not catalogue.** `assertCanUpdateMeeting` is
+`isAdmin(actor) OR A1@board OR M1@board` — not reducible to one `PermissionCode`, so
+`requireBoardPermission` (which always resolves exactly one code via `assertPermission`) cannot
+express it, the identical reason `requireActor` cannot express a subject-carrying rule like
+`assertCanUpdateUserAccount`. `meeting.ts`'s `cancel` procedure needed a fourth shape — a **board-scoped
+custom middleware** (`requireCanUpdateMeeting`, local to that file, not a new `trpc.ts` export, per
+this item's own "keep a single-use shape local until a second caller needs it" precedent for
+`requireOwnAccountColumns`) that reads `boardId` via the exported `boardIdFrom()` helper and calls the
+real `assertCanUpdateMeeting(actor, {boardId})` rather than a single-code stand-in. This item's
+existing catalogue (requirePermission/requireBoardPermission for one code; requireActor for no board;
+a subject-carrying middleware for a row/column subject) had no entry for "BoardScope, more than one
+code" until this task.
+
+**A second, sharper finding, specific to `cancel` and worth generalizing: a board-scoped UPDATE whose
+target is named by a DIFFERENT id than the board itself reopens the `.transform()` hazard by a new
+route.** This item already warns "do not `.transform()` a value a guard authorizes on" for the case
+where a schema transform changes a board id between the guard's read and the resolver's read of the
+SAME field. `cancel` never transforms anything, and the hazard shows up anyway: its input is
+`{meetingId, boardId}`, the guard authorizes the CLIENT-CLAIMED `boardId`, but the row the resolver
+actually writes is selected by `meetingId` — a value the guard never inspects. `meeting`'s own RLS
+(`meeting_tenant_isolation`) is tenancy-only, no board predicate, so any town member can already see
+any meeting's true board via `detail`/`byTown`; nothing stops a caller who holds A1 on their OWN board
+from naming a DIFFERENT board's meeting and claiming their own board for it. The middleware, doing
+exactly what `boardIdFrom` always does, authorizes the board the caller NAMED, not the board the write
+is actually about. The fix is not a schema change (there is no `.transform()` to remove) — it is a
+SECOND, independent authorization check in the resolver, re-running `assertCanUpdateMeeting` against
+the ROW's real `board_id` read fresh from the database, before the write. Generalize this as: **any
+board-scoped write whose target is identified by something OTHER than the board id itself (a row id,
+not the board id, as the mutation's key) needs the resolver to re-verify the guard's authorized value
+against the row's true value — the middleware's pre-check on client-claimed input is not sufficient by
+itself.** `insert` does not need this (the board id it authorizes on IS the board id it writes, by
+construction), which is exactly why this did not surface in Task 1's `insert` procedure, or in
+`board-scope.test.ts`'s four synthetic procedures, or in `require-permission.test.ts`'s
+`editAgenda`/`scheduleMeeting` — none of them target a row by an id OTHER than the board id.
+
+**A third finding, orthogonal to authorization but found by exactly the same "verify by mutation"
+discipline item 13 requires, and worth recording here because the guard's own shape is what exposed
+it: resolving `ctx.actor()` for the first time INSIDE a procedure's own `ctx.withTenant` callback
+self-deadlocks under a single-connection pool.** `ctx.actor()` is memoised per request
+(`context.ts`), but an UNresolved call runs its own internal `withTenant` (`fixtures.ts`'s `contextFor`
+and the production context both shape it this way) — a second, nested transaction on the same pooled
+connection while the first is still open. `cancel`'s resolver calls `assertCanUpdateMeeting(await
+ctx.actor(), {...})` for its own re-check (the finding above); normally the `requireCanUpdateMeeting`
+middleware resolves `ctx.actor()` FIRST, outside any transaction, so the resolver's later call just
+reads the warmed memo. Deleting that middleware to run the deletion-pin mutation item 13 requires
+(see this file's own discipline, and wave 3's Task 1 report) removed the ONLY thing warming that memo
+before the transaction opened — every `meeting.cancel` test hung at vitest's 30s per-test timeout
+instead of failing, on the test harness's deliberately single-connection pool
+(`connectAsAppRole`'s own doc comment: "one connection, so 'the same pooled connection' is a fact").
+Fixed by resolving `ctx.actor()` BEFORE `ctx.withTenant` opens, in the resolver itself, so the guard's
+call and the resolver's are provably the same cached promise regardless of whether the guard ran —
+correct by construction, not by accident of the guard resolving it first. **Any future procedure that
+re-checks authorization inside its own transaction, the way `cancel`'s does, inherits this exact trap
+if it calls `ctx.actor()` for the first time from inside `ctx.withTenant`'s callback rather than
+before it.**
 
 **The example files a reader lands on now match this item's own rule.** `board-scope.test.ts`'s
 four board-scoped procedures and `require-permission.test.ts`'s `editAgenda`/`scheduleMeeting` used
@@ -1116,10 +1189,19 @@ grep-able property.
 
 ## Known gaps this document does not close
 
-- The board-scoped authorization form in item 2 is fixed and unit-tested (Task 2's fix round —
-  `requirePermission`'s board extractor now reads `getRawInput()` so the form actually works
-  declared before `.input()`) but still has **zero call sites in a real procedure** — no shipped
-  router calls `requireBoardPermission` yet. The mechanism is proven; the first real use is not.
+- ~~The board-scoped authorization form in item 2 is fixed and unit-tested ... but still has **zero
+  call sites in a real procedure** — no shipped router calls `requireBoardPermission` yet.~~ —
+  **closed in wave 3, Task 1.** `meeting.insert` (`packages/api/src/trpc/routers/meeting.ts`) calls
+  `requireBoardPermission("A1", boardIdFrom())` for real, and the case this whole mechanism exists
+  for — a revoking board override refusing on the barred board while still allowing the same actor
+  elsewhere — is exercised by a real procedure for the first time (`meeting.test.ts`'s "honours a
+  REVOKING board override" tests, on both `insert` and `cancel`). See wave 3's Task 1 report for what
+  this first real use found item 2 got right and wrong. Not fully closed, though: `cancel` does NOT
+  use `requireBoardPermission` — `assertCanUpdateMeeting` is admin-OR-A1-OR-M1, not one code, so it
+  needed a fourth guard shape (a `BoardScope`-taking local middleware, `meeting.ts`'s own
+  `requireCanUpdateMeeting`) that item 2 does not yet catalogue. `requireBoardPermission` itself has
+  exactly one real call site as of this task; the broader claim "the board-scoped mechanism has real
+  users" is now true, but "every board-scoped write fits the two shapes item 2 names" is not.
 - `assertCanSelectTownNotificationConfig` / `assertCanInsertTownNotificationConfig` /
   `assertCanUpdateTownNotificationConfig` are tested as pure functions
   (`packages/api/src/trpc/__tests__/admin-gates.test.ts`) but **no procedure calls them** — wave 1
@@ -1253,8 +1335,14 @@ settings" read)`.
   marker in this same round: `board.listActive` exists and is not a blind swap, because its ordering
   (governing board first, then alphabetical — see its own doc comment) differs from this picker's
   plain `.order("name")`, a real behavior difference whoever migrates this file next needs to check,
-  not a missing procedure. `meetingRows`/`minutesDocs` still have no router at all
-  (`meeting`/`minutesDocument`) and stay open exactly as before.
+  not a missing procedure. ~~`meetingRows`/`minutesDocs` still have no router at all
+  (`meeting`/`minutesDocument`) and stay open exactly as before.~~ — **`meetingRows`'s half closed in
+  wave 3, Task 0/1**: a `meeting` router now exists (`packages/api/src/trpc/routers/meeting.ts`,
+  Task 1) and `home.tsx`'s own marker was retagged to say so (Task 0) — the screen itself is not
+  wired onto it yet (that is Task 2 territory and explicitly out of this wave's Task 1 scope), only
+  the marker's claim changed. `minutesDocs` still has no router at all and stays open, now scoped to
+  wave 6 in `home.tsx`'s own retagged marker (that wave owns `minutes.tsx`/`review.tsx` per this
+  wave's own plan).
 - ~~`ProgressChecklist.tsx` (Task 5) ... Its third, `memberCount` ... stays on Supabase ... Marked
   `// TODO(phase-e-wave-2): boardMember.countByTown (or equivalent)`.~~ — **closed in Task 3.**
   `boardMember.memberCount` (the relocated procedure — see `board-member.ts`'s own header, "Task 1,
