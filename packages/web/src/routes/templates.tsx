@@ -3,6 +3,24 @@
  *
  * Lists every board's reusable agenda templates, grouped by board. Creating and
  * editing happens in each board's Templates tab; this is the cross-board view.
+ *
+ * TODO(phase-e-wave-4): agendaTemplate.listByTown (or equivalent) — not a
+ * simple swap onto an existing procedure: `agendaTemplate.list`/`.detail`
+ * (`packages/api/src/trpc/routers/agenda-template.ts`) are both BOARD-scoped
+ * (take a `boardId`), and this screen's own question is town-wide, grouped
+ * by board — the identical shape gap `home.tsx`'s board-picker marker named
+ * for `board.listActive` before that procedure existed. No authorization
+ * delta versus the raw read below either way (`agendaTemplate.list` is a
+ * plain `protectedProcedure` — see conventions item 11 and wave 3's Task 0,
+ * which added this marker). Wave number is a best guess, not a plan
+ * citation — no wave plan document names this file yet (checked directly:
+ * wave 3's own plan lists `CreateMeetingDialog.tsx` and `routes/templates.tsx`
+ * together as the two files missing this marker, but only schedules the
+ * former's conversion, in this same wave's Task 2). `wave-4` is chosen
+ * because that wave already owns the agenda surface generally, not because
+ * any document says so — retag when a wave plan actually claims this file,
+ * per conventions item 14's `home.tsx` precedent for the identical
+ * situation.
  */
 
 import { useMemo } from "react";
@@ -28,6 +46,7 @@ export default function TemplatesPage() {
   const currentUser = useCurrentUser();
   const townId = currentUser?.townId ?? "";
 
+  // TODO(phase-e-wave-4): agendaTemplate.listByTown — see this file's header.
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ["agendaTemplates", "byTown", townId],
     queryFn: async () => {

@@ -4,6 +4,14 @@
  * Validates prerequisites (member count, retention policy),
  * creates the meeting record, instantiates agenda from template,
  * and navigates to the agenda builder.
+ *
+ * TODO(phase-e-wave-3): meeting.insert (this wave's own Task 2 converts this
+ * file's meeting-record write onto it — see `packages/api/src/trpc/routers/meeting.ts`,
+ * shipped in Task 1), agenda_template read (`agendaTemplate.list`/`.detail`
+ * already exist as plain `protectedProcedure` — no authorization delta
+ * versus the raw read below, a completeness gap only; see conventions item
+ * 11 and wave 3's Task 0). Both markers are expected to close together when
+ * Task 2 lands, not separately.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -135,6 +143,7 @@ export function CreateMeetingDialog({
     enabled: !!townId,
   });
 
+  // TODO(phase-e-wave-3): agendaTemplate.list — see this file's header.
   const { data: templates = [] } = useQuery({
     queryKey: queryKeys.agendaTemplates.byBoard(boardId),
     queryFn: async () => {
@@ -183,6 +192,7 @@ export function CreateMeetingDialog({
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
 
+      // TODO(phase-e-wave-3): meeting.insert — see this file's header.
       const { error } = await supabase.from("meeting").insert({
         id,
         board_id: boardId,

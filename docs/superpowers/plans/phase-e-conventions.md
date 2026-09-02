@@ -809,6 +809,20 @@ six calls already exist and already serve an already-migrated screen; deferring 
 in the meantime. A wave that adds a new writer against an already-migrated read owes it the pin in
 the same commit, for the identical reason.
 
+**`pathfilter-pin-coverage.test.ts` mechanizes this discipline, and its own credit is per TEST FILE,
+not per writer inside it — named in wave 3's Task 0.** If a test file imports writer A (and
+genuinely asserts `isInvalidated`/`countFor(` about A's own key) and ALSO imports writer B — for any
+reason, including one that has nothing to do with B's own `pathFilter()` call — B is credited as
+pinned too, purely because the file contains SOME invalidation assertion and SOME import of B.
+Proven as a fixture, not asserted: `pathfilter-pin-coverage.test.ts`'s own "credits an unrelated
+writer merely for being imported alongside a genuinely-pinned one" test constructs exactly this case
+and shows it passes. Not audited against every real writer in the tree to confirm none currently
+rides on this hole in practice — that would be the per-mutation deletion sweep two paragraphs up,
+scoped to cache invalidation generally, not this specific credit-bleed shape — so treat this as a
+known mechanism limit, not a claim that HEAD is clean of it. Item 14's deletion sweep is the backstop
+either way. Recorded here rather than only in the check's own header because a reader of this
+document who never opens that test file should not have to rediscover the limit by tripping over it.
+
 ### The floor
 
 If a payload genuinely cannot go through `installTRPCFetchStub`, it still carries
@@ -1465,13 +1479,13 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   neither answers `people.tsx`'s actual question ("for every person in the town, which board names do
   they hold a seat on"), which needs a town-wide `board_member` JOIN `board` grouped by person — a
   procedure that does not exist yet. Both markers stay exactly as they were.
-- **`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
-  re-labeled to a specific wave number in Task 4.** A dispatch for this task asked for it to be re-tagged
-  to "the wave that will own them," on the reasoning that `meeting`/`minutesDocument` are wave 3+ work —
-  correct as far as it goes (this wave's own "Measured scope" table and Global Constraints both say this
-  wave is board/membership only), but no wave 3–6 plan document exists yet (only
-  `2026-08-29-phase-e-wave-1-identity-and-settings.md`, `2026-08-29-phase-e-unit-0-boards-slice.md` and
-  this wave's own plan exist in `docs/superpowers/plans/` as of Task 4). Guessing a specific wave number
-  with nothing to check it against would be exactly the kind of unverified claim this document exists to
-  prevent. Left as `TODO(phase-e-wave-2)` — mis-scoped but honestly so — for whoever writes the wave 3
-  plan to retag with an actual number.
+- ~~`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
+  re-labeled to a specific wave number in Task 4.~~ ... Left as `TODO(phase-e-wave-2)` — mis-scoped
+  but honestly so — for whoever writes the wave 3 plan to retag with an actual number.~~ — **the wave
+  3 plan this bullet was waiting for now exists, and wave 3's own Task 0 did the retag it asked for.**
+  `home.tsx`'s marker is now `TODO(phase-e-wave-6)`, naming only `minutesDocument.pendingByTown` and
+  the still-unwired `board.listActive` — `meeting.byTown` dropped off the list because wave 3's Task 1
+  shipped it for real, not because of a re-scoping guess. `minutesDocument.pendingByTown` is tagged
+  `wave-6` on the same basis this wave's own plan already states elsewhere (its "Out of scope" note:
+  "`minutes.tsx` and `review.tsx` are wave 6"), not a fresh guess — the same table this bullet's
+  original version was checking against, now checkable because it exists.
