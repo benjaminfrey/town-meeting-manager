@@ -1,17 +1,20 @@
 /**
- * `meeting.byTown` / `.byBoard` / `.detail` / `.insert` / `.cancel`.
+ * `meeting.byTown` / `.byBoard` / `.detail` / `.insert` / `.cancel` /
+ * `.updateStatus`.
  *
- * `insert`/`cancel` are this codebase's first REAL call sites for the
- * board-scoped half of conventions item 2 (`requireBoardPermission`/
- * `BoardScope`) — every prior wave's write was an actor-only admin gate. The
- * four things wave 3's task brief asks to prove by mutation, each with its
- * own test below:
+ * `insert`/`cancel`/`updateStatus` are this codebase's first REAL call sites
+ * for the board-scoped half of conventions item 2 (`requireBoardPermission`/
+ * `requireBoardActor`/`BoardScope`) — every prior wave's write was an
+ * actor-only admin gate. The four things wave 3's task brief asks to prove
+ * by mutation, each with its own test below, for `insert` and (where the
+ * shape differs) `cancel`/`updateStatus` too:
  *
- *   1. A caller WITH A1 on a board succeeds; WITHOUT it, FORBIDDEN.
- *   2. A caller with a REVOKING board override for A1 is refused on that
- *      board and still allowed on another — the case the whole board-scoped
- *      mechanism exists for, and (per the task brief) never exercised by a
- *      real procedure before this task.
+ *   1. A caller WITH A1 (or, for `cancel`/`updateStatus`, A1 OR M1 OR admin)
+ *      on a board succeeds; WITHOUT it, FORBIDDEN.
+ *   2. A caller with a REVOKING board override is refused on that board and
+ *      still allowed on another — the case the whole board-scoped mechanism
+ *      exists for, and (per the task brief) never exercised by a real
+ *      procedure before this task.
  *   3. Moving `.use()` after `.input()` turns a reorder pin red — proved
  *      here by input that fails validation on a field the guard does not
  *      read, while the field the guard DOES read (`boardId`) stays valid,
@@ -24,10 +27,28 @@
  *      succeed — reproduced once during this task (see the task report),
  *      restored; the NOT_FOUND test below is what stays red without it.
  *
- * `cancel` carries a fifth kind of test neither `insert` nor any prior
- * router needed: the board-MISMATCH case `meeting.ts`'s own header names —
- * a caller claims a board they hold A1 on for a meeting that actually
- * belongs to a different board.
+ * `cancel`/`updateStatus` carry a fifth kind of test neither `insert` nor
+ * any prior router needed: the board-MISMATCH case `trpc.ts`'s
+ * `requireBoardActor` doc comment names — a caller claims a board they hold
+ * A1 on for a meeting that actually belongs to a different board.
+ *
+ * Both also carry a sixth, and its actual shape is worth stating precisely
+ * because an earlier draft of this comment got it wrong: deleting the
+ * `.use(requireBoardActor(...))` guard ENTIRELY does NOT leave
+ * `assertMatchesAuthorizedBoard` behaving as an independent re-check that
+ * still separates authorized from unauthorized callers. It leaves
+ * `ctx.authorizedBoardId` unset for EVERY call, and `assertMatchesAuthorizedBoard`
+ * refuses to proceed at all when that happens (a plain `Error`, "this
+ * procedure's guard must be requireBoardActor" — a wiring-bug signal, not an
+ * `AuthorizationError`) — so deleting the guard fails EVERY test in this
+ * describe block, the successful ones included, not just the refusal ones.
+ * That is arguably a STRONGER property (a missing guard cannot silently let
+ * an authorized call through by accident, the way a same-permission
+ * resolver-side re-check might if it were ever miscoded), but it is a
+ * DIFFERENT property than "the resolver alone still tells authorized and
+ * unauthorized callers apart," and this file used to claim the latter.
+ * Verified directly: see "answers a wiring-bug error, not a silent
+ * authorization gap, when the guard never ran at all" below.
  *
  * Same connection discipline as every other router test in this phase:
  * every case that touches tenancy or RLS runs through `connectAsAppRole`,
@@ -634,16 +655,17 @@ describe("meeting.cancel", () => {
   });
 
   /**
-   * The board-MISMATCH case `meeting.ts`'s header names, unique to this
-   * procedure: the caller holds A1 on THEIR board and claims it for a
-   * meeting that actually belongs to a DIFFERENT board they hold nothing
-   * on. `meeting_tenant_isolation` has no board predicate, so the row is
-   * visible; only the application-level re-check (against the row's REAL
-   * `board_id`, not the client-claimed one the middleware guard used)
-   * stands between this and a cross-board privilege escalation. Without the
-   * resolver's `assertCanUpdateMeeting` re-check, this case would succeed —
-   * verified by mutation during this task (see the report) by removing that
-   * line and watching the meeting actually get cancelled.
+   * The board-MISMATCH case `trpc.ts`'s `requireBoardActor` doc comment
+   * names, unique to a row-targeted board-scoped write like this one: the
+   * caller holds A1 on THEIR board and claims it for a meeting that
+   * actually belongs to a DIFFERENT board they hold nothing on.
+   * `meeting_tenant_isolation` has no board predicate, so the row is
+   * visible; only the resolver's `assertMatchesAuthorizedBoard(ctx,
+   * meeting.board_id)` call — comparing the board the guard authorized
+   * against the row's REAL board — stands between this and a cross-board
+   * privilege escalation. Without that call, this case would succeed —
+   * verified by mutation during this task (see the report) by removing it
+   * and watching the meeting actually get cancelled.
    */
   it("refuses when the claimed boardId does not match the meeting's real board, and cancels nothing", async () => {
     await withTestDb(async (client) => {
@@ -742,6 +764,272 @@ describe("meeting.cancel", () => {
           caller.meeting.cancel({ meetingId: theirMeeting, boardId: mine.boardId }),
         );
         expect(err.code).toBe("NOT_FOUND");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("meeting.updateStatus", () => {
+  it("refuses a caller with no A1 or M1 on this board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "To Notice",
+          scheduledDate: "2026-05-01",
+        });
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({ meetingId, boardId: town.boardId, status: "noticed" }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets a caller holding A1 on this board change the status", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "To Notice",
+          scheduledDate: "2026-05-01",
+        });
+        const clerk = await seedActor(db, town, { role: "staff", global: ["A1"] });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.meeting.updateStatus({
+          meetingId,
+          boardId: town.boardId,
+          status: "noticed",
+        });
+        expect(result.status).toBe("noticed");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("noticed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The M1 fallback, identical reason `cancel` needs it: a presiding
+   * officer holding only `start_run_meeting` — no A1 — can still move a
+   * meeting's status (e.g. opening one for attendance).
+   */
+  it("lets a caller holding ONLY M1 (start_run_meeting) on this board change the status too", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "To Open",
+          scheduledDate: "2026-05-01",
+          status: "noticed",
+        });
+        const officer = await seedActor(db, town, { role: "staff", global: ["M1"] });
+        const caller = appRouter.createCaller(contextFor(db, town, officer));
+
+        const result = await caller.meeting.updateStatus({
+          meetingId,
+          boardId: town.boardId,
+          status: "open",
+        });
+        expect(result.status).toBe("open");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("honours a REVOKING board override: refused on the barred board, allowed for the same actor on another", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const barredMeeting = await seedMeeting(db, town, town.boardId, {
+          title: "Barred Board Meeting",
+          scheduledDate: "2026-05-01",
+        });
+        const otherMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Other Board Meeting",
+          scheduledDate: "2026-05-02",
+        });
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: ["A1"],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A1: false } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({
+            meetingId: barredMeeting,
+            boardId: town.boardId,
+            status: "noticed",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, barredMeeting)).toBe("draft");
+
+        const result = await caller.meeting.updateStatus({
+          meetingId: otherMeeting,
+          boardId: town.otherBoardId,
+          status: "noticed",
+        });
+        expect(result.status).toBe("noticed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The board-MISMATCH case, identical shape to `cancel`'s own — see that
+   * describe block's own comment, and `trpc.ts`'s `requireBoardActor` doc
+   * comment for the general rule.
+   */
+  it("refuses when the claimed boardId does not match the meeting's real board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const theirMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Not This Clerk's Board",
+          scheduledDate: "2026-05-01",
+        });
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A1: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({
+            meetingId: theirMeeting,
+            boardId: town.boardId,
+            status: "noticed",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, theirMeeting)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({
+            meetingId: "not-a-uuid",
+            boardId: town.boardId,
+            status: "noticed",
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("proves the reorder pin is not vacuous: valid-but-unauthorized input also answers FORBIDDEN", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "To Notice",
+          scheduledDate: "2026-05-01",
+        });
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({ meetingId, boardId: town.boardId, status: "noticed" }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a meetingId in another town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirMeeting = await seedMeeting(db, theirs, theirs.boardId, {
+          title: "Not Mine",
+          scheduledDate: "2026-01-01",
+        });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.updateStatus({
+            meetingId: theirMeeting,
+            boardId: mine.boardId,
+            status: "noticed",
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("rejects 'cancelled' as a status value — cancel is the dedicated procedure for that", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Not Via updateStatus",
+          scheduledDate: "2026-05-01",
+        });
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        await expect(
+          caller.meeting.updateStatus({
+            meetingId,
+            boardId: town.boardId,
+            // @ts-expect-error — "cancelled" is deliberately outside the
+            // zod enum; this proves it at RUNTIME too (BAD_REQUEST), not
+            // just at the type level.
+            status: "cancelled",
+          }),
+        ).rejects.toThrow();
       } finally {
         await app.end();
       }

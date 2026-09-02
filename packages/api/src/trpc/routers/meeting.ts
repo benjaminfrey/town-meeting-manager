@@ -1,15 +1,15 @@
 /**
  * Phase E, wave 3, Task 1 — meetings: a town-wide list (the kanban), a
  * board-scoped list (the board's Meetings tab), one meeting's detail, and
- * two writes — `insert` and `cancel`.
+ * three writes — `insert`, `cancel`, and `updateStatus`.
  *
  * ─── Why this router is different from every other one so far ────────────
  *
  * Unit 0 and waves 1–2 converted only ACTOR-only writes (`requireActor`) —
- * admin gates with no board. `insert`/`cancel` are this codebase's first
- * REAL call sites for the board-scoped half of conventions item 2:
- * `assertCanInsertMeeting`/`assertCanUpdateMeeting` (`rules.ts`) both take a
- * `BoardScope` and were, until this task, exercised only by
+ * admin gates with no board. `insert`/`cancel`/`updateStatus` are this
+ * codebase's first REAL call sites for the board-scoped half of conventions
+ * item 2: `assertCanInsertMeeting`/`assertCanUpdateMeeting` (`rules.ts`) both
+ * take a `BoardScope` and were, until this task, exercised only by
  * `board-scope.test.ts`'s synthetic router. See `phase-e-conventions.md`
  * item 2's "Known gaps" bullet naming this — it is retired by this commit.
  * `insert` uses `requireBoardPermission("A1", boardIdFrom())` rather than
@@ -17,7 +17,8 @@
  * `assertPermission(actor, "A1", {boardId, ...})`, the identical call
  * `requireBoardPermission` makes internally, so calling it through the code
  * form (as `board-scope.test.ts`'s own single-code examples do) is not a
- * shortcut, it is the same check. `cancel` cannot do the same — see below.
+ * shortcut, it is the same check. `cancel`/`updateStatus` cannot do the
+ * same — see below.
  *
  * ─── Reads carry no guard ──────────────────────────────────────────────
  *
@@ -61,12 +62,16 @@
  * open a way to mint a meeting that is already `'noticed'` or `'approved'`
  * with no history behind it.
  *
- * ─── `cancel`: why it does NOT copy `insert`'s guard verbatim ─────────────
+ * ─── `cancel`/`updateStatus`: why they do NOT copy `insert`'s guard verbatim
  *
  * Two divergences from the literal wave-3 task brief
- * (".use(requireBoardPermission("A1", boardIdFrom())).input(...)" for BOTH
- * writes), both load-bearing enough to report rather than silently deviate
- * from:
+ * (".use(requireBoardPermission("A1", boardIdFrom())).input(...)" for every
+ * write), both load-bearing enough to report rather than silently deviate
+ * from, and both now generalised into `trpc.ts` rather than left as a
+ * one-off local middleware (this task's own first version had a local
+ * `requireCanUpdateMeeting`; the review round generalised it — see
+ * `requireBoardActor`'s own doc comment in `trpc.ts` for the full case,
+ * summarised here):
  *
  * 1. **`assertCanUpdateMeeting` is not a single-code check.** It is
  *    `isAdmin(actor) OR A1@board OR M1@board` (`rules.ts`, "meeting UPDATE").
@@ -78,69 +83,107 @@
  *    permissions.ts`), so `requireBoardPermission("A1", ...)` alone would
  *    still pass an admin. The M1 branch is NOT subsumed: a caller holding
  *    only M1 (`start_run_meeting`) — e.g. a presiding officer with no A1 —
- *    would be wrongly refused by a straight A1-only guard. `cancel` is a
- *    `meeting` UPDATE (`status` changes), exactly `assertCanUpdateMeeting`'s
- *    own stated scope, so it gets the real rule, not a narrower stand-in.
- *    This is the same shape conventions item 2 already names for
- *    `assertCanUpdateUserAccount`/`requireOwnAccountColumns` in `person.ts`
- *    — "a subject-carrying middleware... a one-off local middleware, not a
- *    new export on `trpc.ts`." `requireCanUpdateMeeting` below is that shape
- *    for a `BoardScope`-taking rule instead of a subject-carrying one; item
- *    2 catalogues neither `requireBoardPermission` (one code) nor
- *    `requireActor` (no board) as fitting a rule with more than one code, so
- *    this is a fourth guard shape, not a variant of the first two.
+ *    would be wrongly refused by a straight A1-only guard. Both `cancel` and
+ *    `updateStatus` are `meeting` UPDATEs (`status` changes), exactly
+ *    `assertCanUpdateMeeting`'s own stated scope, so both get the real rule
+ *    via `requireBoardActor(assertCanUpdateMeeting)` — `requireActor`'s
+ *    board-scoped sibling, taking the RULE FUNCTION rather than a code, so
+ *    it can express an OR across codes and a role check the way
+ *    `requireBoardPermission` cannot. See `trpc.ts` for why this is a
+ *    generalised primitive rather than staying a local one-off — the
+ *    reviewer found two MORE `BoardScope` rules (`assertCanInsertExhibit`,
+ *    `assertCanInsertVoteRecord`) that also do not fit
+ *    `requireBoardPermission`, so this shape needed a name other authors can
+ *    reach for, not a second bespoke copy.
  *
  * 2. **`meeting` has no board-level RLS, so a client-supplied board id is
  *    not safe to trust for authorization the way `insert`'s is.** `insert`
  *    uses `boardId` for the FK it is ABOUT to write — the guard's
  *    pre-validation value and the resolver's post-validation value are
  *    identical by construction (no `.transform()`), exactly the case item 2
- *    already covers. `cancel` targets an EXISTING row by `meetingId`, and
- *    that row already has its own, true `board_id` from when it was
- *    created. Because `meeting_tenant_isolation` has no board predicate, any
- *    signed-in member of the town can already SEE any meeting's real board
- *    via `detail`/`byTown` — so a caller holding A1 on their OWN board could
- *    send `{meetingId: <someone else's board's meeting>, boardId: <their
- *    own board>}`. The middleware guard, reading the CLAIMED board off
- *    unvalidated input exactly as `boardIdFrom` always does, would correctly
- *    authorize against the board the caller named — which is not the board
- *    the write is actually about. This is the `.transform()` hazard item 2
- *    already names ("the guard authorizes the PRE-validation board id while
- *    the resolver acts on the POST-validation one... do not transform a
- *    value a guard authorizes on"), reached a different way: not by a
- *    schema transform, but by the write's true subject being a different
- *    id than the one the guard checked. The resolver closes it by
- *    re-running `assertCanUpdateMeeting` against the ROW's real `board_id`,
- *    read fresh from the database, before performing the update — the
- *    identical "recompute server-side rather than trust the client"
- *    principle `phase-e-conventions.md`'s Known-gaps entry "Recompute a
- *    client's destructive-option request server-side" already states for a
- *    different write. `ctx.actor()` IS memoised per request (`context.ts`)
- *    — but the resolver resolves it BEFORE opening its own `withTenant`
- *    transaction, not inside that transaction's callback, and that ordering
- *    is load-bearing, not tidiness: an unresolved `ctx.actor()` call runs
- *    its own internal `withTenant` (`fixtures.ts`'s `contextFor` and the
- *    production context both shape it this way), which is a SECOND
- *    transaction on the same pooled connection while the first is still
- *    open. Reproduced during this task by deleting the `requireCanUpdateMeeting`
- *    guard (which normally resolves `ctx.actor()` first, warming the memo
- *    before the resolver ever runs) — every `meeting.cancel` test hung at
- *    vitest's 30s per-test timeout instead of failing, on the test harness's
- *    single-connection pool (`connectAsAppRole`'s own doc comment: "one
- *    connection, so 'the same pooled connection' is a fact"). Calling
- *    `ctx.actor()` before the transaction, as the resolver does now, makes
- *    the guard's own call and this one provably the same cached promise
- *    regardless of whether the guard ran — correct by construction, not by
- *    accident of the guard resolving it first.
+ *    already covers. `cancel`/`updateStatus` both target an EXISTING row by
+ *    `meetingId`, and that row already has its own, true `board_id` from
+ *    when it was created. Because `meeting_tenant_isolation` has no board
+ *    predicate, any signed-in member of the town can already SEE any
+ *    meeting's real board via `detail`/`byTown` — so a caller holding A1 on
+ *    their OWN board could send `{meetingId: <someone else's board's
+ *    meeting>, boardId: <their own board>}`. The middleware guard, reading
+ *    the CLAIMED board off unvalidated input exactly as `boardIdFrom`
+ *    always does, would correctly authorize against the board the caller
+ *    named — which is not the board the write is actually about. This is
+ *    the `.transform()` hazard item 2 already names ("the guard authorizes
+ *    the PRE-validation board id while the resolver acts on the
+ *    POST-validation one... do not transform a value a guard authorizes
+ *    on"), reached a different way: not by a schema transform, but by the
+ *    write's true subject being a different id than the one the guard
+ *    checked. Both resolvers close it by calling
+ *    `assertMatchesAuthorizedBoard(ctx, meeting.board_id)` — `trpc.ts`'s
+ *    mechanical, greppable half of `requireBoardActor`'s mismatch defence —
+ *    against the ROW's real `board_id`, read fresh from the database,
+ *    before performing the update. This is NOT `cancel`'s special case: any
+ *    future board-scoped write in this router (or any other table with no
+ *    board-level RLS) targeting a row by an id other than the board id
+ *    needs the identical call — see `trpc.ts`'s own doc comment on
+ *    `requireBoardActor` for which of waves 4–6's tables are already known
+ *    to be in that shape.
+ *
+ *    This design no longer needs a second `ctx.actor()` call inside the
+ *    transaction at all — `assertMatchesAuthorizedBoard` only compares two
+ *    board id strings, one already resolved by the guard
+ *    (`ctx.authorizedBoardId`) and one just read from the row. The earlier
+ *    version of `cancel` DID call `ctx.actor()` a second time, resolver-side,
+ *    to re-run `assertCanUpdateMeeting` against the real board — and
+ *    mutation-testing THAT design (deleting the guard to prove the
+ *    resolver's re-check alone still refused unauthorized callers) is what
+ *    found a real bug: resolving `ctx.actor()` for the first time from
+ *    INSIDE `ctx.withTenant`'s own callback opens a second, nested
+ *    transaction on the same connection, which self-deadlocked the test
+ *    harness's single-connection pool instead of failing. `context.ts` now
+ *    closes that structurally (a per-request reentrancy guard, not a
+ *    convention to remember), but this design change also means the
+ *    specific call pattern that trap needs no longer appears here at all.
  *
  * The middleware guard is still required, still declared before `.input()`,
  * and still answers FORBIDDEN before BAD_REQUEST for a refused caller whose
- * OTHER input fails to parse (`meeting.test.ts`'s reorder pin) — it is not
+ * OTHER input fails to parse (`meeting.test.ts`'s reorder pins) — it is not
  * redundant with the resolver's re-check. Removing it would mean an
  * unauthenticated-for-any-board caller's malformed `meetingId` gets
  * BAD_REQUEST instead of FORBIDDEN, which is exactly the defect item 2 spent
  * two fix rounds on. The resolver's re-check is a SECOND, independent gate,
  * not a replacement for the first.
+ *
+ * ─── `updateStatus`: the gap the review round found ───────────────────────
+ *
+ * `routes/meetings.tsx`'s kanban drags a meeting between columns via a raw
+ * `supabase.from("meeting").update({status: newStatus})` with **no
+ * authorization check of any kind** — any signed-in town member, any role,
+ * could move any meeting to any status, including `'noticed'`. This
+ * procedure closes that with the identical `requireBoardActor
+ * (assertCanUpdateMeeting)` + `assertMatchesAuthorizedBoard` shape `cancel`
+ * uses. It does NOT enforce that `'noticed'` is only reachable by generating
+ * and publishing a notice — the product's own stated rule for that status
+ * (see project memory, "Session 13.x: Meeting notice template system...
+ * `noticed` status gated behind notice generation") is a materially larger
+ * feature (a whole planned session), not an authorization check, and
+ * inventing that gate here would be exactly the "design decision smuggled
+ * into a migration" conventions item 1 warns against — the raw code this
+ * replaces enforced no such precondition either, so this is not a
+ * regression, only an unclosed gap this task did not own closing. Nor does
+ * it validate that a requested transition is a LEGAL one for the meeting's
+ * CURRENT status (`draft` → `approved` directly, say) — the client-side
+ * `VALID_TRANSITIONS` map in `meetings.tsx` is the only thing that has ever
+ * enforced that, and this procedure preserves exactly the level of
+ * server-side validation the raw update had, which was none. `'cancelled'`
+ * is excluded from this procedure's accepted values on purpose — `cancel`
+ * is the dedicated procedure for that transition, with its own tests: two
+ * procedures answering the identical question would be the same logic in
+ * two places instead of one, conventions item 1's "one noun, one router"
+ * concern one level down. `meetings.tsx` also sends `"active"` as a target
+ * status for its noticed→active kanban transition, which is not a real
+ * `meeting_status` value (the enum has `open`, not `active`; that screen's
+ * kanban column id and its DB status are different strings pre-existing
+ * this task) — Task 2, which migrates that screen, inherits reconciling the
+ * two, not this task.
  */
 
 import { sql } from "drizzle-orm";
@@ -150,8 +193,9 @@ import {
   router,
   protectedProcedure,
   requireBoardPermission,
+  requireBoardActor,
+  assertMatchesAuthorizedBoard,
   boardIdFrom,
-  middleware,
 } from "../trpc.js";
 import { assertCanUpdateMeeting } from "../authorization/rules.js";
 import { assertBoardExists } from "./board.js";
@@ -168,45 +212,18 @@ const MEETING_TYPES = [
 ] as const;
 
 /**
- * `assertCanUpdateMeeting`'s middleware form — see this file's header,
- * "why `cancel` does NOT copy `insert`'s guard verbatim", point 1. Same
- * shape as `person.ts`'s `requireOwnAccountColumns`: a one-off local
- * middleware, not a new `trpc.ts` export, per conventions item 2's
- * "subject-carrying middleware" precedent — nothing else in the app needs
- * this exact shape yet.
- *
- * Declared before `.input()`, reading `boardId` off the UNVALIDATED body via
- * the exported `boardIdFrom()` helper — the identical mechanism
- * `requireBoardPermission` uses. This authorizes the CLAIMED board; the
- * resolver re-checks the row's REAL board before writing — see this file's
- * header, point 2.
+ * Every `meeting_status` value `updateStatus` accepts — the full DB enum
+ * (`db/schema.ts`'s `meetingStatus`) minus `'cancelled'`, which is
+ * `cancel`'s own job — see this file's header.
  */
-function requireCanUpdateMeeting() {
-  const boardId = boardIdFrom();
-  return middleware(async (opts) => {
-    const ctx = opts.ctx;
-    if (!ctx.actor) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message:
-          "A permission check ran on a procedure with no tenant context. Permission " +
-          "checks are only meaningful for a signed-in member of a town; build the " +
-          "procedure on protectedProcedure.",
-      });
-    }
-    const board = boardId(await opts.getRawInput());
-    if (!board) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message:
-          "This procedure is scoped to a board, but no board id was supplied. Refusing " +
-          "rather than falling back to a global grant.",
-      });
-    }
-    assertCanUpdateMeeting(await ctx.actor(), { boardId: board });
-    return opts.next();
-  });
-}
+const UPDATABLE_MEETING_STATUSES = [
+  "draft",
+  "noticed",
+  "open",
+  "adjourned",
+  "minutes_draft",
+  "approved",
+] as const;
 
 export const meetingRouter = router({
   /**
@@ -387,31 +404,13 @@ export const meetingRouter = router({
 
   /**
    * `CancelMeetingDialog.tsx`'s write. See this file's header, "why
-   * `cancel` does NOT copy `insert`'s guard verbatim" — this is the
-   * procedure that section is about.
+   * `cancel`/`updateStatus` do NOT copy `insert`'s guard verbatim" — this
+   * is one of the two procedures that section is about.
    */
   cancel: protectedProcedure
-    .use(requireCanUpdateMeeting())
+    .use(requireBoardActor(assertCanUpdateMeeting))
     .input(z.object({ meetingId: z.string().uuid(), boardId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      // Resolved BEFORE `ctx.withTenant` opens its own transaction, not
-      // inside it. `ctx.actor()` is memoised per request (`context.ts`), but
-      // an UNresolved call runs its own `withTenant` internally
-      // (`fixtures.ts`'s `contextFor` and the production context both shape
-      // it this way) — a SECOND, nested transaction on the same pooled
-      // connection while the first is still open. The test harness pools
-      // exactly one connection per client (`connectAsAppRole`'s own doc
-      // comment), so this is not a hypothetical: calling `ctx.actor()` for
-      // the FIRST time from inside this procedure's own `withTenant`
-      // callback deadlocks outright — reproduced during this task by
-      // deleting the `requireCanUpdateMeeting` guard (which normally warms
-      // this memo first) and watching every `meeting.cancel` test in the
-      // suite hang at vitest's 30s per-test timeout instead of failing.
-      // Resolving it out here means the guard's own `ctx.actor()` call and
-      // this one are provably the same cached promise regardless of
-      // whether the guard ran, rather than this procedure being correct
-      // only by accident of the guard resolving it first.
-      const actor = await ctx.actor();
       return ctx.withTenant(async (tx) => {
         const rows = toRows<{ id: string; board_id: string }>(
           await tx.execute(sql`SELECT id, board_id FROM meeting WHERE id = ${input.meetingId}`),
@@ -419,19 +418,46 @@ export const meetingRouter = router({
         );
         const meeting = rows[0];
         if (!meeting) throw new TRPCError({ code: "NOT_FOUND" });
-
-        // Re-authorize against the ROW's real board, not the client-claimed
-        // one the middleware guard used to answer quickly — see this file's
-        // header, point 2. Throws AuthorizationError, translated to
-        // FORBIDDEN by `translateAuthorizationErrors` exactly like the
-        // middleware's own refusal.
-        assertCanUpdateMeeting(actor, { boardId: meeting.board_id });
+        assertMatchesAuthorizedBoard(ctx, meeting.board_id);
 
         await tx.execute(sql`
           UPDATE meeting SET status = 'cancelled'::meeting_status, updated_at = now()
           WHERE id = ${input.meetingId}
         `);
         return { id: input.meetingId };
+      });
+    }),
+
+  /**
+   * `routes/meetings.tsx`'s kanban drag-and-drop write, closing the
+   * no-authorization-at-all gap the review round found — see this file's
+   * header, "`updateStatus`: the gap the review round found," for exactly
+   * what this does and does not enforce.
+   */
+  updateStatus: protectedProcedure
+    .use(requireBoardActor(assertCanUpdateMeeting))
+    .input(
+      z.object({
+        meetingId: z.string().uuid(),
+        boardId: z.string().uuid(),
+        status: z.enum(UPDATABLE_MEETING_STATUSES),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string; board_id: string }>(
+          await tx.execute(sql`SELECT id, board_id FROM meeting WHERE id = ${input.meetingId}`),
+          (message) => new Error(`meeting.updateStatus: ${message}`),
+        );
+        const meeting = rows[0];
+        if (!meeting) throw new TRPCError({ code: "NOT_FOUND" });
+        assertMatchesAuthorizedBoard(ctx, meeting.board_id);
+
+        await tx.execute(sql`
+          UPDATE meeting SET status = ${input.status}::meeting_status, updated_at = now()
+          WHERE id = ${input.meetingId}
+        `);
+        return { id: input.meetingId, status: input.status };
       });
     }),
 });

@@ -55,6 +55,7 @@ describe("router wiring", () => {
         "meeting.detail",
         "meeting.insert",
         "meeting.cancel",
+        "meeting.updateStatus",
         "whoami",
       ]),
     );
@@ -120,6 +121,7 @@ describe("router wiring", () => {
       "person.archiveUserAccount",
       "meeting.insert",
       "meeting.cancel",
+      "meeting.updateStatus",
       "agendaTemplate.list",
       "agendaTemplate.detail",
       "agendaTemplate.countForBoard",

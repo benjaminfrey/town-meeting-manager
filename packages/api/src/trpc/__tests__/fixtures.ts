@@ -42,7 +42,7 @@ import { randomUUID } from "node:crypto";
 import { withTenant, type TenantTx } from "../../db/with-tenant.js";
 import { loadActor, type Actor } from "../authorization/actor.js";
 import type { PermissionCode } from "../authorization/permission.js";
-import type { TrpcContext } from "../context.js";
+import { bindTenantAccess, type TrpcContext } from "../context.js";
 
 export type TestDb = ReturnType<typeof drizzle>;
 
@@ -214,10 +214,16 @@ export async function seedBoardSeat(
 /**
  * Build the context a procedure sees, from a real account in a real database.
  *
- * Deliberately assembled the same way `createTrpcContext` assembles it — a
- * bound `withTenant` and a memoised actor loader, and no other database
- * handle — so a procedure that finds a way to the database in a test would
- * have found the same way in production.
+ * Deliberately assembled the same way `createTrpcContext` assembles it — both
+ * call the same `bindTenantAccess` (`context.ts`) for the bound `withTenant`
+ * and the memoised, reentrancy-guarded `actor()` — so a procedure that finds
+ * a way to the database in a test would have found the same way in
+ * production, AND a procedure that trips the reentrant-`ctx.actor()` guard in
+ * production would have tripped the identical guard here. Phase E wave 3's
+ * fix round is what made that second half true: `contextFor` used to build
+ * its own hand-rolled pairing (no reentrancy check at all), which is exactly
+ * why the deadlock that guard now catches had to be found by a 30-second
+ * test hang instead of a clean thrown error.
  */
 export function contextFor(
   db: TestDb,
@@ -229,20 +235,17 @@ export function contextFor(
     personId: seeded.personId,
     userAccountId: seeded.userAccountId,
   };
-  const bound = <T>(fn: Parameters<typeof withTenant<never, T>>[2]) =>
+  const rawWithTenant = <T>(fn: Parameters<typeof withTenant<never, T>>[2]) =>
     withTenant(db, { townId: town.townId }, fn as never) as Promise<T>;
+  const bound = bindTenantAccess(rawWithTenant as never, tenant);
 
-  let cached: ReturnType<typeof loadActor> | undefined;
   return {
     req: {} as never,
     res: {} as never,
     authUser: { id: "auth-user", email: "a@example.test", emailVerified: true },
     tenant,
-    withTenant: bound as TrpcContext["withTenant"],
-    actor: () => {
-      cached ??= bound((tx) => loadActor(tx as never, tenant));
-      return cached;
-    },
+    withTenant: bound.withTenant,
+    actor: bound.actor,
   };
 }
 

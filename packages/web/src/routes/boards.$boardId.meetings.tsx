@@ -2,6 +2,14 @@
  * MeetingListPage — /boards/:boardId/meetings route
  *
  * Lists meetings for a board with create, edit-agenda, and cancel actions.
+ *
+ * TODO(phase-e-wave-3): meeting.byBoard, board.detail (wave 3 Task 1 for the
+ * former; `board.ts` already has the latter). Completeness gaps only for
+ * this file's OWN reads. This route DOES already have `boardId` in scope,
+ * though, which matters for a caller: it is `CancelMeetingDialog`'s only
+ * mount point, and that dialog's own marker names why its write is not a
+ * completeness gap — this route is where `boardId` would be threaded down
+ * to it once that migration lands.
  */
 
 import { useState } from "react";
@@ -76,6 +84,8 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
   } | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────
+  // TODO(phase-e-wave-2): board.detail — see boards.$boardId.tsx's own
+  // marker for the identical, already-shipped procedure not yet wired here.
   const { data: boardRows } = useQuery({
     queryKey: queryKeys.boards.detail(boardId),
     queryFn: async () => {
@@ -89,6 +99,7 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
     },
   });
 
+  // TODO(phase-e-wave-3): meeting.byBoard — see this file's header.
   const { data: meetingRows } = useQuery({
     queryKey: queryKeys.meetings.byBoard(boardId),
     queryFn: async () => {

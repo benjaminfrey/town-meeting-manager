@@ -1,5 +1,19 @@
 /**
  * CancelMeetingDialog — confirmation dialog for cancelling a meeting.
+ *
+ * TODO(phase-e-wave-3): meeting.cancel — NOT merely a completeness gap like
+ * most markers this document tracks. `meeting_tenant_isolation` is
+ * tenancy-only (no board or role predicate), so the raw `.update({status:
+ * "cancelled"})` below has NO authorization check of any kind today — any
+ * signed-in member of the town, any role, can cancel any meeting on any
+ * board. `meeting.cancel` (`packages/api/src/trpc/routers/meeting.ts`,
+ * wave 3 Task 1) closes this with `requireBoardActor(assertCanUpdateMeeting)`
+ * — admin, or A1/M1 for the meeting's own board — the moment this file is
+ * migrated onto it (wave 3 Task 2). Its input also needs a `boardId`
+ * (`requireBoardActor`'s guard reads it before `.input()` parses), which
+ * this component does not currently receive as a prop — see
+ * `boards.$boardId.meetings.tsx`'s own marker, its only caller, which
+ * already has the board in scope.
  */
 
 import { useCallback, useState } from "react";
@@ -38,6 +52,8 @@ export function CancelMeetingDialog({
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
+      // TODO(phase-e-wave-3): meeting.cancel — see this file's header; this
+      // write has NO authorization check today, not just a completeness gap.
       const { error } = await supabase
         .from("meeting")
         .update({ status: "cancelled", updated_at: now })

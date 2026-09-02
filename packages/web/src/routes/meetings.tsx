@@ -4,6 +4,20 @@
  * Minimalist 4-column Kanban: Draft | Noticed | Active | Done
  * Rice paper aesthetic — borderless cards, hover-reveal actions.
  * Drag-and-drop between columns with confirmation dialogs.
+ *
+ * TODO(phase-e-wave-3): meeting.byTown, meeting.updateStatus (wave 3 Task 1,
+ * `packages/api/src/trpc/routers/meeting.ts` — closes onto Task 2 in this
+ * file). `meeting.byTown` is a completeness gap only (`meeting.list`'s old
+ * policy was tenancy-only, same as the raw read below). `transitionMutation`
+ * is NOT — like `CancelMeetingDialog`'s write, its raw
+ * `.from("meeting").update({status: newStatus})` has NO authorization check
+ * of any kind today; `meeting.updateStatus` closes it with
+ * `requireBoardActor(assertCanUpdateMeeting)`. That procedure's accepted
+ * `status` enum is the real DB values (`open`, not `active`) — this file's
+ * own `VALID_TRANSITIONS`/kanban column ids use `"active"` for the
+ * noticed→active drag, which is not a `meeting_status` value at all (a
+ * pre-existing mismatch, not introduced by this marker); reconciling the two
+ * is part of migrating this file onto `updateStatus`, not a separate gap.
  */
 
 import { useState, useMemo } from "react";
@@ -153,6 +167,7 @@ export default function MeetingsPage() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  // TODO(phase-e-wave-3): meeting.byTown — see this file's header.
   // Fetch all meetings for this town
   const { data: meetingRows = [], isLoading } = useQuery({
     queryKey: queryKeys.meetings.byTown(townId),
@@ -190,6 +205,8 @@ export default function MeetingsPage() {
     enabled: !!townId && canCreateMeeting,
   });
 
+  // TODO(phase-e-wave-3): meeting.updateStatus — see this file's header;
+  // this write has NO authorization check today, not just a completeness gap.
   // Status transition mutation
   const transitionMutation = useMutation({
     mutationFn: async ({ meetingId, newStatus }: { meetingId: string; newStatus: string }) => {

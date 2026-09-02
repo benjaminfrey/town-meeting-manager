@@ -4,6 +4,14 @@
  * Shows meeting overview: date/time, location, status, board,
  * agenda/minutes status, and links to agenda builder, live meeting,
  * review, and minutes pages.
+ *
+ * TODO(phase-e-wave-3): meeting.detail (wave 3 Task 1,
+ * `packages/api/src/trpc/routers/meeting.ts`) for the two `meeting`
+ * `select("*")` reads — completeness gap only, migrating this whole shell
+ * (nine reads across `meeting`/`board`/`person`/`agenda_item`/
+ * `minutes_document`/`meeting_attendance`) is wave 3's own Task 3, not this
+ * marker's job. The other seven reads belong to routers this task does not
+ * own and are not itemised here individually.
  */
 
 import { Link } from "react-router";
@@ -82,6 +90,7 @@ const MINUTES_STATUS_COLORS: Record<string, string> = {
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const meetingId = params.meetingId;
 
+  // TODO(phase-e-wave-3): meeting.detail — see this file's header.
   // Prefetch meeting data
   await queryClient.ensureQueryData({
     queryKey: queryKeys.meetings.detail(meetingId),
@@ -102,6 +111,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
 
+  // TODO(phase-e-wave-3): meeting.detail — see this file's header.
   // Meeting data
   const { data: meeting, isLoading: meetingLoading } = useQuery({
     queryKey: queryKeys.meetings.detail(meetingId),
