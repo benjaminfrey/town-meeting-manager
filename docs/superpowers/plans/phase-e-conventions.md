@@ -1118,6 +1118,30 @@ count DROPPED by one within this same span (`meeting.byTown` closed, retagged `p
 its own Known-gaps entry) — both directions happened in the same fix round, which is exactly why
 "quote the grep, not the number" stays the rule rather than trying to memorise a running total.
 
+**Re-run at wave 3 Task 2 (`c34b987`), its fix round (`1b1d635`), and Task 3's own close-out
+(`0643553`) — the identical drift item 14 exists to catch showed up again in between: this
+paragraph stopped at Task 1's fix round and was never updated across Task 2, even though Task 2's
+own progress note already recorded the numbers.**
+
+```
+$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+11   # at c34b987 — Task 2 closed CancelMeetingDialog.tsx's and meetings.tsx's raw-write
+     # authorization holes (both markers named `updateStatus`/the kanban gap above)
+20   # at 1b1d635 — Task 2's fix round re-tagged four writers newly implicated by adding
+     # `meetings: "meeting"` to cache-key-parity's MIGRATED map (item 7): MeetingStartFlow.tsx,
+     # PublishAgendaDialog.tsx, meetings.$meetingId.agenda.tsx, meetings.$meetingId.live.tsx —
+     # each got a `TODO(phase-e-wave-4/5)` marker for a `meeting` write that was already
+     # unauthorized before this fix round and still is; only the missing invalidation the
+     # MIGRATED entry flagged was in scope to close
+17   # at 0643553 — Task 3 discharged `meetings.$meetingId.tsx`'s own three
+     # `TODO(phase-e-wave-3)` markers (the header comment and both inline `meeting.detail`
+     # citations) by migrating the file's nine reads onto tRPC in full — see this wave's
+     # Task 3 report
+```
+
+Whether the count is 22, 20, 17, or something else by the time this is read depends entirely on
+what closed since — quote the grep, not the number, still the rule three tasks later.
+
 This countdown is not monotonic within a wave regardless of which grep measures it — a task can
 legitimately raise it by naming a gap explicitly that was previously silent (Task 5 added
 `ProgressChecklist.tsx`'s `memberCount` gap while closing `home.tsx`'s town-header read). It only has
@@ -1568,3 +1592,27 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   `wave-6` on the same basis this wave's own plan already states elsewhere (its "Out of scope" note:
   "`minutes.tsx` and `review.tsx` are wave 6"), not a fresh guess — the same table this bullet's
   original version was checking against, now checkable because it exists.
+- **Wave 3, Task 3: three new one-procedure routers (`agendaItem`, `minutesDocument`,
+  `meetingAttendance`) exist and back `meetings.$meetingId.tsx`'s shell, but are deliberately NOT in
+  `cache-key-parity.test.ts`'s `MIGRATED` map yet — a real, load-bearing staleness gap, not an
+  oversight.** Adding any of the three would (per the `meetings` entry's own precedent, item 7 above)
+  require every writer of the corresponding legacy `queryKeys.<x>` namespace, tree-wide, to also call
+  the new router's `pathFilter()` in the same commit. Measured before deciding: `agendaItems.byMeeting`
+  has six such writers (`AgendaItemDetailPanel.tsx`, `AgendaSection.tsx`, `InlineItemForm.tsx`,
+  `MeetingStartFlow.tsx`, `meetings.$meetingId.live.tsx`, `meetings.$meetingId.agenda.tsx`),
+  `minutesDocuments.byMeeting` two (`meetings.$meetingId.live.tsx`, `meetings.$meetingId.review.tsx`),
+  `attendance.byMeeting` three (`MeetingStartFlow.tsx`, `AttendancePanel.tsx`,
+  `meetings.$meetingId.live.tsx`) — every one of them squarely wave 4 (agenda), wave 5 (live/attendance)
+  or wave 6 (minutes) territory per this wave's own "Out of scope, and verify before assuming" note,
+  not this task's file list (`routes/meetings.$meetingId.tsx` alone). `persons.detail` has zero writers
+  anywhere in the tree (checked directly, not assumed), so no equivalent gap exists there. The concrete
+  cost of NOT adding the three entries: none of the six/two/three writers above currently invalidate
+  the new tRPC keys, so a change made through any of them (adding an agenda item elsewhere, say) will
+  not refresh this shell's own agenda-item-count/minutes-status/attendance-count reads until the
+  default 60s `staleTime` expires — bounded, not silent-forever, but the exact class of staleness item
+  7 exists to close. Whichever wave next migrates the screen that owns each writer inherits closing
+  this: add the `MIGRATED` entry, fix each real writer on the merits (a `pathFilter()` call + a pin
+  test per file), mirroring wave 3 Task 2's own fix round for the `meetings` entry — see item 7's
+  `meetings` paragraph for the template. Do not add the entry piecemeal ahead of that; a MIGRATED
+  entry with even one real writer left unfixed is the exact hole this document's `cache-key-parity`
+  section exists to prevent, not a partial credit.
