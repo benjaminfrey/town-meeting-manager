@@ -473,21 +473,24 @@ does not generalise to a single other table.
 
 **Fixed by narrowing the guard, not by narrowing the documentation** — the documented resolver-side
 shape has to work, because three waves are told to use it. The condition is now
-`inTransaction && !actorSettled`. `actorPromise !== undefined` would have been the WRONG narrowing:
-a promise can be defined and still PENDING, with its own internal `withTenant` holding the
-connection, and awaiting that from inside an open transaction on a single-connection pool is the
-original deadlock. "Settled" cannot be read synchronously off a raw promise, so `bindTenantAccess`
+`inTransaction && !actorSettled`. `actorPromise !== undefined` refuses less than the invariant
+warrants, so `!actorSettled` is chosen as the conservative reading — a defined-but-PENDING memo is
+one refactor away from unsafe. But do not repeat the stronger claim this paragraph used to make:
+narrowing to `actorPromise !== undefined` does **not** reopen the deadlock, because a second call on
+a pending memo returns the SAME promise and opens no second transaction. Measured — that narrowing
+runs the api suite green in normal time, failing only the state-3 pin. "Settled" cannot be read
+synchronously off a raw promise, so `bindTenantAccess`
 tracks it with a flag set from the memo's own settlement handlers (both branches — a REJECTED load
 opens no second transaction either). All three states are pinned separately in `context.test.ts`, and
 the middle one was verified by mutation the way item 13 requires — reverting the condition to
 `inTransaction` alone turns "ALLOWS a ctx.actor() call from inside a ctx.withTenant() callback once
 the memo is already SETTLED" red, and leaves the other two green:
 
-| state                            | inside a transaction | behaviour                                 |
-| -------------------------------- | -------------------- | ----------------------------------------- |
-| cold memo (never called)         | yes                  | throws — the original hazard, preserved   |
-| settled memo (middleware warmed) | yes                  | **succeeds** — the false positive, closed |
-| defined but still pending        | yes                  | throws — the subtle hazard, not opened    |
+| state                            | inside a transaction | behaviour                                     |
+| -------------------------------- | -------------------- | --------------------------------------------- |
+| cold memo (never called)         | yes                  | throws — the original hazard, preserved       |
+| settled memo (middleware warmed) | yes                  | **succeeds** — the false positive, closed     |
+| defined but still pending        | yes                  | throws — a conservative refusal, not a hazard |
 
 **State 3's reachability, since a test that cannot fail is worth less than the sentence that says
 so:** `inTransaction` is a single flag, so a pending actor load and a separately-open `ctx.withTenant`

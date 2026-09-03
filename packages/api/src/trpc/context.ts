@@ -70,8 +70,10 @@
  * that actually opens a second transaction — tracked by a flag set from the
  * memo's own settlement handlers, since a raw promise cannot be asked
  * synchronously whether it has settled. `actorPromise !== undefined` would
- * have been the wrong narrowing: a DEFINED-but-PENDING memo is the original
- * deadlock, not a warm one.
+ * refuse less than the invariant warrants, so `!actorSettled` is the
+ * conservative reading — but it would NOT have reopened the deadlock, and
+ * saying so would be a claim that does not reproduce: a second call on a
+ * PENDING memo returns the SAME promise and opens no second transaction.
  *
  * The three states are pinned separately in `__tests__/context.test.ts`
  * (cold → throws, settled → succeeds, pending-but-unsettled → throws), and
@@ -168,8 +170,12 @@ export function bindTenantAccess(
   // below actually needs and the one a raw promise cannot be asked for
   // synchronously. `actorPromise !== undefined` is NOT the same question: a
   // promise can be defined and still PENDING, with its own internal
-  // `withTenant` transaction holding the connection — that is the original
-  // deadlock, not a warm memo. Set on both outcomes, because a REJECTED load
+  // `withTenant` transaction holding the connection. That state is refused
+  // deliberately — it is one refactor away from unsafe — but it is NOT itself
+  // the original deadlock: a second call on a pending memo returns the SAME
+  // promise and opens no second transaction. Measured, not assumed: narrowing
+  // to `actorPromise !== undefined` runs the api suite green in normal time,
+  // failing only the state-3 pin. Set on both outcomes, because a REJECTED load
   // opens no second transaction either; returning the rejected promise
   // re-throws the load's own error, which is the honest answer.
   let actorSettled = false;
