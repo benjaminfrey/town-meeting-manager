@@ -5,19 +5,28 @@
  * Rice paper aesthetic — borderless cards, hover-reveal actions.
  * Drag-and-drop between columns with confirmation dialogs.
  *
- * TODO(phase-e-wave-3): meeting.byTown, meeting.updateStatus (wave 3 Task 1,
- * `packages/api/src/trpc/routers/meeting.ts` — closes onto Task 2 in this
- * file). `meeting.byTown` is a completeness gap only (`meeting.list`'s old
- * policy was tenancy-only, same as the raw read below). `transitionMutation`
- * is NOT — like `CancelMeetingDialog`'s write, its raw
- * `.from("meeting").update({status: newStatus})` has NO authorization check
- * of any kind today; `meeting.updateStatus` closes it with
- * `requireBoardActor(assertCanUpdateMeeting)`. That procedure's accepted
- * `status` enum is the real DB values (`open`, not `active`) — this file's
- * own `VALID_TRANSITIONS`/kanban column ids use `"active"` for the
- * noticed→active drag, which is not a `meeting_status` value at all (a
- * pre-existing mismatch, not introduced by this marker); reconciling the two
- * is part of migrating this file onto `updateStatus`, not a separate gap.
+ * Phase E, wave 3, Task 2 — `meeting.byTown` (a completeness gap only —
+ * `meeting.list`'s old policy was tenancy-only, same as the raw read this
+ * replaces) and `meeting.updateStatus` (NOT a completeness gap — the raw
+ * `.from("meeting").update({status: newStatus})` this replaces had NO
+ * authorization check of any kind; `meeting.updateStatus` closes it with
+ * `requireBoardActor(assertCanUpdateMeeting)`, the identical gap
+ * `CancelMeetingDialog`'s write had). See `packages/api/src/trpc/routers/
+ * meeting.ts`'s header for both procedures.
+ *
+ * `meeting.byTown` returns flat `board_id`/`board_name` columns, not a
+ * nested `{board: {id, name}}` object — see that procedure's own doc comment
+ * for why (the old PostgREST embed forced a cast through `unknown` here that
+ * a real join has no need for).
+ *
+ * `meeting.updateStatus`'s accepted `status` enum is the real DB values
+ * (`open`, not `active`). This file's `VALID_TRANSITIONS` used to conflate
+ * the kanban COLUMN id a drag lands on with the DB STATUS to write — the
+ * noticed→active drag sent the literal string `"active"` as `newStatus`,
+ * which is not a `meeting_status` value at all (a pre-existing mismatch).
+ * `VALID_TRANSITIONS` now carries both separately: `column` (matched against
+ * the drop target's column id) and `status` (the real value sent to
+ * `updateStatus`).
  */
 
 import { useState, useMemo } from "react";
@@ -37,6 +46,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  AlertTriangle,
   CalendarDays,
   GripVertical,
   FileEdit,
@@ -53,20 +63,27 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-interface MeetingRecord {
-  id: string;
-  title: string;
-  status: string;
-  meeting_type: string;
-  scheduled_date: string;
-  scheduled_time: string | null;
-  board: { id: string; name: string } | null;
-}
+/**
+ * `meeting.byTown`'s real row shape (conventions item 10 — never a hand-typed
+ * bag that can drift from the procedure's actual columns), not a locally
+ * duplicated interface.
+ */
+type MeetingRecord = RouterOutputs["meeting"]["byTown"][number];
+
+/** The full `meeting_status` set `meeting.updateStatus` accepts (all but `cancelled` — see that procedure's own doc comment). */
+type UpdatableMeetingStatus =
+  | "draft"
+  | "noticed"
+  | "open"
+  | "adjourned"
+  | "minutes_draft"
+  | "approved";
 
 // ─── Column definitions (4 columns) ─────────────────────────────────
 
@@ -79,15 +96,24 @@ const KANBAN_COLUMNS = [
 
 type ColumnId = (typeof KANBAN_COLUMNS)[number]["id"];
 
-// Adjacent column transitions allowed via drag
-const VALID_TRANSITIONS: Record<string, { target: string; message: string }[]> = {
+/**
+ * Adjacent column transitions allowed via drag. `column` is matched against
+ * the drop target's kanban column id; `status` is the real `meeting_status`
+ * value sent to `meeting.updateStatus` — the two used to be conflated (see
+ * this file's header).
+ */
+const VALID_TRANSITIONS: Record<
+  string,
+  { column: ColumnId; status: UpdatableMeetingStatus; message: string }[]
+> = {
   draft: [
     {
-      target: "noticed",
+      column: "noticed",
+      status: "noticed",
       message: "Mark as noticed? This confirms the meeting notice has been published.",
     },
   ],
-  noticed: [{ target: "active", message: "Open this meeting for attendance?" }],
+  noticed: [{ column: "active", status: "open", message: "Open this meeting for attendance?" }],
   // active → done requires the live meeting flow
   // done transitions require the full approval workflow
 };
@@ -159,7 +185,7 @@ export default function MeetingsPage() {
   const [draggedMeeting, setDraggedMeeting] = useState<MeetingRecord | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     meeting: MeetingRecord;
-    targetStatus: string;
+    targetStatus: UpdatableMeetingStatus;
     message: string;
   } | null>(null);
   const [boardPickerOpen, setBoardPickerOpen] = useState(() => searchParams.get("new") === "1");
@@ -167,29 +193,17 @@ export default function MeetingsPage() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  // TODO(phase-e-wave-3): meeting.byTown — see this file's header.
-  // Fetch all meetings for this town
-  const { data: meetingRows = [], isLoading } = useQuery({
-    queryKey: queryKeys.meetings.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("meeting")
-        .select(
-          "id, title, status, meeting_type, scheduled_date, scheduled_time, board:board_id(id, name)",
-        )
-        .eq("town_id", townId)
-        .neq("status", "cancelled")
-        .order("scheduled_date", { ascending: true })
-        .order("scheduled_time", { ascending: true });
-      if (error) throw error;
-      // PostgREST infers the `board` to-one embed as an array, but a FK
-      // relationship returns a single object at runtime — cast through unknown.
-      return (data ?? []) as unknown as MeetingRecord[];
-    },
-    enabled: !!townId,
-  });
+  // Fetch all (non-cancelled) meetings for this town — see this file's header.
+  const {
+    data: meetingRows = [],
+    isLoading,
+    isError: isMeetingsError,
+  } = useQuery(trpc.meeting.byTown.queryOptions());
 
-  // Boards for CreateMeetingDialog
+  // Boards for CreateMeetingDialog — still raw Supabase, matching home.tsx's
+  // own identical board picker (`board.listActive` exists but is deliberately
+  // not wired into either picker yet — see home.tsx's own header for the
+  // ordering difference that needs checking first; out of this task's scope).
   const { data: allBoards = [] } = useQuery({
     queryKey: queryKeys.boards.byTown(townId),
     queryFn: async () => {
@@ -205,21 +219,22 @@ export default function MeetingsPage() {
     enabled: !!townId && canCreateMeeting,
   });
 
-  // TODO(phase-e-wave-3): meeting.updateStatus — see this file's header;
-  // this write has NO authorization check today, not just a completeness gap.
-  // Status transition mutation
-  const transitionMutation = useMutation({
-    mutationFn: async ({ meetingId, newStatus }: { meetingId: string; newStatus: string }) => {
-      const { error } = await supabase
-        .from("meeting")
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", meetingId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
-    },
-  });
+  // Status transition mutation — closes the gap the raw
+  // `.from("meeting").update({status: newStatus})` this replaces had: no
+  // authorization check of any kind. See this file's header and
+  // `meeting.ts`'s own doc comment on `updateStatus`.
+  const transitionMutation = useMutation(
+    trpc.meeting.updateStatus.mutationOptions({
+      onSuccess: () => {
+        // Legacy key: `home.tsx`'s own kanban-adjacent meeting list still
+        // reads `queryKeys.meetings.byTown` raw (its own marker defers that
+        // migration to wave 6) — conventions item 7, "the legacy line stays
+        // because other, unmigrated screens still read that key."
+        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+      },
+    }),
+  );
 
   // Group meetings by column
   const columnMeetings = useMemo(() => {
@@ -261,14 +276,15 @@ export default function MeetingsPage() {
     if (!targetColumn || (targetColumn.statuses as readonly string[]).includes(meeting.status))
       return;
 
-    // Check if valid transition
+    // Check if valid transition — `column` is the drop target's kanban
+    // column id; `status` (below) is the real DB value to write.
     const transitions = VALID_TRANSITIONS[meeting.status];
-    const transition = transitions?.find((t) => t.target === targetColumnId);
+    const transition = transitions?.find((t) => t.column === targetColumnId);
     if (!transition) return;
 
     setConfirmDialog({
       meeting,
-      targetStatus: transition.target,
+      targetStatus: transition.status,
       message: transition.message,
     });
   }
@@ -277,7 +293,8 @@ export default function MeetingsPage() {
     if (!confirmDialog) return;
     transitionMutation.mutate({
       meetingId: confirmDialog.meeting.id,
-      newStatus: confirmDialog.targetStatus,
+      boardId: confirmDialog.meeting.board_id,
+      status: confirmDialog.targetStatus,
     });
     setConfirmDialog(null);
   }
@@ -285,7 +302,21 @@ export default function MeetingsPage() {
   return (
     <div className="flex h-full flex-col px-6 lg:px-10">
       {/* Kanban board */}
-      {isLoading ? (
+      {isMeetingsError ? (
+        <div
+          className="flex flex-1 items-center justify-center p-12"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+            <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+            <p className="mt-3 text-sm font-medium">Something went wrong loading meetings.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Try reloading the page. If the problem continues, contact support.
+            </p>
+          </div>
+        </div>
+      ) : isLoading ? (
         <div className="py-12 px-4">
           <MeetingListSkeleton rows={5} />
         </div>
@@ -337,10 +368,10 @@ export default function MeetingsPage() {
             <p className="mt-2 text-sm text-muted-foreground">{confirmDialog.message}</p>
             <p className="mt-3 text-sm">
               <span className="font-medium">{confirmDialog.meeting.title}</span>
-              {confirmDialog.meeting.board && (
+              {confirmDialog.meeting.board_name && (
                 <span className="text-muted-foreground">
                   {" "}
-                  &mdash; {confirmDialog.meeting.board.name}
+                  &mdash; {confirmDialog.meeting.board_name}
                 </span>
               )}
             </p>
@@ -541,10 +572,10 @@ function KanbanCardContent({
               className={cn("inline-block h-1.5 w-1.5 rounded-full", getStatusDot(meeting.status))}
             />
             {meeting.scheduled_date ? formatDate(meeting.scheduled_date) : "\u2014"}
-            {meeting.board && (
+            {meeting.board_name && (
               <>
                 <span className="text-muted-foreground/30">&middot;</span>
-                <span className="truncate">{meeting.board.name}</span>
+                <span className="truncate">{meeting.board_name}</span>
               </>
             )}
           </p>

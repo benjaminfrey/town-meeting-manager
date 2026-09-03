@@ -3,19 +3,22 @@
  *
  * Lists meetings for a board with create, edit-agenda, and cancel actions.
  *
- * TODO(phase-e-wave-3): meeting.byBoard, board.detail (wave 3 Task 1 for the
- * former; `board.ts` already has the latter). Completeness gaps only for
- * this file's OWN reads. This route DOES already have `boardId` in scope,
- * though, which matters for a caller: it is `CancelMeetingDialog`'s only
- * mount point, and that dialog's own marker names why its write is not a
- * completeness gap — this route is where `boardId` would be threaded down
- * to it once that migration lands.
+ * Phase E, wave 3, Task 2 — `meeting.byBoard` (wave 3 Task 1) and
+ * `board.detail` (already shipped, wave 2) both move onto tRPC here;
+ * completeness gaps only for this file's own reads (`meeting.byBoard`'s row
+ * shape includes `board_id`, but that value is trusted only for reads here —
+ * `boardId` from the route's own params is what's threaded to any writer).
+ * This route is `CancelMeetingDialog`'s only mount point, and — unlike this
+ * file's own reads — that dialog's write was NOT merely a completeness gap;
+ * it had no authorization check at all. It's converted here too, now that
+ * this route has a real `boardId` to hand it (see that component's own doc
+ * comment for the guard it closes).
  */
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, CalendarDays, Play, Plus } from "lucide-react";
+import { ChevronRight, CalendarDays, AlertTriangle, Play, Plus } from "lucide-react";
 import type { Route } from "./+types/boards.$boardId.meetings";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { CreateMeetingDialog } from "@/components/meetings/CreateMeetingDialog";
@@ -30,8 +33,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 
 // ─── Route ───────────────────────────────────────────────────────────
@@ -39,33 +41,15 @@ import { queryClient } from "@/lib/queryClient";
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const boardId = params.boardId;
 
-  // Prefetch board and meetings
+  // Not wrapped in try/catch: a nonexistent or foreign board answers
+  // NOT_FOUND and letting that reject routes to RouteErrorBoundary — see
+  // conventions item 4/12. `meeting.byBoard` cannot itself 404 (an empty
+  // list is a legitimate answer for a real, meeting-less board), so only
+  // `board.detail` is worth priming pre-mount; `byBoard` still gets fetched
+  // in parallel so the component does not wait on it serially.
   await Promise.all([
-    queryClient.ensureQueryData({
-      queryKey: queryKeys.boards.detail(boardId),
-      queryFn: async () => {
-        const { data } = await supabase
-          .from("board")
-          .select("id, name, board_type")
-          .eq("id", boardId)
-          .limit(1)
-          .throwOnError();
-        return data ?? [];
-      },
-    }),
-    queryClient.ensureQueryData({
-      queryKey: queryKeys.meetings.byBoard(boardId),
-      queryFn: async () => {
-        const { data } = await supabase
-          .from("meeting")
-          .select("*")
-          .eq("board_id", boardId)
-          .order("scheduled_date", { ascending: false })
-          .order("scheduled_time", { ascending: false })
-          .throwOnError();
-        return data ?? [];
-      },
-    }),
+    queryClient.ensureQueryData(trpc.board.detail.queryOptions({ boardId })),
+    queryClient.ensureQueryData(trpc.meeting.byBoard.queryOptions({ boardId })),
   ]);
 
   return { boardId };
@@ -84,42 +68,45 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
   } | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────────
-  // TODO(phase-e-wave-2): board.detail — see boards.$boardId.tsx's own
-  // marker for the identical, already-shipped procedure not yet wired here.
-  const { data: boardRows } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name, board_type")
-        .eq("id", boardId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const {
+    data: board,
+    isLoading: isBoardLoading,
+    isError: isBoardError,
+  } = useQuery(trpc.board.detail.queryOptions({ boardId }));
 
-  // TODO(phase-e-wave-3): meeting.byBoard — see this file's header.
-  const { data: meetingRows } = useQuery({
-    queryKey: queryKeys.meetings.byBoard(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("board_id", boardId)
-        .order("scheduled_date", { ascending: false })
-        .order("scheduled_time", { ascending: false })
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const {
+    data: meetings = [],
+    isLoading: isMeetingsLoading,
+    isError: isMeetingsError,
+  } = useQuery(trpc.meeting.byBoard.queryOptions({ boardId }));
 
-  const board = boardRows?.[0] as Record<string, unknown> | undefined;
-  const boardName = String(board?.name ?? "");
-  const meetings = (meetingRows ?? []) as Record<string, unknown>[];
+  const boardName = board?.name ?? "";
+
+  // ─── Error ──────────────────────────────────────────────────────────
+  // A screen that renders nothing and says nothing for a failed read is the
+  // failure mode this migration exists to end (conventions item 5).
+  if (isBoardError || isMeetingsError) {
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {isBoardError
+              ? "This board could not be found."
+              : "Something went wrong loading its meetings."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {isBoardError
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Loading ────────────────────────────────────────────────────────
-  if (!board) {
+  if (isBoardLoading || !board || isMeetingsLoading) {
     return (
       <div className="flex items-center justify-center p-12">
         <p className="text-sm text-muted-foreground">Loading...</p>
@@ -141,6 +128,7 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
         <CancelMeetingDialog
           meetingId={cancelMeeting.id}
           meetingTitle={cancelMeeting.title}
+          boardId={boardId}
           open={!!cancelMeeting}
           onOpenChange={(open) => {
             if (!open) setCancelMeeting(null);
@@ -202,13 +190,13 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
             </thead>
             <tbody>
               {meetings.map((m) => {
-                const id = String(m.id);
-                const title = String(m.title ?? "");
-                const meetingType = String(m.meeting_type ?? "regular");
-                const status = String(m.status ?? "draft");
-                const agendaStatus = String(m.agenda_status ?? "draft");
-                const scheduledDate = String(m.scheduled_date ?? "");
-                const scheduledTime = String(m.scheduled_time ?? "");
+                const id = m.id;
+                const title = m.title;
+                const meetingType = m.meeting_type;
+                const status = m.status;
+                const agendaStatus = m.agenda_status;
+                const scheduledDate = m.scheduled_date;
+                const scheduledTime = m.scheduled_time ?? "";
                 const isCancelled = status === "cancelled";
 
                 const formattedDate = scheduledDate

@@ -5,20 +5,28 @@
  * creates the meeting record, instantiates agenda from template,
  * and navigates to the agenda builder.
  *
- * TODO(phase-e-wave-3): meeting.insert (this wave's own Task 2 converts this
- * file's meeting-record write onto it — see `packages/api/src/trpc/routers/meeting.ts`,
- * shipped in Task 1), agenda_template read (`agendaTemplate.list`/`.detail`
- * already exist as plain `protectedProcedure` — no authorization delta
- * versus the raw read below, a completeness gap only; see conventions item
- * 11 and wave 3's Task 0). Both markers are expected to close together when
- * Task 2 lands, not separately.
+ * Phase E, wave 3, Task 2 — the meeting-record write moves onto
+ * `trpc.meeting.insert` (`packages/api/src/trpc/routers/meeting.ts`, shipped
+ * in Task 1) and the template list onto `trpc.agendaTemplate.list`
+ * (`agendaTemplate.list` already existed as a plain `protectedProcedure` —
+ * no authorization delta versus the raw read this replaces, a completeness
+ * gap only; see conventions item 11 and wave 3's Task 0).
+ *
+ * `meeting.insert` generates and returns the meeting's own `id` — this
+ * dialog no longer mints one client-side with `crypto.randomUUID()` before
+ * the write. Agenda instantiation (`instantiateAgendaFromTemplate`, a raw
+ * Supabase writer) still runs as a separate step after the insert succeeds,
+ * exactly as before; that write belongs to whichever router owns
+ * `agenda_item` (wave 4's agenda surface), not this one — see `meeting.ts`'s
+ * own doc comment on `insert`.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { z } from "zod";
 import { AlertCircle, Info, Loader2 } from "lucide-react";
 import {
@@ -46,7 +54,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWizardForm } from "@/hooks/useWizardForm";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { parseSections } from "@/lib/agenda-template-helpers";
 import { instantiateAgendaFromTemplate } from "@/lib/meeting-helpers";
 import { MEETING_TYPE_LABELS } from "./meeting-labels";
@@ -92,7 +99,6 @@ export function CreateMeetingDialog({
   const supabase = useSupabase();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const currentUser = useCurrentUser();
   const [isSaving, setIsSaving] = useState(false);
 
   // Default title suggestion
@@ -143,19 +149,8 @@ export function CreateMeetingDialog({
     enabled: !!townId,
   });
 
-  // TODO(phase-e-wave-3): agendaTemplate.list — see this file's header.
   const { data: templates = [] } = useQuery({
-    queryKey: queryKeys.agendaTemplates.byBoard(boardId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("agenda_template")
-        .select("id, name, is_default, sections")
-        .eq("board_id", boardId)
-        .order("is_default", { ascending: false })
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
+    ...trpc.agendaTemplate.list.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
@@ -183,33 +178,36 @@ export function CreateMeetingDialog({
   // Pre-submit validation
   const prereqValidation = validateMeetingCreation(activeMemberCount, retentionAck, boardId);
 
+  const insertMutation = useMutation(
+    trpc.meeting.insert.mutationOptions({
+      onSuccess: () => {
+        // Legacy key: `EditBoardDialog`'s "does this board have meetings"
+        // check still reads a `queryKeys.meetings.byBoard(boardId)`-prefixed
+        // key raw — conventions item 7, "the legacy line stays because
+        // other, unmigrated screens still read that key."
+        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(boardId) });
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+      },
+    }),
+  );
+
   const handleSave = useCallback(async () => {
     const data = validate();
     if (!data) return;
 
     setIsSaving(true);
     try {
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-
-      // TODO(phase-e-wave-3): meeting.insert — see this file's header.
-      const { error } = await supabase.from("meeting").insert({
-        id,
-        board_id: boardId,
-        town_id: townId,
+      // `meeting.insert` mints the meeting's own id and derives `created_by`
+      // from the caller's own session server-side — neither is sent from
+      // here any more (see this file's header).
+      const { id } = await insertMutation.mutateAsync({
+        boardId,
         title: data.title,
-        meeting_type: data.meeting_type,
-        scheduled_date: data.scheduled_date,
-        scheduled_time: data.scheduled_time,
+        meetingType: data.meeting_type,
+        scheduledDate: data.scheduled_date,
+        scheduledTime: data.scheduled_time,
         location: data.location || null,
-        status: "draft",
-        agenda_status: "draft",
-        formality_override: null,
-        created_by: currentUser?.id ?? "",
-        created_at: now,
-        updated_at: now,
       });
-      if (error) throw error;
 
       // Instantiate agenda from selected template
       const selectedTemplate = templates.find((t) => String(t.id) === data.template_id);
@@ -220,24 +218,12 @@ export function CreateMeetingDialog({
         await instantiateAgendaFromTemplate(id, boardId, townId, sections);
       }
 
-      await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(boardId) });
       onOpenChange(false);
       void navigate(`/meetings/${id}/agenda`);
     } finally {
       setIsSaving(false);
     }
-  }, [
-    validate,
-    prereqValidation.valid,
-    supabase,
-    queryClient,
-    boardId,
-    townId,
-    currentUser,
-    templates,
-    onOpenChange,
-    navigate,
-  ]);
+  }, [validate, insertMutation, boardId, townId, templates, onOpenChange, navigate]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
