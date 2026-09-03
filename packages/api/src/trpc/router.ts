@@ -24,6 +24,9 @@ import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 import { meetingRouter } from "./routers/meeting.js";
+import { agendaItemRouter } from "./routers/agenda-item.js";
+import { minutesDocumentRouter } from "./routers/minutes-document.js";
+import { meetingAttendanceRouter } from "./routers/meeting-attendance.js";
 
 export const appRouter = router({
   /**
@@ -55,8 +58,9 @@ export const appRouter = router({
   agendaTemplate: agendaTemplateRouter,
 
   /**
-   * The people directory and its writes. No permission guard on `list` —
-   * see `routers/person.ts` for why. The four writes are all admin gates.
+   * The people directory and its writes, plus `detail` (wave 3, Task 3) — one
+   * person's name, by id. No permission guard on either read — see
+   * `routers/person.ts` for why. The four writes are all admin gates.
    */
   person: personRouter,
 
@@ -75,6 +79,27 @@ export const appRouter = router({
    * `insert`'s.
    */
   meeting: meetingRouter,
+
+  /**
+   * The agenda item count `routes/meetings.$meetingId.tsx`'s shell needs.
+   * One procedure today — wave 4 owns the full agenda surface and extends
+   * this router rather than creating it. See `routers/agenda-item.ts`.
+   */
+  agendaItem: agendaItemRouter,
+
+  /**
+   * The one minutes document a meeting has, if any — `routes/
+   * meetings.$meetingId.tsx`'s status pill. Wave 6 owns the full minutes
+   * surface and extends this router. See `routers/minutes-document.ts`.
+   */
+  minutesDocument: minutesDocumentRouter,
+
+  /**
+   * The attendance count `routes/meetings.$meetingId.tsx`'s shell needs.
+   * Wave 5 owns the full attendance surface (`live.tsx`) and extends this
+   * router. See `routers/meeting-attendance.ts`.
+   */
+  meetingAttendance: meetingAttendanceRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

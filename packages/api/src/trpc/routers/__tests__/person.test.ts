@@ -200,6 +200,62 @@ describe("person.list", () => {
   });
 });
 
+describe("person.detail", () => {
+  it("returns a person's name, for a person with no user_account", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const personId = await seedPerson(db, town, "Jordan Presiding");
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const row = await caller.person.detail({ personId });
+        expect(row).toEqual({ id: personId, name: "Jordan Presiding" });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a person in another town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirPersonId = await seedPerson(db, theirs, "Not Mine");
+        const actor = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+
+        const err = await expectTrpcError(() => caller.person.detail({ personId: theirPersonId }));
+        expect(err.code).toBe("NOT_FOUND");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for an id that never existed", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() => caller.person.detail({ personId: randomUUID() }));
+        expect(err.code).toBe("NOT_FOUND");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
 describe("person.insert", () => {
   it("refuses a caller who is not an administrator, and writes nothing", async () => {
     await withTestDb(async (client) => {

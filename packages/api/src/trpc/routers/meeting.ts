@@ -200,6 +200,7 @@ import {
 import { assertCanUpdateMeeting } from "../authorization/rules.js";
 import { assertBoardExists } from "./board.js";
 import { toRows } from "../../db/rows.js";
+import type { TenantTx } from "../../db/with-tenant.js";
 
 const MEETING_TYPES = [
   "regular",
@@ -224,6 +225,29 @@ const UPDATABLE_MEETING_STATUSES = [
   "minutes_draft",
   "approved",
 ] as const;
+
+/**
+ * Confirm the meeting exists in the caller's own town before answering a
+ * question ABOUT it — the identical shape as `board.ts`'s `assertBoardExists`
+ * and for the same reason (conventions item 3): RLS makes a foreign or
+ * nonexistent meeting invisible, not merely filtered, but a correlated
+ * count/scan (e.g. `agendaItem.countByMeeting`) degrades to `0`/`[]` for
+ * either case just as readily as for a real meeting with nothing recorded
+ * yet, and a screen calling only that procedure would render a convincing,
+ * empty-but-real meeting for an id that is not there.
+ *
+ * Exported (wave 3, Task 3) so `agenda-item.ts`, `minutes-document.ts` and
+ * `meeting-attendance.ts` can each run the identical check for their own
+ * meeting-scoped reads rather than duplicating the query — the same reuse
+ * `board.ts`'s own export already gets from `agenda-template.ts`.
+ */
+export async function assertMeetingExists(tx: TenantTx, meetingId: string): Promise<void> {
+  const rows = toRows<{ id: string }>(
+    await tx.execute(sql`SELECT id FROM meeting WHERE id = ${meetingId}`),
+    (message) => new Error(`meeting.assertMeetingExists: ${message}`),
+  );
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+}
 
 export const meetingRouter = router({
   /**

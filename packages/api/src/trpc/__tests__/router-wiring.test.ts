@@ -36,6 +36,7 @@ describe("router wiring", () => {
         "agendaTemplate.delete",
         "permissions",
         "person.list",
+        "person.detail",
         "person.insert",
         "person.update",
         "person.insertStaffAccount",
@@ -56,6 +57,9 @@ describe("router wiring", () => {
         "meeting.insert",
         "meeting.cancel",
         "meeting.updateStatus",
+        "agendaItem.countByMeeting",
+        "minutesDocument.byMeeting",
+        "meetingAttendance.countByMeeting",
         "whoami",
       ]),
     );
@@ -87,6 +91,10 @@ describe("router wiring", () => {
       "boardMember.roster",
       "meeting.byBoard",
       "meeting.detail",
+      "person.detail",
+      "agendaItem.countByMeeting",
+      "minutesDocument.byMeeting",
+      "meetingAttendance.countByMeeting",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
