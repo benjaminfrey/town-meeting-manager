@@ -4,6 +4,19 @@
  * Displays the generated minutes document with status tracking,
  * action buttons (edit, submit, approve, publish), amendment history,
  * and inline dialogs for status transitions.
+ *
+ * TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes —
+ * every read and write on this screen is still raw Supabase. `minutesDocument`
+ * exists (wave 3, Task 3) but carries `byMeeting` only, which answers the
+ * shell's status pill, not this screen's full document; and no procedure
+ * exists for any of the six status transitions below. Wave 6 owns this file
+ * per the wave-3 plan's own "Out of scope" note.
+ *
+ * What DID land here in wave 3's whole-branch fix round is only the
+ * invalidation half — see `invalidateMinutes` for why the shell's pill went
+ * stale without it, and why a `minutes`-namespace writer slipped past
+ * `lib/__tests__/cache-key-parity.test.ts`. Pinned in
+ * `meetings.$meetingId.minutes.test.tsx`.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -55,6 +68,7 @@ import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
 import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { apiFetch, apiJson } from "@/lib/api-client";
 
 // ─── Route Loader ─────────────────────────────────────────────────
@@ -262,8 +276,29 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
 
   // ─── Mutations ────────────────────────────────────────────────
 
-  const invalidateMinutes = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.minutes.byMeeting(meetingId) });
+  // Every mutation on this screen funnels through here, so both keys are
+  // invalidated once rather than seven times.
+  //
+  // The legacy `queryKeys.minutes` line STAYS: this screen's own
+  // `minutesDoc` read (above) is still a raw Supabase query on that key, and
+  // `home.tsx` derives a key from the same namespace. It goes when the last
+  // legacy reader does, not before (conventions item 7).
+  //
+  // The `pathFilter()` line was MISSING until the whole-branch fix round.
+  // `routes/meetings.$meetingId.tsx`'s shell renders the minutes status pill
+  // from `trpc.minutesDocument.byMeeting`, and this file writes
+  // `minutes_document.status` at six sites (submit, approve, publish, return
+  // for amendments, unpublish, regenerate) — so publishing minutes and
+  // returning to the meeting detail showed a stale pill for up to the 60s
+  // `staleTime`. Identical to the regression the previous fix round closed
+  // for eight other files; it survived only because the mechanical check
+  // (`lib/__tests__/cache-key-parity.test.ts`) keyed on the
+  // `minutesDocuments` namespace and this writer uses `minutes` — two
+  // namespaces over one table. Both are in `MIGRATED` now.
+  const invalidateMinutes = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.minutes.byMeeting(meetingId) });
+    void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
+  };
 
   const saveDraftMutation = useMutation({
     mutationFn: async (updatedContentJson: MinutesContentJson) => {

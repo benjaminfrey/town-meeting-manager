@@ -641,6 +641,40 @@ describe("LiveMeetingPage", () => {
     });
   });
 
+  it("invalidates trpc.agendaItem.pathFilter() from the agenda_item Realtime handler", async () => {
+    // Whole-branch fix round. This route's `agenda_item` Realtime handler
+    // shipped its `trpc.agendaItem.pathFilter()` line with NO pin: a
+    // reviewer's deletion sweep commented it out and the whole web suite
+    // stayed green, because this FILE was already credited by the
+    // `meeting_attendance` Realtime pin below — the exact credit-bleed limit
+    // conventions item 8 records for `pathfilter-pin-coverage.test.ts`,
+    // demonstrated rather than hypothetical. Mirrors that test exactly: the
+    // Realtime hook is mocked out, so the handler is reached by invoking the
+    // callback this route registered for the `agenda_item` table.
+    setupLiveMeetingQueries();
+
+    const mockQueryClient = queryClientRef.current!;
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    mockQueryClient.setQueryData(countKey, 2);
+    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    const agendaCall = vi
+      .mocked(useRealtimeSubscription)
+      .mock.calls.find((call) => call[1] === "agenda_item");
+    expect(agendaCall, "the route no longer subscribes to agenda_item").toBeDefined();
+    agendaCall![3]({});
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
   it("invalidates trpc.minutesDocument.pathFilter() when a minutes-approval motion passes", async () => {
     // The auto-approval effect: an agenda item carrying
     // `source_minutes_document_id` plus a PASSED motion on that item moves

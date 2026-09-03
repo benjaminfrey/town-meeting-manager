@@ -25,8 +25,27 @@
  * wave 3 Task 2's own fix round; `agendaItems: "agendaItem"`,
  * `minutesDocuments: "minutesDocument"` and `attendance: "meetingAttendance"`
  * joined in wave 3 Tasks 3+4's fix round (see the paragraph after `meetings`
- * below). Growing it is exactly the moment this rule should fire for a
+ * below); `minutes: "minutesDocument"` joined in the whole-branch fix round
+ * after that. Growing it is exactly the moment this rule should fire for a
  * newly-migrated entity, so it stays a deliberate edit, not a derived one.
+ *
+ * **`minutes` and `minutesDocuments` are TWO namespaces over ONE table**
+ * (`queryKeys.minutes.byMeeting` and `queryKeys.minutesDocuments.byMeeting`
+ * both key a meeting's `minutes_document` row, and neither invalidates the
+ * other — a pre-existing split this map does not try to fix). Mapping both
+ * to `minutesDocument` is why the entry above is not redundant: it is the
+ * reason this check MISSED `routes/meetings.$meetingId.minutes.tsx`, which
+ * writes `minutes_document.status` at six sites through one
+ * `invalidateMinutes()` helper and used the `minutes` namespace to do it. The
+ * shell (`routes/meetings.$meetingId.tsx`) renders its status pill from
+ * `trpc.minutesDocument.byMeeting`, so publishing minutes and navigating back
+ * held a stale pill for the full 60s `staleTime` — the identical regression
+ * the previous fix round closed for eight other files, surviving one commit
+ * longer purely on a namespace spelling. Adding the entry raised exactly ONE
+ * violation (that file's own `invalidateMinutes`), fixed in the same commit;
+ * `home.tsx`'s `queryKeys.minutes.byMeeting("__home_pending__")` is a
+ * `useQuery` key, not an `invalidateQueries` call, so this check does not
+ * reach it.
  * Update it in the same commit a router's read moves off `queryKeys.<x>` and
  * its `pathFilter()` becomes the thing writers owe (conventions item 7).
  *
@@ -180,6 +199,7 @@ const MIGRATED: Record<string, string> = {
   meetings: "meeting",
   agendaItems: "agendaItem",
   minutesDocuments: "minutesDocument",
+  minutes: "minutesDocument",
   attendance: "meetingAttendance",
 };
 

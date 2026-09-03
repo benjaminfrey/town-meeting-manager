@@ -421,14 +421,29 @@ export function requireActor<R>(
  * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board) is the first real
  * caller (`meeting.ts`'s `cancel`); the reviewer who specified this function
  * (Phase E wave 3's fix round) enumerated `rules.ts`'s other `BoardScope`
- * rules and found sixteen of nineteen ARE exactly one `assertPermission`
+ * rules and found sixteen of EIGHTEEN ARE exactly one `assertPermission`
  * call (use `requireBoardPermission` for those — reach for it FIRST; this
- * function is for the remainder). Two more do not fit even this function's
- * shape and stay resolver-side: `assertCanInsertVoteRecord` is `async` and
- * takes a third argument, a `TenantTx`, which no middleware has (see
- * `RequireBoardActorRule`'s own comment below) — forcing it into the
- * resolver is not a loss; that `TenantTx` is exactly what its self-vote
- * branch needs to look up the caller's own seat.
+ * function is for the remainder). Re-derived in the whole-branch fix round
+ * after the count shipped as "nineteen" here and in
+ * `phase-e-conventions.md` item 2 — quote the grep, not the number
+ * (conventions item 11):
+ *
+ *     $ grep -nE ": BoardScope" packages/api/src/trpc/authorization/rules.ts | wc -l
+ *     18
+ *
+ * The two that are not one `assertPermission` call are
+ * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board — this function's
+ * own reason for existing) and `assertCanInsertExhibit` (A3 OR
+ * `isBoardMember(actor)`, a ROLE branch rather than a second code; it fits
+ * this shape structurally and is simply unused here yet). The nineteenth
+ * rule the old count was reaching for is `assertCanInsertVoteRecord`, which
+ * takes no `BoardScope` at all — its signature is `(actor: Actor, tx:
+ * TenantTx, subject: VoteRecordSubject)`, so the `TenantTx` is its SECOND
+ * argument, not "a third argument" as this comment previously said. It stays
+ * resolver-side regardless: it is `async` and needs a `TenantTx` no
+ * middleware has (see `RequireBoardActorRule`'s own comment below) — not a
+ * loss, since that `TenantTx` is exactly what its self-vote branch needs to
+ * look up the caller's own seat.
  *
  * A property `requireBoardPermission` has that this function CANNOT
  * preserve: import-time refusal for a board-scoped code used with no board

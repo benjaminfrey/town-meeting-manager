@@ -51,6 +51,36 @@
  * it, a slow, mysterious connection-starvation incident instead of a loud
  * error at the exact line that caused it.
  *
+ * ─── What the actor half of that guard does NOT refuse, and why ───────────
+ *
+ * Narrowed in wave 3's whole-branch fix round, after a reviewer reproduced a
+ * false positive: the first version tested `inTransaction` alone, so
+ * `ctx.actor()` threw inside `ctx.withTenant` even when the memo was ALREADY
+ * RESOLVED and no second transaction would open. That is not a corner case —
+ * every guarded procedure reaches its resolver with a warm memo, because
+ * `requireActor`/`requirePermission`/`requireBoardPermission`/
+ * `requireBoardActor` all `await ctx.actor()` in middleware — and
+ * `phase-e-conventions.md` item 2 explicitly directs waves 4–6 to keep
+ * row-level rules resolver-side ("these minutes are still a draft" cannot be
+ * decided before the row is read), which is exactly the shape
+ * `assertCanUpdateAgendaItem(await ctx.actor(), { boardId: row.board_id })`
+ * takes. `meeting.ts` escaped it only because `assertMatchesAuthorizedBoard`
+ * compares two strings and needs no actor at all; that escape does not
+ * generalise. So the guard now refuses only an UNSETTLED actor — the state
+ * that actually opens a second transaction — tracked by a flag set from the
+ * memo's own settlement handlers, since a raw promise cannot be asked
+ * synchronously whether it has settled. `actorPromise !== undefined` would
+ * have been the wrong narrowing: a DEFINED-but-PENDING memo is the original
+ * deadlock, not a warm one.
+ *
+ * The three states are pinned separately in `__tests__/context.test.ts`
+ * (cold → throws, settled → succeeds, pending-but-unsettled → throws), and
+ * that file records what the third state is reachable AS: because
+ * `inTransaction` is one flag, a pending actor load and a separate open
+ * `withTenant` cannot coexist (the second would be refused by the
+ * `withTenant` half first), so the only reachable form is a re-entry into the
+ * actor's OWN load window.
+ *
  * `contextFor` in `packages/api/src/trpc/__tests__/fixtures.ts` calls this
  * same function — its own doc comment already promises it is "assembled the
  * same way `createTrpcContext` assembles it," and that promise is what makes
@@ -134,18 +164,44 @@ export function bindTenantAccess(
   };
 
   let actorPromise: Promise<Actor> | undefined;
+  // Tracks whether `actorPromise` has SETTLED, which is the property the guard
+  // below actually needs and the one a raw promise cannot be asked for
+  // synchronously. `actorPromise !== undefined` is NOT the same question: a
+  // promise can be defined and still PENDING, with its own internal
+  // `withTenant` transaction holding the connection — that is the original
+  // deadlock, not a warm memo. Set on both outcomes, because a REJECTED load
+  // opens no second transaction either; returning the rejected promise
+  // re-throws the load's own error, which is the honest answer.
+  let actorSettled = false;
   const actor = (): Promise<Actor> => {
-    if (inTransaction) {
+    if (inTransaction && !actorSettled) {
       throw new Error(
-        "ctx.actor() called for the first time from INSIDE a ctx.withTenant() transaction on " +
-          "this same request. An unresolved ctx.actor() call runs its OWN withTenant() " +
-          "internally to load the account — see context.ts's header — so calling it here opens " +
-          "a second transaction while the first is still open, which can deadlock a pooled " +
-          "client. Resolve ctx.actor() BEFORE calling ctx.withTenant(), and use the resolved " +
-          "value inside the callback instead.",
+        "ctx.actor() called from INSIDE a ctx.withTenant() transaction on this same request " +
+          "while the actor is still UNRESOLVED. An unresolved ctx.actor() call runs its OWN " +
+          "withTenant() internally to load the account — see context.ts's header — so calling " +
+          "it here opens a second transaction while the first is still open, which can " +
+          "deadlock a pooled client. Resolve ctx.actor() BEFORE calling ctx.withTenant(), and " +
+          "use the resolved value inside the callback instead. A resolver whose middleware " +
+          "already awaited ctx.actor() (requireActor, requirePermission, requireBoardPermission " +
+          "and requireBoardActor all do) may call it freely inside its own transaction: the " +
+          "memo is already settled and no second transaction opens.",
       );
     }
-    actorPromise ??= withTenant((tx) => loadActor(tx, tenant));
+    if (actorPromise === undefined) {
+      const loading = withTenant((tx) => loadActor(tx, tenant));
+      // Attached HERE, at creation, before any caller can `await` the promise
+      // — handlers run in attachment order, so `actorSettled` is already true
+      // by the time the first awaiting caller resumes.
+      void loading.then(
+        () => {
+          actorSettled = true;
+        },
+        () => {
+          actorSettled = true;
+        },
+      );
+      actorPromise = loading;
+    }
     return actorPromise;
   };
 

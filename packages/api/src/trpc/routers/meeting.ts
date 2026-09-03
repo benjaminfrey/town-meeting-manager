@@ -183,7 +183,12 @@
  * `meeting_status` value (the enum has `open`, not `active`; that screen's
  * kanban column id and its DB status are different strings pre-existing
  * this task) — Task 2, which migrates that screen, inherits reconciling the
- * two, not this task.
+ * two, not this task. **Task 2 did it** (`routes/meetings.tsx`): its
+ * `VALID_TRANSITIONS` map now carries `column` (the kanban drop target's id)
+ * and `status` (the real `meeting_status` value) as separate fields, and the
+ * noticed→active drag sends `"open"`. Recorded here rather than left as a
+ * live forward-reference — conventions item 14's lens, applied to a router
+ * header instead of a Known-gaps bullet.
  */
 
 import { sql } from "drizzle-orm";

@@ -73,10 +73,12 @@ export const appRouter = router({
 
   /**
    * Meetings: a town-wide list (the kanban), a board-scoped list, one
-   * meeting's detail, and two writes. `insert`/`cancel` are this codebase's
-   * first real call sites for the board-scoped half of conventions item 2
-   * — see `routers/meeting.ts` for why `cancel`'s guard is not a copy of
-   * `insert`'s.
+   * meeting's detail, and three writes — `insert`, `cancel` and
+   * `updateStatus`, matching `routers/meeting.ts`'s own header. `insert`/
+   * `cancel` are this codebase's first real call sites for the board-scoped
+   * half of conventions item 2 — see `routers/meeting.ts` for why `cancel`'s
+   * guard is not a copy of `insert`'s, and `updateStatus` (added in the same
+   * task's fix round) for the raw-write hole it closed.
    */
   meeting: meetingRouter,
 

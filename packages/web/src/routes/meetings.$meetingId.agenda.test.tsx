@@ -157,9 +157,26 @@ vi.mock("@/components/RouteErrorBoundary", () => ({
   RouteErrorBoundary: () => <div>Error</div>,
 }));
 
-// Mock @dnd-kit modules to avoid WASM/DOM issues in jsdom
+// Mock @dnd-kit modules to avoid WASM/DOM issues in jsdom.
+//
+// `onDragEnd` is exposed as a button rather than dropped on the floor — the
+// same technique `components/meetings/__tests__/AgendaSection.test.tsx` uses,
+// and for the same reason: a real pointer drag in jsdom would be testing
+// `@dnd-kit`, not this route's reorder handler. Added in the whole-branch fix
+// round, because `handleSectionDragEnd`'s `trpc.agendaItem.pathFilter()` line
+// was unreachable from this file and therefore unpinnable.
 vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: any) => <div data-testid="dnd-context">{children}</div>,
+  DndContext: ({ children, onDragEnd }: any) => (
+    <div data-testid="dnd-context">
+      <button
+        data-testid="fire-section-drag-end"
+        onClick={() => onDragEnd({ active: { id: "section-2" }, over: { id: "section-1" } })}
+      >
+        drag
+      </button>
+      {children}
+    </div>
+  ),
   closestCenter: vi.fn(),
   KeyboardSensor: vi.fn(),
   PointerSensor: vi.fn(),
@@ -647,6 +664,40 @@ describe("AgendaBuilderPage", () => {
     await user.click(screen.getByRole("button", { name: /add section/i }));
     await user.type(screen.getByPlaceholderText("New section title"), "Public Comment");
     await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.agendaItem.pathFilter() when sections are reordered — the OTHER call site", async () => {
+    // Whole-branch fix round. `handleSectionDragEnd` shipped its
+    // `trpc.agendaItem.pathFilter()` line with NO pin: a reviewer's deletion
+    // sweep commented it out and the whole web suite stayed green, because
+    // this FILE was already credited by the add-section pin above — the
+    // credit-bleed limit conventions item 8 records for
+    // `pathfilter-pin-coverage.test.ts`, demonstrated rather than
+    // hypothetical. A reorder changes no COUNT, but it is an `agenda_item`
+    // write, and item 7's rule is router-level: a writer should not have to
+    // know which procedures the shell happens to call.
+    setupQueryMocks({
+      items: [
+        createMockSection({ id: "section-1", sort_order: 0, title: "Call to Order" }),
+        createMockSection({ id: "section-2", sort_order: 1, title: "Public Comment" }),
+      ],
+    });
+
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(countKey, 2);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderWithProviders(
+      <AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />,
+    );
+
+    await user.click(screen.getByTestId("fire-section-drag-end"));
 
     await waitFor(() => {
       expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
