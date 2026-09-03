@@ -4,10 +4,40 @@
  * Shows meeting overview: date/time, location, status, board,
  * agenda/minutes status, and links to agenda builder, live meeting,
  * review, and minutes pages.
+ *
+ * Phase E, wave 3, Task 3 — the shell every downstream tab (agenda, live,
+ * minutes, review) navigates from. Formerly nine raw Supabase reads (one
+ * `meeting` row read twice — loader + component — plus `board`, two
+ * `person` lookups, `agenda_item`, `minutes_document`, `meeting_attendance`)
+ * and zero writes; all nine now go through tRPC:
+ *
+ *   - `meeting.detail` (wave 3, Task 1) — the meeting row itself, including
+ *     `board_id`. This is the one column every board-scoped guard the
+ *     agenda/live/minutes/review tabs need downstream reads off this row —
+ *     see this wave's plan, Task 3's own note — so `boardId` below is
+ *     derived from it, not from a prop or a separate read.
+ *   - `board.detail` (unit 0) — reused as-is for the board name; not
+ *     duplicated into `meeting.detail`, matching that procedure's own header
+ *     comment ("those belong to their own routers").
+ *   - `person.detail` (new, this task) — presiding officer / recording
+ *     secretary names.
+ *   - `agendaItem.countByMeeting`, `minutesDocument.byMeeting`,
+ *     `meetingAttendance.countByMeeting` (new routers, this task, one
+ *     procedure each) — each router's own header explains why it carries
+ *     only one procedure today: the fuller surface belongs to whichever wave
+ *     migrates the screen that owns it (agenda: wave 4; attendance/live:
+ *     wave 5; minutes: wave 6).
+ *
+ * This screen has no child components that receive `meeting`/`board` as
+ * props — every downstream tab is a sibling ROUTE (`routes.ts`), not an
+ * `<Outlet>` child, reached by `<Link>`, so there is no prop surface here to
+ * audit columns against; each sibling route reads its own data independently
+ * when its own wave migrates it.
  */
 
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import {
   CalendarDays,
   Clock,
@@ -18,6 +48,7 @@ import {
   ClipboardList,
   Users,
   Gavel,
+  AlertTriangle,
 } from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -28,11 +59,9 @@ import {
   AGENDA_STATUS_LABELS,
   AGENDA_STATUS_COLORS,
 } from "@/components/meetings/meeting-labels";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -82,19 +111,12 @@ const MINUTES_STATUS_COLORS: Record<string, string> = {
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const meetingId = params.meetingId;
 
-  // Prefetch meeting data
-  await queryClient.ensureQueryData({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  // Not wrapped in try/catch: a nonexistent or foreign meeting answers
+  // NOT_FOUND (see `meeting.detail`'s doc comment), and letting that reject
+  // the loader routes to `RouteErrorBoundary` below — visible, not the
+  // indefinite "Loading meeting…" spinner the old `select("*").single()`
+  // produced for the same case.
+  await queryClient.ensureQueryData(trpc.meeting.detail.queryOptions({ meetingId }));
 
   return { meetingId };
 }
@@ -102,148 +124,106 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
 
-  // Meeting data
-  const { data: meeting, isLoading: meetingLoading } = useQuery({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  const {
+    data: meeting,
+    isLoading: meetingLoading,
+    isError: meetingIsError,
+    error: meetingError,
+  } = useQuery(trpc.meeting.detail.queryOptions({ meetingId }));
 
-  const boardId = (meeting?.board_id as string) ?? "";
-  const presidingId = (meeting?.presiding_officer_id as string) ?? "";
-  const secretaryId = (meeting?.recording_secretary_id as string) ?? "";
+  const boardId = meeting?.board_id ?? "";
+  const presidingId = meeting?.presiding_officer_id ?? "";
+  const secretaryId = meeting?.recording_secretary_id ?? "";
 
   // Board name
   const { data: board } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("id", boardId)
-        .single()
-        .throwOnError();
-      return data;
-    },
+    ...trpc.board.detail.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
   // Presiding officer name
   const { data: presiding } = useQuery({
-    queryKey: queryKeys.persons.detail(presidingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("person")
-        .select("name")
-        .eq("id", presidingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
+    ...trpc.person.detail.queryOptions({ personId: presidingId }),
     enabled: !!presidingId,
   });
 
   // Recording secretary name
   const { data: secretary } = useQuery({
-    queryKey: queryKeys.persons.detail(secretaryId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("person")
-        .select("name")
-        .eq("id", secretaryId)
-        .single()
-        .throwOnError();
-      return data;
-    },
+    ...trpc.person.detail.queryOptions({ personId: secretaryId }),
     enabled: !!secretaryId,
   });
 
   // Agenda item count
-  const { data: agendaItems } = useQuery({
-    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_item")
-        .select("id")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
-  const agendaItemCount = agendaItems?.length ?? 0;
+  const { data: agendaItemCount = 0 } = useQuery(
+    trpc.agendaItem.countByMeeting.queryOptions({ meetingId }),
+  );
 
   // Minutes document status
-  const { data: minutesDocs } = useQuery({
-    queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("minutes_document")
-        .select("id, status")
-        .eq("meeting_id", meetingId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
-  const minutes = minutesDocs?.[0] ?? undefined;
+  const { data: minutes } = useQuery(trpc.minutesDocument.byMeeting.queryOptions({ meetingId }));
 
   // Attendance count
-  const { data: attendanceRecords } = useQuery({
-    queryKey: queryKeys.attendance.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting_attendance")
-        .select("id")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
-  const attendanceCount = attendanceRecords?.length ?? 0;
+  const { data: attendanceCount = 0 } = useQuery(
+    trpc.meetingAttendance.countByMeeting.queryOptions({ meetingId }),
+  );
+
+  // ─── Error state ─────────────────────────────────────────────────────
+  //
+  // A failure AFTER mount (a refetch, a `staleTime` expiry) — the loader
+  // above already handles the BEFORE-mount case via `RouteErrorBoundary`.
+  // Both are required — conventions item 12 — neither substitutes for the
+  // other.
+
+  if (meetingIsError) {
+    const notFound = isTRPCClientError(meetingError) && meetingError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This meeting could not be found."
+              : "Something went wrong loading this meeting."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link to="/boards" className="mt-4 inline-block text-sm text-primary hover:underline">
+            Back to Boards
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Loading state ───────────────────────────────────────────────────
 
-  if (!meeting) {
+  if (meetingLoading || !meeting) {
     return (
       <div className="flex items-center justify-center p-12">
-        {!meetingLoading ? (
-          <div className="text-center">
-            <p className="text-muted-foreground">Meeting not found.</p>
-            <Link to="/boards" className="mt-3 inline-block text-sm text-blue-600 hover:underline">
-              Back to Boards
-            </Link>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <p className="text-sm text-muted-foreground">Loading meeting…</p>
-          </div>
-        )}
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading meeting…</p>
+        </div>
       </div>
     );
   }
 
   // ─── Derived values ──────────────────────────────────────────────────
 
-  const status = meeting.status as string;
-  const meetingType = meeting.meeting_type as string;
-  const agendaStatus = meeting.agenda_status as string;
-  const scheduledDate = meeting.scheduled_date as string;
-  const scheduledTime = meeting.scheduled_time as string;
-  const location = meeting.location as string;
-  const title = meeting.title as string;
-  const boardName = (board?.name as string) ?? "—";
-  const minutesStatus = minutes?.status as string | undefined;
+  const status = meeting.status;
+  const meetingType = meeting.meeting_type;
+  const agendaStatus = meeting.agenda_status;
+  const scheduledDate = meeting.scheduled_date;
+  const scheduledTime = meeting.scheduled_time;
+  const location = meeting.location;
+  const title = meeting.title;
+  const boardName = board?.name ?? "—";
+  const minutesStatus = minutes?.status;
 
-  const presidingName = presiding?.name as string | undefined;
-  const secretaryName = secretary?.name as string | undefined;
+  const presidingName = presiding?.name;
+  const secretaryName = secretary?.name;
 
   // Can run the live meeting?
   const canRunLive = status === "noticed" || status === "open";
@@ -348,14 +328,10 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
             {presidingName && <InfoRow label="Presiding Officer">{presidingName}</InfoRow>}
             {secretaryName && <InfoRow label="Recording Secretary">{secretaryName}</InfoRow>}
             {meeting.started_at && (
-              <InfoRow label="Started">
-                {new Date(meeting.started_at as string).toLocaleString()}
-              </InfoRow>
+              <InfoRow label="Started">{new Date(meeting.started_at).toLocaleString()}</InfoRow>
             )}
             {meeting.ended_at && (
-              <InfoRow label="Ended">
-                {new Date(meeting.ended_at as string).toLocaleString()}
-              </InfoRow>
+              <InfoRow label="Ended">{new Date(meeting.ended_at).toLocaleString()}</InfoRow>
             )}
           </CardContent>
         </Card>
@@ -382,8 +358,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
                       {AGENDA_STATUS_LABELS[agendaStatus] ?? agendaStatus}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {agendaItemCount ?? 0} item
-                      {agendaItemCount !== 1 ? "s" : ""}
+                      {agendaItemCount} item{agendaItemCount !== 1 ? "s" : ""}
                     </span>
                   </div>
                 </div>
@@ -448,7 +423,7 @@ export default function MeetingDetail({ loaderData }: Route.ComponentProps) {
             </div>
 
             {/* Attendance summary (if any) */}
-            {(attendanceCount ?? 0) > 0 && (
+            {attendanceCount > 0 && (
               <div className="flex items-center gap-3 rounded-lg border p-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950">
                   <Users className="h-5 w-5 text-amber-600 dark:text-amber-400" />

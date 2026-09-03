@@ -272,18 +272,233 @@ that the item 2 rewrite's diagnosis was right: its schema used to be a bare `z.s
 permissive for almost any string to fail," and literally could not have supported a reorder pin
 until Task 5 tightened it — see that procedure's own doc comment. The
 `PermissionCode` form (`requirePermission`) declared before `.input()` is exercised too, in
-`require-permission.test.ts`'s synthetic router, including its own reorder pin — but has **zero
-call sites in a real procedure**; every real Actor-only write so far is an admin gate
-(`requireActor`), not a delegable code. The board-SCOPED form specifically
-(`requireBoardPermission`/`boardIdFrom` keyed to one of the 18 `BOARD_SCOPED_CODES`) is fixed and
-covered by a dedicated test proving it resolves a board and refuses correctly at the corrected
-position, but still has **zero call sites outside tests** — no procedure in this repo authorizes
-anything board-scoped yet. The first wave to add one should expect to amend this item again, not
-assume it settled. **The underlying `getRawInput()` TECHNIQUE this form popularized is a different
-claim and is no longer test-only** — `person.ts`'s `requireOwnAccountColumns` (the subject-carrying
-shape documented above) reads a different field off `getRawInput()` the identical way, for a
-different reason, and ships in a real procedure today. Do not read "zero call sites outside tests"
-as covering the mechanism in general; it is scoped to the board-scoped form specifically.
+`require-permission.test.ts`'s synthetic router, including its own reorder pin — but the GLOBAL
+shape (a code with no board) still has **zero call sites in a real procedure** as of wave 3; every
+real Actor-only write so far is an admin gate (`requireActor`), not a delegable code, and this
+wave's own delegable-code write (`meeting.insert`) is board-scoped, not global. ~~The board-SCOPED
+form specifically ... still has **zero call sites outside tests** — no procedure in this repo
+authorizes anything board-scoped yet.~~ — **closed in wave 3, Task 1.** `meeting.insert` calls
+`requireBoardPermission("A1", boardIdFrom())` for real — see "Wave 3, Task 1 — the board-scoped
+form's first real call site, and what it found" below for what that first use found the item got
+right and what it did not yet say. **The underlying `getRawInput()` TECHNIQUE this form popularized
+is a different claim and is no longer test-only** — `person.ts`'s `requireOwnAccountColumns` (the
+subject-carrying shape documented above) reads a different field off `getRawInput()` the identical
+way, for a different reason, and ships in a real procedure today. Do not read "zero call sites" for
+the GLOBAL `requirePermission` form as covering the board-scoped form too; they are tracked
+separately here because they answer different questions, and only one of the two closed this wave.
+
+**Wave 3, Task 1 — the board-scoped form's first real call site, and what it found.** `meeting.insert`
+(`packages/api/src/trpc/routers/meeting.ts`) is `.use(requireBoardPermission("A1", boardIdFrom())).input(...)`,
+exactly the shape this item's example code has shown for three waves with nothing behind it. The case
+this whole mechanism exists for — a global grant REVOKED on one board refuses there and still allows
+the same actor elsewhere, and the mirror case the two `designated_boards` templates actually produce
+(nothing globally, granted on one board only) — is now exercised by a real procedure for the first
+time (`meeting.test.ts`'s "honours a REVOKING board override" / "honours a GRANTING board override"
+tests). **What the item got right:** the mechanism worked exactly as specified, first try, for a
+single-code write. `requireBoardPermission("A1", boardIdFrom())` needed no changes and no fix round —
+`assertCanInsertMeeting(actor, scope)` and `assertPermission(actor, "A1", {boardId, ...})` are the
+identical call, so using the code form through the middleware IS calling the rule, not a shortcut
+around it (see `meeting.ts`'s own header for why it does not additionally import and call
+`assertCanInsertMeeting` directly).
+
+**What the item got wrong, or rather did not yet say: a `BoardScope`-taking rule with more than one
+code needs a FOURTH guard shape this item did not catalogue.** (Settled here after an earlier draft
+of this paragraph said "fifth" in one sentence and "fourth" three sentences later — the count is
+FOUR: `requirePermission`/`requireBoardPermission` together are one form with two positions;
+`requireActor` is the second; the subject-carrying middleware shape — `requireOwnAccountColumns` — is
+the third; this is the fourth.) `assertCanUpdateMeeting` is `isAdmin(actor) OR A1@board OR M1@board` —
+not reducible to one `PermissionCode`, so `requireBoardPermission` (which always resolves exactly one
+code via `assertPermission`) cannot express it, the identical reason `requireActor` cannot express a
+subject-carrying rule like `assertCanUpdateUserAccount`. The FIRST version of this task's fix gave
+`cancel` a local, one-off middleware (`requireCanUpdateMeeting`) for exactly this — but the review
+round that found this item's own count inconsistency also asked why it should stay local: a full
+audit of `rules.ts`'s **eighteen** `BoardScope` rules found `assertCanUpdateMeeting` is not alone.
+Sixteen ARE exactly one `assertPermission` call — use `requireBoardPermission` for those, and reach
+for it FIRST; this shape is for the rest. The one other that is not is `assertCanInsertExhibit`
+(A3 OR `isBoardMember(actor)`, a ROLE branch rather than a second code — this one DOES fit the shape
+below, structurally; it is named here because it is the other multi-branch example the audit found,
+not because it cannot be wired).
+
+**Corrected in the whole-branch fix round: this count shipped as "nineteen" here and again in
+`trpc.ts`'s own `requireBoardActor` doc comment, and it does not reproduce.** Quote the grep, not
+the number (item 11) — and this one matters more than a stale marker count, because wave 5 wires the
+very rule the miscount was reaching for:
+
+```
+$ grep -nE ": BoardScope" packages/api/src/trpc/authorization/rules.ts | wc -l
+18
+```
+
+The nineteenth was `assertCanInsertVoteRecord` (M3 OR the caller's own active seat), which takes no
+`BoardScope` **at all**: its signature is `(actor: Actor, tx: TenantTx, subject: VoteRecordSubject)`,
+so `TenantTx` is the **SECOND** argument, not "a THIRD argument" as both places said. It stays
+resolver-side regardless, and for the reason already given — it is `async` and needs a `TenantTx` no
+middleware has; not a loss, since that `TenantTx` is exactly what its self-vote branch needs.
+
+So `trpc.ts` now exports `requireBoardActor` — `requireActor`'s board-scoped sibling, taking the RULE
+FUNCTION rather than a code, generalised rather than left as `meeting.ts`'s own local export:
+
+```ts
+protectedProcedure
+  .use(requireBoardActor(assertCanUpdateMeeting))
+  .input(z.object({ meetingId: z.uuid(), boardId: z.uuid() }))
+  .mutation(...)
+```
+
+**Reach for `requireBoardPermission` first; use `requireBoardActor` only when the rule spans more than
+one code (or a role branch).** Two type-level checks close the same mistakes `requireActor` closes for
+its own shape, plus one it does not need: a boolean predicate (`requireActor`'s own hole, reproduced
+here because the parameter shape is identical) AND an actor-only rule like `assertCanUpdateTown` —
+NEW to this shape, because a one-parameter function IS structurally assignable to a two-parameter type
+(a function that ignores its second argument can be called with one), so without the arity check
+`requireBoardActor(assertCanUpdateTown)` would compile, extract a board, refuse if none is supplied,
+and then silently drop it. Verified as real compile errors: four `@ts-expect-error` pins in
+`packages/api/src/trpc/__tests__/require-board-actor-type.test.ts`.
+
+**One property `requireBoardPermission` has that `requireBoardActor` CANNOT preserve: import-time
+refusal for a board-scoped code used with no board.** `requirePermission` throws while the router
+module loads if handed one of the 18 `BOARD_SCOPED_CODES` with no `board` option — there is no single
+`PermissionCode` to check against that set here, because the whole point of this shape is a rule that
+is not keyed to one code. The arity check is the PARTIAL substitute: it catches "this rule takes no
+board at all," which is the realistic mistake at this shape's call sites, but not "this rule is
+board-scoped but was wired to `requireActor` instead" — a different mistake, and one the safety net
+above never covered for the `requirePermission` form either. ~~Nothing stops writing
+`requireActor(someBoardScopedRule)` today; TypeScript sees a valid one-argument call and there is no
+`BOARD_SCOPED_CODES`-style set of RULE FUNCTIONS to check against. Recorded as a real, currently open
+gap rather than implied closed by analogy with the code form.~~ — **overstated; TypeScript already
+closes this half, and the whole-branch fix round probed it rather than reasoning about it.** A
+function that requires TWO arguments is not assignable to a one-argument parameter type (the arity
+rule runs the opposite way from the familiar "fewer parameters is fine" direction), so
+`requireActor(assertCanUpdateMeeting)` is a compile error:
+
+```
+src/trpc/__probe.ts(3,54): error TS2345: Argument of type '(actor: Actor, scope: BoardScope) => void'
+  is not assignable to parameter of type '(actor: Actor) => void'.
+  Target signature provides too few arguments. Expected 2 or more, but got 1.
+```
+
+All 18 `BoardScope` rules take a REQUIRED second parameter (`scope: BoardScope`; none is optional —
+same grep as above), so the mistake is not expressible without an explicit cast, which is the
+already-documented "parked, not closed" structural-typing hole above rather than a second one. What
+genuinely remains open is only the narrower claim: there is no `BOARD_SCOPED_CODES`-style set of RULE
+FUNCTIONS, so if a future rule were ever given an OPTIONAL scope parameter, `requireActor` would
+start accepting it silently. Check that when adding a rule, not before — a wave-4 author should not
+spend a round closing a gap the compiler already holds shut.
+
+**The mismatch defence is mechanical, not prose, and it is the DEFAULT for a row-targeted board-scoped
+write — not `cancel`'s special case.** A board-scoped UPDATE whose target is named by a DIFFERENT id
+than the board itself reopens the `.transform()` hazard this item already warns about ("do not
+`.transform()` a value a guard authorizes on") by a new route: not a schema transform changing one
+field, but the write's true subject being a different id than the one the guard checked. `cancel`'s
+input is `{meetingId, boardId}`; the guard authorizes the CLIENT-CLAIMED `boardId`, but the row the
+resolver actually writes is selected by `meetingId` — a value the guard never inspects. `meeting`'s
+own RLS (`meeting_tenant_isolation`) is tenancy-only, no board predicate, so any town member can
+already see any meeting's true board via `detail`/`byTown`; nothing stops a caller who holds A1 on
+their OWN board from naming a DIFFERENT board's meeting and claiming their own board for it.
+`requireBoardActor` cannot close this itself — it authorizes before `.input()` even parses, with no
+`TenantTx` to look the row up. Instead it carries the board it authorized forward on the request
+context (`ctx.authorizedBoardId`), and the resolver calls `assertMatchesAuthorizedBoard(ctx,
+<the row's real board, read fresh from the database>)` before writing — a GREPPABLE, separate
+function rather than inline prose, so "did this procedure re-check the row's true board" is
+answerable by `grep -rn "assertMatchesAuthorizedBoard("` instead of something a reviewer has to
+reconstruct. `insert` does not need this (the board id it authorizes on IS the board id it writes, by
+construction) — which is exactly why this did not surface in Task 1's `insert` procedure, or in
+`board-scope.test.ts`'s four synthetic procedures, or in `require-permission.test.ts`'s
+`editAgenda`/`scheduleMeeting` — none of them target a row by an id OTHER than the board id. **Waves
+4–6 must check each table's own RLS rather than assume `meeting`'s tenancy-only finding carries
+over:** `agenda_item`, `motion`, `vote_record`, `meeting_attendance`, `minutes_document`,
+`minutes_section` and `exhibit` are all board-scoped writes targeted by a row id, not the board id —
+the shape this hazard needs, not a shape unique to `cancel`.
+
+**Three of the seven are now checked; four are not.** Wave 3, Task 3 built the read-only routers over
+`agenda_item`, `meeting_attendance` and `minutes_document`, and its fix round confirmed all three
+against `0000_baseline.sql` directly (`agenda_item_tenant_isolation`,
+`meeting_attendance_tenant_isolation`, `minutes_document_tenant_isolation`): each is a plain
+`FOR ALL USING (town_id = get_current_town_id()) WITH CHECK (…)` — **no role predicate and no board
+predicate**, identical to `meeting_tenant_isolation`. So the mismatch defence IS load-bearing for all
+three the moment a wave adds a row-targeted board-scoped WRITE to any of them: any town member can
+already see any of those rows and therefore learn their true board. The finding lives in each
+router's own header too, but it belongs here as well, since this paragraph is where a wave-4/5/6
+author is sent to look. **`motion`, `vote_record`, `minutes_section` and `exhibit` remain unchecked**
+— that check belongs to whichever wave writes each one's router, and "the other three turned out
+tenancy-only" is not evidence about these four.
+
+**The cost, stated rather than left to be discovered:** the board id `requireBoardActor` needs is not
+needed by the WRITE itself for a row-targeted procedure — it exists purely so a guard declared before
+`.input()` has something to authorize on. Every such write inherits a client-supplied field whose only
+job is feeding the guard, and the client-side plumbing to supply it — `CancelMeetingDialog.tsx` will
+need a `boardId` prop it does not have today (see that component's own `TODO(phase-e-wave-3)` marker).
+Worth it for FORBIDDEN-before-BAD_REQUEST (item 13's rule), but a documented cost, not a discovery a
+future wave should have to make again.
+
+**A separate finding, orthogonal to authorization but found by exactly the same "verify by mutation"
+discipline item 13 requires, and now closed STRUCTURALLY rather than by a convention to remember:
+resolving `ctx.actor()` for the first time INSIDE a procedure's own `ctx.withTenant` callback
+self-deadlocks under a single-connection pool.** `ctx.actor()` is memoised per request
+(`context.ts`), but an UNresolved call runs its own internal `withTenant` — a second, nested
+transaction on the same pooled connection while the first is still open. This was found on an EARLIER
+version of `cancel`'s resolver, which called `assertCanUpdateMeeting(await ctx.actor(), {...})`
+resolver-side for its own re-check (before the mismatch defence above became a pure board-id
+comparison, which needs no actor at all): deleting the guard to run item 13's required deletion-pin
+mutation removed the ONLY thing that had been warming `ctx.actor()`'s memo before the transaction
+opened, and every `meeting.cancel` test hung at vitest's 30s per-test timeout instead of failing —
+reproducing it also leaked scratch databases, because vitest force-kills a timed-out test and
+`withTestDb`'s own teardown `finally` never got to run. **Fixed in `context.ts`, not in `meeting.ts`:**
+`bindTenantAccess` (the one place both `createTrpcContext`, production, and `fixtures.ts`'s
+`contextFor`, every router test, build their `withTenant`/`actor()` pair) now tracks a per-request
+in-transaction flag and refuses a reentrant call — of EITHER `ctx.withTenant` or `ctx.actor()` — with a
+named, immediate error instead of a hang. Verified directly, not by absence of a hang:
+`packages/api/src/trpc/__tests__/context.test.ts` reproduces the exact reentrant call and asserts it
+throws in under a second, alongside a positive control proving sequential (non-nested) use of both
+still works. ~~**Any future procedure that re-checks something inside its own transaction and reaches
+for `ctx.actor()` there for the first time now gets a loud, immediate, named error instead of a
+hang**~~ — **that sentence described the guard's INTENT, not its code, and the gap between the two
+was a blocking finding in the whole-branch review. NARROWED; read the paragraph below instead.**
+
+**The guard fired on a warm memo, and this item said it did not.** As shipped, the check was
+`if (inTransaction)` — it never consulted `actorPromise`, so `ctx.actor()` threw inside
+`ctx.withTenant` even when the memo was already RESOLVED and no second transaction would open.
+Reproduced by the reviewer: warm the memo, call inside the transaction, get
+`Error: ctx.actor() called for the first time from INSIDE a ctx.withTenant() transaction` — and it
+was not the first time. **This compounds rather than sits still**, which is why it blocks wave 4
+rather than being logged: every guarded procedure reaches its resolver with a WARM memo, because
+`requireActor`, `requirePermission`, `requireBoardPermission` and `requireBoardActor` all
+`await ctx.actor()` in middleware; and this item's own "row-level rules stay in the resolver by
+necessity" paragraph directs waves 4, 5 and 6 to write exactly
+`assertCanUpdateAgendaItem(await ctx.actor(), { boardId: row.board_id })` inside the transaction that
+read the row. A wave-4 author writing the documented shape would have got a plain `Error` →
+`INTERNAL_SERVER_ERROR` carrying a message that names the wrong cause. `meeting.ts` escaped only
+because `assertMatchesAuthorizedBoard` compares two strings and needs no actor at all; that escape
+does not generalise to a single other table.
+
+**Fixed by narrowing the guard, not by narrowing the documentation** — the documented resolver-side
+shape has to work, because three waves are told to use it. The condition is now
+`inTransaction && !actorSettled`. `actorPromise !== undefined` refuses less than the invariant
+warrants, so `!actorSettled` is chosen as the conservative reading — a defined-but-PENDING memo is
+one refactor away from unsafe. But do not repeat the stronger claim this paragraph used to make:
+narrowing to `actorPromise !== undefined` does **not** reopen the deadlock, because a second call on
+a pending memo returns the SAME promise and opens no second transaction. Measured — that narrowing
+runs the api suite green in normal time, failing only the state-3 pin. "Settled" cannot be read
+synchronously off a raw promise, so `bindTenantAccess`
+tracks it with a flag set from the memo's own settlement handlers (both branches — a REJECTED load
+opens no second transaction either). All three states are pinned separately in `context.test.ts`, and
+the middle one was verified by mutation the way item 13 requires — reverting the condition to
+`inTransaction` alone turns "ALLOWS a ctx.actor() call from inside a ctx.withTenant() callback once
+the memo is already SETTLED" red, and leaves the other two green:
+
+| state                            | inside a transaction | behaviour                                     |
+| -------------------------------- | -------------------- | --------------------------------------------- |
+| cold memo (never called)         | yes                  | throws — the original hazard, preserved       |
+| settled memo (middleware warmed) | yes                  | **succeeds** — the false positive, closed     |
+| defined but still pending        | yes                  | throws — a conservative refusal, not a hazard |
+
+**State 3's reachability, since a test that cannot fail is worth less than the sentence that says
+so:** `inTransaction` is a single flag, so a pending actor load and a separately-open `ctx.withTenant`
+cannot coexist — the `withTenant` half of the guard refuses the second one first. The only reachable
+form of "in a transaction with an unsettled memo" is therefore a re-entry into the actor's OWN load
+window (call `ctx.actor()`, do not await it, call it again), which is what that test constructs. It
+is reachable, so the test stays; it is narrow, and saying which narrow shape it is beats leaving a
+reader to assume it covers more.
 
 **The example files a reader lands on now match this item's own rule.** `board-scope.test.ts`'s
 four board-scoped procedures and `require-permission.test.ts`'s `editAgenda`/`scheduleMeeting` used
@@ -547,11 +762,10 @@ it mechanically, on every `npx turbo run test`, and fails with a filename instea
 reviewer's grep.
 
 What it checks: for every `invalidateQueries(` call in a non-test file, if the call's own argument
-names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (seven entries
-as of this wave's final fix round — `towns`, `boards`, `persons`, `agendaTemplates`, `members`,
-`userAccounts`, `invitations` — quote `cache-key-parity.test.ts`'s own `MIGRATED` object, not this
-number, which will drift the same way "currently `towns`/`boards`/`persons`" drifted here from three
-to seven without this paragraph ever being updated), the same file must also call the matching
+names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (quote
+`cache-key-parity.test.ts`'s own `MIGRATED` object — this paragraph used to carry a count and a
+roster instead, and it drifted from three to seven to eleven entries without ever being updated;
+the object is the only statement of it that cannot go stale), the same file must also call the matching
 `trpc.<router>.pathFilter()` somewhere. The match is scoped to roughly 250 characters measured from
 inside the `invalidateQueries(` call itself, not the whole file — a whole-file version of this check
 raises 12 false positives at HEAD (files that read a migrated key in a `useQuery` far from an
@@ -735,6 +949,27 @@ six calls already exist and already serve an already-migrated screen; deferring 
 "whichever wave migrates \[the screen]" is what let a reviewer delete one and get 947 green tests
 in the meantime. A wave that adds a new writer against an already-migrated read owes it the pin in
 the same commit, for the identical reason.
+
+**`pathfilter-pin-coverage.test.ts` mechanizes this discipline, and its own credit is per TEST FILE,
+not per writer inside it — named in wave 3's Task 0.** If a test file imports writer A (and
+genuinely asserts `isInvalidated`/`countFor(` about A's own key) and ALSO imports writer B — for any
+reason, including one that has nothing to do with B's own `pathFilter()` call — B is credited as
+pinned too, purely because the file contains SOME invalidation assertion and SOME import of B.
+Proven as a fixture, not asserted: `pathfilter-pin-coverage.test.ts`'s own "credits an unrelated
+writer merely for being imported alongside a genuinely-pinned one" test constructs exactly this case
+and shows it passes. ~~Not audited against every real writer in the tree to confirm none currently
+rides on this hole in practice ... so treat this as a known mechanism limit, not a claim that HEAD is
+clean of it.~~ — **audited in wave 3's whole-branch review, and the hole had real occupants.** The
+review swept the eighteen `pathFilter()` calls that wave 3's Tasks 3+4 fix round added and found TWO
+that turn nothing red: `routes/meetings.$meetingId.agenda.tsx`'s section-REORDER handler (the file was
+credited by its add-section pin) and `routes/meetings.$meetingId.live.tsx`'s `agenda_item` Realtime
+handler (credited by its `meeting_attendance` Realtime pin). Both are exactly this shape — a second
+call inside a file that already had a genuine pin for a different call — and both are now pinned in
+their own right, each verified by deletion. So this is a **demonstrated** limit, not a theoretical
+one: the credit is per test FILE, and a file's second, third and fourth `pathFilter()` calls ride in
+free. **The mechanical check cannot close this; only the deletion sweep two paragraphs up can, so run
+it.** Recorded here rather than only in the check's own header because a reader of this document who
+never opens that test file should not have to rediscover the limit by tripping over it.
 
 ### The floor
 
@@ -955,6 +1190,71 @@ own Known-gaps entry below), and `people.tsx` (`boardMember.listByTown`). Whethe
 grep AND the commit, always, and prefer describing the gaps by name (as the bullets below do) over
 reporting a bare count that a reader cannot check without also re-deriving which lines you meant.
 
+**Re-run again in wave 3's Task 1 fix round, per that round's own L5 finding: this enumeration was
+correct as of `bb60e295` but the review's own new markers moved it before this paragraph was
+updated — the identical drift item 14 exists to catch, one wave later.**
+
+```
+$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+22
+```
+
+22 lines, up from 6 — and the growth is markers ADDED to files that already had the gap, not new
+gaps created: wave 3 Task 0 added `CreateMeetingDialog.tsx`'s and `templates.tsx`'s (both named in
+that task's own brief, discussed above), and Task 1's fix round added `CancelMeetingDialog.tsx`,
+`meetings.tsx`, `boards.$boardId.meetings.tsx` and `meetings.$meetingId.tsx` — four files whose raw
+Supabase reads/writes item 11's sweep had been reading as "done" only because they carried no token,
+exactly the hole this item exists to close. `CancelMeetingDialog.tsx`'s marker is qualitatively
+different from the others: its raw write has NO authorization check at all today (tenancy-only RLS),
+not a completeness gap alone — see that file's own marker and `meeting.ts`'s header, "`updateStatus`:
+the gap the review round found," for the sibling case in `meetings.tsx`. `home.tsx`'s own marker
+count DROPPED by one within this same span (`meeting.byTown` closed, retagged `phase-e-wave-6` — see
+its own Known-gaps entry) — both directions happened in the same fix round, which is exactly why
+"quote the grep, not the number" stays the rule rather than trying to memorise a running total.
+
+**Re-run at wave 3 Task 2 (`c34b987`), its fix round (`1b1d635`), and Task 3's own close-out
+(`0643553`) — the identical drift item 14 exists to catch showed up again in between: this
+paragraph stopped at Task 1's fix round and was never updated across Task 2, even though Task 2's
+own progress note already recorded the numbers.**
+
+```
+$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+11   # at c34b987 — Task 2 closed CancelMeetingDialog.tsx's and meetings.tsx's raw-write
+     # authorization holes (both markers named `updateStatus`/the kanban gap above)
+20   # at 1b1d635 — Task 2's fix round re-tagged four writers newly implicated by adding
+     # `meetings: "meeting"` to cache-key-parity's MIGRATED map (item 7): MeetingStartFlow.tsx,
+     # PublishAgendaDialog.tsx, meetings.$meetingId.agenda.tsx, meetings.$meetingId.live.tsx —
+     # each got a `TODO(phase-e-wave-4/5)` marker for a `meeting` write that was already
+     # unauthorized before this fix round and still is; only the missing invalidation the
+     # MIGRATED entry flagged was in scope to close
+17   # at 0643553 — Task 3 discharged `meetings.$meetingId.tsx`'s own three
+     # `TODO(phase-e-wave-3)` markers (the header comment and both inline `meeting.detail`
+     # citations) by migrating the file's nine reads onto tRPC in full — see this wave's
+     # Task 3 report
+```
+
+```
+17   # unchanged in wave 3 Tasks 3+4's fix round — that round added eleven
+     # `pathFilter()` invalidations and eight pin tests but closed no
+     # Supabase read and opened no new gap, so no marker moved in either
+     # direction. Recorded rather than left silent: "the number did not
+     # change" is itself a re-run result, and the alternative is a reader
+     # assuming the enumeration simply was not checked.
+18   # after the whole-branch fix round. The one added marker is
+     # `routes/meetings.$meetingId.minutes.tsx`'s
+     # `TODO(phase-e-wave-6): minutesDocument.detail / the minutes status
+     # writes` — the countdown going UP because a gap that was already there
+     # got NAMED, which this item's own closing paragraph says is legitimate.
+     # That file was reached only for its missing `pathFilter()` invalidation
+     # (see the Known-gaps bullet); every read and write on it is still raw
+     # Supabase, and item 11's sweep had been reading it as done purely
+     # because it carried no token. Same hole as the four files Task 1's fix
+     # round re-tagged.
+```
+
+Whether the count is 22, 20, 17, or something else by the time this is read depends entirely on
+what closed since — quote the grep, not the number, still the rule three tasks later.
+
 This countdown is not monotonic within a wave regardless of which grep measures it — a task can
 legitimately raise it by naming a gap explicitly that was previously silent (Task 5 added
 `ProgressChecklist.tsx`'s `memberCount` gap while closing `home.tsx`'s town-header read). It only has
@@ -1093,6 +1393,22 @@ this wave's work closed, whether or not the task that closed it was the one that
 A bullet is stale exactly as easily by someone else's fix landing nearby as by the task that named
 it forgetting to update it — check the file, not the diff.
 
+**Sharpened in wave 3, Tasks 3+4's fix round, because the step as written above was RUN and still
+missed one.** Task 4's close-out sweep reported "none went stale because of this task's work," and
+that was wrong: Task 3 had created `packages/api/src/trpc/routers/minutes-document.ts` one commit
+earlier, and the `home.tsx` bullet's sentence "`minutesDocs` still has no router at all" had been
+false ever since. The sweep missed it because of how it selected which bullets to re-read — it looked
+for bullets that MENTION the files the task touched, and that bullet mentions `home.tsx`, a file
+neither task edited. **The unit of staleness is a CLAIM, not a file.** So read each bullet for the
+assertions it makes — "X does not exist", "Y is still unwired", "Z has no caller", "this is still
+open" — and check each assertion against the tree, whether or not the bullet names anything you
+touched. The three assertion shapes that go stale most often here, all three demonstrated in this
+document's own history: **"no router/procedure exists"** (check `router.ts` and the router file, not
+the screen), **"nothing is wired to it"** (grep for the procedure name across `packages/web/src`), and
+**"marked with a `TODO(phase-e-wave-N)`"** (re-run item 11's anchored grep). A bullet naming a file
+you never opened is exactly the one this step exists for; "my diff does not touch that file" is the
+reasoning that produced four stale bullets in wave 2 and a fifth here.
+
 This is intentionally scoped to Known-gaps, not "audit the whole document every time" — item 11's
 own countdown grep already does the analogous job for `TODO(phase-e-wave-*)` markers in the
 CODEBASE; this step is the same discipline applied to the PLAN DOCUMENT's own claims about that
@@ -1116,10 +1432,22 @@ grep-able property.
 
 ## Known gaps this document does not close
 
-- The board-scoped authorization form in item 2 is fixed and unit-tested (Task 2's fix round —
-  `requirePermission`'s board extractor now reads `getRawInput()` so the form actually works
-  declared before `.input()`) but still has **zero call sites in a real procedure** — no shipped
-  router calls `requireBoardPermission` yet. The mechanism is proven; the first real use is not.
+- ~~The board-scoped authorization form in item 2 is fixed and unit-tested ... but still has **zero
+  call sites in a real procedure** — no shipped router calls `requireBoardPermission` yet.~~ —
+  **closed in wave 3, Task 1.** `meeting.insert` (`packages/api/src/trpc/routers/meeting.ts`) calls
+  `requireBoardPermission("A1", boardIdFrom())` for real, and the case this whole mechanism exists
+  for — a revoking board override refusing on the barred board while still allowing the same actor
+  elsewhere — is exercised by a real procedure for the first time (`meeting.test.ts`'s "honours a
+  REVOKING board override" tests, on `insert`, `cancel` AND `updateStatus`). See wave 3's Task 1
+  report for what this first real use found item 2 got right and wrong. `cancel`/`updateStatus`
+  needed a FOURTH guard shape — `assertCanUpdateMeeting` is admin-OR-A1-OR-M1, not one code — and
+  that shape is now `requireBoardActor` (`trpc.ts`), generalised in this same task's fix round rather
+  than left as `meeting.ts`'s own one-off `requireCanUpdateMeeting` (the review round's audit of
+  `rules.ts` found `assertCanUpdateMeeting` was not the only `BoardScope` rule that does not reduce
+  to one code — see item 2's own "Wave 3, Task 1" section for the other two and why they either fit
+  or do not). `requireBoardPermission` has one real call site (`meeting.insert`);
+  `requireBoardActor` has two (`meeting.cancel`, `meeting.updateStatus`) as of this task. The
+  board-scoped mechanism now has real users on both of its shapes, not just the single-code one.
 - `assertCanSelectTownNotificationConfig` / `assertCanInsertTownNotificationConfig` /
   `assertCanUpdateTownNotificationConfig` are tested as pure functions
   (`packages/api/src/trpc/__tests__/admin-gates.test.ts`) but **no procedure calls them** — wave 1
@@ -1193,9 +1521,19 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `Foo.pathfilter.test.tsx` that does not actually import `Foo.tsx` (see the check's own fixture
   tests for both). Comment-stripping is load-bearing the identical way item 11's marker grep needs
   it to be: without it, `routes/people.tsx` and `test/trpc.ts` both false-positive as writers because
-  each mentions `trpc.<router>.pathFilter()` in a comment, not real code — 28 files contain the raw
-  substring at HEAD, 26 after stripping, and 26 is the number the check's own history-validation
-  section (below) confirms is right. Validated against `git archive` snapshots of three real commits,
+  each mentions `trpc.<router>.pathFilter()` in a comment, not real code. **The figures that used to
+  sit here — "28 files contain the raw substring at HEAD, 26 after stripping" — were anchored to no
+  commit at all, and had drifted by two waves; re-measured in wave 3, Tasks 3+4's fix round and
+  anchored the way item 11 requires.** At `8c1b5e2` (this round's parent) the walk over non-test
+  files under `packages/web/src` finds **35** containing the literal `.pathFilter()` and **33** after
+  stripping comments; this round adds five more writers (`AgendaItemDetailPanel.tsx`,
+  `AttendancePanel.tsx`, `AgendaSection.tsx`, `InlineItemForm.tsx`,
+  `routes/meetings.$meetingId.review.tsx`), taking those to **40** and **38**; the whole-branch fix
+  round adds a sixth, `routes/meetings.$meetingId.minutes.tsx` (see its own Known-gaps bullet below),
+  taking them to **41** and **39**. The two files the gap
+  between the pair accounts for are still the same two, which is the durable claim here — quote the
+  check's own `findUnpinnedWriters(SRC_DIR).writerCount` rather than any of these seven numbers.
+  Validated against `git archive` snapshots of three real commits,
   not assumed: HEAD (26 writers, 0 violations), `3b22df8` (16 writers, 3 violations —
   `AddMemberDialog.tsx`, `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`), `081a27e` (25
   writers, 1 violation — `MemberRoster.tsx`) — all three matching this wave's own named findings by
@@ -1220,12 +1558,48 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   procedure and passes" failure mode left for a stricter static check to add value against. What
   actually catches a missing invalidation on a specific mutation, proven by Task 3's own fix round,
   is a **scripted deletion sweep** run as a close-out step, not a new assertion shape: comment out
-  each `pathFilter()` call one at a time (`~21` sites at HEAD — `grep -rl "\.pathFilter()"
-packages/web/src | grep -v __tests__ | grep -v '\.test\.'`, minus the two comment-only false
-  positives item 4's own check already excludes), run the web suite, confirm something goes red,
-  restore. At roughly 10 seconds per site that is about 4 minutes for the whole tree — cheap enough
+  each `pathFilter()` call one at a time, run the web suite, confirm something goes red, restore. The
+  file list:
+
+  ```
+  $ grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  35   # at 8c1b5e2, this round's parent
+  40   # after wave 3 Tasks 3+4's fix round adds five writer files
+  ```
+
+  (minus the two comment-only false positives the pin-coverage check's own comment-stripping already
+  excludes — `routes/people.tsx` and `test/trpc.ts`.) **This bullet used to say "`~21` sites at HEAD"
+  with no SHA attached** — off by fourteen against its own grep by the time it was re-run, which is
+  precisely the drift item 11's "quote the grep, not the number" rule exists to prevent, in the
+  document that states the rule. Re-run it; do not trust either figure above either.
+  A site is one `pathFilter()` CALL, not one file, and several files now carry two or more.
+  At roughly 10 seconds per site that is well under ten minutes for the whole tree — cheap enough
   to run as a matter of course before closing out a task that touched cache invalidation, and it is
   the only thing in this document that has actually caught a missing-but-plausible-looking pin.
+
+  **Run over the WHOLE tree for the first time in wave 3's whole-branch fix round — not just the
+  commit under review — and the estimate above held: 66 sites, ~12s each, about 13 minutes
+  unattended.** The site list, and what it cost, quoted rather than summarised:
+
+  ```
+  $ grep -rn "invalidateQueries(trpc\..*\.pathFilter())" packages/web/src \
+      | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  66     # at 0e920fa, before this round; one is a doc-comment false positive
+         # (test/trpc.ts), so 65 real calls
+  ```
+
+  Result: **63 RED, 2 GREEN.** Both greens were among the eighteen calls the round under review had
+  just added (see item 8's credit-bleed paragraph); **all 47 pre-existing calls turned a named test
+  red.** That is the answer to the "not audited against every real writer" caveat this bullet's
+  sibling used to carry: the pre-existing tree was clean, and the hole's only occupants were new. It
+  is also the reason to keep running it per-task rather than declaring the tree audited — a sweep is
+  a statement about one commit, and the two greens here were three days old.
+
+  Mechanising the sweep is worth the ten minutes it takes to write: comment the line with `perl -i`
+  keyed on the line number (so no other line moves), run the suite, `git checkout --` the file,
+  record. `git checkout --` as the restore step means the sweep needs a CLEAN working tree — run it
+  BEFORE the round's own edits, or back the file up by hand for a site you are actively changing.
+
 - **Re-checked in the wave's final whole-branch review (current as of `9e87b7b`) — four of the
   five bullets that used to sit here were stale, three of them CLOSED and described as open. This
   is exactly the drift item 14 above (the standing close-out step) exists to catch, and the fact
@@ -1253,8 +1627,22 @@ settings" read)`.
   marker in this same round: `board.listActive` exists and is not a blind swap, because its ordering
   (governing board first, then alphabetical — see its own doc comment) differs from this picker's
   plain `.order("name")`, a real behavior difference whoever migrates this file next needs to check,
-  not a missing procedure. `meetingRows`/`minutesDocs` still have no router at all
-  (`meeting`/`minutesDocument`) and stay open exactly as before.
+  not a missing procedure. ~~`meetingRows`/`minutesDocs` still have no router at all
+  (`meeting`/`minutesDocument`) and stay open exactly as before.~~ — **`meetingRows`'s half closed in
+  wave 3, Task 0/1**: a `meeting` router now exists (`packages/api/src/trpc/routers/meeting.ts`,
+  Task 1) and `home.tsx`'s own marker was retagged to say so (Task 0) — the screen itself is not
+  wired onto it yet (that is Task 2 territory and explicitly out of this wave's Task 1 scope), only
+  the marker's claim changed. ~~`minutesDocs` still has no router at all and stays open~~ —
+  **"no router at all" is false as of wave 3, Task 3** (`0643553`), which created
+  `packages/api/src/trpc/routers/minutes-document.ts` and wired `minutesDocument` into `router.ts`.
+  Corrected in this wave's Tasks 3+4 fix round; the sweep that should have caught it searched for
+  bullets naming its own FILE rather than bullets whose CLAIM its work falsified — see item 14's
+  lens, sharpened in the same round for exactly this. What is still open here is narrower and
+  unchanged: that router carries `byMeeting` only, and `home.tsx` needs `pendingByTown`, which does
+  not exist. The wave-6 scoping stands (that wave owns `minutes.tsx`/`review.tsx` per this wave's own
+  plan), and `home.tsx`'s marker —
+  `TODO(phase-e-wave-6): minutesDocument.pendingByTown, board.listActive` — is already worded
+  correctly, naming the missing PROCEDURE rather than a missing router.
 - ~~`ProgressChecklist.tsx` (Task 5) ... Its third, `memberCount` ... stays on Supabase ... Marked
   `// TODO(phase-e-wave-2): boardMember.countByTown (or equivalent)`.~~ — **closed in Task 3.**
   `boardMember.memberCount` (the relocated procedure — see `board-member.ts`'s own header, "Task 1,
@@ -1377,13 +1765,87 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   neither answers `people.tsx`'s actual question ("for every person in the town, which board names do
   they hold a seat on"), which needs a town-wide `board_member` JOIN `board` grouped by person — a
   procedure that does not exist yet. Both markers stay exactly as they were.
-- **`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
-  re-labeled to a specific wave number in Task 4.** A dispatch for this task asked for it to be re-tagged
-  to "the wave that will own them," on the reasoning that `meeting`/`minutesDocument` are wave 3+ work —
-  correct as far as it goes (this wave's own "Measured scope" table and Global Constraints both say this
-  wave is board/membership only), but no wave 3–6 plan document exists yet (only
-  `2026-08-29-phase-e-wave-1-identity-and-settings.md`, `2026-08-29-phase-e-unit-0-boards-slice.md` and
-  this wave's own plan exist in `docs/superpowers/plans/` as of Task 4). Guessing a specific wave number
-  with nothing to check it against would be exactly the kind of unverified claim this document exists to
-  prevent. Left as `TODO(phase-e-wave-2)` — mis-scoped but honestly so — for whoever writes the wave 3
-  plan to retag with an actual number.
+- ~~`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
+  re-labeled to a specific wave number in Task 4.~~ ... Left as `TODO(phase-e-wave-2)` — mis-scoped
+  but honestly so — for whoever writes the wave 3 plan to retag with an actual number.~~ — **the wave
+  3 plan this bullet was waiting for now exists, and wave 3's own Task 0 did the retag it asked for.**
+  `home.tsx`'s marker is now `TODO(phase-e-wave-6)`, naming only `minutesDocument.pendingByTown` and
+  the still-unwired `board.listActive` — `meeting.byTown` dropped off the list because wave 3's Task 1
+  shipped it for real, not because of a re-scoping guess. `minutesDocument.pendingByTown` is tagged
+  `wave-6` on the same basis this wave's own plan already states elsewhere (its "Out of scope" note:
+  "`minutes.tsx` and `review.tsx` are wave 6"), not a fresh guess — the same table this bullet's
+  original version was checking against, now checkable because it exists.
+- ~~**Wave 3, Task 3: three new one-procedure routers (`agendaItem`, `minutesDocument`,
+  `meetingAttendance`) exist and back `meetings.$meetingId.tsx`'s shell, but are deliberately NOT in
+  `cache-key-parity.test.ts`'s `MIGRATED` map yet — a real, load-bearing staleness gap, not an
+  oversight.** ... Whichever wave next migrates the screen that owns each writer inherits closing
+  this.~~ — **closed in wave 3, Tasks 3+4's fix round, and the deferral was wrong on the merits, not
+  merely deferred too long.** All three entries are in the map now (`agendaItems: "agendaItem"`,
+  `minutesDocuments: "minutesDocument"`, `attendance: "meetingAttendance"`). The bullet's own
+  measurement held up exactly — 11 (namespace, file) pairs across 8 unique files, 6 `agendaItems` / 2
+  `minutesDocuments` / 3 `attendance`, in `AgendaItemDetailPanel.tsx`, `AgendaSection.tsx`,
+  `InlineItemForm.tsx`, `MeetingStartFlow.tsx`, `AttendancePanel.tsx`,
+  `meetings.$meetingId.agenda.tsx`, `meetings.$meetingId.live.tsx` and
+  `meetings.$meetingId.review.tsx` — and so did "`persons.detail` has zero writers." What the bullet
+  got wrong was calling the cost "bounded, not silent-forever" and treating that as a reason to wait:
+  a reviewer reproduced the regression by execution, not argument. At the parent commit `1b1d635` the
+  shell read `queryKeys.agendaItems.byMeeting(meetingId)` — the same expression every writer
+  invalidates, character for character — and `Query.isStaleByTime()` short-circuits on
+  `state.isInvalidated` before consulting `staleTime`, so the refetch happened on return to the shell
+  regardless of the 60s window. After Task 3 the shell's key was
+  `[["agendaItem","countByMeeting"],…]`, nothing invalidated it, and adding two agenda items then
+  navigating back to the meeting detail read "3 items" for up to a minute. Same for the minutes status
+  pill and the attendance count. **The alternative to a partial entry is a COMPLETE entry** — all
+  eleven fixed on their merits in one commit, ~~each with a pin test verified by deletion (item 8)~~,
+  the
+  legacy `queryKeys.*` lines all left in place because `SourceDataPanel.tsx`, `useQuorumCheck.ts` and
+  reads inside `live.tsx`/`review.tsx`/`agenda.tsx` still consume them. That is what wave 3 Task 2 did
+  for `meetings` one commit earlier and what `agendaTemplates` records two paragraphs into
+  `cache-key-parity.test.ts`'s own header; a task's file list has never exempted a writer from item 7,
+  and this bullet was the third time in three waves that reasoning was tried.
+
+  **Two corrections from the whole-branch review, both to this bullet's own arithmetic and its own
+  claim about pins.** First, "each with a pin test verified by deletion" was **false for two of the
+  calls**, and this is the sentence a reader would have trusted instead of re-running the sweep. The
+  review swept all eighteen added calls and found `meetings.$meetingId.agenda.tsx`'s section-REORDER
+  handler and `meetings.$meetingId.live.tsx`'s `agenda_item` Realtime handler both turn NOTHING red —
+  each riding the per-test-FILE credit-bleed item 8 describes, in a file that already had a genuine
+  pin for a DIFFERENT call. Same failure shape as Task 3's original defect, one layer down. Both are
+  pinned now, in `meetings.$meetingId.agenda.test.tsx` ("...when sections are reordered — the OTHER
+  call site") and `meetings.$meetingId.live.test.tsx` ("...from the agenda_item Realtime handler"),
+  each verified by commenting the `pathFilter()` line, watching that named test go red, and restoring
+  byte-identical. Second, that commit's message said the eleven pairs were "fixed on their merits at
+  **13** call sites"; the figure does not reproduce, and the message's OWN per-file bullet list sums
+  to 18:
+
+  ```
+  $ git diff 8c1b5e2..0e920fa -- packages/web/src | grep -c "^+.*invalidateQueries(trpc\..*pathFilter())"
+  18
+  ```
+
+  Item 11's rule is quote the grep, not the number, and it applies to a commit message exactly as
+  much as to this document — a wrong count in a message is what a later reader treats as the roster
+  to check against.
+
+- **`routes/meetings.$meetingId.minutes.tsx` had the same item-7 gap for one commit longer, and the
+  mechanical check could not see it — two `queryKeys` namespaces cover one table.** The file writes
+  `minutes_document.status` at six sites (submit, approve, publish, return for amendments, unpublish,
+  regenerate), all funnelled through one `invalidateMinutes()` helper, and that helper invalidated
+  only `queryKeys.minutes.byMeeting(meetingId)`. The shell now reads that status through
+  `trpc.minutesDocument.byMeeting` and renders it as the pill, so publishing minutes and returning to
+  the meeting detail showed a stale pill for the full 60s `staleTime` — the identical regression the
+  bullet above closed for eight other files. `cache-key-parity.test.ts` missed it because this writer
+  uses the **`minutes`** namespace and the `MIGRATED` map only carried **`minutesDocuments`**;
+  `queryKeys.minutes.byMeeting` and `queryKeys.minutesDocuments.byMeeting` are different keys over the
+  same `minutes_document` row, and neither invalidates the other. **Closed in the whole-branch fix
+  round, and the "it is a wave-6 file" reasoning was declined for the fourth time in four waves** — a
+  reviewer flagged it as informational on exactly that basis, and the round one commit earlier had
+  already applied the opposite reasoning to eight other files. `minutes: "minutesDocument"` is in
+  `MIGRATED` now; adding it surfaced exactly one violation (that helper), fixed in the same commit,
+  with a real pin (`meetings.$meetingId.minutes.test.tsx`) verified by deletion. `home.tsx`'s
+  `queryKeys.minutes.byMeeting("__home_pending__")` is a `useQuery` key, not an `invalidateQueries`
+  call, so the check does not reach it. The legacy line stays — this screen's own `minutesDoc` read is
+  still raw Supabase on that key. What remains open is the file itself, now carrying a marker that
+  says so: `TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes` — the
+  `minutesDocument` router has `byMeeting` only, and no procedure exists for any of the six
+  transitions.

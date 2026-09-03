@@ -2,6 +2,8 @@ import React from "react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
+import { queryClient } from "@/lib/queryClient";
+import { trpc } from "@/lib/trpc";
 
 // ─── Mock TanStack Query ───────────────────────────────────────────────
 
@@ -55,13 +57,31 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 // ─── Mock queryClient singleton ────────────────────────────────────────
+//
+// A REAL `QueryClient` instance, not a `vi.fn()` stand-in — this route
+// imports the singleton directly (not via `useQueryClient()`), and the pin
+// test at the bottom of this file needs a real cache to seed a
+// `trpc.meeting.byBoard` entry into and genuinely observe
+// `trpc.meeting.pathFilter()` invalidate it (conventions item 13: "verify
+// by mutation" needs something a deleted invalidation call can actually
+// make false).
 
-vi.mock("@/lib/queryClient", () => ({
-  queryClient: {
-    invalidateQueries: vi.fn(),
-    ensureQueryData: vi.fn().mockResolvedValue(undefined),
-  },
-  resetQueryCache: vi.fn(),
+vi.mock("@/lib/queryClient", async () => {
+  const { QueryClient } =
+    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
+  return {
+    queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    resetQueryCache: vi.fn(),
+  };
+});
+
+// ─── Mock the document-generation API calls ────────────────────────────
+// `@/lib/trpc` is deliberately NOT mocked — `trpc.meeting.pathFilter()` is a
+// pure predicate (no network call), so the real proxy is used only to build
+// the value the pin test below asserts against.
+
+vi.mock("@/lib/api-client", () => ({
+  apiJson: vi.fn().mockResolvedValue({ url: "https://example.com/generated.pdf" }),
 }));
 
 // ─── Mock route types ─────────────────────────────────────────────────
@@ -137,9 +157,26 @@ vi.mock("@/components/RouteErrorBoundary", () => ({
   RouteErrorBoundary: () => <div>Error</div>,
 }));
 
-// Mock @dnd-kit modules to avoid WASM/DOM issues in jsdom
+// Mock @dnd-kit modules to avoid WASM/DOM issues in jsdom.
+//
+// `onDragEnd` is exposed as a button rather than dropped on the floor — the
+// same technique `components/meetings/__tests__/AgendaSection.test.tsx` uses,
+// and for the same reason: a real pointer drag in jsdom would be testing
+// `@dnd-kit`, not this route's reorder handler. Added in the whole-branch fix
+// round, because `handleSectionDragEnd`'s `trpc.agendaItem.pathFilter()` line
+// was unreachable from this file and therefore unpinnable.
 vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: any) => <div data-testid="dnd-context">{children}</div>,
+  DndContext: ({ children, onDragEnd }: any) => (
+    <div data-testid="dnd-context">
+      <button
+        data-testid="fire-section-drag-end"
+        onClick={() => onDragEnd({ active: { id: "section-2" }, over: { id: "section-1" } })}
+      >
+        drag
+      </button>
+      {children}
+    </div>
+  ),
   closestCenter: vi.fn(),
   KeyboardSensor: vi.fn(),
   PointerSensor: vi.fn(),
@@ -556,5 +593,114 @@ describe("AgendaBuilderPage", () => {
     renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     expect(screen.getByRole("button", { name: /run meeting/i })).toBeInTheDocument();
+  });
+
+  it("invalidates trpc.meeting.pathFilter() after generating a meeting notice", async () => {
+    // Phase E wave 3 Task 2's fix round: this writer changes a document URL
+    // this route reads, not a `status`/`agenda_status` column the kanban or
+    // board Meetings tab render — but it invalidates the abandoned
+    // `queryKeys.meetings.detail` key, so conventions item 7 owes it the
+    // matching `trpc.meeting.pathFilter()` call regardless. Pinned by
+    // seeding the real `@/lib/queryClient` singleton (see this file's own
+    // mock, above) under the key `boards.$boardId.meetings.tsx` reads, and
+    // observing it flip to invalidated.
+    setupQueryMocks();
+
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /generate notice/i }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.meeting.pathFilter() after generating an agenda packet — the OTHER call site", async () => {
+    // `handleGeneratePacket` and `handleGenerateNotice` each carry their own
+    // `trpc.meeting.pathFilter()` line — this pins the packet one
+    // separately, so deleting either (not just the notice one the previous
+    // test covers) is caught.
+    const section = createMockSection();
+    const item = createMockItem();
+    setupQueryMocks({ items: [section, item] });
+
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /generate packet/i }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.agendaItem.pathFilter() after adding a section — the shell's item count", async () => {
+    // Phase E wave 3, Tasks 3+4 fix round. `routes/meetings.$meetingId.tsx`
+    // reads its "N items" badge from `trpc.agendaItem.countByMeeting`;
+    // `handleAddSection` INSERTs an `agenda_item` row, so without the
+    // `trpc.agendaItem.pathFilter()` line in that handler the shell keeps
+    // showing the pre-insert count for the full 60s `staleTime`. Seeded
+    // under the shell's OWN key so a deleted invalidation is what makes this
+    // assertion false — conventions item 13.
+    setupQueryMocks({ items: [] });
+
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(countKey, 3);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderWithProviders(
+      <AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /add section/i }));
+    await user.type(screen.getByPlaceholderText("New section title"), "Public Comment");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.agendaItem.pathFilter() when sections are reordered — the OTHER call site", async () => {
+    // Whole-branch fix round. `handleSectionDragEnd` shipped its
+    // `trpc.agendaItem.pathFilter()` line with NO pin: a reviewer's deletion
+    // sweep commented it out and the whole web suite stayed green, because
+    // this FILE was already credited by the add-section pin above — the
+    // credit-bleed limit conventions item 8 records for
+    // `pathfilter-pin-coverage.test.ts`, demonstrated rather than
+    // hypothetical. A reorder changes no COUNT, but it is an `agenda_item`
+    // write, and item 7's rule is router-level: a writer should not have to
+    // know which procedures the shell happens to call.
+    setupQueryMocks({
+      items: [
+        createMockSection({ id: "section-1", sort_order: 0, title: "Call to Order" }),
+        createMockSection({ id: "section-2", sort_order: 1, title: "Public Comment" }),
+      ],
+    });
+
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(countKey, 2);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderWithProviders(
+      <AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />,
+    );
+
+    await user.click(screen.getByTestId("fire-section-drag-end"));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
   });
 });

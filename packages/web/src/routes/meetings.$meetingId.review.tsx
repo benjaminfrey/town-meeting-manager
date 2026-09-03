@@ -61,6 +61,7 @@ import {
   type StructuredMeetingRecordInput,
 } from "@/lib/meeting/buildStructuredMeetingRecord";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { apiJson } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
@@ -494,6 +495,12 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         await queryClient.invalidateQueries({
           queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
         });
+        // Generation/regeneration creates or replaces the meeting's
+        // `minutes_document`, which is exactly what
+        // `routes/meetings.$meetingId.tsx`'s shell renders as its minutes
+        // status pill ("Not yet generated" → "Draft") via
+        // `trpc.minutesDocument.byMeeting`.
+        await queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
       } catch (err) {
         setGenerateError(
           err instanceof Error ? err.message : "An error occurred during generation.",

@@ -287,6 +287,33 @@ export const personRouter = router({
   }),
 
   /**
+   * One person's name, by id — `routes/meetings.$meetingId.tsx`'s presiding
+   * officer / recording secretary lookups (wave 3, Task 3). Not folded into
+   * `meeting.detail` itself: that procedure already shipped (Task 1) with a
+   * header comment stating the other eight reads that screen makes, this one
+   * included, "belong to their own routers," matching conventions item 1's
+   * "one router per domain noun" — a person's name is this router's
+   * question, not `meeting`'s.
+   *
+   * NOT_FOUND for a person in another town or a deleted id, same shape as
+   * `board.detail` — see conventions item 3. `person_tenant_isolation` is a
+   * plain tenancy policy, so no guard, matching `list` above.
+   */
+  detail: protectedProcedure
+    .input(z.object({ personId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.withTenant(async (tx) =>
+        toRows<{ id: string; name: string }>(
+          await tx.execute(sql`SELECT id, name FROM person WHERE id = ${input.personId}`),
+          (message) => new Error(`person.detail: ${message}`),
+        ),
+      );
+      const row = rows[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return row;
+    }),
+
+  /**
    * `AddPersonDialog`'s step 1: create the person, decoupled from any
    * board or account. `id` is database-generated (`person.id`'s own
    * `defaultRandom()`), not client-supplied — one less thing a caller

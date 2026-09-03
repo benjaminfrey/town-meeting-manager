@@ -4,6 +4,32 @@
  * Minimalist 4-column Kanban: Draft | Noticed | Active | Done
  * Rice paper aesthetic — borderless cards, hover-reveal actions.
  * Drag-and-drop between columns with confirmation dialogs.
+ *
+ * Phase E, wave 3, Task 2 — `meeting.byTown` (a completeness gap only —
+ * `meeting.list`'s old policy was tenancy-only, same as the raw read this
+ * replaces) and `meeting.updateStatus` (NOT a completeness gap — the raw
+ * `.from("meeting").update({status: newStatus})` this replaces had NO
+ * authorization check of any kind; `meeting.updateStatus` closes it with
+ * `requireBoardActor(assertCanUpdateMeeting)`, the identical gap
+ * `CancelMeetingDialog`'s write had). See `packages/api/src/trpc/routers/
+ * meeting.ts`'s header for both procedures.
+ *
+ * `meeting.byTown` returns flat `board_id`/`board_name` columns, not a
+ * nested `{board: {id, name}}` object — see that procedure's own doc comment
+ * for why (the old PostgREST embed forced a cast through `unknown` here that
+ * a real join has no need for).
+ *
+ * `meeting.updateStatus`'s accepted `status` enum is the real DB values
+ * (`open`, not `active`). This file's `VALID_TRANSITIONS` used to conflate
+ * the kanban COLUMN id a drag lands on with the DB STATUS to write — the
+ * noticed→active drag sent the literal string `"active"` as `newStatus`,
+ * which is not a `meeting_status` value at all (a pre-existing mismatch).
+ * `VALID_TRANSITIONS` now carries both separately: `column` (matched against
+ * the drop target's column id) and `status` (the real value sent to
+ * `updateStatus`).
+ *
+ * TODO(phase-e-wave-6): board.listActive — the board picker's `allBoards`
+ * read is still raw Supabase; see that query's own comment for why.
  */
 
 import { useState, useMemo } from "react";
@@ -23,6 +49,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  AlertTriangle,
   CalendarDays,
   GripVertical,
   FileEdit,
@@ -31,6 +58,7 @@ import {
   FileText,
   ChevronRight,
 } from "lucide-react";
+import { isTRPCClientError } from "@trpc/client";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -39,23 +67,37 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-interface MeetingRecord {
-  id: string;
-  title: string;
-  status: string;
-  meeting_type: string;
-  scheduled_date: string;
-  scheduled_time: string | null;
-  board: { id: string; name: string } | null;
-}
+/**
+ * `meeting.byTown`'s real row shape (conventions item 10 — never a hand-typed
+ * bag that can drift from the procedure's actual columns), not a locally
+ * duplicated interface.
+ */
+type MeetingRecord = RouterOutputs["meeting"]["byTown"][number];
+
+/** The full `meeting_status` set `meeting.updateStatus` accepts (all but `cancelled` — see that procedure's own doc comment). */
+type UpdatableMeetingStatus =
+  | "draft"
+  | "noticed"
+  | "open"
+  | "adjourned"
+  | "minutes_draft"
+  | "approved";
 
 // ─── Column definitions (4 columns) ─────────────────────────────────
 
+// `"in_progress"` below (and in `getStatusDot`/`getCardAction`) is dead: the
+// real `meeting_status` enum (`db/schema.ts`) has no such value — only
+// `"open"` is ever actually written. Pre-existing, inert, and left as-is
+// (not this task's write path); noted here so it reads as audited rather
+// than missed, since this task's own fix round corrected the ADJACENT real
+// bug in this exact status mapping (the noticed→active drag sending the
+// literal column id `"active"` as a write — see this file's header).
 const KANBAN_COLUMNS = [
   { id: "draft", label: "Draft", statuses: ["draft"] },
   { id: "noticed", label: "Noticed", statuses: ["noticed"] },
@@ -65,15 +107,24 @@ const KANBAN_COLUMNS = [
 
 type ColumnId = (typeof KANBAN_COLUMNS)[number]["id"];
 
-// Adjacent column transitions allowed via drag
-const VALID_TRANSITIONS: Record<string, { target: string; message: string }[]> = {
+/**
+ * Adjacent column transitions allowed via drag. `column` is matched against
+ * the drop target's kanban column id; `status` is the real `meeting_status`
+ * value sent to `meeting.updateStatus` — the two used to be conflated (see
+ * this file's header).
+ */
+const VALID_TRANSITIONS: Record<
+  string,
+  { column: ColumnId; status: UpdatableMeetingStatus; message: string }[]
+> = {
   draft: [
     {
-      target: "noticed",
+      column: "noticed",
+      status: "noticed",
       message: "Mark as noticed? This confirms the meeting notice has been published.",
     },
   ],
-  noticed: [{ target: "active", message: "Open this meeting for attendance?" }],
+  noticed: [{ column: "active", status: "open", message: "Open this meeting for attendance?" }],
   // active → done requires the live meeting flow
   // done transitions require the full approval workflow
 };
@@ -145,36 +196,32 @@ export default function MeetingsPage() {
   const [draggedMeeting, setDraggedMeeting] = useState<MeetingRecord | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     meeting: MeetingRecord;
-    targetStatus: string;
+    targetStatus: UpdatableMeetingStatus;
     message: string;
   } | null>(null);
   const [boardPickerOpen, setBoardPickerOpen] = useState(() => searchParams.get("new") === "1");
   const [selectedBoard, setSelectedBoard] = useState<{ id: string; name: string } | null>(null);
+  // Before this task, `transitionMutation`'s raw write could never be
+  // refused — there was no authorization check at all. Closing that hole
+  // made FORBIDDEN a real, reachable outcome, so a silent failure here (the
+  // dialog just closing, the card not moving, nothing said) is a new defect
+  // this migration would otherwise introduce, not an inherited one.
+  const [transitionError, setTransitionError] = useState<string | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  // Fetch all meetings for this town
-  const { data: meetingRows = [], isLoading } = useQuery({
-    queryKey: queryKeys.meetings.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("meeting")
-        .select(
-          "id, title, status, meeting_type, scheduled_date, scheduled_time, board:board_id(id, name)",
-        )
-        .eq("town_id", townId)
-        .neq("status", "cancelled")
-        .order("scheduled_date", { ascending: true })
-        .order("scheduled_time", { ascending: true });
-      if (error) throw error;
-      // PostgREST infers the `board` to-one embed as an array, but a FK
-      // relationship returns a single object at runtime — cast through unknown.
-      return (data ?? []) as unknown as MeetingRecord[];
-    },
-    enabled: !!townId,
-  });
+  // Fetch all (non-cancelled) meetings for this town — see this file's header.
+  const {
+    data: meetingRows = [],
+    isLoading,
+    isError: isMeetingsError,
+  } = useQuery(trpc.meeting.byTown.queryOptions());
 
-  // Boards for CreateMeetingDialog
+  // TODO(phase-e-wave-6): board.listActive — still raw Supabase, matching
+  // home.tsx's own identical board picker (`board.listActive` exists but is
+  // deliberately not wired into either picker yet — see home.tsx's own
+  // header for the ordering difference that needs checking first; out of
+  // this task's scope, retagged wave-6 to match home.tsx's own marker).
   const { data: allBoards = [] } = useQuery({
     queryKey: queryKeys.boards.byTown(townId),
     queryFn: async () => {
@@ -190,19 +237,30 @@ export default function MeetingsPage() {
     enabled: !!townId && canCreateMeeting,
   });
 
-  // Status transition mutation
-  const transitionMutation = useMutation({
-    mutationFn: async ({ meetingId, newStatus }: { meetingId: string; newStatus: string }) => {
-      const { error } = await supabase
-        .from("meeting")
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", meetingId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
-    },
-  });
+  // Status transition mutation — closes the gap the raw
+  // `.from("meeting").update({status: newStatus})` this replaces had: no
+  // authorization check of any kind. See this file's header and
+  // `meeting.ts`'s own doc comment on `updateStatus`.
+  const transitionMutation = useMutation(
+    trpc.meeting.updateStatus.mutationOptions({
+      onSuccess: () => {
+        setTransitionError(null);
+        // Legacy key: `home.tsx`'s own kanban-adjacent meeting list still
+        // reads `queryKeys.meetings.byTown` raw (its own marker defers that
+        // migration to wave 6) — conventions item 7, "the legacy line stays
+        // because other, unmigrated screens still read that key."
+        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+      },
+      onError: (err) => {
+        setTransitionError(
+          isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
+            ? "You don't have permission to change this meeting's status."
+            : "Couldn't update this meeting's status. Try again.",
+        );
+      },
+    }),
+  );
 
   // Group meetings by column
   const columnMeetings = useMemo(() => {
@@ -244,14 +302,16 @@ export default function MeetingsPage() {
     if (!targetColumn || (targetColumn.statuses as readonly string[]).includes(meeting.status))
       return;
 
-    // Check if valid transition
+    // Check if valid transition — `column` is the drop target's kanban
+    // column id; `status` (below) is the real DB value to write.
     const transitions = VALID_TRANSITIONS[meeting.status];
-    const transition = transitions?.find((t) => t.target === targetColumnId);
+    const transition = transitions?.find((t) => t.column === targetColumnId);
     if (!transition) return;
 
+    setTransitionError(null);
     setConfirmDialog({
       meeting,
-      targetStatus: transition.target,
+      targetStatus: transition.status,
       message: transition.message,
     });
   }
@@ -260,15 +320,48 @@ export default function MeetingsPage() {
     if (!confirmDialog) return;
     transitionMutation.mutate({
       meetingId: confirmDialog.meeting.id,
-      newStatus: confirmDialog.targetStatus,
+      boardId: confirmDialog.meeting.board_id,
+      status: confirmDialog.targetStatus,
     });
     setConfirmDialog(null);
   }
 
   return (
     <div className="flex h-full flex-col px-6 lg:px-10">
+      {/* Status-change failure — see this file's `transitionError` comment for why this is new, not inherited */}
+      {transitionError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-4 shadow-lg"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+          <p className="text-sm text-destructive">{transitionError}</p>
+          <button
+            onClick={() => setTransitionError(null)}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Kanban board */}
-      {isLoading ? (
+      {isMeetingsError ? (
+        <div
+          className="flex flex-1 items-center justify-center p-12"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+            <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+            <p className="mt-3 text-sm font-medium">Something went wrong loading meetings.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Try reloading the page. If the problem continues, contact support.
+            </p>
+          </div>
+        </div>
+      ) : isLoading ? (
         <div className="py-12 px-4">
           <MeetingListSkeleton rows={5} />
         </div>
@@ -320,10 +413,10 @@ export default function MeetingsPage() {
             <p className="mt-2 text-sm text-muted-foreground">{confirmDialog.message}</p>
             <p className="mt-3 text-sm">
               <span className="font-medium">{confirmDialog.meeting.title}</span>
-              {confirmDialog.meeting.board && (
+              {confirmDialog.meeting.board_name && (
                 <span className="text-muted-foreground">
                   {" "}
-                  &mdash; {confirmDialog.meeting.board.name}
+                  &mdash; {confirmDialog.meeting.board_name}
                 </span>
               )}
             </p>
@@ -524,10 +617,10 @@ function KanbanCardContent({
               className={cn("inline-block h-1.5 w-1.5 rounded-full", getStatusDot(meeting.status))}
             />
             {meeting.scheduled_date ? formatDate(meeting.scheduled_date) : "\u2014"}
-            {meeting.board && (
+            {meeting.board_name && (
               <>
                 <span className="text-muted-foreground/30">&middot;</span>
-                <span className="truncate">{meeting.board.name}</span>
+                <span className="truncate">{meeting.board_name}</span>
               </>
             )}
           </p>

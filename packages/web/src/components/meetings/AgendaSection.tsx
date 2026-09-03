@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import {
   DndContext,
   closestCenter,
@@ -103,6 +104,10 @@ export function AgendaSection({
         }
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // Reorders `agenda_item` rows — no count change, but an `agenda_item`
+      // write all the same; invalidated at the router per conventions item 7
+      // rather than encoding which of that router's procedures exist today.
+      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     },
     [children_items, supabase, queryClient, meetingId],
   );
@@ -117,6 +122,10 @@ export function AgendaSection({
     const { error } = await supabase.from("agenda_item").delete().eq("id", sectionId);
     if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    // DELETEs the section and every child item — this one really does move
+    // the "N items" count `routes/meetings.$meetingId.tsx`'s shell renders
+    // through `trpc.agendaItem.countByMeeting`.
+    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     setConfirmDelete(false);
   }, [supabase, queryClient, sectionId, children_items, meetingId]);
 

@@ -7,7 +7,10 @@
  * tRPC screen test in this phase uses: the real options proxy and a real
  * `QueryClient` run, only `globalThis.fetch` is replaced. `@/lib/supabase`
  * stays mocked wholesale — `meetingRows`, `minutesDocs` and `boardRows` all
- * still go through it (see `home.tsx`'s own `TODO(phase-e-wave-2)` marker).
+ * still go through it (see `home.tsx`'s own `TODO(phase-e-wave-6)` marker —
+ * retagged in wave 3's Task 0 after `meeting.byTown` shipped and closed the
+ * `meetingRows` third of what this comment used to cite as `wave-2`; this
+ * file's own reference was stale until this fix round caught it).
  */
 
 import React from "react";

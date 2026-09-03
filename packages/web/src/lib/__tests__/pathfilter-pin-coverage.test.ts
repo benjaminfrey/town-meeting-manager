@@ -68,6 +68,18 @@
  * procedure" check caught nothing beyond what this simpler shape already
  * catches. See conventions item 4c / the Known-gaps entry for the
  * per-mutation half this leaves to a scripted deletion sweep instead.
+ *
+ * A second, narrower shape of the same "which writer, exactly" gap — named
+ * in wave 3's own Task 0, not found freshly here: the credit is PER TEST
+ * FILE, not per writer within it. If test file X imports writer A (and
+ * genuinely asserts `isInvalidated` about A's own key) and ALSO imports
+ * writer B — for any reason, including one that has nothing to do with B's
+ * own `pathFilter()` call — B is credited as pinned too, purely because the
+ * file contains SOME `isInvalidated`/`countFor(` assertion and SOME import
+ * of B. See "credits an unrelated writer merely for being imported
+ * alongside a genuinely-pinned one" below for the fixture proving this is
+ * not hypothetical. Zero effect at HEAD (checked as part of this task); item
+ * 14's deletion sweep is the backstop, identically to the gap above.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
@@ -356,6 +368,41 @@ describe("the check itself", () => {
       `void queryClient.invalidateQueries(trpc.board.pathFilter());`,
     );
     writeFixture("Broken.test.tsx", `void queryClient.invalidateQueries(trpc.board.pathFilter());`);
+    expect(findUnpinnedWriters(tmpRoot).violations).toEqual([]);
+  });
+
+  /**
+   * Wave 3, Task 0 — the known limit this file's header now names: credit is
+   * per TEST FILE, not per writer inside it. `WidgetB` is imported here only
+   * because the test file happens to also render it alongside `WidgetA` —
+   * nothing in this file asserts anything about `WidgetB`'s own
+   * `pathFilter()` call — and it still passes, because the file contains
+   * SOME `isInvalidated` assertion (for `WidgetA`) and SOME import of
+   * `WidgetB`. This is not fixed here — see the header note and conventions
+   * item 8 for why (zero effect at HEAD; the deletion sweep is the
+   * backstop) — this fixture exists so the limit is a checked fact, not a
+   * prose claim nobody re-verifies.
+   */
+  it("credits an unrelated writer merely for being imported alongside a genuinely-pinned one", () => {
+    writeFixture(
+      "components/WidgetA.tsx",
+      `void queryClient.invalidateQueries(trpc.board.pathFilter());`,
+    );
+    writeFixture(
+      "components/WidgetB.tsx",
+      `void queryClient.invalidateQueries(trpc.town.pathFilter());`,
+    );
+    writeFixture(
+      "components/__tests__/WidgetA.test.tsx",
+      `
+      import { WidgetA } from "../WidgetA";
+      import { WidgetB } from "../WidgetB";
+      it("invalidates WidgetA's key, and renders WidgetB alongside it", () => {
+        expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+      });
+      `,
+    );
+    // Both pass — WidgetB's own invalidation is never actually asserted.
     expect(findUnpinnedWriters(tmpRoot).violations).toEqual([]);
   });
 });

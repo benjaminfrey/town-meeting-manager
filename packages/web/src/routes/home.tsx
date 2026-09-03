@@ -51,21 +51,24 @@ import {
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-2): meeting.byTown, minutesDocument.pendingByTown,
-// board.listActive (exists, not yet wired here — see this file's header
-// comment for the ordering difference that needs checking first).
+// TODO(phase-e-wave-6): minutesDocument.pendingByTown, board.listActive
+// (exists, not yet wired here — see this file's header comment for the
+// ordering difference that needs checking first).
 //
 // The marker above is the machine-checkable half of this comment (item 11)
-// — a completeness sweep greps for it, not for prose. `meetingRows` and
-// `minutesDocs` below are the two reads with no procedure at all yet;
-// `boardRows` has an existing candidate (`board.listActive`) that is
-// deliberately not used yet, for the reason in this file's header comment.
-//
-// This gap is genuinely wave 3+ (meeting/minutes routers), not wave 2's —
-// tagged `phase-e-wave-2` only because no wave 3-6 plan document exists yet
-// to retag it against (checked in Task 4: `docs/superpowers/plans/` has only
-// unit 0, wave 1, and wave 2). Retag with the real wave number once that
-// plan lands, rather than reading "wave-2" here as this wave's own debt.
+// — a completeness sweep greps for it, not for prose. `meetingRows` below
+// used to be on this list too (`meeting.byTown`, no router at all) — closed
+// by wave 3's own Task 1, which shipped `meeting.byTown`
+// (`packages/api/src/trpc/routers/meeting.ts`); retagged here to say so
+// rather than left claiming a gap that no longer exists (wave 3's own Task 1
+// brief: "Do not migrate any screen... the screens are Task 2", so this file
+// still reads `meetingRows` off Supabase — only the marker's CLAIM changed,
+// not the wiring). `minutesDocs` is the one remaining read with no procedure
+// at all — a `minutesDocument` router, wave 3's own plan scopes `minutes.tsx`/
+// `review.tsx` to wave 6, and this is the identical table. `boardRows` has an
+// existing candidate (`board.listActive`, wave 2) that is deliberately not
+// used yet, for the reason in this file's header comment — unrelated to
+// which wave owns the remaining `minutesDocs` gap.
 import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";

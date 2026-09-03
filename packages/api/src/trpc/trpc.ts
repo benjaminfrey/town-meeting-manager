@@ -29,6 +29,7 @@ import type { ResolvedTenant } from "../auth/tenant-context.js";
 import type { Actor } from "./authorization/actor.js";
 import { AuthorizationError, type PermissionCode } from "./authorization/permission.js";
 import { assertPermission } from "./authorization/permission.js";
+import type { BoardScope } from "./authorization/rules.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -411,4 +412,221 @@ export function requireActor<R>(
     assert(await ctx.actor());
     return opts.next();
   });
+}
+
+/**
+ * `requireActor`'s board-scoped sibling — for a `BoardScope`-taking rule in
+ * `authorization/rules.ts` that does NOT reduce to exactly one
+ * `PermissionCode`, so `requireBoardPermission` cannot express it.
+ * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board) is the first real
+ * caller (`meeting.ts`'s `cancel`); the reviewer who specified this function
+ * (Phase E wave 3's fix round) enumerated `rules.ts`'s other `BoardScope`
+ * rules and found sixteen of EIGHTEEN ARE exactly one `assertPermission`
+ * call (use `requireBoardPermission` for those — reach for it FIRST; this
+ * function is for the remainder). Re-derived in the whole-branch fix round
+ * after the count shipped as "nineteen" here and in
+ * `phase-e-conventions.md` item 2 — quote the grep, not the number
+ * (conventions item 11):
+ *
+ *     $ grep -nE ": BoardScope" packages/api/src/trpc/authorization/rules.ts | wc -l
+ *     18
+ *
+ * The two that are not one `assertPermission` call are
+ * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board — this function's
+ * own reason for existing) and `assertCanInsertExhibit` (A3 OR
+ * `isBoardMember(actor)`, a ROLE branch rather than a second code; it fits
+ * this shape structurally and is simply unused here yet). The nineteenth
+ * rule the old count was reaching for is `assertCanInsertVoteRecord`, which
+ * takes no `BoardScope` at all — its signature is `(actor: Actor, tx:
+ * TenantTx, subject: VoteRecordSubject)`, so the `TenantTx` is its SECOND
+ * argument, not "a third argument" as this comment previously said. It stays
+ * resolver-side regardless: it is `async` and needs a `TenantTx` no
+ * middleware has (see `RequireBoardActorRule`'s own comment below) — not a
+ * loss, since that `TenantTx` is exactly what its self-vote branch needs to
+ * look up the caller's own seat.
+ *
+ * A property `requireBoardPermission` has that this function CANNOT
+ * preserve: import-time refusal for a board-scoped code used with no board
+ * (`requirePermission` throws while the router module loads if handed one
+ * of the 18 `BOARD_SCOPED_CODES` with no `board` option — see that
+ * function's own doc comment). There is no single `PermissionCode` here to
+ * check against `BOARD_SCOPED_CODES`, so that specific safety net does not
+ * exist for this shape. The arity check below is the partial substitute:
+ * it cannot catch "this rule is board-scoped but was wired to
+ * `requireActor` instead" (a different mistake), but it does catch "this
+ * rule takes no board at all" at compile time, which is the shape of
+ * mistake this function's callers are actually at risk of.
+ *
+ * ─── The two type-level checks, and why both are load-bearing ────────────
+ *
+ * Mirrors `requireActor`'s own `R extends void` guard against a boolean
+ * predicate (see that function's doc comment for the full mechanism —
+ * TypeScript's void-return-position assignability special case, and why a
+ * plain `(actor, scope) => void` parameter type does not catch it). A
+ * SECOND conditional tuple, new here, closes a hole `requireActor` does not
+ * have to worry about: an ACTOR-ONLY rule like `assertCanUpdateTown` is
+ * `(actor: Actor) => void` — one parameter — which IS structurally
+ * assignable to this function's `(actor: Actor, scope: BoardScope) =>
+ * unknown` constraint (a function that ignores its second argument is
+ * assignable to a type that supplies one), so without the arity check
+ * `requireBoardActor(assertCanUpdateTown)` would compile, extract a board
+ * from the input, refuse if none is supplied, and then SILENTLY IGNORE it
+ * when calling `assertCanUpdateTown(actor)` — exactly the "looks
+ * board-scoped, answers globally" failure `trpc.ts`'s own `BOARD_SCOPED_CODES`
+ * comment warns about for a different mechanism. Both checks are spread into
+ * one rest-parameter tuple; when both pass it is `[]` (no extra argument
+ * needed) and a real call site is unaffected, matching `requireActor`'s own
+ * shape.
+ *
+ * Verified as real compile errors, not assumed: see the four
+ * `@ts-expect-error` pins in
+ * `packages/api/src/trpc/__tests__/require-board-actor-type.test.ts` —
+ * a boolean predicate, an actor-only rule, an async rule, and (redundantly,
+ * to document the overlap) a rule that is both async AND actor-only — all
+ * checked by `npx turbo run typecheck --force`.
+ *
+ * ─── The mismatch defence: carrying the authorized board forward ─────────
+ *
+ * A board-scoped write whose target is identified by something OTHER than
+ * the board id itself (a row id, not the board id, as the mutation's key —
+ * `meeting.cancel`'s `meetingId` is the first instance) needs a SECOND,
+ * resolver-side check: the guard here can only authorize the board the
+ * CLIENT CLAIMED (read via `board(getRawInput())`, before `.input()` even
+ * parses); it cannot look up the row's real board, because that needs a
+ * `TenantTx` no middleware has. So this function carries the board it
+ * actually authorized forward on the request context —
+ * `ctx.authorizedBoardId` — and the resolver, after reading the row's REAL
+ * board from the database, calls `assertMatchesAuthorizedBoard(ctx, ...)`
+ * below. That call is deliberately a GREPPABLE, separate function rather
+ * than inline prose: "did this procedure re-check the row's true board" is
+ * then answerable by `grep -rn "assertMatchesAuthorizedBoard("`, the same
+ * move item 11's marker token makes for migration completeness.
+ *
+ * This hazard is NOT `cancel`'s special case — see
+ * `docs/superpowers/plans/phase-e-conventions.md` item 2: it is the DEFAULT
+ * for any board-scoped write whose table has no board-level RLS and whose
+ * target is named by a row id. `agenda_item`, `motion`, `vote_record`,
+ * `meeting_attendance`, `minutes_document`, `minutes_section` and `exhibit`
+ * are all in that shape — waves 4–6 must check each table's own RLS policy
+ * rather than assuming `meeting`'s tenancy-only finding carries over.
+ *
+ * The cost, stated rather than left to be discovered: the board id this
+ * function needs is not needed by the WRITE itself (the write acts on the
+ * row id) — it exists purely so a guard declared before `.input()` has
+ * something to authorize on. Every row-targeted board-scoped write inherits
+ * a client-supplied field whose only job is feeding this guard, and the
+ * client-side plumbing to supply it (a parent component threading a
+ * `boardId` prop it may not otherwise need).
+ */
+type RequireBoardActorRule = (actor: Actor, scope: BoardScope) => unknown;
+
+export function requireBoardActor<A extends RequireBoardActorRule>(
+  assert: A,
+  board: (input: unknown) => string | undefined = boardIdFrom(),
+  ..._checks: [
+    ...(ReturnType<A> extends void
+      ? []
+      : [
+          error: "requireBoardActor's assert function must throw-or-return-void, like assertCanUpdateMeeting — not return a value that gets silently discarded. A boolean predicate would compile here and then refuse nobody at runtime.",
+        ]),
+    ...(Parameters<A>["length"] extends 2
+      ? []
+      : [
+          error: "requireBoardActor's assert function must take exactly (actor, scope). An actor-only rule ignores the board entirely — use requireActor instead. An async rule (Parameters includes a TenantTx) cannot run in middleware — check it resolver-side instead, the way assertCanInsertVoteRecord does.",
+        ]),
+  ]
+) {
+  return middleware(async (opts) => {
+    const ctx = opts.ctx;
+    // All three checked together, not just `ctx.actor` (the other guards'
+    // usual single check): this middleware is the first one that has to
+    // FORWARD `ctx.withTenant`/`ctx.tenant` into `next({ctx: ...})` below,
+    // and TypeScript's narrowing on `!ctx.actor` alone does not carry over
+    // to the other two independently-optional fields — a spread built from
+    // only-`actor`-narrowed `ctx` would leave `withTenant` typed possibly
+    // `undefined` for every downstream resolver, caught by `tsc` (TS2722 at
+    // the resolver's own `ctx.withTenant(...)` call) the moment this was
+    // tried without the extra checks.
+    if (!ctx.actor || !ctx.withTenant || !ctx.tenant) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "A permission check ran on a procedure with no tenant context. Permission " +
+          "checks are only meaningful for a signed-in member of a town; build the " +
+          "procedure on protectedProcedure.",
+      });
+    }
+    // `getRawInput()`, not `opts.input` — see `requirePermission`'s own
+    // doc comment for why: declared before `.input()`, this middleware
+    // runs before parsing, so `opts.input` is `undefined` here.
+    const boardId = board(await opts.getRawInput());
+    if (!boardId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          "This procedure is scoped to a board, but no board id was supplied. Refusing " +
+          "rather than falling back to a global grant, which would ignore an override that " +
+          "revokes this rule for that board.",
+      });
+    }
+    const actor = await ctx.actor();
+    assert(actor, { boardId });
+    // Carries the AUTHORIZED board forward — see this function's own doc
+    // comment, "the mismatch defence" — for a resolver-side
+    // `assertMatchesAuthorizedBoard` call to compare against the row's
+    // real board.
+    //
+    // Each field re-listed explicitly, `satisfies AuthenticatedContext`,
+    // mirroring `requireTenant`'s own `next({ctx: {...}})` above rather
+    // than a bare `{...ctx, authorizedBoardId}` spread: a bare spread's
+    // inferred type did NOT carry the narrowing from the guard clause
+    // above into what `next()` reports downstream — `ctx.withTenant`
+    // resolved to possibly-`undefined` for every caller's resolver
+    // (`TS2722` at the resolver's own `ctx.withTenant(...)` call), caught
+    // by `npx turbo run typecheck --force` the moment this was tried
+    // without the explicit reconstruction.
+    return opts.next({
+      ctx: {
+        ...ctx,
+        tenant: ctx.tenant,
+        withTenant: ctx.withTenant,
+        actor: ctx.actor,
+        authorizedBoardId: boardId,
+      } satisfies AuthenticatedContext & { authorizedBoardId: string },
+    });
+  });
+}
+
+/**
+ * The resolver-side half of `requireBoardActor`'s mismatch defence — see
+ * that function's own doc comment. Call this after reading a row's REAL
+ * board id from the database and before writing to it, whenever the
+ * procedure's target is identified by something other than the board id
+ * itself.
+ *
+ * Throws FORBIDDEN (via `AuthorizationError`, translated the identical way
+ * every other refusal in this layer is) when `ctx.authorizedBoardId` — the
+ * board `requireBoardActor` actually authorized — does not match the row's
+ * real board. Throws a plain `Error`, not a refusal, when
+ * `ctx.authorizedBoardId` is missing entirely: that means this procedure's
+ * guard is not `requireBoardActor`, which is a wiring bug in the
+ * procedure, not something about THIS caller to refuse.
+ */
+export function assertMatchesAuthorizedBoard(
+  ctx: { authorizedBoardId?: string },
+  actualBoardId: string,
+): void {
+  if (ctx.authorizedBoardId === undefined) {
+    throw new Error(
+      "assertMatchesAuthorizedBoard called on a context with no authorizedBoardId set. This " +
+        "procedure's guard must be requireBoardActor — it is the only thing that sets it.",
+    );
+  }
+  if (ctx.authorizedBoardId !== actualBoardId) {
+    throw new AuthorizationError(
+      "This request was authorized against a different board than the one this row actually " +
+        "belongs to. Refusing rather than trusting the board named in the request.",
+      { boardId: actualBoardId },
+    );
+  }
 }
