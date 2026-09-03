@@ -101,6 +101,7 @@ const noticedMeeting = {
 const server = {
   meetings: [noticedMeeting] as RouterOutputs["meeting"]["byTown"],
   byTownRejects: false,
+  updateStatusRejects: false,
 };
 
 /** Set by the `meeting.updateStatus` handler, so a test can assert on the exact input sent. */
@@ -113,6 +114,7 @@ const stub = installTRPCFetchStub({
   },
   "meeting.updateStatus": (input) => {
     received.updateStatus = input;
+    if (server.updateStatusRejects) trpcTestError("FORBIDDEN");
     return { id: input.meetingId, status: input.status };
   },
 });
@@ -125,6 +127,7 @@ describe("meetings kanban", () => {
   beforeEach(() => {
     server.meetings = [noticedMeeting];
     server.byTownRejects = false;
+    server.updateStatusRejects = false;
     received.updateStatus = undefined;
     dnd.onDragEnd = null;
   });
@@ -192,5 +195,27 @@ describe("meetings kanban", () => {
 
     await waitFor(() => expect(stub.countFor("meeting.byTown")).toBeGreaterThan(before));
     expect(await screen.findByText("Renamed Meeting")).toBeInTheDocument();
+  });
+
+  it("shows a visible alert, not a silent no-op, when the status change is refused", async () => {
+    // Before this task, `transitionMutation`'s raw write could never be
+    // refused — there was no authorization check at all. Closing that hole
+    // made FORBIDDEN a real outcome; failing to handle it here would have
+    // meant the dialog closes, the card stays put, and nothing is said.
+    server.updateStatusRejects = true;
+    const { user } = renderRoute();
+    await screen.findByText("Regular Meeting");
+
+    dnd.onDragEnd!({
+      active: { id: "m1" },
+      over: { id: "active" },
+    } as unknown as DragEndEvent);
+    await screen.findByText("Open this meeting for attendance?");
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      await screen.findByText("You don't have permission to change this meeting's status."),
+    ).toBeInTheDocument();
   });
 });

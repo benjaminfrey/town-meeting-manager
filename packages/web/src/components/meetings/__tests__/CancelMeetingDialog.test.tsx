@@ -13,10 +13,10 @@
  * matters.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import { queryKeys } from "@/lib/queryKeys";
 import { CancelMeetingDialog } from "../CancelMeetingDialog";
@@ -26,9 +26,13 @@ const queryClient = setupAppQueryClient();
 /** Set by the `meeting.cancel` handler, so a test can assert on the exact input sent. */
 const received: { cancel?: unknown } = {};
 
+/** Mutable so a test can make the next call refuse. */
+const server = { cancelRejects: false };
+
 const stub = installTRPCFetchStub({
   "meeting.cancel": (input) => {
     received.cancel = input;
+    if (server.cancelRejects) trpcTestError("FORBIDDEN");
     return { id: input.meetingId };
   },
 });
@@ -60,6 +64,10 @@ async function cancel() {
 }
 
 describe("CancelMeetingDialog", () => {
+  beforeEach(() => {
+    server.cancelRejects = false;
+  });
+
   it("sends the meetingId and boardId through trpc.meeting.cancel", async () => {
     await cancel();
     expect(received.cancel).toEqual({ meetingId: "m1", boardId: "b1" });
@@ -76,5 +84,31 @@ describe("CancelMeetingDialog", () => {
       expect(queryClient.getQueryState(legacyDetailKey)?.isInvalidated).toBe(true),
     );
     expect(queryClient.getQueryState(legacyAllKey)?.isInvalidated).toBe(true);
+  });
+
+  it("shows a visible alert, and keeps the dialog open, when the cancel is refused", async () => {
+    // Before this task, the raw write could never be refused — closing that
+    // hole made FORBIDDEN a real outcome. A silent failure here (dialog
+    // closes, nothing said) would be a new defect this migration
+    // introduced, not an inherited one.
+    server.cancelRejects = true;
+    const onOpenChange = () => {};
+    const { user } = renderWithProviders(
+      <CancelMeetingDialog
+        meetingId="m1"
+        meetingTitle="Regular Meeting"
+        boardId="b1"
+        open
+        onOpenChange={onOpenChange}
+      />,
+      { queryClient },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel Meeting" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      await screen.findByText("You don't have permission to cancel this meeting."),
+    ).toBeInTheDocument();
   });
 });

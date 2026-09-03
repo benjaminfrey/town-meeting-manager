@@ -9,6 +9,9 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
+import { fireEvent } from "@testing-library/react";
+import { trpc } from "@/lib/trpc";
+import type { QueryClient } from "@tanstack/react-query";
 
 /** Build a mock useQuery return value with data and no loading/error state. */
 function mockQueryResult<T>(data: T[]) {
@@ -17,17 +20,32 @@ function mockQueryResult<T>(data: T[]) {
 
 // ─── Module-level mocks ──────────────────────────────────────────
 
-const { mockUseQuery } = vi.hoisted(() => {
+const { mockUseQuery, queryClientRef } = vi.hoisted(() => {
   return {
     mockUseQuery: vi.fn(),
+    // Populated by the `@tanstack/react-query` mock factory below, once,
+    // before any test runs — a fake extra module export would not
+    // typecheck (the real module has no such member), so the factory's own
+    // closure hands it out through this hoisted container instead.
+    queryClientRef: { current: null as QueryClient | null },
   };
 });
 
 const mockNavigate = vi.fn();
 
-// Mock TanStack Query hooks
+// Mock TanStack Query hooks. `useQueryClient` returns a REAL `QueryClient`
+// instance (built from the same `actual` module, not a `vi.fn()` stand-in) —
+// this route calls `useQueryClient()` once and reuses the reference across
+// every handler, and the pin test below needs a real cache to seed a
+// `trpc.meeting.byBoard` entry into and genuinely observe
+// `trpc.meeting.pathFilter()` invalidate it (conventions item 13: "verify
+// by mutation" needs something a deleted invalidation call can actually
+// make false).
 vi.mock("@tanstack/react-query", async () => {
-  const actual = await vi.importActual("@tanstack/react-query");
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
+  const testQueryClient = new actual.QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClientRef.current = testQueryClient;
   return {
     ...actual,
     useQuery: (...args: unknown[]) => mockUseQuery(...args),
@@ -38,10 +56,7 @@ vi.mock("@tanstack/react-query", async () => {
       isError: false,
       error: null,
     })),
-    useQueryClient: vi.fn(() => ({
-      invalidateQueries: vi.fn(),
-      ensureQueryData: vi.fn(),
-    })),
+    useQueryClient: vi.fn(() => testQueryClient),
   };
 });
 
@@ -510,5 +525,29 @@ describe("LiveMeetingPage", () => {
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
     expect(screen.getByTestId("attendance-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-title")).toHaveTextContent("none");
+  });
+
+  it("invalidates trpc.meeting.pathFilter() after adjourning without objection", async () => {
+    // Phase E wave 3 Task 2's fix round: this handler moves the meeting
+    // open → adjourned — a status both the kanban (routes/meetings.tsx) and
+    // the board Meetings tab (routes/boards.$boardId.meetings.tsx) render
+    // via trpc.meeting.byTown/byBoard. Before this fix, neither refreshed
+    // for up to 60s after a meeting was adjourned.
+    setupLiveMeetingQueries();
+
+    const mockQueryClient = queryClientRef.current!;
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    mockQueryClient.setQueryData(byBoardKey, []);
+    expect(mockQueryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    fireEvent.click(screen.getByTestId("adjourn-wo"));
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
   });
 });

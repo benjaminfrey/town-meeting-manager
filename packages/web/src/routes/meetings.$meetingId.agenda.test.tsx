@@ -2,6 +2,8 @@ import React from "react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
+import { queryClient } from "@/lib/queryClient";
+import { trpc } from "@/lib/trpc";
 
 // ─── Mock TanStack Query ───────────────────────────────────────────────
 
@@ -55,13 +57,31 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 // ─── Mock queryClient singleton ────────────────────────────────────────
+//
+// A REAL `QueryClient` instance, not a `vi.fn()` stand-in — this route
+// imports the singleton directly (not via `useQueryClient()`), and the pin
+// test at the bottom of this file needs a real cache to seed a
+// `trpc.meeting.byBoard` entry into and genuinely observe
+// `trpc.meeting.pathFilter()` invalidate it (conventions item 13: "verify
+// by mutation" needs something a deleted invalidation call can actually
+// make false).
 
-vi.mock("@/lib/queryClient", () => ({
-  queryClient: {
-    invalidateQueries: vi.fn(),
-    ensureQueryData: vi.fn().mockResolvedValue(undefined),
-  },
-  resetQueryCache: vi.fn(),
+vi.mock("@/lib/queryClient", async () => {
+  const { QueryClient } =
+    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
+  return {
+    queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    resetQueryCache: vi.fn(),
+  };
+});
+
+// ─── Mock the document-generation API calls ────────────────────────────
+// `@/lib/trpc` is deliberately NOT mocked — `trpc.meeting.pathFilter()` is a
+// pure predicate (no network call), so the real proxy is used only to build
+// the value the pin test below asserts against.
+
+vi.mock("@/lib/api-client", () => ({
+  apiJson: vi.fn().mockResolvedValue({ url: "https://example.com/generated.pdf" }),
 }));
 
 // ─── Mock route types ─────────────────────────────────────────────────
@@ -556,5 +576,51 @@ describe("AgendaBuilderPage", () => {
     renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
 
     expect(screen.getByRole("button", { name: /run meeting/i })).toBeInTheDocument();
+  });
+
+  it("invalidates trpc.meeting.pathFilter() after generating a meeting notice", async () => {
+    // Phase E wave 3 Task 2's fix round: this writer changes a document URL
+    // this route reads, not a `status`/`agenda_status` column the kanban or
+    // board Meetings tab render — but it invalidates the abandoned
+    // `queryKeys.meetings.detail` key, so conventions item 7 owes it the
+    // matching `trpc.meeting.pathFilter()` call regardless. Pinned by
+    // seeding the real `@/lib/queryClient` singleton (see this file's own
+    // mock, above) under the key `boards.$boardId.meetings.tsx` reads, and
+    // observing it flip to invalidated.
+    setupQueryMocks();
+
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /generate notice/i }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.meeting.pathFilter() after generating an agenda packet — the OTHER call site", async () => {
+    // `handleGeneratePacket` and `handleGenerateNotice` each carry their own
+    // `trpc.meeting.pathFilter()` line — this pins the packet one
+    // separately, so deleting either (not just the notice one the previous
+    // test covers) is caught.
+    const section = createMockSection();
+    const item = createMockItem();
+    setupQueryMocks({ items: [section, item] });
+
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(<AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /generate packet/i }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
   });
 });

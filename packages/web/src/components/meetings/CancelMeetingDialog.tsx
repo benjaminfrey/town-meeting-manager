@@ -16,13 +16,20 @@
  * scope): `requireBoardActor`'s guard reads it before `.input()` parses, so
  * there is something for the guard to authorize against before the resolver
  * ever looks up the meeting's real board.
+ *
+ * Before this task, the raw write could never be refused — there was no
+ * authorization check at all, so a caught-and-surfaced error path was
+ * unreachable. Closing the hole made FORBIDDEN a real outcome; without a
+ * visible error here, a refused cancel would leave the dialog open with no
+ * feedback and the rejection escaping as an unhandled promise rejection.
  */
 
 import { useCallback, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -50,6 +57,7 @@ export function CancelMeetingDialog({
 }: CancelMeetingDialogProps) {
   const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const cancelMutation = useMutation(
     trpc.meeting.cancel.mutationOptions({
@@ -66,9 +74,16 @@ export function CancelMeetingDialog({
 
   const handleCancel = useCallback(async () => {
     setIsSaving(true);
+    setError(null);
     try {
       await cancelMutation.mutateAsync({ meetingId, boardId });
       onOpenChange(false);
+    } catch (err) {
+      setError(
+        isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
+          ? "You don't have permission to cancel this meeting."
+          : "Couldn't cancel this meeting. Try again.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -83,6 +98,16 @@ export function CancelMeetingDialog({
             Are you sure you want to cancel "{meetingTitle}"? This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <p
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-2 text-sm text-destructive"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            {error}
+          </p>
+        )}
         <AlertDialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Keep Meeting

@@ -27,6 +27,9 @@
  * `VALID_TRANSITIONS` now carries both separately: `column` (matched against
  * the drop target's column id) and `status` (the real value sent to
  * `updateStatus`).
+ *
+ * TODO(phase-e-wave-6): board.listActive — the board picker's `allBoards`
+ * read is still raw Supabase; see that query's own comment for why.
  */
 
 import { useState, useMemo } from "react";
@@ -55,6 +58,7 @@ import {
   FileText,
   ChevronRight,
 } from "lucide-react";
+import { isTRPCClientError } from "@trpc/client";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,6 +91,13 @@ type UpdatableMeetingStatus =
 
 // ─── Column definitions (4 columns) ─────────────────────────────────
 
+// `"in_progress"` below (and in `getStatusDot`/`getCardAction`) is dead: the
+// real `meeting_status` enum (`db/schema.ts`) has no such value — only
+// `"open"` is ever actually written. Pre-existing, inert, and left as-is
+// (not this task's write path); noted here so it reads as audited rather
+// than missed, since this task's own fix round corrected the ADJACENT real
+// bug in this exact status mapping (the noticed→active drag sending the
+// literal column id `"active"` as a write — see this file's header).
 const KANBAN_COLUMNS = [
   { id: "draft", label: "Draft", statuses: ["draft"] },
   { id: "noticed", label: "Noticed", statuses: ["noticed"] },
@@ -190,6 +201,12 @@ export default function MeetingsPage() {
   } | null>(null);
   const [boardPickerOpen, setBoardPickerOpen] = useState(() => searchParams.get("new") === "1");
   const [selectedBoard, setSelectedBoard] = useState<{ id: string; name: string } | null>(null);
+  // Before this task, `transitionMutation`'s raw write could never be
+  // refused — there was no authorization check at all. Closing that hole
+  // made FORBIDDEN a real, reachable outcome, so a silent failure here (the
+  // dialog just closing, the card not moving, nothing said) is a new defect
+  // this migration would otherwise introduce, not an inherited one.
+  const [transitionError, setTransitionError] = useState<string | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -200,10 +217,11 @@ export default function MeetingsPage() {
     isError: isMeetingsError,
   } = useQuery(trpc.meeting.byTown.queryOptions());
 
-  // Boards for CreateMeetingDialog — still raw Supabase, matching home.tsx's
-  // own identical board picker (`board.listActive` exists but is deliberately
-  // not wired into either picker yet — see home.tsx's own header for the
-  // ordering difference that needs checking first; out of this task's scope).
+  // TODO(phase-e-wave-6): board.listActive — still raw Supabase, matching
+  // home.tsx's own identical board picker (`board.listActive` exists but is
+  // deliberately not wired into either picker yet — see home.tsx's own
+  // header for the ordering difference that needs checking first; out of
+  // this task's scope, retagged wave-6 to match home.tsx's own marker).
   const { data: allBoards = [] } = useQuery({
     queryKey: queryKeys.boards.byTown(townId),
     queryFn: async () => {
@@ -226,12 +244,20 @@ export default function MeetingsPage() {
   const transitionMutation = useMutation(
     trpc.meeting.updateStatus.mutationOptions({
       onSuccess: () => {
+        setTransitionError(null);
         // Legacy key: `home.tsx`'s own kanban-adjacent meeting list still
         // reads `queryKeys.meetings.byTown` raw (its own marker defers that
         // migration to wave 6) — conventions item 7, "the legacy line stays
         // because other, unmigrated screens still read that key."
         void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
         void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+      },
+      onError: (err) => {
+        setTransitionError(
+          isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
+            ? "You don't have permission to change this meeting's status."
+            : "Couldn't update this meeting's status. Try again.",
+        );
       },
     }),
   );
@@ -282,6 +308,7 @@ export default function MeetingsPage() {
     const transition = transitions?.find((t) => t.column === targetColumnId);
     if (!transition) return;
 
+    setTransitionError(null);
     setConfirmDialog({
       meeting,
       targetStatus: transition.status,
@@ -301,6 +328,24 @@ export default function MeetingsPage() {
 
   return (
     <div className="flex h-full flex-col px-6 lg:px-10">
+      {/* Status-change failure — see this file's `transitionError` comment for why this is new, not inherited */}
+      {transitionError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-4 shadow-lg"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+          <p className="text-sm text-destructive">{transitionError}</p>
+          <button
+            onClick={() => setTransitionError(null)}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Kanban board */}
       {isMeetingsError ? (
         <div

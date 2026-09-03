@@ -10,12 +10,22 @@
  *
  * On "Start Meeting": updates meeting status to 'open', sets timestamps,
  * creates the first agenda_item_transition, and writes attendance records.
+ *
+ * TODO(phase-e-wave-5): this file's `meeting`/`meeting_attendance`/
+ * `agenda_item`/`agenda_item_transition` writes are all still raw Supabase —
+ * NOT a completeness gap alone for `startMeetingMutation`'s `meeting` write:
+ * `meeting_tenant_isolation` is tenancy-only, so this `.update({status:
+ * "open", ...})` has no authorization check of any kind today, the identical
+ * shape Phase E wave 3 Task 2 closed for `meeting.cancel`/`meeting.updateStatus`
+ * (see `packages/api/src/trpc/routers/meeting.ts`). Flagged here so wave 5's
+ * live-meeting migration does not have to rediscover it.
  */
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Check, X, AlertTriangle, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -216,6 +226,11 @@ export function MeetingStartFlow({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
       });
+      // The kanban (routes/meetings.tsx) and board Meetings tab
+      // (routes/boards.$boardId.meetings.tsx) both read this meeting's
+      // status via trpc.meeting.byTown/byBoard — this write moves it
+      // draft/noticed → open, which both screens render.
+      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
       toast.success("Meeting called to order");
     },
     onError: (err) => {

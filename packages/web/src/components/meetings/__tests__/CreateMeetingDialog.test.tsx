@@ -13,10 +13,10 @@
  * own header for what did move).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -56,10 +56,14 @@ const queryClient = setupAppQueryClient();
 /** Set by the `meeting.insert` handler, so a test can assert on the exact input sent. */
 const received: { insert?: unknown } = {};
 
+/** Mutable so a test can make the next call refuse. */
+const server = { insertRejects: false };
+
 const stub = installTRPCFetchStub({
   "agendaTemplate.list": () => [],
   "meeting.insert": (input) => {
     received.insert = input;
+    if (server.insertRejects) trpcTestError("FORBIDDEN");
     return { id: "new-meeting" };
   },
 });
@@ -98,6 +102,10 @@ async function create() {
 }
 
 describe("CreateMeetingDialog", () => {
+  beforeEach(() => {
+    server.insertRejects = false;
+  });
+
   it("submits the new meeting through trpc.meeting.insert", async () => {
     await create();
     expect(received.insert).toMatchObject({ boardId: "b1" });
@@ -111,5 +119,38 @@ describe("CreateMeetingDialog", () => {
   it("invalidates the legacy meetings.byBoard key — EditBoardDialog's meeting-count check still reads it", async () => {
     const { legacyKey } = await create();
     await waitFor(() => expect(queryClient.getQueryState(legacyKey)?.isInvalidated).toBe(true));
+  });
+
+  it("shows a visible alert, and keeps the dialog open, when the create is refused", async () => {
+    // Before this task, `insert`'s raw write could never be refused. Closing
+    // that hole made FORBIDDEN a real outcome — including from
+    // boards.$boardId.meetings.tsx's own ungated "Create Meeting" button,
+    // which has no client-side permission check at all. A silent failure
+    // here (dialog closes, nothing said) would be a new defect this
+    // migration introduced, not an inherited one.
+    server.insertRejects = true;
+    const { user } = renderWithProviders(
+      <CreateMeetingDialog
+        boardId="b1"
+        boardName="Select Board"
+        townId="town-1"
+        open
+        onOpenChange={() => {}}
+      />,
+      { queryClient, route: "/boards/b1/meetings" },
+    );
+
+    const titleInput = await screen.findByPlaceholderText("Meeting title");
+    await user.click(titleInput);
+    await user.tab();
+
+    const createButton = await screen.findByRole("button", { name: /create meeting/i });
+    await waitFor(() => expect(createButton).not.toBeDisabled());
+    await user.click(createButton);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      await screen.findByText("You don't have permission to schedule a meeting for this board."),
+    ).toBeInTheDocument();
   });
 });

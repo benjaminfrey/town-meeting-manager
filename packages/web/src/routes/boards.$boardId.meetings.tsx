@@ -5,10 +5,11 @@
  *
  * Phase E, wave 3, Task 2 — `meeting.byBoard` (wave 3 Task 1) and
  * `board.detail` (already shipped, wave 2) both move onto tRPC here;
- * completeness gaps only for this file's own reads (`meeting.byBoard`'s row
- * shape includes `board_id`, but that value is trusted only for reads here —
- * `boardId` from the route's own params is what's threaded to any writer).
- * This route is `CancelMeetingDialog`'s only mount point, and — unlike this
+ * completeness gaps only for this file's own reads. `meeting.byBoard`'s row
+ * shape does NOT include `board_id` (it doesn't need to — the query is
+ * already scoped by the `boardId` input) — `boardId` from the route's own
+ * params is what's threaded to any writer instead. This route is
+ * `CancelMeetingDialog`'s only mount point, and — unlike this
  * file's own reads — that dialog's write was NOT merely a completeness gap;
  * it had no authorization check at all. It's converted here too, now that
  * this route has a real `boardId` to hand it (see that component's own doc

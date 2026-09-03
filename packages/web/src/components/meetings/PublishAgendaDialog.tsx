@@ -3,12 +3,22 @@
  *
  * Validates at least 1 item exists.
  * Warns about unfilled placeholders (non-blocking).
+ *
+ * TODO(phase-e-wave-4): this dialog's `meeting.agenda_status` write is still
+ * raw Supabase, with no authorization check of any kind under
+ * `meeting_tenant_isolation` (tenancy-only) — the same shape Phase E wave 3
+ * Task 2 closed for `meeting.cancel`/`meeting.updateStatus` (see
+ * `packages/api/src/trpc/routers/meeting.ts`), on a different column. Not
+ * fixed here — this component's write is `agenda_status`, out of this
+ * task's scope (its `meeting` router closes `status` only) — flagged so
+ * wave 4's agenda migration does not have to rediscover it.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -68,6 +78,9 @@ export function PublishAgendaDialog({
         .eq("id", meetingId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+      // The board Meetings tab (routes/boards.$boardId.meetings.tsx) renders
+      // this meeting's agenda_status via trpc.meeting.byBoard.
+      await queryClient.invalidateQueries(trpc.meeting.pathFilter());
       onOpenChange(false);
     } finally {
       setIsSaving(false);

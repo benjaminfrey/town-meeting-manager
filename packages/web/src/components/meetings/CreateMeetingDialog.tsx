@@ -19,11 +19,31 @@
  * exactly as before; that write belongs to whichever router owns
  * `agenda_item` (wave 4's agenda surface), not this one — see `meeting.ts`'s
  * own doc comment on `insert`.
+ *
+ * Before this task, `insert`'s raw Supabase write could never be refused —
+ * there was no authorization check at all, so a caught-and-surfaced error
+ * path was unreachable, including from `boards.$boardId.meetings.tsx`'s own
+ * ungated "Create Meeting" button (no `usePermission("A1")` check there).
+ * Closing the hole made FORBIDDEN a real outcome; without a visible error
+ * here, a refused create leaves the dialog open with nothing said.
+ *
+ * TODO(phase-e-wave-4): this dialog still reads/writes raw Supabase in three
+ * places, none a completeness gap this task closed: the active
+ * `board_member` count (no exact procedure exists —
+ * `boardMember.roster`/`.memberCount` are board-roster and town-wide-total
+ * respectively, neither an active-count-for-one-board; a new procedure or a
+ * client-side filter over `roster` would be needed), the town
+ * retention/state read (`trpc.town.detail` already exists and would be a
+ * drop-in replacement — not swapped here to stay within this task's own
+ * file-list scope), and `instantiateAgendaFromTemplate`'s `agenda_item`
+ * writes (wave 4's own agenda surface, per this file's `insert` doc comment
+ * above).
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
@@ -100,6 +120,7 @@ export function CreateMeetingDialog({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Default title suggestion
   const today = new Date();
@@ -121,6 +142,8 @@ export function CreateMeetingDialog({
   );
 
   // ─── Queries for validation & templates ─────────────────────────────
+  // TODO(phase-e-wave-4): no exact procedure exists yet — see this file's
+  // header.
   const { data: activeMemberCount = 0 } = useQuery({
     queryKey: [...queryKeys.members.byBoard(boardId), "activeCount"],
     queryFn: async () => {
@@ -135,6 +158,7 @@ export function CreateMeetingDialog({
     enabled: !!boardId,
   });
 
+  // TODO(phase-e-wave-4): town.detail — see this file's header.
   const { data: townData } = useQuery({
     queryKey: queryKeys.towns.detail(townId),
     queryFn: async () => {
@@ -196,6 +220,7 @@ export function CreateMeetingDialog({
     if (!data) return;
 
     setIsSaving(true);
+    setSubmitError(null);
     try {
       // `meeting.insert` mints the meeting's own id and derives `created_by`
       // from the caller's own session server-side — neither is sent from
@@ -210,6 +235,7 @@ export function CreateMeetingDialog({
       });
 
       // Instantiate agenda from selected template
+      // TODO(phase-e-wave-4): agenda_item writes — see this file's header.
       const selectedTemplate = templates.find((t) => String(t.id) === data.template_id);
       if (selectedTemplate?.sections) {
         const sections = parseSections(
@@ -220,6 +246,12 @@ export function CreateMeetingDialog({
 
       onOpenChange(false);
       void navigate(`/meetings/${id}/agenda`);
+    } catch (err) {
+      setSubmitError(
+        isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
+          ? "You don't have permission to schedule a meeting for this board."
+          : "Couldn't create this meeting. Try again.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -242,6 +274,18 @@ export function CreateMeetingDialog({
                 <p className="text-sm text-destructive">{err.message}</p>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Submit error — e.g. FORBIDDEN from meeting.insert */}
+        {submitError && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+          >
+            <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" aria-hidden="true" />
+            <p className="text-sm text-destructive">{submitError}</p>
           </div>
         )}
 

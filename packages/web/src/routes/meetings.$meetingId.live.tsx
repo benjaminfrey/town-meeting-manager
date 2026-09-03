@@ -16,6 +16,16 @@
  * - Executive session banner with timer during closed session
  * - Dual adjournment: formal motion or without objection
  * - Meeting end flow: close transitions, defer unreached items, navigate to review
+ *
+ * TODO(phase-e-wave-5): this file's adjournment handler writes `meeting`
+ * (status: 'adjourned', among others), `agenda_item`, `future_item_queue`
+ * and `executive_session` all raw via Supabase. NOT a completeness gap alone
+ * for the `meeting` write: `meeting_tenant_isolation` is tenancy-only, so
+ * this `.update({status: "adjourned", ...})` has no authorization check of
+ * any kind today, the identical shape Phase E wave 3 Task 2 closed for
+ * `meeting.cancel`/`meeting.updateStatus` (see
+ * `packages/api/src/trpc/routers/meeting.ts`). Flagged here so wave 5's
+ * live-meeting migration does not have to rediscover it.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -35,6 +45,7 @@ import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
 import { ConnectionStatusBarErrorBoundary } from "@/components/FeatureErrorBoundaries";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { apiFetch } from "@/lib/api-client";
 import { supabase as supabaseSingleton } from "@/lib/supabase";
 import { queryClient as sharedQueryClient } from "@/lib/queryClient";
@@ -1045,6 +1056,11 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItems.byMeeting(meetingId),
       });
+      // The kanban (routes/meetings.tsx) and board Meetings tab
+      // (routes/boards.$boardId.meetings.tsx) both read this meeting's
+      // status via trpc.meeting.byTown/byBoard — this write moves it open
+      // → adjourned, which both screens render.
+      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
 
       toast.success("Meeting adjourned");
 

@@ -52,6 +52,7 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+import { trpc } from "@/lib/trpc";
 import { getNoticeDeadline, type MeetingType, type ComplianceResult } from "@town-meeting/shared";
 
 // ─── Compliance Banner ──────────────────────────────────────────────
@@ -288,6 +289,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
       });
       // Invalidate meeting to pick up new packet URL
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
       toast.success("Agenda packet generated", {
         action: {
           label: "Download",
@@ -311,6 +313,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
       });
       // Invalidate meeting to pick up new notice URL
       await queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
       toast.success("Meeting notice generated", {
         action: {
           label: "Download",

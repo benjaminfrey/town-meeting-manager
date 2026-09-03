@@ -16,15 +16,37 @@
  * otherwise a reader that moved onto the tRPC key is not being invalidated
  * by this writer at all, silently, for up to the query's `staleTime`.
  *
- * `MIGRATED` is hand-maintained on purpose (seven entries as of wave 2's
- * final whole-branch-review fix round — `members: "boardMember"`,
- * `userAccounts: "person"` and `invitations: "boardMember"` joined
- * `agendaTemplates: "agendaTemplate"` there, all four verified to raise zero
- * violations at HEAD before being added). Growing it is exactly the moment
- * this rule should fire for a newly-migrated entity, so it stays a
- * deliberate edit, not a derived one. Update it in the same commit a
- * router's read moves off `queryKeys.<x>` and its `pathFilter()` becomes the
- * thing writers owe (conventions item 7).
+ * `MIGRATED` is hand-maintained on purpose (eight entries as of wave 3 Task
+ * 2's fix round — `members: "boardMember"`, `userAccounts: "person"` and
+ * `invitations: "boardMember"` joined `agendaTemplates: "agendaTemplate"` in
+ * wave 2's final whole-branch-review fix round, all four verified to raise
+ * zero violations at HEAD before being added; `meetings: "meeting"` joined in
+ * wave 3 Task 2's own fix round). Growing it is exactly the moment this rule
+ * should fire for a newly-migrated entity, so it stays a deliberate edit, not
+ * a derived one. Update it in the same commit a router's read moves off
+ * `queryKeys.<x>` and its `pathFilter()` becomes the thing writers owe
+ * (conventions item 7).
+ *
+ * `meetings` is the map's first entry added when only PART of a namespace's
+ * reads had migrated — `meeting.byTown`/`meeting.byBoard` moved in wave 3
+ * Task 2, but `meeting.detail`'s own screens (wave 4's agenda tab, wave 5's
+ * live-meeting flow) had not, and still read the raw `meeting` row. Because
+ * this check is namespace-, not procedure-, granular, adding the entry
+ * flagged every `invalidateQueries(queryKeys.meetings.*)` writer in the tree,
+ * not only the two reads that actually moved — four files outside that
+ * task's own file list (`MeetingStartFlow.tsx`, `PublishAgendaDialog.tsx`,
+ * `routes/meetings.$meetingId.agenda.tsx`, `routes/meetings.$meetingId.live.tsx`).
+ * Fixed on the merits, not merely to satisfy this check: each write changes a
+ * `meeting` column the kanban or board Meetings tab renders (`status` for the
+ * first two, `agenda_status`/derived document URLs for the other two), so
+ * each was missing a real invalidation of its own — the kanban silently held
+ * a stale card for up to 60s after a meeting was called to order or
+ * adjourned. Each fix is one `trpc.meeting.pathFilter()` line at an existing
+ * `invalidateQueries` call site; see wave 3 Task 2's fix-round report for the
+ * per-file detail and the two of the four that also carry a new
+ * `TODO(phase-e-wave-4/5)` authorization-hole marker (their `meeting` writes
+ * were already unauthorized before this fix round and still are — only the
+ * missing invalidation was in scope to close).
  *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three
@@ -129,6 +151,7 @@ const MIGRATED: Record<string, string> = {
   members: "boardMember",
   userAccounts: "person",
   invitations: "boardMember",
+  meetings: "meeting",
 };
 
 /**
@@ -265,11 +288,14 @@ describe("the check itself", () => {
       useQuery(queryKeys.towns.detail(townId));
       ${padding}
       onSuccess: () => {
-        // Deliberately a namespace NOT in MIGRATED (unlike \`invitations\`,
-        // which joined the map in this same fix round) — this fixture needs
-        // a key this check has no opinion about, not one it would now flag
-        // for real.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(townId) });
+        // Deliberately a namespace NOT in MIGRATED — this fixture needs a
+        // key this check has no opinion about, not one it would now flag
+        // for real. \`meetings\` joined the map in wave 3 Task 2's fix round
+        // (this exact fixture is why: it used \`queryKeys.meetings.byBoard\`
+        // as its "genuinely unmigrated" example until that entry was added,
+        // which would have turned this fixture into a real violation rather
+        // than a non-match). \`motions\` has no router at all yet.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
       },
       `,
     );
