@@ -367,6 +367,9 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
 
       await Promise.all(updates);
       await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // Reorders `agenda_item` rows — no count change, but an `agenda_item`
+      // write, invalidated at the router per conventions item 7.
+      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     },
     [sections, meetingId],
   );
@@ -399,6 +402,11 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
       .throwOnError();
 
     await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    // INSERTs a new section row into `agenda_item` — the "N items" count
+    // `routes/meetings.$meetingId.tsx`'s shell reads through
+    // `trpc.agendaItem.countByMeeting` counts every row for the meeting,
+    // sections included.
+    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
 
     setAddingSectionType(null);
     setAddingSectionTitle("");

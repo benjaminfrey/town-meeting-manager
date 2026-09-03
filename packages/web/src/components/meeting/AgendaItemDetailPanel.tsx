@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import {
   ChevronLeft,
   ChevronRight,
@@ -224,6 +225,14 @@ export function AgendaItemDetailPanel({
     onSuccess: (_data, { itemId }) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // Writes an `agenda_item` row, which `routes/meetings.$meetingId.tsx`'s
+      // shell reads through `trpc.agendaItem.countByMeeting`. Router-level,
+      // per conventions item 7 ("a writer should not have to know which
+      // procedures some screen happens to call") — this particular write
+      // changes `operator_notes`, not the count, but wave 4's own
+      // `agendaItem.list`/`detail` procedures will render it, and this
+      // writer is not the place to encode which procedures exist today.
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     },
   });
 
@@ -243,6 +252,9 @@ export function AgendaItemDetailPanel({
     onSuccess: (_data, itemId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // Moves the item to `completed` — same reasoning as `saveNotesMutation`
+      // above: an `agenda_item` write, invalidated at the router.
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
       onNavigateNext();
     },
   });

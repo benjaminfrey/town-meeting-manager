@@ -16,16 +16,19 @@
  * otherwise a reader that moved onto the tRPC key is not being invalidated
  * by this writer at all, silently, for up to the query's `staleTime`.
  *
- * `MIGRATED` is hand-maintained on purpose (eight entries as of wave 3 Task
- * 2's fix round — `members: "boardMember"`, `userAccounts: "person"` and
+ * `MIGRATED` is hand-maintained on purpose — quote the object below rather
+ * than any count in this comment, which is exactly the figure that drifts.
+ * `members: "boardMember"`, `userAccounts: "person"` and
  * `invitations: "boardMember"` joined `agendaTemplates: "agendaTemplate"` in
  * wave 2's final whole-branch-review fix round, all four verified to raise
  * zero violations at HEAD before being added; `meetings: "meeting"` joined in
- * wave 3 Task 2's own fix round). Growing it is exactly the moment this rule
- * should fire for a newly-migrated entity, so it stays a deliberate edit, not
- * a derived one. Update it in the same commit a router's read moves off
- * `queryKeys.<x>` and its `pathFilter()` becomes the thing writers owe
- * (conventions item 7).
+ * wave 3 Task 2's own fix round; `agendaItems: "agendaItem"`,
+ * `minutesDocuments: "minutesDocument"` and `attendance: "meetingAttendance"`
+ * joined in wave 3 Tasks 3+4's fix round (see the paragraph after `meetings`
+ * below). Growing it is exactly the moment this rule should fire for a
+ * newly-migrated entity, so it stays a deliberate edit, not a derived one.
+ * Update it in the same commit a router's read moves off `queryKeys.<x>` and
+ * its `pathFilter()` becomes the thing writers owe (conventions item 7).
  *
  * `meetings` is the map's first entry added when only PART of a namespace's
  * reads had migrated — `meeting.byTown`/`meeting.byBoard` moved in wave 3
@@ -47,6 +50,29 @@
  * `TODO(phase-e-wave-4/5)` authorization-hole marker (their `meeting` writes
  * were already unauthorized before this fix round and still are — only the
  * missing invalidation was in scope to close).
+ *
+ * `agendaItems`/`minutesDocuments`/`attendance` are the same shape, one wave
+ * later and one round later than they should have been. Wave 3 Task 3 built
+ * the three one-procedure routers behind `routes/meetings.$meetingId.tsx`'s
+ * shell (`agendaItem.countByMeeting`, `minutesDocument.byMeeting`,
+ * `meetingAttendance.countByMeeting`) and DEFERRED the map entries, on the
+ * reasoning that the writers live in wave-4/5/6 files. Wrong for the same
+ * reason `agendaTemplates` was wrong below, and a reviewer demonstrated the
+ * regression by execution rather than argument: at `1b1d635` the shell read
+ * `queryKeys.agendaItems.byMeeting(meetingId)` and every writer invalidated
+ * that exact expression, so `Query.isStaleByTime()`'s `state.isInvalidated`
+ * short-circuit forced a refetch on return to the shell; after Task 3 the
+ * shell's key was `[["agendaItem","countByMeeting"],…]`, nothing invalidated
+ * it, and adding two agenda items then navigating back to the meeting still
+ * read "3 items" for up to 60s. Same for the minutes status pill and the
+ * attendance count. Adding the three entries raised 11 (namespace, file)
+ * pairs across 8 files — 6 `agendaItems`, 2 `minutesDocuments`, 3
+ * `attendance` — every one of them a real writer of the table its router
+ * owns, each fixed on its own merits with a `pathFilter()` call and a pin
+ * test, each pin verified by deleting the line and watching it go red. The
+ * legacy `queryKeys.*` lines all STAY: `SourceDataPanel.tsx`,
+ * `useQuorumCheck.ts` and reads inside `live.tsx`/`review.tsx`/`agenda.tsx`
+ * still consume them, and they go when the last legacy reader does.
  *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three
@@ -152,6 +178,9 @@ const MIGRATED: Record<string, string> = {
   userAccounts: "person",
   invitations: "boardMember",
   meetings: "meeting",
+  agendaItems: "agendaItem",
+  minutesDocuments: "minutesDocument",
+  attendance: "meetingAttendance",
 };
 
 /**

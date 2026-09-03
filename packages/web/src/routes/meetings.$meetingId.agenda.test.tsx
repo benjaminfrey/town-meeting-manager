@@ -623,4 +623,33 @@ describe("AgendaBuilderPage", () => {
       expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
     });
   });
+
+  it("invalidates trpc.agendaItem.pathFilter() after adding a section — the shell's item count", async () => {
+    // Phase E wave 3, Tasks 3+4 fix round. `routes/meetings.$meetingId.tsx`
+    // reads its "N items" badge from `trpc.agendaItem.countByMeeting`;
+    // `handleAddSection` INSERTs an `agenda_item` row, so without the
+    // `trpc.agendaItem.pathFilter()` line in that handler the shell keeps
+    // showing the pre-insert count for the full 60s `staleTime`. Seeded
+    // under the shell's OWN key so a deleted invalidation is what makes this
+    // assertion false — conventions item 13.
+    setupQueryMocks({ items: [] });
+
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(countKey, 3);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderWithProviders(
+      <AgendaBuilderPage {...({ loaderData: defaultLoaderData } as any)} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /add section/i }));
+    await user.type(screen.getByPlaceholderText("New section title"), "Public Comment");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
 });

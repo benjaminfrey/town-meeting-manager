@@ -10,6 +10,7 @@ import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Loader2, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useWizardForm } from "@/hooks/useWizardForm";
@@ -139,6 +140,12 @@ export function InlineItemForm({
         if (error) throw error;
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // The `else` branch above INSERTs a new `agenda_item`, which changes
+      // the "N items" count `routes/meetings.$meetingId.tsx`'s shell renders
+      // through `trpc.agendaItem.countByMeeting` — this is the exact
+      // "add two agenda items, go back, still says 3" regression the
+      // `MIGRATED` entry for `agendaItems` exists to catch.
+      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
       onSaved();
     } finally {
       setIsSaving(false);
@@ -177,6 +184,10 @@ export function InlineItemForm({
     if (error) throw error;
     await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
     await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
+    // DELETEs the item and its children — the same count, in the other
+    // direction. (`exhibit` has no router yet, so its legacy key above has
+    // no tRPC counterpart to pair with.)
+    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     setConfirmDelete(false);
     onSaved();
   }, [existingItem, supabase, queryClient, meetingId, onSaved]);

@@ -163,6 +163,10 @@ export function MeetingStartFlow({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+      // INSERTs a `meeting_attendance` row for a member with none yet — the
+      // count `routes/meetings.$meetingId.tsx`'s shell renders through
+      // `trpc.meetingAttendance.countByMeeting`.
+      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
     },
   });
 
@@ -231,6 +235,13 @@ export function MeetingStartFlow({
       // status via trpc.meeting.byTown/byBoard — this write moves it
       // draft/noticed → open, which both screens render.
       void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+      // Same shell, two more of its reads: this mutation flips the recording
+      // secretary's `meeting_attendance` row and the first `agenda_item` to
+      // `active`. Neither changes a COUNT today, but both are writes to the
+      // tables those two routers own — invalidated at the router, per
+      // conventions item 7.
+      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
       toast.success("Meeting called to order");
     },
     onError: (err) => {

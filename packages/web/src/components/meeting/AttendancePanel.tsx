@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MeetingTimer } from "./MeetingTimer";
@@ -133,6 +134,11 @@ export function AttendancePanel({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+      // The `else` branch above INSERTs a `meeting_attendance` row for a
+      // member with no record yet, which changes exactly the number
+      // `routes/meetings.$meetingId.tsx`'s shell renders through
+      // `trpc.meetingAttendance.countByMeeting` ("N members recorded").
+      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
     },
     onError: () => {
       toast.error("Couldn't update attendance — please try again.");

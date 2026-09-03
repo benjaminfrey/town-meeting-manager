@@ -347,6 +347,10 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     `meeting_id=eq.${meetingId}`,
     () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+      // A `meeting_attendance` change made on ANOTHER device — the shell's
+      // `trpc.meetingAttendance.countByMeeting` entry in this client's cache
+      // is just as stale as the legacy key above.
+      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
     },
   );
 
@@ -356,6 +360,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     `meeting_id=eq.${meetingId}`,
     () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+      // Same, for `agenda_item`: an INSERT or DELETE on another device moves
+      // the shell's `trpc.agendaItem.countByMeeting`.
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
     },
   );
 
@@ -737,6 +744,15 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           void queryClient.invalidateQueries({
             queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
           });
+          // Moves `minutes_document.status` to `approved` — exactly the pill
+          // `routes/meetings.$meetingId.tsx`'s shell renders from
+          // `trpc.minutesDocument.byMeeting`. Note the legacy key above is
+          // keyed by the LIVE meeting's id while `docId` belongs to the
+          // EARLIER meeting whose minutes are being approved here (it comes
+          // off `item.source_minutes_document_id`), so that key never
+          // reaches the shell that actually shows this document. The
+          // router-level filter does — one more reason item 7 prefers it.
+          void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
 
           // Fire notification event (fire-and-forget)
           await supabase.from("notification_event").insert({
@@ -864,6 +880,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItems.byMeeting(meetingId),
       });
+      // Sets the departed item to `completed` and the arrived one to
+      // `active` — `agenda_item` writes, invalidated at the router.
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
       });
@@ -1056,6 +1075,9 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agendaItems.byMeeting(meetingId),
       });
+      // Adjournment marks the remaining items `completed` and moves tabled
+      // ones to `future_agenda_item` — `agenda_item` writes.
+      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
       // The kanban (routes/meetings.tsx) and board Meetings tab
       // (routes/boards.$boardId.meetings.tsx) both read this meeting's
       // status via trpc.meeting.byTown/byBoard — this write moves it open

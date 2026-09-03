@@ -11,6 +11,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
 import { trpc } from "@/lib/trpc";
+import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import type { QueryClient } from "@tanstack/react-query";
 
 /** Build a mock useQuery return value with data and no loading/error state. */
@@ -133,6 +134,12 @@ vi.mock("@/components/meeting/AgendaNavigationPanel", () => ({
   AgendaNavigationPanel: (props: any) => (
     <div data-testid="agenda-nav-panel">
       <span data-testid="nav-section-count">{props.sections?.length ?? 0}</span>
+      {/* Reaches `navigateToItem`, the route's OTHER `agenda_item` writer
+          (it sets the departed item `completed` and the arrived one
+          `active`) — pinned separately from the adjournment handler below. */}
+      <button data-testid="nav-to-item" onClick={() => props.onNavigate?.("item-1")}>
+        Go
+      </button>
     </div>
   ),
 }));
@@ -548,6 +555,130 @@ describe("LiveMeetingPage", () => {
 
     await waitFor(() => {
       expect(mockQueryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  // ─── Wave 3, Tasks 3+4 fix round: the three new routers ───────────
+  //
+  // `routes/meetings.$meetingId.tsx`'s shell reads
+  // `agendaItem.countByMeeting`, `meetingAttendance.countByMeeting` and
+  // `minutesDocument.byMeeting`. This route writes all three tables, so
+  // conventions item 7 owes each of those writes the matching
+  // `pathFilter()` call — and item 8 owes each call a pin that a deletion
+  // turns red. Each test below seeds the SHELL's own key, not a nearby one.
+
+  it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {
+    setupLiveMeetingQueries();
+
+    const mockQueryClient = queryClientRef.current!;
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    mockQueryClient.setQueryData(countKey, 2);
+    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    fireEvent.click(screen.getByTestId("adjourn-wo"));
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.agendaItem.pathFilter() when navigating between items — the OTHER call site", async () => {
+    // `navigateToItem` carries its own `trpc.agendaItem.pathFilter()` line,
+    // separate from the adjournment handler's, so deleting either one is
+    // caught rather than only whichever the previous test happens to reach.
+    setupLiveMeetingQueries();
+
+    const mockQueryClient = queryClientRef.current!;
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    mockQueryClient.setQueryData(countKey, 2);
+    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    fireEvent.click(screen.getByTestId("nav-to-item"));
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.meetingAttendance.pathFilter() from the meeting_attendance Realtime handler", async () => {
+    // The Realtime hook is mocked out (see the module mocks above), so the
+    // handler is reached by invoking the callback this route registered for
+    // the `meeting_attendance` table — the same thing the real subscription
+    // does when another device records attendance.
+    setupLiveMeetingQueries();
+
+    const mockQueryClient = queryClientRef.current!;
+    const countKey = trpc.meetingAttendance.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    mockQueryClient.setQueryData(countKey, 2);
+    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    const attendanceCall = vi
+      .mocked(useRealtimeSubscription)
+      .mock.calls.find((call) => call[1] === "meeting_attendance");
+    expect(attendanceCall, "the route no longer subscribes to meeting_attendance").toBeDefined();
+    attendanceCall![3]({});
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it("invalidates trpc.minutesDocument.pathFilter() when a minutes-approval motion passes", async () => {
+    // The auto-approval effect: an agenda item carrying
+    // `source_minutes_document_id` plus a PASSED motion on that item moves
+    // the referenced `minutes_document` to `approved` — the exact status the
+    // shell's pill renders.
+    setupLiveMeetingQueries({
+      agendaItems: [
+        {
+          ...mockAgendaItems[0],
+          id: "item-minutes",
+          parent_item_id: null,
+          source_minutes_document_id: "md-1",
+        },
+      ],
+      motions: [
+        {
+          id: "motion-1",
+          agenda_item_id: "item-minutes",
+          motion_type: "main",
+          motion_text: "to approve the minutes of February 10",
+          status: "passed",
+        },
+      ],
+    });
+
+    const mockQueryClient = queryClientRef.current!;
+    const minutesKey = trpc.minutesDocument.byMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    mockQueryClient.setQueryData(minutesKey, { id: "md-1", status: "review" });
+    expect(mockQueryClient.getQueryState(minutesKey)?.isInvalidated).toBeFalsy();
+
+    renderWithProviders(
+      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    );
+
+    await waitFor(() => {
+      expect(mockQueryClient.getQueryState(minutesKey)?.isInvalidated).toBe(true);
     });
   });
 });

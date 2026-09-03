@@ -59,7 +59,6 @@ import {
   AGENDA_STATUS_LABELS,
   AGENDA_STATUS_COLORS,
 } from "@/components/meetings/meeting-labels";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";

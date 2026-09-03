@@ -377,9 +377,20 @@ construction) — which is exactly why this did not surface in Task 1's `insert`
 4–6 must check each table's own RLS rather than assume `meeting`'s tenancy-only finding carries
 over:** `agenda_item`, `motion`, `vote_record`, `meeting_attendance`, `minutes_document`,
 `minutes_section` and `exhibit` are all board-scoped writes targeted by a row id, not the board id —
-the shape this hazard needs, not a shape unique to `cancel`. Whether each one's RLS also lacks a board
-predicate (making the defence load-bearing there too) has not been checked table by table; that check
-belongs to whichever wave writes each one's router.
+the shape this hazard needs, not a shape unique to `cancel`.
+
+**Three of the seven are now checked; four are not.** Wave 3, Task 3 built the read-only routers over
+`agenda_item`, `meeting_attendance` and `minutes_document`, and its fix round confirmed all three
+against `0000_baseline.sql` directly (`agenda_item_tenant_isolation`,
+`meeting_attendance_tenant_isolation`, `minutes_document_tenant_isolation`): each is a plain
+`FOR ALL USING (town_id = get_current_town_id()) WITH CHECK (…)` — **no role predicate and no board
+predicate**, identical to `meeting_tenant_isolation`. So the mismatch defence IS load-bearing for all
+three the moment a wave adds a row-targeted board-scoped WRITE to any of them: any town member can
+already see any of those rows and therefore learn their true board. The finding lives in each
+router's own header too, but it belongs here as well, since this paragraph is where a wave-4/5/6
+author is sent to look. **`motion`, `vote_record`, `minutes_section` and `exhibit` remain unchecked**
+— that check belongs to whichever wave writes each one's router, and "the other three turned out
+tenancy-only" is not evidence about these four.
 
 **The cost, stated rather than left to be discovered:** the board id `requireBoardActor` needs is not
 needed by the WRITE itself for a row-targeted procedure — it exists purely so a guard declared before
@@ -674,11 +685,10 @@ it mechanically, on every `npx turbo run test`, and fails with a filename instea
 reviewer's grep.
 
 What it checks: for every `invalidateQueries(` call in a non-test file, if the call's own argument
-names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (seven entries
-as of this wave's final fix round — `towns`, `boards`, `persons`, `agendaTemplates`, `members`,
-`userAccounts`, `invitations` — quote `cache-key-parity.test.ts`'s own `MIGRATED` object, not this
-number, which will drift the same way "currently `towns`/`boards`/`persons`" drifted here from three
-to seven without this paragraph ever being updated), the same file must also call the matching
+names a `queryKeys.<namespace>` for a namespace in its hand-maintained `MIGRATED` map (quote
+`cache-key-parity.test.ts`'s own `MIGRATED` object — this paragraph used to carry a count and a
+roster instead, and it drifted from three to seven to eleven entries without ever being updated;
+the object is the only statement of it that cannot go stale), the same file must also call the matching
 `trpc.<router>.pathFilter()` somewhere. The match is scoped to roughly 250 characters measured from
 inside the `invalidateQueries(` call itself, not the whole file — a whole-file version of this check
 raises 12 false positives at HEAD (files that read a migrated key in a `useQuery` far from an
@@ -1139,6 +1149,15 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Task 3 report
 ```
 
+```
+17   # unchanged in wave 3 Tasks 3+4's fix round — that round added eleven
+     # `pathFilter()` invalidations and eight pin tests but closed no
+     # Supabase read and opened no new gap, so no marker moved in either
+     # direction. Recorded rather than left silent: "the number did not
+     # change" is itself a re-run result, and the alternative is a reader
+     # assuming the enumeration simply was not checked.
+```
+
 Whether the count is 22, 20, 17, or something else by the time this is read depends entirely on
 what closed since — quote the grep, not the number, still the rule three tasks later.
 
@@ -1280,6 +1299,22 @@ this wave's work closed, whether or not the task that closed it was the one that
 A bullet is stale exactly as easily by someone else's fix landing nearby as by the task that named
 it forgetting to update it — check the file, not the diff.
 
+**Sharpened in wave 3, Tasks 3+4's fix round, because the step as written above was RUN and still
+missed one.** Task 4's close-out sweep reported "none went stale because of this task's work," and
+that was wrong: Task 3 had created `packages/api/src/trpc/routers/minutes-document.ts` one commit
+earlier, and the `home.tsx` bullet's sentence "`minutesDocs` still has no router at all" had been
+false ever since. The sweep missed it because of how it selected which bullets to re-read — it looked
+for bullets that MENTION the files the task touched, and that bullet mentions `home.tsx`, a file
+neither task edited. **The unit of staleness is a CLAIM, not a file.** So read each bullet for the
+assertions it makes — "X does not exist", "Y is still unwired", "Z has no caller", "this is still
+open" — and check each assertion against the tree, whether or not the bullet names anything you
+touched. The three assertion shapes that go stale most often here, all three demonstrated in this
+document's own history: **"no router/procedure exists"** (check `router.ts` and the router file, not
+the screen), **"nothing is wired to it"** (grep for the procedure name across `packages/web/src`), and
+**"marked with a `TODO(phase-e-wave-N)`"** (re-run item 11's anchored grep). A bullet naming a file
+you never opened is exactly the one this step exists for; "my diff does not touch that file" is the
+reasoning that produced four stale bullets in wave 2 and a fifth here.
+
 This is intentionally scoped to Known-gaps, not "audit the whole document every time" — item 11's
 own countdown grep already does the analogous job for `TODO(phase-e-wave-*)` markers in the
 CODEBASE; this step is the same discipline applied to the PLAN DOCUMENT's own claims about that
@@ -1392,9 +1427,17 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `Foo.pathfilter.test.tsx` that does not actually import `Foo.tsx` (see the check's own fixture
   tests for both). Comment-stripping is load-bearing the identical way item 11's marker grep needs
   it to be: without it, `routes/people.tsx` and `test/trpc.ts` both false-positive as writers because
-  each mentions `trpc.<router>.pathFilter()` in a comment, not real code — 28 files contain the raw
-  substring at HEAD, 26 after stripping, and 26 is the number the check's own history-validation
-  section (below) confirms is right. Validated against `git archive` snapshots of three real commits,
+  each mentions `trpc.<router>.pathFilter()` in a comment, not real code. **The figures that used to
+  sit here — "28 files contain the raw substring at HEAD, 26 after stripping" — were anchored to no
+  commit at all, and had drifted by two waves; re-measured in wave 3, Tasks 3+4's fix round and
+  anchored the way item 11 requires.** At `8c1b5e2` (this round's parent) the walk over non-test
+  files under `packages/web/src` finds **35** containing the literal `.pathFilter()` and **33** after
+  stripping comments; this round adds five more writers (`AgendaItemDetailPanel.tsx`,
+  `AttendancePanel.tsx`, `AgendaSection.tsx`, `InlineItemForm.tsx`,
+  `routes/meetings.$meetingId.review.tsx`), taking those to **40** and **38**. The two files the gap
+  between the pair accounts for are still the same two, which is the durable claim here — quote the
+  check's own `findUnpinnedWriters(SRC_DIR).writerCount` rather than any of these six numbers.
+  Validated against `git archive` snapshots of three real commits,
   not assumed: HEAD (26 writers, 0 violations), `3b22df8` (16 writers, 3 violations —
   `AddMemberDialog.tsx`, `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`), `081a27e` (25
   writers, 1 violation — `MemberRoster.tsx`) — all three matching this wave's own named findings by
@@ -1419,12 +1462,25 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   procedure and passes" failure mode left for a stricter static check to add value against. What
   actually catches a missing invalidation on a specific mutation, proven by Task 3's own fix round,
   is a **scripted deletion sweep** run as a close-out step, not a new assertion shape: comment out
-  each `pathFilter()` call one at a time (`~21` sites at HEAD — `grep -rl "\.pathFilter()"
-packages/web/src | grep -v __tests__ | grep -v '\.test\.'`, minus the two comment-only false
-  positives item 4's own check already excludes), run the web suite, confirm something goes red,
-  restore. At roughly 10 seconds per site that is about 4 minutes for the whole tree — cheap enough
+  each `pathFilter()` call one at a time, run the web suite, confirm something goes red, restore. The
+  file list:
+
+  ```
+  $ grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  35   # at 8c1b5e2, this round's parent
+  40   # after wave 3 Tasks 3+4's fix round adds five writer files
+  ```
+
+  (minus the two comment-only false positives the pin-coverage check's own comment-stripping already
+  excludes — `routes/people.tsx` and `test/trpc.ts`.) **This bullet used to say "`~21` sites at HEAD"
+  with no SHA attached** — off by fourteen against its own grep by the time it was re-run, which is
+  precisely the drift item 11's "quote the grep, not the number" rule exists to prevent, in the
+  document that states the rule. Re-run it; do not trust either figure above either.
+  A site is one `pathFilter()` CALL, not one file, and several files now carry two or more.
+  At roughly 10 seconds per site that is well under ten minutes for the whole tree — cheap enough
   to run as a matter of course before closing out a task that touched cache invalidation, and it is
   the only thing in this document that has actually caught a missing-but-plausible-looking pin.
+
 - **Re-checked in the wave's final whole-branch review (current as of `9e87b7b`) — four of the
   five bullets that used to sit here were stale, three of them CLOSED and described as open. This
   is exactly the drift item 14 above (the standing close-out step) exists to catch, and the fact
@@ -1457,9 +1513,17 @@ settings" read)`.
   wave 3, Task 0/1**: a `meeting` router now exists (`packages/api/src/trpc/routers/meeting.ts`,
   Task 1) and `home.tsx`'s own marker was retagged to say so (Task 0) — the screen itself is not
   wired onto it yet (that is Task 2 territory and explicitly out of this wave's Task 1 scope), only
-  the marker's claim changed. `minutesDocs` still has no router at all and stays open, now scoped to
-  wave 6 in `home.tsx`'s own retagged marker (that wave owns `minutes.tsx`/`review.tsx` per this
-  wave's own plan).
+  the marker's claim changed. ~~`minutesDocs` still has no router at all and stays open~~ —
+  **"no router at all" is false as of wave 3, Task 3** (`0643553`), which created
+  `packages/api/src/trpc/routers/minutes-document.ts` and wired `minutesDocument` into `router.ts`.
+  Corrected in this wave's Tasks 3+4 fix round; the sweep that should have caught it searched for
+  bullets naming its own FILE rather than bullets whose CLAIM its work falsified — see item 14's
+  lens, sharpened in the same round for exactly this. What is still open here is narrower and
+  unchanged: that router carries `byMeeting` only, and `home.tsx` needs `pendingByTown`, which does
+  not exist. The wave-6 scoping stands (that wave owns `minutes.tsx`/`review.tsx` per this wave's own
+  plan), and `home.tsx`'s marker —
+  `TODO(phase-e-wave-6): minutesDocument.pendingByTown, board.listActive` — is already worded
+  correctly, naming the missing PROCEDURE rather than a missing router.
 - ~~`ProgressChecklist.tsx` (Task 5) ... Its third, `memberCount` ... stays on Supabase ... Marked
   `// TODO(phase-e-wave-2): boardMember.countByTown (or equivalent)`.~~ — **closed in Task 3.**
   `boardMember.memberCount` (the relocated procedure — see `board-member.ts`'s own header, "Task 1,
@@ -1592,27 +1656,30 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   `wave-6` on the same basis this wave's own plan already states elsewhere (its "Out of scope" note:
   "`minutes.tsx` and `review.tsx` are wave 6"), not a fresh guess — the same table this bullet's
   original version was checking against, now checkable because it exists.
-- **Wave 3, Task 3: three new one-procedure routers (`agendaItem`, `minutesDocument`,
+- ~~**Wave 3, Task 3: three new one-procedure routers (`agendaItem`, `minutesDocument`,
   `meetingAttendance`) exist and back `meetings.$meetingId.tsx`'s shell, but are deliberately NOT in
   `cache-key-parity.test.ts`'s `MIGRATED` map yet — a real, load-bearing staleness gap, not an
-  oversight.** Adding any of the three would (per the `meetings` entry's own precedent, item 7 above)
-  require every writer of the corresponding legacy `queryKeys.<x>` namespace, tree-wide, to also call
-  the new router's `pathFilter()` in the same commit. Measured before deciding: `agendaItems.byMeeting`
-  has six such writers (`AgendaItemDetailPanel.tsx`, `AgendaSection.tsx`, `InlineItemForm.tsx`,
-  `MeetingStartFlow.tsx`, `meetings.$meetingId.live.tsx`, `meetings.$meetingId.agenda.tsx`),
-  `minutesDocuments.byMeeting` two (`meetings.$meetingId.live.tsx`, `meetings.$meetingId.review.tsx`),
-  `attendance.byMeeting` three (`MeetingStartFlow.tsx`, `AttendancePanel.tsx`,
-  `meetings.$meetingId.live.tsx`) — every one of them squarely wave 4 (agenda), wave 5 (live/attendance)
-  or wave 6 (minutes) territory per this wave's own "Out of scope, and verify before assuming" note,
-  not this task's file list (`routes/meetings.$meetingId.tsx` alone). `persons.detail` has zero writers
-  anywhere in the tree (checked directly, not assumed), so no equivalent gap exists there. The concrete
-  cost of NOT adding the three entries: none of the six/two/three writers above currently invalidate
-  the new tRPC keys, so a change made through any of them (adding an agenda item elsewhere, say) will
-  not refresh this shell's own agenda-item-count/minutes-status/attendance-count reads until the
-  default 60s `staleTime` expires — bounded, not silent-forever, but the exact class of staleness item
-  7 exists to close. Whichever wave next migrates the screen that owns each writer inherits closing
-  this: add the `MIGRATED` entry, fix each real writer on the merits (a `pathFilter()` call + a pin
-  test per file), mirroring wave 3 Task 2's own fix round for the `meetings` entry — see item 7's
-  `meetings` paragraph for the template. Do not add the entry piecemeal ahead of that; a MIGRATED
-  entry with even one real writer left unfixed is the exact hole this document's `cache-key-parity`
-  section exists to prevent, not a partial credit.
+  oversight.** ... Whichever wave next migrates the screen that owns each writer inherits closing
+  this.~~ — **closed in wave 3, Tasks 3+4's fix round, and the deferral was wrong on the merits, not
+  merely deferred too long.** All three entries are in the map now (`agendaItems: "agendaItem"`,
+  `minutesDocuments: "minutesDocument"`, `attendance: "meetingAttendance"`). The bullet's own
+  measurement held up exactly — 11 (namespace, file) pairs across 8 unique files, 6 `agendaItems` / 2
+  `minutesDocuments` / 3 `attendance`, in `AgendaItemDetailPanel.tsx`, `AgendaSection.tsx`,
+  `InlineItemForm.tsx`, `MeetingStartFlow.tsx`, `AttendancePanel.tsx`,
+  `meetings.$meetingId.agenda.tsx`, `meetings.$meetingId.live.tsx` and
+  `meetings.$meetingId.review.tsx` — and so did "`persons.detail` has zero writers." What the bullet
+  got wrong was calling the cost "bounded, not silent-forever" and treating that as a reason to wait:
+  a reviewer reproduced the regression by execution, not argument. At the parent commit `1b1d635` the
+  shell read `queryKeys.agendaItems.byMeeting(meetingId)` — the same expression every writer
+  invalidates, character for character — and `Query.isStaleByTime()` short-circuits on
+  `state.isInvalidated` before consulting `staleTime`, so the refetch happened on return to the shell
+  regardless of the 60s window. After Task 3 the shell's key was
+  `[["agendaItem","countByMeeting"],…]`, nothing invalidated it, and adding two agenda items then
+  navigating back to the meeting detail read "3 items" for up to a minute. Same for the minutes status
+  pill and the attendance count. **The alternative to a partial entry is a COMPLETE entry** — all
+  eleven fixed on their merits in one commit, each with a pin test verified by deletion (item 8), the
+  legacy `queryKeys.*` lines all left in place because `SourceDataPanel.tsx`, `useQuorumCheck.ts` and
+  reads inside `live.tsx`/`review.tsx`/`agenda.tsx` still consume them. That is what wave 3 Task 2 did
+  for `meetings` one commit earlier and what `agendaTemplates` records two paragraphs into
+  `cache-key-parity.test.ts`'s own header; a task's file list has never exempted a writer from item 7,
+  and this bullet was the third time in three waves that reasoning was tried.
