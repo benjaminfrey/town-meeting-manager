@@ -7,24 +7,35 @@
  * Named as the intended caller in both `agendaTemplate.detail`'s and
  * `agendaTemplate.update`'s own doc comments
  * (`packages/api/src/trpc/routers/agenda-template.ts`) since those
- * procedures shipped in wave 2, Task 1 — but never actually wired here. This
- * route's read (`.select("*")`) and write (`.update(...)`) still go straight
- * through `@/lib/supabase`, and the write also bypasses
- * `assertCanUpdateAgendaTemplate` entirely (raw Supabase update, no admin
- * gate), the same non-admin-can-write inconsistency Task 3 closed for
- * `DeleteTemplateDialog.tsx`. Found in this wave's whole-branch review: no
- * task's file list or the wave plan names this route, and it carried no
- * `TODO(phase-e-wave-2)` marker, so conventions item 11's completeness sweep
- * read it as done. Not migrated here — that is wave 3's work — but marked so
- * the sweep sees it.
+ * procedures shipped in wave 2, Task 1 — wired here in Phase E wave 4,
+ * Task 0. The `templateRow` read and the save write now go through
+ * `trpc.agendaTemplate.detail`/`trpc.agendaTemplate.update`; the board-name
+ * breadcrumb read stays on raw Supabase (out of this marker's scope — see
+ * the `board` query below). Converting the write also closes the
+ * non-admin-can-write gap this file's header used to describe:
+ * `agendaTemplate.update` carries `requireActor(assertCanUpdateAgendaTemplate)`
+ * (declared before `.input()`, conventions item 2), so a non-admin save now
+ * answers FORBIDDEN instead of writing silently.
  *
- * TODO(phase-e-wave-2): agendaTemplate.detail, agendaTemplate.update
+ * Cache keys: `queryKeys.agendaTemplates.detail(templateId)` had exactly one
+ * reader and one writer in the whole tree — both in this file (checked via
+ * `grep -rn "queryKeys\.agendaTemplates" packages/web/src`) — so migrating
+ * this file's read is also retiring the last consumer, and its invalidation
+ * is dropped rather than kept as a legacy line (conventions item 7: "the
+ * legacy line stays because other, unmigrated screens still read that key ...
+ * not before"; there is no "before" left here). `queryKeys.agendaTemplates.byBoard(boardId)`
+ * is NOT dropped: `CreateTemplateDialog.tsx`, `DeleteTemplateDialog.tsx` and
+ * `boards.$boardId.templates.tsx` still read it, so `handleSave` keeps
+ * invalidating both that key and `trpc.agendaTemplate.pathFilter()` — the
+ * latter also covers this file's own `agendaTemplate.detail` read, since
+ * `pathFilter()` matches every procedure under the `agendaTemplate` router.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Save } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
+import { AlertTriangle, ChevronRight, Loader2, Save } from "lucide-react";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import type { Route } from "./+types/boards.$boardId.templates.$templateId.edit";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -35,12 +46,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
+import { queryClient as globalQueryClient } from "@/lib/queryClient";
 import { trpc } from "@/lib/trpc";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { boardId: params.boardId, templateId: params.templateId };
+  const templateId = params.templateId;
+  // Not wrapped in try/catch: a nonexistent or foreign template answers
+  // NOT_FOUND (`agendaTemplate.detail`'s own doc comment), and letting that
+  // reject routes to `RouteErrorBoundary` below — the same shape
+  // `boards.$boardId.tsx`'s loader uses (conventions item 12).
+  await globalQueryClient.ensureQueryData(trpc.agendaTemplate.detail.queryOptions({ templateId }));
+  return { boardId: params.boardId, templateId };
 }
 
 export default function AgendaTemplateEditorPage({ loaderData }: Route.ComponentProps) {
@@ -61,18 +79,11 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
     },
   });
 
-  const { data: templateRow } = useQuery({
-    queryKey: queryKeys.agendaTemplates.detail(templateId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_template")
-        .select("*")
-        .eq("id", templateId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  const {
+    data: templateRow,
+    isError: isTemplateError,
+    error: templateError,
+  } = useQuery(trpc.agendaTemplate.detail.queryOptions({ templateId }));
 
   const boardName = String(board?.name ?? "");
 
@@ -152,41 +163,68 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
     [selectedIndex, markDirty],
   );
 
+  const updateTemplate = useMutation(trpc.agendaTemplate.update.mutationOptions());
+  const { mutateAsync: updateTemplateAsync } = updateTemplate;
+
   const handleSave = useCallback(async () => {
     if (!isDirty) return;
     setIsSaving(true);
     try {
       const serialized = serializeSections(sections);
-      const now = new Date().toISOString();
-      await supabase
-        .from("agenda_template")
-        .update({
-          name: templateName,
-          sections: JSON.parse(serialized),
-          updated_at: now,
-        })
-        .eq("id", templateId)
-        .throwOnError();
-      setIsDirty(false);
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.agendaTemplates.detail(templateId),
+      await updateTemplateAsync({
+        templateId,
+        name: templateName,
+        sections: JSON.parse(serialized),
       });
+      setIsDirty(false);
+      // `queryKeys.agendaTemplates.detail(templateId)` is NOT invalidated
+      // here any more — this file's own `templateRow` read was its last
+      // consumer in the tree, and that read moved onto
+      // `trpc.agendaTemplate.detail` above (see this file's own header).
+      // `queryKeys.agendaTemplates.byBoard(boardId)` stays: `CreateTemplateDialog.tsx`,
+      // `DeleteTemplateDialog.tsx` and `boards.$boardId.templates.tsx` still
+      // read it.
       queryClient.invalidateQueries({
         queryKey: queryKeys.agendaTemplates.byBoard(boardId),
       });
-      // `boards.$boardId.templates.tsx`'s list read moved onto
-      // `trpc.agendaTemplate.list` (wave 2, Task 2) — the two legacy-key
-      // invalidations above no longer reach it. This route was originally
-      // named as only a legacy READER of `queryKeys.agendaTemplates`; it is
-      // also a WRITER, and the same gap applies (`cache-key-parity.test.ts`'s
-      // `MIGRATED` entry for `agendaTemplates`).
+      // Also covers this file's own `agendaTemplate.detail` read —
+      // `pathFilter()` matches every procedure under the `agendaTemplate`
+      // router, not just `list` (`boards.$boardId.templates.tsx`'s own
+      // reader).
       queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
     } finally {
       setIsSaving(false);
     }
-  }, [isDirty, sections, templateName, templateId, boardId, queryClient]);
+  }, [isDirty, sections, templateName, templateId, boardId, queryClient, updateTemplateAsync]);
 
-  // ─── Loading ──────────────────────────────────────────────────────
+  // ─── Error / loading ──────────────────────────────────────────────
+  if (isTemplateError) {
+    const notFound = isTRPCClientError(templateError) && templateError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This template could not be found."
+              : "Something went wrong loading this template."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another board."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link
+            to={`/boards/${boardId}/templates`}
+            className="mt-4 inline-block text-sm text-primary hover:underline"
+          >
+            Back to Templates
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!templateRow || !initialized) {
     return (
       <div className="flex items-center justify-center p-12">

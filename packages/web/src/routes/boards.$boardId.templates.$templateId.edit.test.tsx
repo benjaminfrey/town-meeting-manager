@@ -1,328 +1,226 @@
-import React from "react";
-import { vi, describe, it, expect, beforeEach } from "vitest";
+/**
+ * AgendaTemplateEditorPage — `agendaTemplate.detail`/`agendaTemplate.update`
+ * on tRPC.
+ *
+ * Phase E wave 4, Task 0 wired this route onto the two procedures named in
+ * its own `TODO(phase-e-wave-2)` marker. Previously two files covered this
+ * route: this one (a legacy `vi.mock("@tanstack/react-query")` test — the
+ * exact anti-pattern conventions item 8 warns against, since it cannot
+ * produce real tRPC query keys) and a separate
+ * `__tests__/boards.$boardId.templates.$templateId.edit.pathfilter.test.tsx`
+ * that mocked `@/lib/supabase` directly for the (then-raw) read and write.
+ * Both are rewritten and merged here, same shape as `boards.$boardId.test.tsx`:
+ * `@/lib/trpc` is NOT mocked, only `globalThis.fetch` is replaced via
+ * `installTRPCFetchStub`. `@/lib/supabase` is still mocked, narrowly — the
+ * `board` breadcrumb read stays raw Supabase (out of this task's marker) —
+ * but the template read/write no longer touch it.
+ */
 
-// ─── Mock TanStack Query ───────────────────────────────────────────────
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import { trpc } from "@/lib/trpc";
+import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.edit";
 
-const { mockUseQuery } = vi.hoisted(() => ({
-  mockUseQuery: vi.fn(),
+// ─── Mock identity ──────────────────────────────────────────────────────
+
+vi.mock("@/hooks/useCurrentUser", () => ({
+  useCurrentUser: () => ({ townId: "town-1" }),
 }));
 
-vi.mock("@tanstack/react-query", async () => {
-  const actual = await vi.importActual("@tanstack/react-query");
-  return {
-    ...(actual as object),
-    useQuery: (...args: unknown[]) => mockUseQuery(...args),
-  };
-});
+// ─── Mock Supabase (only the board-name breadcrumb read still uses it) ──
 
-// ─── Mock Supabase ─────────────────────────────────────────────────────
-
-const { mockChain, mockFrom } = vi.hoisted(() => {
+vi.mock("@/lib/supabase", () => {
   const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: [], error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) => Promise.resolve({ data: [], error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
+  chain["single"] = () => chain;
+  chain["throwOnError"] = () =>
+    Promise.resolve({ data: { id: "b1", name: "Select Board" }, error: null });
+  for (const m of ["select", "eq"]) {
     chain[m] = vi.fn().mockReturnValue(chain);
   }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
+  return { supabase: { from: vi.fn().mockReturnValue(chain) } };
 });
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
+// ─── Harness ────────────────────────────────────────────────────────────
 
-// ─── Mock child components ────────────────────────────────────────────
+const queryClient = setupAppQueryClient();
 
-vi.mock("@/components/templates/SectionListPanel", () => ({
-  SectionListPanel: (props: any) => (
-    <div data-testid="section-list-panel">
-      <button data-testid="add-section" onClick={props.onAdd}>
-        Add
-      </button>
-      <button data-testid="remove-section" onClick={() => props.onRemove(0)}>
-        Remove
-      </button>
-      <button data-testid="select-section" onClick={() => props.onSelect(1)}>
-        Select 1
-      </button>
-      <span data-testid="section-count">{props.sections.length}</span>
-    </div>
-  ),
-}));
+const fixedSections = [
+  {
+    title: "Call to Order",
+    sort_order: 0,
+    section_type: "procedural",
+    is_fixed: true,
+    description: null,
+    default_items: [],
+    minutes_behavior: "summarize",
+    show_item_commentary: false,
+  },
+  {
+    title: "Old Business",
+    sort_order: 1,
+    section_type: "discussion",
+    is_fixed: false,
+    description: null,
+    default_items: [],
+    minutes_behavior: "summarize",
+    show_item_commentary: false,
+  },
+];
 
-vi.mock("@/components/templates/SectionDetailPanel", () => ({
-  SectionDetailPanel: (props: any) => (
-    <div data-testid="section-detail-panel">
-      <span data-testid="section-title">{props.section?.title}</span>
-    </div>
-  ),
-}));
+/** Mutable so a test can change what the server returns between refetches. */
+const server = {
+  templateName: "Regular Meeting",
+  sections: fixedSections as unknown[],
+  detailRejects: false,
+  updateForbidden: false,
+};
 
-vi.mock("./+types/boards.$boardId.templates.$templateId.edit", () => ({}));
-
-// ─── Import component and test utils after mocks ─────────────────────
-
-import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.edit";
-import { renderWithProviders, screen, waitFor } from "@/test/render";
-
-// ─── Helpers ──────────────────────────────────────────────────────────
-
-function mockQueryResult<T>(data: T[]) {
-  return { data, isLoading: false, isFetching: false, error: undefined };
-}
-
-// ─── Mock data factory ───────────────────────────────────────────────
-
-function createMockBoard(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "board-1",
-    name: "Select Board",
-    ...overrides,
-  };
-}
-
-function createMockTemplate(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "template-1",
-    board_id: "board-1",
-    name: "Regular Meeting",
-    sections: JSON.stringify([
-      {
-        title: "Call to Order",
-        sort_order: 0,
-        section_type: "procedural",
-        is_fixed: true,
-        description: null,
-        default_items: [],
-        minutes_behavior: "summarize",
-        show_item_commentary: false,
-      },
-      {
-        title: "Old Business",
-        sort_order: 1,
-        section_type: "discussion",
-        is_fixed: false,
-        description: null,
-        default_items: [],
-        minutes_behavior: "summarize",
-        show_item_commentary: false,
-      },
-    ]),
-    is_default: 1,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function setupQueryMocks(
-  board: Record<string, unknown> | null = createMockBoard(),
-  template: Record<string, unknown> | null = createMockTemplate(),
-) {
-  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
-    const key = queryKey[0] as string;
-    if (key === "boards")
-      return { data: board ?? undefined, isLoading: false, isFetching: false, error: undefined };
-    if (key === "agendaTemplates")
-      return { data: template ?? undefined, isLoading: false, isFetching: false, error: undefined };
-    return mockQueryResult([]);
-  });
-}
+// Collection scope, once per file — see `installTRPCFetchStub`'s doc comment.
+const stub = installTRPCFetchStub({
+  "agendaTemplate.detail": () => {
+    if (server.detailRejects) trpcTestError("NOT_FOUND");
+    return { id: "template-1", name: server.templateName, sections: server.sections };
+  },
+  "agendaTemplate.update": (input) => {
+    if (server.updateForbidden) trpcTestError("FORBIDDEN");
+    server.templateName = input.name;
+    server.sections = input.sections;
+    return { id: input.templateId, name: input.name };
+  },
+});
 
 const defaultLoaderData = { boardId: "board-1", templateId: "template-1" };
 
-// ─── Tests ───────────────────────────────────────────────────────────
+function renderRoute() {
+  return renderWithProviders(
+    <AgendaTemplateEditorPage
+      {...({ loaderData: defaultLoaderData } as Parameters<typeof AgendaTemplateEditorPage>[0])}
+    />,
+    { route: "/boards/board-1/templates/template-1/edit", queryClient },
+  );
+}
 
 describe("AgendaTemplateEditorPage", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockFrom.mockReturnValue(mockChain);
-    for (const m of [
-      "select",
-      "insert",
-      "update",
-      "delete",
-      "eq",
-      "neq",
-      "order",
-      "limit",
-      "single",
-      "throwOnError",
-      "or",
-      "filter",
-      "upsert",
-      "in",
-      "maybeSingle",
-    ]) {
-      if (typeof mockChain[m]?.mockReturnValue === "function") {
-        mockChain[m].mockReturnValue(mockChain);
-      }
-    }
-    mockUseQuery.mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      error: undefined,
-    });
+    server.templateName = "Regular Meeting";
+    server.sections = fixedSections;
+    server.detailRejects = false;
+    server.updateForbidden = false;
   });
 
-  it("renders loading state when template not yet loaded", () => {
-    setupQueryMocks(createMockBoard(), null);
-
-    renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
-
+  it("renders loading state before the template resolves", () => {
+    // `queryClient` has no primed cache and the stub never settles
+    // synchronously, so the very first render is the loading branch.
+    renderRoute();
     expect(screen.getByText("Loading template...")).toBeInTheDocument();
   });
 
-  it("renders template name and breadcrumb when loaded", () => {
-    setupQueryMocks(
-      createMockBoard({ name: "Planning Board" }),
-      createMockTemplate({ name: "Special Meeting" }),
-    );
-
-    renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
-
-    // Breadcrumb links
-    expect(screen.getByText("Boards")).toBeInTheDocument();
-    expect(screen.getByText("Planning Board")).toBeInTheDocument();
-    expect(screen.getByText("Templates")).toBeInTheDocument();
-
-    // Template name in the editable input
-    const nameInput = screen.getByDisplayValue("Special Meeting");
-    expect(nameInput).toBeInTheDocument();
+  it("shows an error state when agendaTemplate.detail rejects, not an empty page", async () => {
+    server.detailRejects = true;
+    renderRoute();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(await screen.findByText("This template could not be found.")).toBeInTheDocument();
   });
 
-  it("disables save button when not dirty", () => {
-    setupQueryMocks();
+  it("renders template name and breadcrumb when loaded", async () => {
+    renderRoute();
 
-    renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
+    expect(await screen.findByText("Boards")).toBeInTheDocument();
+    expect(await screen.findByText("Select Board")).toBeInTheDocument();
+    expect(await screen.findByText("Templates")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Regular Meeting")).toBeInTheDocument();
+  });
 
-    const saveButton = screen.getByRole("button", { name: /save/i });
+  it("disables save button when not dirty", async () => {
+    renderRoute();
+    const saveButton = await screen.findByRole("button", { name: /save/i });
     expect(saveButton).toBeDisabled();
   });
 
   it("marks form as dirty when template name changes", async () => {
-    setupQueryMocks();
-
-    const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
-
-    const nameInput = screen.getByDisplayValue("Regular Meeting");
+    const { user } = renderRoute();
+    const nameInput = await screen.findByDisplayValue("Regular Meeting");
     await user.clear(nameInput);
     await user.type(nameInput, "Updated Meeting");
 
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    expect(saveButton).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
   });
 
   it("adds a new section with default values", async () => {
-    setupQueryMocks();
+    const { user } = renderRoute();
+    expect(await screen.findByText("Old Business")).toBeInTheDocument();
 
-    const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
+    // The real `SectionListPanel` renders one row per section plus an "Add
+    // Section" control — click through it rather than a mocked stand-in, so
+    // this exercises the same component tree production renders.
+    await user.click(screen.getByRole("button", { name: /add section/i }));
 
-    // Verify initial section count (2 sections from mock template)
-    expect(screen.getByTestId("section-count")).toHaveTextContent("2");
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
+  });
 
-    // Click the add button exposed by mock SectionListPanel
-    await user.click(screen.getByTestId("add-section"));
+  it("selects a section and shows its detail panel", async () => {
+    const { user } = renderRoute();
+    // Index 0 ("Call to Order") is selected by default.
+    expect(await screen.findByDisplayValue("Call to Order")).toBeInTheDocument();
 
-    // Section count should increment
-    expect(screen.getByTestId("section-count")).toHaveTextContent("3");
+    await user.click(screen.getByText("Old Business"));
 
-    // Save should now be enabled since adding a section marks dirty
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    expect(saveButton).toBeEnabled();
+    expect(await screen.findByDisplayValue("Old Business")).toBeInTheDocument();
   });
 
   it("removes a section and adjusts selected index", async () => {
-    setupQueryMocks();
+    const { user } = renderRoute();
+    expect(await screen.findByText("Old Business")).toBeInTheDocument();
 
-    const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
+    // "Old Business" (`is_fixed: false`) carries a remove button; "Call to
+    // Order" (`is_fixed: true`) does not — `SectionListPanel` hides it for
+    // fixed sections, so this is the only one on the page.
+    await user.click(screen.getByRole("button", { name: /remove section/i }));
 
-    expect(screen.getByTestId("section-count")).toHaveTextContent("2");
-
-    // Remove the first section (index 0)
-    await user.click(screen.getByTestId("remove-section"));
-
-    // Section count should decrement
-    expect(screen.getByTestId("section-count")).toHaveTextContent("1");
-
-    // Save should be enabled after removal
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    expect(saveButton).toBeEnabled();
+    await waitFor(() => expect(screen.queryByText("Old Business")).not.toBeInTheDocument());
+    expect(screen.getByText("Call to Order")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled();
   });
 
-  it("saves template via Supabase update", async () => {
-    setupQueryMocks();
+  it("saves through agendaTemplate.update and invalidates trpc.agendaTemplate.pathFilter()", async () => {
+    const listKey = trpc.agendaTemplate.list.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(listKey, []);
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBeFalsy();
 
-    const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
-
-    // Make the form dirty by changing the name
-    const nameInput = screen.getByDisplayValue("Regular Meeting");
+    const { user } = renderRoute();
+    const nameInput = await screen.findByDisplayValue("Regular Meeting");
     await user.clear(nameInput);
     await user.type(nameInput, "Updated Agenda");
 
-    // Click save
-    const saveButton = screen.getByRole("button", { name: /save/i });
-    await user.click(saveButton);
+    const before = stub.countFor("agendaTemplate.update");
+    await user.click(screen.getByRole("button", { name: /save/i }));
 
-    await waitFor(() => {
-      expect(mockFrom).toHaveBeenCalledWith("agenda_template");
-      expect(mockChain.update).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "Updated Agenda" }),
-      );
-      expect(mockChain.eq).toHaveBeenCalledWith("id", "template-1");
-    });
+    await waitFor(() => expect(stub.countFor("agendaTemplate.update")).toBeGreaterThan(before));
+    // `trpc.agendaTemplate.pathFilter()` matches every procedure under the
+    // `agendaTemplate` router, including `list` — the key
+    // `boards.$boardId.templates.tsx` reads under.
+    await waitFor(() => expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true));
   });
 
-  it("selects section and shows detail panel", async () => {
-    setupQueryMocks();
+  it("refetches this screen's own read when a writer invalidates trpc.agendaTemplate.pathFilter()", async () => {
+    // Proves `agendaTemplate.pathFilter()` also reaches THIS screen's own
+    // `agendaTemplate.detail` read, not only `list`'s — the reasoning
+    // `handleSave`'s own comment gives for why no separate `.detail(...)`
+    // invalidation is needed any more. Asserted on the refetch count, not the
+    // displayed name: the component's `useEffect` seeds local form state from
+    // `templateRow` exactly once (guarded by its own `initialized` flag), by
+    // design — a background refetch must not stomp an in-progress edit, so a
+    // renamed-elsewhere server value is deliberately NOT expected to reach
+    // the input.
+    renderRoute();
+    expect(await screen.findByDisplayValue("Regular Meeting")).toBeInTheDocument();
+    const before = stub.countFor("agendaTemplate.detail");
 
-    const { user } = renderWithProviders(
-      <AgendaTemplateEditorPage {...({ loaderData: defaultLoaderData } as any)} />,
-    );
+    server.templateName = "Renamed Elsewhere";
+    await queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
 
-    // Initially the first section ("Call to Order") is selected (index 0)
-    expect(screen.getByTestId("section-title")).toHaveTextContent("Call to Order");
-
-    // Click to select the second section (index 1)
-    await user.click(screen.getByTestId("select-section"));
-
-    // The detail panel should now show the second section's title
-    expect(screen.getByTestId("section-title")).toHaveTextContent("Old Business");
+    await waitFor(() => expect(stub.countFor("agendaTemplate.detail")).toBeGreaterThan(before));
   });
 });
