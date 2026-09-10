@@ -4,14 +4,21 @@
  * Validates at least 1 item exists.
  * Warns about unfilled placeholders (non-blocking).
  *
- * TODO(phase-e-wave-4): this dialog's `meeting.agenda_status` write is still
- * raw Supabase, with no authorization check of any kind under
- * `meeting_tenant_isolation` (tenancy-only) — the same shape Phase E wave 3
- * Task 2 closed for `meeting.cancel`/`meeting.updateStatus` (see
- * `packages/api/src/trpc/routers/meeting.ts`), on a different column. Not
- * fixed here — this component's write is `agenda_status`, out of this
- * task's scope (its `meeting` router closes `status` only) — flagged so
- * wave 4's agenda migration does not have to rediscover it.
+ * TODO(phase-e-wave-4): `meeting.publishAgenda` — this dialog's
+ * `meeting.agenda_status` write is still raw Supabase, with no authorization
+ * check of any kind under `meeting_tenant_isolation` (tenancy-only), the same
+ * shape Phase E wave 3 Task 2 closed for
+ * `meeting.cancel`/`meeting.updateStatus` on a different column.
+ *
+ * **The procedure now exists** — `meeting.publishAgenda`
+ * (`packages/api/src/trpc/routers/meeting.ts`), guarded by A5 through
+ * `requireBoardPermission`, added in wave 4's Task 2 along with the
+ * `assertCanPublishAgenda` rule that code had never had. **Nothing calls it
+ * yet.** Task 3 wires this dialog, which needs a `boardId` prop it does not
+ * have today (the guard is declared before `.input()` and has to authorize
+ * something before any query runs — see `trpc.ts`'s `requireBoardActor` doc
+ * comment on that cost). Until then the hole described above is open exactly
+ * as it was; the marker stays, with its claim corrected rather than removed.
  */
 
 import { useCallback, useMemo, useState } from "react";

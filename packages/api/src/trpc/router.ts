@@ -26,6 +26,7 @@ import { invitationRouter } from "./routers/invitation.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 import { meetingRouter } from "./routers/meeting.js";
 import { agendaItemRouter } from "./routers/agenda-item.js";
+import { exhibitRouter } from "./routers/exhibit.js";
 import { minutesDocumentRouter } from "./routers/minutes-document.js";
 import { meetingAttendanceRouter } from "./routers/meeting-attendance.js";
 
@@ -101,6 +102,16 @@ export const appRouter = router({
    * mismatch defence it feeds.
    */
   agendaItem: agendaItemRouter,
+
+  /**
+   * An agenda item's attachments: one read, and the LINK creation path only.
+   * The file-upload path and the delete both stay at the D1e endpoints
+   * (`routes/files.ts` → `storage/documents.ts`), which already apply the
+   * same rules against the same derived board and additionally manage the
+   * bytes — see `routers/exhibit.ts`'s header for why duplicating either
+   * here would weaken it.
+   */
+  exhibit: exhibitRouter,
 
   /**
    * The one minutes document a meeting has, if any — `routes/

@@ -7,6 +7,24 @@
  * enforcement: the API re-checks the size and sniffs the file's actual bytes,
  * because anything a component decides is a decision the client makes about
  * itself. See `useExhibitUpload` and `packages/api/src/storage/paths.ts`.
+ *
+ * TODO(phase-e-wave-4): `exhibit.link` / `exhibit.byMeeting` — `handleAddUrl`
+ * below is a SECOND, unauthorized creation path for the same table the file
+ * upload above writes properly. It raw-inserts an `exhibit` row through the
+ * dead Supabase client with no rule, no existence check on `agenda_item_id`
+ * (FK enforcement bypasses RLS — conventions item 3), a client-supplied
+ * `town_id`, `uploaded_by` left NULL, and `visibility` hardcoded `"public"`
+ * with no way to say otherwise. `exhibit_tenant_isolation` is tenancy-only,
+ * so nothing else is checking either.
+ *
+ * **Both procedures now exist** (`packages/api/src/trpc/routers/exhibit.ts`,
+ * wave 4 Task 2): `exhibit.link` applies the SAME rule 15 against the SAME
+ * derived board as the upload endpoint, and `exhibit.byMeeting` replaces the
+ * town-wide `exhibit` read this component's `exhibits` prop comes from.
+ * **Nothing calls either yet** — Task 3 wires them, and `link` needs a
+ * `boardId` prop this component does not have today. The DELETE path
+ * (`ExhibitRow.tsx`) is already correct and stays where it is; see that
+ * router's header for why there is no `exhibit.delete`.
  */
 
 import { useCallback, useRef, useState } from "react";
