@@ -312,12 +312,17 @@ code via `assertPermission`) cannot express it, the identical reason `requireAct
 subject-carrying rule like `assertCanUpdateUserAccount`. The FIRST version of this task's fix gave
 `cancel` a local, one-off middleware (`requireCanUpdateMeeting`) for exactly this — but the review
 round that found this item's own count inconsistency also asked why it should stay local: a full
-audit of `rules.ts`'s **eighteen** `BoardScope` rules found `assertCanUpdateMeeting` is not alone.
-Sixteen ARE exactly one `assertPermission` call — use `requireBoardPermission` for those, and reach
+audit of `rules.ts`'s `BoardScope` rules — **eighteen** at the time, nineteen since wave 4's Task 2
+added `assertCanPublishAgenda`; quote the grep below, not either number — found
+`assertCanUpdateMeeting` is not alone.
+All but two ARE exactly one `assertPermission` call — use `requireBoardPermission` for those, and reach
 for it FIRST; this shape is for the rest. The one other that is not is `assertCanInsertExhibit`
-(A3 OR `isBoardMember(actor)`, a ROLE branch rather than a second code — this one DOES fit the shape
+(A3 OR `isBoardMember(actor)`, a ROLE branch rather than a second code — ~~this one DOES fit the shape
 below, structurally; it is named here because it is the other multi-branch example the audit found,
-not because it cannot be wired).
+not because it cannot be wired~~ — **wired in wave 4, Task 2: `exhibit.link` is
+`requireBoardActor`'s second real call site, and the first on a rule whose second branch is a role.
+See "Wave 4, Task 2" below for what that first use found, which is not what a reader of this
+paragraph would predict**).
 
 **Corrected in the whole-branch fix round: this count shipped as "nineteen" here and again in
 `trpc.ts`'s own `requireBoardActor` doc comment, and it does not reproduce.** Quote the grep, not
@@ -325,11 +330,15 @@ the number (item 11) — and this one matters more than a stale marker count, be
 very rule the miscount was reaching for:
 
 ```
-$ grep -nE ": BoardScope" packages/api/src/trpc/authorization/rules.ts | wc -l
-18
+$ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
+18   # at 860a469, wave 4 Task 1's close-out
+19   # at 5d11393, after wave 4 Task 2 added `assertCanPublishAgenda` — A5,
+     # `publish_agenda`, one of the 18 BOARD_SCOPED_CODES and the only one
+     # with no rule in this codebase at all until that task
 ```
 
-The nineteenth was `assertCanInsertVoteRecord` (M3 OR the caller's own active seat), which takes no
+The extra rule the old "nineteen" was reaching for — a DIFFERENT nineteenth from the real one the
+grep now counts — was `assertCanInsertVoteRecord` (M3 OR the caller's own active seat), which takes no
 `BoardScope` **at all**: its signature is `(actor: Actor, tx: TenantTx, subject: VoteRecordSubject)`,
 so `TenantTx` is the **SECOND** argument, not "a THIRD argument" as both places said. It stays
 resolver-side regardless, and for the reason already given — it is `async` and needs a `TenantTx` no
@@ -393,8 +402,8 @@ src/trpc/__probe.ts(3,54): error TS2345: Argument of type '(actor: Actor, scope:
   Target signature provides too few arguments. Expected 2 or more, but got 1.
 ```
 
-All 18 `BoardScope` rules take a REQUIRED second parameter (`scope: BoardScope`; none is optional —
-same grep as above), so the mistake is not expressible without an explicit cast, which is the
+Every `BoardScope` rule takes a REQUIRED second parameter (`scope: BoardScope`; none is optional —
+same grep as above, re-checked when Task 2 added the nineteenth), so the mistake is not expressible without an explicit cast, which is the
 already-documented "parked, not closed" structural-typing hole above rather than a second one. What
 genuinely remains open is only the narrower claim: there is no `BOARD_SCOPED_CODES`-style set of RULE
 FUNCTIONS, so if a future rule were ever given an OPTIONAL scope parameter, `requireActor` would
@@ -475,7 +484,7 @@ consequences a wave-5/6 author should not have to rediscover:
   FK-bypasses-RLS hazard for the many-row case, exactly as the `NOT_FOUND` check does for the
   single-row case above.
 
-**Three of the seven are now checked; four are not.** Wave 3, Task 3 built the read-only routers over
+**Four of the seven are now checked; three are not.** Wave 3, Task 3 built the read-only routers over
 `agenda_item`, `meeting_attendance` and `minutes_document`, and its fix round confirmed all three
 against `0000_baseline.sql` directly (`agenda_item_tenant_isolation`,
 `meeting_attendance_tenant_isolation`, `minutes_document_tenant_isolation`): each is a plain
@@ -484,9 +493,58 @@ predicate**, identical to `meeting_tenant_isolation`. So the mismatch defence IS
 three the moment a wave adds a row-targeted board-scoped WRITE to any of them: any town member can
 already see any of those rows and therefore learn their true board. The finding lives in each
 router's own header too, but it belongs here as well, since this paragraph is where a wave-4/5/6
-author is sent to look. **`motion`, `vote_record`, `minutes_section` and `exhibit` remain unchecked**
-— that check belongs to whichever wave writes each one's router, and "the other three turned out
-tenancy-only" is not evidence about these four.
+author is sent to look. ~~**`motion`, `vote_record`, `minutes_section` and `exhibit` remain
+unchecked**~~ — **`exhibit` was checked in wave 4, Task 2 and is the same shape**:
+
+```
+$ grep -n "exhibit_tenant_isolation" -A 3 packages/api/drizzle/0000_baseline.sql
+CREATE POLICY exhibit_tenant_isolation ON public.exhibit
+  FOR ALL
+  USING (town_id = get_current_town_id())
+  WITH CHECK (town_id = get_current_town_id());
+```
+
+No board predicate, no role predicate — so the mismatch defence is load-bearing for `exhibit.link`,
+two joins out. **`motion`, `vote_record` and `minutes_section` remain unchecked** — that check
+belongs to whichever wave writes each one's router, and "the other four turned out tenancy-only" is
+not evidence about these three.
+
+**Wave 4, Task 2 — the fourth guard shape's second call site, and two things it found.**
+`exhibit.link` is `.use(requireBoardActor(assertCanInsertExhibit))`, the first use of that shape on a
+rule whose second branch is a ROLE rather than a second code.
+
+**What the shape got right:** everything the mechanism promises. The guard runs before `.input()`
+(FORBIDDEN before BAD_REQUEST, pinned and verified by moving the `.use()` — exactly one test goes red,
+as `expected 'BAD_REQUEST' to be 'FORBIDDEN'`); the arity and return-type checks accept this rule and
+would reject an actor-only one; `ctx.authorizedBoardId` is set, so `assertMatchesAuthorizedBoard`
+works two joins out with no change to the helper at all.
+
+**What no guard of this shape can fix, and a wave-5/6 author should not mistake for a bug in their own
+wiring:** `isBoardMember(actor)` is `actor.role === "board_member"` — a TOWN-level fact with no board
+in it. So for that branch the `BoardScope` the guard so carefully extracts, authorizes and re-checks is
+**inert**: any board member of the town may attach material to ANY board's agenda item, and the
+mismatch defence does not stop them, because the board they claim IS the item's real board. This is a
+property of rule 15, not of `requireBoardActor`; the D1e upload endpoint
+(`storage/documents.ts`'s `createExhibitFromUpload`) reaches the same rule with the same derived board
+and answers identically, and has since Stage 1. Narrowing it to "a member of THIS board" needs a
+`board_member` lookup, which makes the rule `async` and therefore resolver-side
+(`assertCanInsertVoteRecord`'s shape, not this one) — a design decision, deliberately not made inside a
+migration, and pinned as a PASSING test in `exhibit.test.ts` so that whoever makes it finds a failing
+test rather than silence. **The general lesson: `requireBoardActor` guarantees that the board a rule is
+asked about is the board the write is really about. It cannot guarantee that the rule looks at it.**
+
+**Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
+the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
+answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`
+(multipart, byte sniffing, a 5 MB ceiling, `withWrittenFile` wrapping the insert — none of which a JSON
+procedure can carry), and the DELETE stays at `DELETE /api/files/exhibits/:exhibitId` (it removes the
+bytes after the transaction commits, which a tRPC resolver cannot do). What is shared is the RULE, the
+BOARD DERIVATION and the visibility vocabulary. The cost of the tRPC half is worth naming because it is
+invisible until the two sit side by side: the Fastify route checks resolver-side, after deriving the
+board, so it never trusts a claimed board and has NO mismatch hazard; the tRPC procedure must authorize
+before `.input()`, so it inherits a client-supplied `boardId` whose only job is feeding the guard, and
+then has to pay for it with the mismatch defence. That is this item's already-stated cost, met in the
+wild.
 
 **The cost, stated rather than left to be discovered:** the board id `requireBoardActor` needs is not
 needed by the WRITE itself for a row-targeted procedure — it exists purely so a guard declared before
@@ -1326,6 +1384,16 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # (`agendaTemplate.detail`/`agendaTemplate.update`) — removing 5 marker
      # lines (18 − 5 = 13), and opened no new gap: the five lines removed are
      # exactly the five this task's own brief named, no more and no less.
+14   # at 5d11393, the close of Phase E wave 4, Task 2 — UP by one from
+     # Task 0's 13, and legitimately so (this item's own closing paragraph:
+     # a task may raise the count by NAMING a gap that was previously
+     # silent). `ExhibitUploader.tsx` gained its first marker ever, for the
+     # raw `handleAddUrl` insert that item 11's sweep had been reading as
+     # done purely because the file carried no token; and
+     # `PublishAgendaDialog.tsx`'s existing marker had its CLAIM corrected
+     # rather than removed — it said no procedure existed, which stopped
+     # being true in Task 2's first commit. Neither file is wired yet; Task
+     # 3 owns that.
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -1521,9 +1589,22 @@ grep-able property.
   than left as `meeting.ts`'s own one-off `requireCanUpdateMeeting` (the review round's audit of
   `rules.ts` found `assertCanUpdateMeeting` was not the only `BoardScope` rule that does not reduce
   to one code — see item 2's own "Wave 3, Task 1" section for the other two and why they either fit
-  or do not). `requireBoardPermission` has one real call site (`meeting.insert`);
-  `requireBoardActor` has two (`meeting.cancel`, `meeting.updateStatus`) as of this task. The
+  or do not). ~~`requireBoardPermission` has one real call site (`meeting.insert`);
+  `requireBoardActor` has two (`meeting.cancel`, `meeting.updateStatus`) as of this task.~~ —
+  **re-run at `5d11393` (wave 4, Task 2's close-out); quote the grep, not the number:**
+
+  ```
+  $ grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
+  9    # agendaItem's seven writes (Task 1), meeting.insert, meeting.publishAgenda (Task 2)
+  $ grep -rnE "^\s+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
+  3    # meeting.cancel, meeting.updateStatus, exhibit.link (Task 2)
+  ```
+
+  (Both anchored to the start of the line on purpose. The unanchored forms answer 18 and 5 at the
+  same commit, because these two names are discussed in half a dozen router doc comments and in
+  `meeting.test.ts` — the same comment-versus-code hazard item 11's own marker grep has.) The
   board-scoped mechanism now has real users on both of its shapes, not just the single-code one.
+
 - `assertCanSelectTownNotificationConfig` / `assertCanInsertTownNotificationConfig` /
   `assertCanUpdateTownNotificationConfig` are tested as pure functions
   (`packages/api/src/trpc/__tests__/admin-gates.test.ts`) but **no procedure calls them** — wave 1
@@ -1983,3 +2064,29 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   says so: `TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes` — the
   `minutesDocument` router has `byMeeting` only, and no procedure exists for any of the six
   transitions.
+
+- **Wave 4, Task 2's own open items, named rather than left silent.** Three, all inherited by Task 3
+  or later, none of them a defect this task introduced:
+  1. **Nothing calls `meeting.publishAgenda`, `exhibit.link` or `exhibit.byMeeting` yet.**
+     `PublishAgendaDialog.tsx` still writes `meeting.agenda_status` raw and
+     `ExhibitUploader.tsx` still raw-inserts a linked exhibit; both carry a
+     `TODO(phase-e-wave-4)` marker naming the procedure that now exists. **The A5 hole and the
+     unauthorized link-insert are therefore still OPEN in the running product**, and will be until
+     Task 3 wires them. Recorded this way deliberately: wave 3 reported a hole closed at the moment
+     its procedure shipped and had to correct itself one round later.
+  2. **`agendaItem.byMeeting`'s `exhibit_count` is not visibility-filtered and `exhibit.byMeeting`
+     is.** The count (Task 1) is a raw correlated `count(*)`; the list (Task 2) applies rule 14. For
+     a caller the rule excludes rows from, the "N exhibits" badge and the list under it disagree.
+     Left alone rather than fixed in passing — making the count actor-dependent changes a procedure
+     Task 2 does not own and did not test, and the honest fix is for the screen to count the rows it
+     actually received. Task 3 renders both.
+  3. **Rule 15's board-member branch ignores the board** (see item 2's "Wave 4, Task 2" section for
+     the full statement). Pinned as a PASSING test in `exhibit.test.ts` so narrowing it is a
+     deliberate change with a failing test to greet it; genuinely open as a product question, and
+     the same at the D1e upload endpoint, where it has been open since Stage 1.
+
+  Two things this task checked and found already correct, so a later wave does not re-open them:
+  the exhibit DELETE (rule 16, A3-only, at the D1e endpoint, reached by `ExhibitRow.tsx` for BOTH
+  file and URL exhibits) and the portal's `board_only` exclusion (`routes/portal.ts` filters with
+  `portalVisibleExhibits`, and `exhibit.link` writes the very column that filter reads, so no row it
+  can create bypasses it).
