@@ -1250,10 +1250,21 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Supabase, and item 11's sweep had been reading it as done purely
      # because it carried no token. Same hole as the four files Task 1's fix
      # round re-tagged.
+13   # at the end of Phase E wave 4, Task 0 — down from 18, and now with
+     # ZERO `phase-e-wave-2` markers left in the tree
+     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-2\)" packages/web/src`
+     # answers empty). Task 0 closed all four of wave 2's leftover markers —
+     # `boards.$boardId.tsx` (`town.detail`), `people.tsx`
+     # (`boardMember.listByTown`), `AddPersonDialog.tsx` (`invitation.insert`,
+     # which carried the marker twice) and
+     # `boards.$boardId.templates.$templateId.edit.tsx`
+     # (`agendaTemplate.detail`/`agendaTemplate.update`) — removing 5 marker
+     # lines (18 − 5 = 13), and opened no new gap: the five lines removed are
+     # exactly the five this task's own brief named, no more and no less.
 ```
 
-Whether the count is 22, 20, 17, or something else by the time this is read depends entirely on
-what closed since — quote the grep, not the number, still the rule three tasks later.
+Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
+what closed since — quote the grep, not the number, still the rule four tasks later.
 
 This countdown is not monotonic within a wave regardless of which grep measures it — a task can
 legitimately raise it by naming a gap explicitly that was previously silent (Task 5 added
@@ -1604,17 +1615,37 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   five bullets that used to sit here were stale, three of them CLOSED and described as open. This
   is exactly the drift item 14 above (the standing close-out step) exists to catch, and the fact
   that four slipped through at once is why that step got added.**
-- `boards.$boardId.tsx`: the agenda-template-count half of the old two-item bullet here is
-  **closed** — `agendaTemplate.countForBoard` is wired (in the `Overview` tab's template-count
-  `useQuery`) and the file's marker naming it is gone, exactly as an earlier version of this bullet
-  predicted it would be. The
-  town-settings half is still open — `town.detail` shipped in Task 1 but this file has not been
-  migrated onto it (real work: retyping two components' props, re-checking the effective-settings
-  mapping) — and **closing the other half had silently dropped this file's marker entirely**, which
-  the whole-branch review caught as its own small instance of item 11's hole: `town.detail` existing
-  elsewhere reads as "done" to a bare grep unless the file's own marker says otherwise. Restored:
-  `// TODO(phase-e-wave-2): town.detail (exists, not yet wired here for the Overview "effective
-settings" read)`.
+- ~~`boards.$boardId.tsx`: ... town-settings half is still open — `town.detail` shipped in Task 1
+  but this file has not been migrated onto it (real work: retyping two components' props,
+  re-checking the effective-settings mapping) ...~~ — **closed in Phase E wave 4, Task 0.** The
+  agenda-template-count half was already closed (see the struck-through text above, kept for the
+  record of item 11's hole it documents). The town read now goes through
+  `useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId })` — the same shape
+  `boards.tsx`/`settings.town.tsx`/`settings.minutes-workflow.tsx`/`home.tsx` already use — and the
+  `as unknown as RouterOutputs["town"]["detail"]` cast on `EditBoardDialog`'s `town` prop is gone
+  now that `town` is the procedure's own real output (conventions item 10). No writer invalidation
+  change was needed: every writer of the legacy `queryKeys.towns.detail(townId)` key already carried
+  `trpc.town.pathFilter()` (`towns: "town"` has been in `cache-key-parity.test.ts`'s `MIGRATED` map
+  since before this task), so this was a pure read-side wiring change. The file's own
+  `TODO(phase-e-wave-2)` marker is gone.
+- **`boards.$boardId.templates.$templateId.edit.tsx`'s own Known-gaps entry — promised by item 11
+  above ("a marker this same review round added; see its Known-gaps entry below") but never actually
+  written. Recorded here, and closed in the same breath, rather than left as a second dangling
+  reference for a future reader to trip over.** This route's `templateRow` read and its save write
+  bypassed `agendaTemplate.detail`/`agendaTemplate.update` entirely, staying on raw Supabase with no
+  admin gate on the write (the save called `.update(...)` directly, with no
+  `assertCanUpdateAgendaTemplate` check at all — the same non-admin-can-write shape Task 3 closed for
+  `DeleteTemplateDialog.tsx`, still open here as of wave 3). **Closed in Phase E wave 4, Task 0**: both
+  now go through the named procedures, `agendaTemplate.update` carrying
+  `requireActor(assertCanUpdateAgendaTemplate)` (already shipped and already tested with a FORBIDDEN
+  refusal and a reorder pin — no new API test was needed). `queryKeys.agendaTemplates.detail(templateId)`
+  had exactly one reader and one writer in the whole tree, both in this file, so its invalidation was
+  dropped outright rather than kept as a legacy line (item 7: the legacy line stays only while another
+  reader exists); `queryKeys.agendaTemplates.byBoard(boardId)` stays, since `CreateTemplateDialog.tsx`,
+  `DeleteTemplateDialog.tsx` and `boards.$boardId.templates.tsx` still read it. The route also gained a
+  loading/error (`role="alert"`) pair and a `clientLoader` prime it did not have before, matching
+  conventions items 5 and 12 for a screen that now has a real tRPC read to fail — it did not have one
+  before, so there was nothing item 5 applied to.
 - ~~`home.tsx` ... The board picker still needs its own procedure (an archived-filtered
   `board.listActive` or an `activeOnly` argument on `board.list`), not a reuse of the existing
   one.~~ — **Wrong as of Task 4, not just stale wording: `board.listActive` shipped there, doing
@@ -1755,16 +1786,27 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   adjusted, because there the caller has no legitimate reading of "the row doesn't exist right now" to
   race against — the two are different hazards and warrant different answers, not the same guard reused
   twice.
-- **`AddPersonDialog.tsx`'s `invitation.insert` and `people.tsx`'s `boardMember.listByTown` markers are
-  still open — checked directly in Task 4, not assumed closed by Task 3's `boardMember` router.**
-  `board-member.ts`'s `insertInvitation` is a private helper used only by `addBoardMember`/
-  `addStaffMember`; it is not a callable procedure `AddPersonDialog` (which never seats anyone on a
-  board) could reach, and `AddPersonDialog`'s own flow — `person.insert` → `person.insertStaffAccount` →
-  a bare invitation write — has no seat to hang an invitation off of the way those two do.
-  `boardMember.roster` is scoped to ONE board and `boardMember.memberCount` returns a bare count;
-  neither answers `people.tsx`'s actual question ("for every person in the town, which board names do
-  they hold a seat on"), which needs a town-wide `board_member` JOIN `board` grouped by person — a
-  procedure that does not exist yet. Both markers stay exactly as they were.
+- ~~**`AddPersonDialog.tsx`'s `invitation.insert` and `people.tsx`'s `boardMember.listByTown` markers
+  are still open** ... Both markers stay exactly as they were.~~ — **both closed in Phase E wave 4,
+  Task 0**, and this bullet's own diagnosis of what was missing turned out to be exactly right, which
+  is why it is worth recording rather than only striking through. `boardMember.listByTown` is a new
+  procedure (`board-member.ts`) answering precisely the town-wide `board_member` JOIN `board` grouped
+  by person this bullet said did not exist; no permission guard, for the same tenancy-only reason
+  `board.ts`'s own reads carry none (`board_member_tenant_isolation` is a plain `town_id`-only RLS
+  policy). No writer invalidation change was needed to add it: `members: "boardMember"` has been in
+  `cache-key-parity.test.ts`'s `MIGRATED` map since wave 2, so every writer that already calls
+  `trpc.boardMember.pathFilter()` (`AddMemberDialog`, `MemberArchiveDialog`, `MemberTransitionDialog`,
+  `RoleConflictDialog`, `EditGovTitleDialog`, `ArchiveBoardDialog`, `MemberRoster`) reaches the new
+  procedure automatically, since `pathFilter()` matches by router prefix. `invitation.insert` is a new
+  router (`invitation.ts`) — `AddPersonDialog` genuinely had "no seat to hang an invitation off of",
+  exactly as this bullet said, so `board-member.ts`'s private `insertInvitation` helper stayed private
+  and a new procedure was built instead, reusing `assertCanInsertUserAccount` (the same rule
+  `person.insertStaffAccount`/`boardMember.addStaffMember` already use) rather than inventing a new
+  rule — see that router's own header for the full reasoning, including the two FK checks
+  (`assertPersonExists` plus a new `assertAccountBelongsToPerson`, which closes both the existence
+  hazard AND a privilege-escalation shape a bare existence check would miss: pairing a real person with
+  a real account that belongs to someone else) and why the token is now `gen_random_uuid()`, generated
+  in the database, rather than the `crypto.randomUUID()` this dialog used to mint in the browser.
 - ~~`home.tsx`'s `meeting.byTown`/`minutesDocument.pendingByTown` marker could not be responsibly
   re-labeled to a specific wave number in Task 4.~~ ... Left as `TODO(phase-e-wave-2)` — mis-scoped
   but honestly so — for whoever writes the wave 3 plan to retag with an actual number.~~ — **the wave
