@@ -12,16 +12,24 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronRight, Clock, GripVertical, Plus, User } from "lucide-react";
 import { InlineItemForm } from "./InlineItemForm";
 import { ExhibitUploader } from "./ExhibitUploader";
+import type { AgendaItem, MeetingExhibit } from "./agenda-types";
 import { Button } from "@/components/ui/button";
 
 interface AgendaItemRowProps {
-  item: Record<string, unknown>;
+  item: AgendaItem;
   itemIndex: number;
   sectionType: string;
   sectionId: string;
   meetingId: string;
-  townId: string;
-  exhibits: Record<string, unknown>[];
+  /**
+   * The meeting's board. Wave 4, Task 3 replaced the `townId` prop this
+   * component used to thread down: `town_id` was only ever needed because the
+   * raw inserts below sent it from client state, and the procedures take it
+   * from the caller's own session instead. What the children need now is the
+   * board their writes authorize against.
+   */
+  boardId: string;
+  exhibits: MeetingExhibit[];
   readOnly: boolean;
   isSubItem?: boolean;
 }
@@ -32,7 +40,7 @@ export function AgendaItemRow({
   sectionType,
   sectionId,
   meetingId,
-  townId,
+  boardId,
   exhibits,
   readOnly,
   isSubItem,
@@ -40,10 +48,10 @@ export function AgendaItemRow({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAddingSubItem, setIsAddingSubItem] = useState(false);
 
-  const itemId = String(item.id);
-  const title = String(item.title ?? "");
-  const presenter = (item.presenter as string) || null;
-  const duration = item.estimated_duration ? Number(item.estimated_duration) : null;
+  const itemId = item.id;
+  const title = item.title;
+  const presenter = item.presenter;
+  const duration = item.estimated_duration;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: itemId,
@@ -110,31 +118,31 @@ export function AgendaItemRow({
           {readOnly ? (
             <div className="space-y-2 text-sm">
               {item.description ? (
-                <p className="text-muted-foreground">{String(item.description)}</p>
+                <p className="text-muted-foreground">{item.description}</p>
               ) : null}
               {item.background ? (
                 <div>
                   <span className="font-medium">Background: </span>
-                  <span className="text-muted-foreground">{String(item.background)}</span>
+                  <span className="text-muted-foreground">{item.background}</span>
                 </div>
               ) : null}
               {item.recommendation ? (
                 <div>
                   <span className="font-medium">Recommendation: </span>
-                  <span className="text-muted-foreground">{String(item.recommendation)}</span>
+                  <span className="text-muted-foreground">{item.recommendation}</span>
                 </div>
               ) : null}
               {item.suggested_motion ? (
                 <div>
                   <span className="font-medium">Suggested motion: </span>
-                  <span className="text-muted-foreground">{String(item.suggested_motion)}</span>
+                  <span className="text-muted-foreground">{item.suggested_motion}</span>
                 </div>
               ) : null}
             </div>
           ) : (
             <InlineItemForm
               meetingId={meetingId}
-              townId={townId}
+              boardId={boardId}
               parentItemId={sectionId}
               sectionType={sectionType}
               sortOrder={itemIndex}
@@ -149,7 +157,7 @@ export function AgendaItemRow({
           <ExhibitUploader
             agendaItemId={itemId}
             meetingId={meetingId}
-            townId={townId}
+            boardId={boardId}
             exhibits={exhibits}
             readOnly={readOnly}
           />
@@ -161,7 +169,7 @@ export function AgendaItemRow({
                 <div className="ml-8">
                   <InlineItemForm
                     meetingId={meetingId}
-                    townId={townId}
+                    boardId={boardId}
                     parentItemId={itemId}
                     sectionType={sectionType}
                     sortOrder={0}

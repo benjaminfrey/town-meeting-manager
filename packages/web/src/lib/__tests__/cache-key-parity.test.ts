@@ -93,6 +93,23 @@
  * `useQuorumCheck.ts` and reads inside `live.tsx`/`review.tsx`/`agenda.tsx`
  * still consume them, and they go when the last legacy reader does.
  *
+ * `exhibits: "exhibit"` joined in Phase E wave 4, Task 3, the commit that
+ * moved `routes/meetings.$meetingId.agenda.tsx`'s exhibit read onto
+ * `trpc.exhibit.byMeeting`. That task's own brief records this call being
+ * made and overturned four times before — always on the reasoning that the
+ * writers live in files the task does not own — and the entry is added on the
+ * same merits as `agendaItems`/`agendaTemplates` above: a task's file list has
+ * never exempted a writer from item 7. It raised exactly THREE violations, all
+ * three real and all three fixed in the same commit:
+ * `ExhibitUploader.tsx` (two call sites: the D1e file upload and the newly
+ * wired `exhibit.link`), `ExhibitRow.tsx` (the D1e delete, which stays at that
+ * endpoint and still owes the key its removal invalidates) and
+ * `InlineItemForm.tsx` (whose `agendaItem.delete` cascades to the item's
+ * exhibits). `AgendaSection.tsx` gained the call in the same commit for its
+ * own cascading section delete, which had no `queryKeys.exhibits` line at all
+ * to be flagged by. The legacy `queryKeys.exhibits.*` lines all STAY:
+ * `routes/meetings.$meetingId.review.tsx` still reads that namespace.
+ *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three
  * writers (`CreateTemplateDialog.tsx`, `DeleteTemplateDialog.tsx`) were
@@ -201,6 +218,7 @@ const MIGRATED: Record<string, string> = {
   minutesDocuments: "minutesDocument",
   minutes: "minutesDocument",
   attendance: "meetingAttendance",
+  exhibits: "exhibit",
 };
 
 /**

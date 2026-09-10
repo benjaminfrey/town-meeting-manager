@@ -3,11 +3,63 @@
  *
  * Full agenda builder with sections, items, inline editing,
  * drag-and-drop reordering, exhibit uploads, and publish workflow.
+ *
+ * ─── Phase E, wave 4, Task 3 — the wiring ─────────────────────────────────
+ *
+ * Tasks 1 and 2 built `agendaItem` and `exhibit` and nothing called either.
+ * This screen and its four child components now do. All five of this file's
+ * reads and both of its writes are tRPC; `@/lib/supabase` is gone from it.
+ *
+ *   - `meeting.detail` (wave 3, Task 1, four columns added in this task) —
+ *     the meeting row, including `board_id`, which is the value every
+ *     board-scoped guard downstream needs. It is read HERE and passed down as
+ *     a `boardId` prop rather than re-derived per component, so there is one
+ *     source for it on this screen.
+ *   - `board.detail` (unit 0) — the board's name for the preview dialog's
+ *     letterhead. Nothing else on this screen reads the board.
+ *   - `town.detail` (wave 1) — the town's name (letterhead) and `state` (the
+ *     notice-compliance banner's statute lookup). It takes no input: it
+ *     answers for the caller's own town, which is the only town a meeting on
+ *     this screen can belong to.
+ *   - `agendaItem.byMeeting` (Task 1) — flat and ordered, grouped into
+ *     sections by the `sections` memo below exactly as before.
+ *   - `exhibit.byMeeting` (Task 2) — replaces a read of EVERY exhibit row in
+ *     the town, filtered to this meeting's items in the browser. See
+ *     "What a clerk stops seeing" below; this is not a pure refactor.
+ *
+ * The two writes were raw `agenda_item` INSERT/UPDATEs with no authorization
+ * check of any kind (`agenda_item_tenant_isolation` is tenancy-only): "Add
+ * Section" is now `agendaItem.insert` and the section drag-reorder is
+ * `agendaItem.reorder`, both A2 board-scoped. Both surface their refusal —
+ * closing a hole makes FORBIDDEN reachable for the first time, and wave 3
+ * shipped two silent refusals for exactly that reason.
+ *
+ * The two document-generation buttons stay on `apiJson`: `/api/meetings/:id/
+ * agenda-packet` and `/api/meetings/:id/meeting-notice` are Fastify routes
+ * that render a PDF, which no tRPC procedure replaces.
+ *
+ * ─── What a clerk stops seeing, stated because it is visible ──────────────
+ *
+ * `exhibit.byMeeting` applies rule 14 per row. A clerk holding A2 but not A3,
+ * who is not a board member, used to see the titles of `admin_only` AND
+ * `board_only` exhibits here (the raw query filtered nothing) and now sees
+ * neither — measured against the built rule, not inferred, and pinned in
+ * `exhibit.test.ts`. `board_only` is the tier a board packet lands in, so
+ * this is a real change to what that clerk sees, and it is the correct
+ * reading of rule 14: neither tier is granted by A2 alone.
+ *
+ * The screen degrades by simply having fewer exhibits, never by looking
+ * broken: the "N exhibits" counters (the status bar, and each item's row)
+ * count the rows this read actually returned, so they agree with the list
+ * beneath them for every caller. That agreement is why `agendaItem.byMeeting`
+ * lost its own unfiltered `exhibit_count` in this task — see that
+ * procedure's doc comment.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -25,7 +77,17 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Eye, FileText, GripVertical, Loader2, Play, Plus, ScrollText, Send } from "lucide-react";
+import {
+  AlertTriangle,
+  Eye,
+  FileText,
+  GripVertical,
+  Loader2,
+  Play,
+  Plus,
+  ScrollText,
+  Send,
+} from "lucide-react";
 import type { Route } from "./+types/meetings.$meetingId.agenda";
 import { apiJson } from "@/lib/api-client";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -33,7 +95,6 @@ import { AgendaSection } from "@/components/meetings/AgendaSection";
 import { AgendaStatusBar } from "@/components/meetings/AgendaStatusBar";
 import { AgendaPreviewDialog } from "@/components/meetings/AgendaPreviewDialog";
 import { PublishAgendaDialog } from "@/components/meetings/PublishAgendaDialog";
-import { InlineItemForm } from "@/components/meetings/InlineItemForm";
 import {
   MEETING_STATUS_LABELS,
   MEETING_STATUS_COLORS,
@@ -50,9 +111,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage } from "@/lib/trpc";
+// The procedures' own row types, shared with every child component below —
+// never `Record<string, unknown>` (conventions item 10).
+import type { AgendaItem, SectionWithChildren } from "@/components/meetings/agenda-types";
 import { getNoticeDeadline, type MeetingType, type ComplianceResult } from "@town-meeting/shared";
 
 // ─── Compliance Banner ──────────────────────────────────────────────
@@ -113,32 +176,13 @@ function NoticeComplianceBanner({
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const meetingId = params.meetingId;
 
-  // Prefetch meeting and agenda items
+  // Not wrapped in try/catch: a nonexistent or foreign meeting answers
+  // NOT_FOUND and letting that reject routes to `RouteErrorBoundary` below —
+  // visible, rather than the indefinite "Loading meeting..." the old
+  // `select("*").single()` produced for the same case (conventions item 12).
   await Promise.all([
-    queryClient.ensureQueryData({
-      queryKey: queryKeys.meetings.detail(meetingId),
-      queryFn: async () => {
-        const { data } = await supabase
-          .from("meeting")
-          .select("*")
-          .eq("id", meetingId)
-          .single()
-          .throwOnError();
-        return data;
-      },
-    }),
-    queryClient.ensureQueryData({
-      queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-      queryFn: async () => {
-        const { data } = await supabase
-          .from("agenda_item")
-          .select("*")
-          .eq("meeting_id", meetingId)
-          .order("sort_order", { ascending: true })
-          .throwOnError();
-        return data ?? [];
-      },
-    }),
+    queryClient.ensureQueryData(trpc.meeting.detail.queryOptions({ meetingId })),
+    queryClient.ensureQueryData(trpc.agendaItem.byMeeting.queryOptions({ meetingId })),
   ]);
 
   return { meetingId };
@@ -156,129 +200,114 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
   const [generatingNotice, setGeneratingNotice] = useState(false);
 
   // ─── Queries ──────────────────────────────────────────────────────
-  const { data: meeting } = useQuery({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  const {
+    data: meeting,
+    isLoading: isMeetingLoading,
+    isError: isMeetingError,
+    error: meetingError,
+  } = useQuery(trpc.meeting.detail.queryOptions({ meetingId }));
 
-  const boardId_ = (meeting?.board_id as string) ?? "";
-  const townId_ = (meeting?.town_id as string) ?? "";
+  const boardId = meeting?.board_id ?? "";
 
   const { data: board } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId_),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("id", boardId_)
-        .single()
-        .throwOnError();
-      return data;
-    },
-    enabled: !!boardId_,
+    ...trpc.board.detail.queryOptions({ boardId }),
+    enabled: !!boardId,
   });
 
-  const { data: town } = useQuery({
-    queryKey: queryKeys.towns.detail(townId_),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId_)
-        .single()
-        .throwOnError();
-      return data;
-    },
-    enabled: !!townId_,
-  });
+  // No `enabled` and no argument: `town.detail` answers for the caller's own
+  // town, read off the bridged session rather than off this meeting's row.
+  const { data: town } = useQuery(trpc.town.detail.queryOptions());
 
-  const { data: itemRows } = useQuery({
-    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_item")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .order("sort_order", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: itemRows } = useQuery(trpc.agendaItem.byMeeting.queryOptions({ meetingId }));
 
-  const { data: exhibitRows } = useQuery({
-    queryKey: [...queryKeys.exhibits.byMeeting(meetingId), townId_],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("exhibit")
-        .select("*")
-        .eq("town_id", townId_)
-        .order("sort_order", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId_,
-  });
+  const {
+    data: exhibitRows,
+    isError: isExhibitsError,
+    error: exhibitsError,
+  } = useQuery(trpc.exhibit.byMeeting.queryOptions({ meetingId }));
 
-  const allItems = (itemRows ?? []) as Record<string, unknown>[];
-  // Filter exhibits to only those belonging to this meeting's items
-  const allItemIds = useMemo(() => new Set(allItems.map((i) => String(i.id))), [allItems]);
-  const allExhibits = useMemo(
-    () =>
-      ((exhibitRows ?? []) as Record<string, unknown>[]).filter((e) =>
-        allItemIds.has(String(e.agenda_item_id)),
-      ),
-    [exhibitRows, allItemIds],
-  );
+  const allItems = useMemo(() => itemRows ?? [], [itemRows]);
+  // No client-side filter to this meeting's items any more: `exhibit.byMeeting`
+  // already joins through `agenda_item` to this meeting, and applies rule 14
+  // per row on top of that (see this file's header).
+  const allExhibits = useMemo(() => exhibitRows ?? [], [exhibitRows]);
 
   // Group items: sections (parent_item_id is null) and children
-  type SectionWithChildren = Record<string, unknown> & {
-    children: Record<string, unknown>[];
-  };
   const sections: SectionWithChildren[] = useMemo(() => {
     const parents = allItems.filter((item) => !item.parent_item_id);
     return parents.map((section) => {
       const children = allItems
         .filter((item) => item.parent_item_id === section.id)
-        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
-      return { ...section, children } as SectionWithChildren;
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      return { ...section, children };
     });
   }, [allItems]);
 
   // Stats
   const totalItems = allItems.length;
-  const totalDuration = allItems.reduce(
-    (sum, item) => sum + (Number(item.estimated_duration) || 0),
-    0,
-  );
+  const totalDuration = allItems.reduce((sum, item) => sum + (item.estimated_duration ?? 0), 0);
+  // The rows this caller actually received, so the count agrees with the list
+  // for a caller rule 14 hides rows from — see this file's header.
   const totalExhibits = allExhibits.length;
 
   // Meeting info
-  const meetingTitle = String(meeting?.title ?? "");
-  const meetingStatus = String(meeting?.status ?? "draft");
-  const agendaStatus = String(meeting?.agenda_status ?? "draft");
-  const boardId = String(meeting?.board_id ?? "");
-  const townId = String(meeting?.town_id ?? "");
-  const boardName = String(board?.name ?? "");
-  const townName = String(town?.name ?? "");
-  const scheduledDate = String(meeting?.scheduled_date ?? "");
-  const scheduledTime = String(meeting?.scheduled_time ?? "");
-  const location = String(meeting?.location ?? "");
+  const meetingTitle = meeting?.title ?? "";
+  const meetingStatus = meeting?.status ?? "draft";
+  const agendaStatus = meeting?.agenda_status ?? "draft";
+  const boardName = board?.name ?? "";
+  const townName = town?.name ?? "";
+  const scheduledDate = meeting?.scheduled_date ?? "";
+  const scheduledTime = meeting?.scheduled_time ?? "";
+  const location = meeting?.location ?? "";
 
-  const agendaPacketUrl = (meeting?.agenda_packet_url as string) || null;
-  const agendaPacketGeneratedAt = (meeting?.agenda_packet_generated_at as string) || null;
-  const meetingNoticeUrl = (meeting?.meeting_notice_url as string) || null;
-  const meetingNoticeGeneratedAt = (meeting?.meeting_notice_generated_at as string) || null;
+  const agendaPacketUrl = meeting?.agenda_packet_url ?? null;
+  const agendaPacketGeneratedAt = meeting?.agenda_packet_generated_at ?? null;
+  const meetingNoticeUrl = meeting?.meeting_notice_url ?? null;
+  const meetingNoticeGeneratedAt = meeting?.meeting_notice_generated_at ?? null;
 
   const isCancelled = meetingStatus === "cancelled";
   const isPublished = agendaStatus === "published";
+
+  // ─── Mutations ────────────────────────────────────────────────────
+  //
+  // Both were raw Supabase writes with no authorization check. Both now
+  // surface their refusal: `agendaItem.insert`/`reorder` are guarded by A2
+  // for this board, so FORBIDDEN is reachable here for the first time and a
+  // silent no-op would be indistinguishable from a saved change.
+
+  const addSection = useMutation(
+    trpc.agendaItem.insert.mutationOptions({
+      onSuccess: () => {
+        // Legacy key: `SourceDataPanel.tsx`, `live.tsx` and `review.tsx`
+        // still read it (conventions item 7 — the legacy line goes when the
+        // last legacy reader does).
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // INSERTs a new section row: this screen's own list, and the "N items"
+        // count `routes/meetings.$meetingId.tsx`'s shell reads through
+        // `trpc.agendaItem.countByMeeting`.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        setAddingSectionType(null);
+        setAddingSectionTitle("");
+      },
+      onError: (err) => toast.error(refusalMessage(err, "add a section to this agenda")),
+    }),
+  );
+
+  const reorderSections = useMutation(
+    trpc.agendaItem.reorder.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // Reorders `agenda_item` rows — no count change, but an `agenda_item`
+        // write, invalidated at the router per conventions item 7.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      },
+      onError: (err) => toast.error(refusalMessage(err, "reorder this agenda")),
+    }),
+  );
 
   // ─── Document Generation ──────────────────────────────────────────
   const handleGeneratePacket = useCallback(async () => {
@@ -303,7 +332,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
     } finally {
       setGeneratingPacket(false);
     }
-  }, [meetingId, queryClient]);
+  }, [meetingId]);
 
   const handleGenerateNotice = useCallback(async () => {
     setGeneratingNotice(true);
@@ -327,7 +356,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
     } finally {
       setGeneratingNotice(false);
     }
-  }, [meetingId, queryClient]);
+  }, [meetingId]);
 
   // ─── DnD for section reordering ─────────────────────────────────────
   const sensors = useSensors(
@@ -337,83 +366,84 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
     }),
   );
 
-  const sectionIds = useMemo(() => sections.map((s) => String(s.id)), [sections]);
+  const sectionIds = useMemo(() => sections.map((s) => s.id), [sections]);
 
   const handleSectionDragEnd = useCallback(
-    async (event: DragEndEvent) => {
+    (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
-      const oldIndex = sections.findIndex((s) => String(s.id) === active.id);
-      const newIndex = sections.findIndex((s) => String(s.id) === over.id);
+      const oldIndex = sections.findIndex((s) => s.id === active.id);
+      const newIndex = sections.findIndex((s) => s.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
 
-      // Update sort_order for affected sections
-      const now = new Date().toISOString();
       const reordered = [...sections];
       const [moved] = reordered.splice(oldIndex, 1);
       reordered.splice(newIndex, 0, moved!);
 
-      // Batch update sort orders via Supabase
-      const updates = reordered
-        .filter((s, i) => Number(s.sort_order) !== i)
-        .map((s, i) =>
-          supabase
-            .from("agenda_item")
-            .update({ sort_order: i, updated_at: now })
-            .eq("id", String(s.id))
-            .throwOnError(),
-        );
-
-      await Promise.all(updates);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      // Reorders `agenda_item` rows — no count change, but an `agenda_item`
-      // write, invalidated at the router per conventions item 7.
-      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      // One request, not N. The procedure writes `sort_order = <position in
+      // this list>` for every id; the client used to skip rows whose value
+      // already matched, which reaches the identical end state.
+      reorderSections.mutate({ boardId, itemIds: reordered.map((s) => s.id) });
     },
-    [sections, meetingId],
+    [sections, boardId, reorderSections],
   );
 
   // ─── Add section handler ────────────────────────────────────────────
-  const handleAddSection = useCallback(async () => {
+  const handleAddSection = useCallback(() => {
     if (!addingSectionType || !addingSectionTitle.trim()) return;
 
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const maxSort = sections.reduce((max, s) => Math.max(max, Number(s.sort_order ?? 0)), -1);
+    const maxSort = sections.reduce((max, s) => Math.max(max, s.sort_order ?? 0), -1);
 
-    await supabase
-      .from("agenda_item")
-      .insert({
-        id,
-        meeting_id: meetingId,
-        town_id: townId,
-        section_type: addingSectionType,
-        sort_order: maxSort + 1,
-        title: addingSectionTitle.trim(),
-        description: null,
-        presenter: null,
-        estimated_duration: null,
-        parent_item_id: null,
-        status: "pending",
-        created_at: now,
-        updated_at: now,
-      })
-      .throwOnError();
+    addSection.mutate({
+      boardId,
+      meetingId,
+      parentItemId: null,
+      sectionType: addingSectionType,
+      sortOrder: maxSort + 1,
+      title: addingSectionTitle.trim(),
+      description: null,
+      presenter: null,
+      estimatedDuration: null,
+      staffResource: null,
+      background: null,
+      recommendation: null,
+      suggestedMotion: null,
+    });
+  }, [addingSectionType, addingSectionTitle, sections, meetingId, boardId, addSection]);
 
-    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-    // INSERTs a new section row into `agenda_item` — the "N items" count
-    // `routes/meetings.$meetingId.tsx`'s shell reads through
-    // `trpc.agendaItem.countByMeeting` counts every row for the meeting,
-    // sections included.
-    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+  // ─── Error state ────────────────────────────────────────────────────
+  //
+  // A failure AFTER mount — a refetch, a `staleTime` expiry. The loader above
+  // covers the before-mount case through `RouteErrorBoundary`; conventions
+  // item 12 requires both and neither substitutes for the other.
 
-    setAddingSectionType(null);
-    setAddingSectionTitle("");
-  }, [addingSectionType, addingSectionTitle, sections, meetingId, townId]);
+  if (isMeetingError) {
+    const notFound = isTRPCClientError(meetingError) && meetingError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This meeting could not be found."
+              : "Something went wrong loading this agenda."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link to="/meetings" className="mt-4 inline-block text-sm text-primary hover:underline">
+            Back to Meetings
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Loading ────────────────────────────────────────────────────────
-  if (!meeting) {
+  if (isMeetingLoading || !meeting) {
     return (
       <div className="flex items-center justify-center p-12">
         <p className="text-sm text-muted-foreground">Loading meeting...</p>
@@ -440,8 +470,8 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
         boardName={boardName}
         townName={townName}
         scheduledDate={formattedDate}
-        scheduledTime={scheduledTime}
-        location={location}
+        scheduledTime={scheduledTime ?? ""}
+        location={location ?? ""}
         sections={sections}
         allExhibits={allExhibits}
       />
@@ -449,6 +479,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
         open={publishOpen}
         onOpenChange={setPublishOpen}
         meetingId={meetingId}
+        boardId={boardId}
         sections={sections}
       />
 
@@ -478,9 +509,9 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
           <div className="flex flex-col items-end gap-2">
             <NoticeComplianceBanner
               meetingDate={scheduledDate}
-              meetingTime={scheduledTime}
-              meetingType={String(meeting?.meeting_type ?? "regular")}
-              state={String(town?.state ?? "ME")}
+              meetingTime={scheduledTime ?? ""}
+              meetingType={meeting.meeting_type}
+              state={town?.state ?? "ME"}
             />
             <div className="flex items-center gap-2">
               <Button
@@ -545,18 +576,34 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
         )}
       </div>
 
+      {/* Exhibits failed to load — the items still render, so say which half
+          is missing rather than blanking the page (conventions item 5). */}
+      {isExhibitsError && (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          role="alert"
+        >
+          <p className="font-medium">Attachments could not be loaded.</p>
+          <p className="text-xs">
+            {isTRPCClientError(exhibitsError) && exhibitsError.data?.code === "NOT_FOUND"
+              ? "This meeting could not be found."
+              : "The agenda below is complete; only its exhibits are missing. Try reloading."}
+          </p>
+        </div>
+      )}
+
       {/* Sections with DnD reordering */}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
-        onDragEnd={(e) => void handleSectionDragEnd(e)}
+        onDragEnd={handleSectionDragEnd}
       >
         <SortableContext items={sectionIds} strategy={verticalListSortingStrategy}>
           <div className="space-y-4">
             {sections.map((section, sectionIndex) => (
               <SortableSection
-                key={String(section.id)}
-                id={String(section.id)}
+                key={section.id}
+                id={section.id}
                 readOnly={isCancelled || isPublished}
               >
                 <AgendaSection
@@ -564,7 +611,7 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
                   sectionIndex={sectionIndex}
                   children_items={section.children}
                   meetingId={meetingId}
-                  townId={townId}
+                  boardId={boardId}
                   exhibits={allExhibits.filter(
                     (e) =>
                       e.agenda_item_id === section.id ||
@@ -617,7 +664,11 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={() => void handleAddSection()} disabled={!addingSectionTitle.trim()}>
+              <Button
+                onClick={handleAddSection}
+                disabled={!addingSectionTitle.trim() || addSection.isPending}
+              >
+                {addSection.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Add
               </Button>
               <Button
