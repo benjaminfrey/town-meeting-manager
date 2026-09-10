@@ -92,9 +92,13 @@ export const appRouter = router({
   meeting: meetingRouter,
 
   /**
-   * The agenda item count `routes/meetings.$meetingId.tsx`'s shell needs.
-   * One procedure today — wave 4 owns the full agenda surface and extends
-   * this router rather than creating it. See `routers/agenda-item.ts`.
+   * The agenda surface: the shell's item count, the builder's ordered read,
+   * and every `agenda_item` write — `insert`, `update`, `reorder`, a
+   * cascading `delete`, and `instantiateFromTemplate`. `setOperatorNotes`
+   * and `markComplete` ship here UNWIRED for wave 5's live screen. Every
+   * write is board-scoped through a JOIN (`agenda_item` has no `board_id`)
+   * — see `routers/agenda-item.ts`'s header for the derivation and the
+   * mismatch defence it feeds.
    */
   agendaItem: agendaItemRouter,
 

@@ -1,35 +1,272 @@
 /**
- * Phase E, wave 3, Task 3 — the agenda item router's first procedure.
+ * Phase E, wave 4, Task 1 — the agenda item router.
  *
- * Only `countByMeeting` exists here today: the single agenda-item read
- * `routes/meetings.$meetingId.tsx`'s shell needs (the "N items" badge next
- * to the agenda's status pill). The full agenda surface — `list`, `detail`,
- * insert/update/reorder/publish — is wave 4's own task, per this wave's plan
- * ("Out of scope, and verify before assuming": the agenda surface is wave
- * 4). This router exists now, with one procedure, so wave 4 extends it
- * rather than creating it — conventions item 1's "one router per domain
- * noun" names `agenda_item` as its own noun, distinct from `meeting`'s.
+ * Wave 3, Task 3 created this file with one procedure (`countByMeeting`, the
+ * "N items" badge on `routes/meetings.$meetingId.tsx`'s shell) precisely so
+ * this task would extend a router rather than create one. It now carries the
+ * agenda builder's read and every `agenda_item` write the product performs.
  *
- * No permission guard: `agenda_item_tenant_isolation`
- * (`0000_baseline.sql`) is a plain `town_id = get_current_town_id()` policy,
- * FOR ALL, no role predicate — the same shape `board.ts`/`person.ts` already
- * document this reasoning for. The raw Supabase read this replaces
- * (`.from("agenda_item").select("id").eq("meeting_id", meetingId)`) had no
- * application-level check either.
+ * ─── The board is behind a JOIN, and that is this task's whole point ───────
  *
- * `assertMeetingExists` (exported from `meeting.ts`) runs first, matching
- * `board.stats`'s own reasoning: a `count(*)` over a foreign or nonexistent
- * `meetingId` degrades to `0` exactly as readily as a real meeting with no
- * agenda yet, so a caller of this procedure alone (not `meeting.detail` in
- * the same screen) would otherwise render a convincing but nonexistent
- * meeting's "0 items" — conventions item 3.
+ * `agenda_item` has **no `board_id` column** (`db/schema.ts`). Its board is
+ * its meeting's:
+ *
+ *     SELECT m.board_id FROM agenda_item ai
+ *     JOIN meeting m ON m.id = ai.meeting_id WHERE ai.id = $1
+ *
+ * Wave 3's mismatch defence (`trpc.ts`'s `assertMatchesAuthorizedBoard`,
+ * conventions item 2) still applies unchanged — every write here authorizes
+ * a CLIENT-CLAIMED `boardId` in middleware, then re-derives the real board
+ * inside the same `ctx.withTenant` transaction as the write and compares.
+ * What changed is where the second value comes from: a query, not a column
+ * on the row being written. The helper needed no signature change; its doc
+ * comment did, and got one in this task's first commit — the requirement is
+ * about PROVENANCE (read from the database inside the write's own
+ * transaction, never from client input), not about the value being a column.
+ *
+ * `agenda_item_tenant_isolation` (`0000_baseline.sql`) is a plain
+ * `FOR ALL USING (town_id = get_current_town_id())` — no board predicate and
+ * no role predicate, re-verified for this task. So RLS will NOT catch a board
+ * mismatch: any signed-in member of the town can already read any of this
+ * town's agenda items and learn which board they belong to. The defence
+ * below is the only thing between a clerk holding A2 on their own board and
+ * a write to another board's agenda.
+ *
+ * **Two procedures write MANY rows** (`reorder`, `instantiateFromTemplate` —
+ * and `delete`, through the database's own cascade). A single
+ * re-authorization is not enough for `reorder`, whose ids can span meetings
+ * and therefore boards: `assertItemsOnAuthorizedBoard` derives the DISTINCT
+ * board set and calls `assertMatchesAuthorizedBoard` once per distinct
+ * board, so a list mixing the authorized board with any other is refused
+ * even though one of the two would pass a single check.
+ * `instantiateFromTemplate` names ONE meeting, so its board set is a
+ * singleton by construction — stated rather than left to be assumed, since
+ * the two are described together in this wave's plan.
+ *
+ * `assertItemsOnAuthorizedBoard` / `assertMeetingOnAuthorizedBoard` are this
+ * router's greppable form of "did this procedure re-check the row's true
+ * board" — `grep -n "OnAuthorizedBoard(" packages/api/src/trpc/routers/agenda-item.ts`
+ * answers it for all seven writes; `assertMatchesAuthorizedBoard(` itself
+ * appears twice, once inside each helper.
+ *
+ * ─── Authorization: A2 for every write, including the delete ──────────────
+ *
+ * `rules.ts`'s agenda_item section is "A2, BOARD-SCOPED" —
+ * `assertCanInsertAgendaItem` and `assertCanUpdateAgendaItem` are each
+ * exactly `assertPermission(actor, "A2", {boardId, action})`. Every write
+ * here therefore uses `requireBoardPermission("A2", boardIdFrom(), {action})`,
+ * which IS that call (see `meeting.ts`'s header for the same reasoning about
+ * `assertCanInsertMeeting`: going through the code form is the same check,
+ * not a shortcut around the rule), and which conventions item 2 tells authors
+ * to reach for FIRST for a single-code rule.
+ *
+ * **The delete rule, decided rather than left implicit.** There is no
+ * `assertCanDeleteAgendaItem` in `rules.ts` and no delete-specific
+ * `PermissionCode` — A2 (`edit_agenda`) is the governing action for the
+ * agenda's contents. This task's plan offered two answers: add a delete rule
+ * delegating to A2, or reuse A2 directly and say why. **Reused, deliberately.**
+ * A third function whose body is a third copy of
+ * `assertPermission(actor, "A2", …)` would be a name, not a check — and it
+ * would be a name with NO caller, because the call site would still be
+ * `requireBoardPermission("A2", …)` (item 2's "reach for it first" applies to
+ * a single-code rule, and inventing a rule in order to justify the wider
+ * guard is backwards). The greppability the plan wanted is met by the guard
+ * line itself plus the refusal's own wording ("to remove an agenda item"),
+ * and `rules.ts`'s agenda_item section now says in so many words that DELETE
+ * is A2 too, so a reader auditing that file alone does not read the absence
+ * as an oversight. What is NOT acceptable — a delete authorized by nothing —
+ * is what the raw Supabase cascade in `InlineItemForm.tsx` does today.
+ *
+ * ─── The FK hazard, closed the way conventions item 3 requires ────────────
+ *
+ * Postgres FK enforcement bypasses row security, so an FK taken from client
+ * input needs a tenant-scoped existence check. Three such fields exist here:
+ *
+ *   - `meetingId` (`insert`, `instantiateFromTemplate`) —
+ *     `assertMeetingOnAuthorizedBoard` reads `meeting.board_id` inside the
+ *     transaction and answers NOT_FOUND when there is no row. That is
+ *     `meeting.ts`'s exported `assertMeetingExists` — the same query, the
+ *     same NOT_FOUND — plus the board the mismatch defence needs; running
+ *     both would be two round trips for one question, so the helper says so
+ *     in its own comment rather than importing a check it duplicates.
+ *   - `parentItemId` (`insert`) — checked for existence AND for belonging to
+ *     the SAME meeting. Existence alone would not be enough: a real parent in
+ *     another town would satisfy `agenda_item_parent_item_id_fkey` while
+ *     hanging this town's item under a row its own town can never see.
+ *   - `templateId` (`instantiateFromTemplate`) — NOT_FOUND when the template
+ *     is not in the caller's town.
+ *
+ * ─── `delete` is ONE statement, because the database already cascades ─────
+ *
+ * `InlineItemForm.tsx` deletes exhibits, then child items, then the item —
+ * three round trips, no transaction, a partial delete on any failure. Both
+ * FKs are already `ON DELETE CASCADE` (`agenda_item_parent_item_id_fkey`,
+ * `exhibit_agenda_item_id_fkey`, verified in `0000_baseline.sql`), so the
+ * single `DELETE FROM agenda_item WHERE id = $1` below removes exactly the
+ * same rows, atomically. Pinned by a test that deletes a section with a child
+ * and an exhibit and asserts all three are gone.
+ *
+ * ─── Two procedures shipped UNWIRED, for wave 5 ──────────────────────────
+ *
+ * `setOperatorNotes` and `markComplete` back
+ * `components/meeting/AgendaItemDetailPanel.tsx`'s two raw writes. That
+ * component is imported only by `routes/meetings.$meetingId.live.tsx`, which
+ * is **wave 5**'s file — so the procedures land here (this wave's plan: "so
+ * wave 5 extends this router rather than creating one") and **nothing calls
+ * them yet**. They are tested exactly like the wired writes; what is missing
+ * is only the client change. One question wave 5 owns and this task did not
+ * decide for it: both use A2, matching every other `agenda_item` write, but a
+ * live-meeting operator may hold M1/M2 and no A2 — if the product wants a
+ * presiding officer with no agenda-editing rights to mark items complete,
+ * that is a rules change (a second code, hence `requireBoardActor`), not a
+ * wiring change, and it should be made deliberately rather than discovered
+ * when a clerk is refused mid-meeting.
+ *
+ * ─── No resolver-side `ctx.actor()` call anywhere in this file ────────────
+ *
+ * Every guard above resolves the actor in middleware, and the resolver-side
+ * defence is a string comparison that needs no actor — so the reentrancy
+ * hazard `context.ts`'s header describes (an UNSETTLED `ctx.actor()` called
+ * from inside `ctx.withTenant`) is not reachable from here at all.
  */
 
 import { sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc.js";
+import { AgendaTemplateSectionSchema } from "@town-meeting/shared";
+import type { AgendaTemplateSection } from "@town-meeting/shared/types";
+import {
+  router,
+  protectedProcedure,
+  requireBoardPermission,
+  assertMatchesAuthorizedBoard,
+  boardIdFrom,
+} from "../trpc.js";
 import { assertMeetingExists } from "./meeting.js";
 import { toRows } from "../../db/rows.js";
+import type { TenantTx } from "../../db/with-tenant.js";
+
+/**
+ * The context shape the two defence helpers need — the board
+ * `requireBoardPermission` authorized, carried on the request context.
+ */
+interface BoardAuthorizedContext {
+  authorizedBoardId?: string;
+}
+
+/**
+ * Resolve a meeting's real board inside the caller's own tenant transaction
+ * and refuse unless it is the board the guard authorized.
+ *
+ * This IS `meeting.ts`'s exported `assertMeetingExists` — the same
+ * `WHERE id = $1` against `meeting` under the same RLS, answering the same
+ * NOT_FOUND for a foreign or nonexistent id (conventions item 3, and the FK
+ * hazard item 3's second half describes) — with the row's `board_id`
+ * returned as well, because the mismatch defence needs it and a second query
+ * for the same row would be two round trips for one question. Not a
+ * weakening of that check: it is that check, plus a column.
+ */
+async function assertMeetingOnAuthorizedBoard(
+  ctx: BoardAuthorizedContext,
+  tx: TenantTx,
+  meetingId: string,
+): Promise<string> {
+  const rows = toRows<{ board_id: string }>(
+    await tx.execute(sql`SELECT board_id FROM meeting WHERE id = ${meetingId}`),
+    (message) => new Error(`agendaItem.assertMeetingOnAuthorizedBoard: ${message}`),
+  );
+  const row = rows[0];
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  assertMatchesAuthorizedBoard(ctx, row.board_id);
+  return row.board_id;
+}
+
+/**
+ * The many-row form: derive the DISTINCT set of boards a list of agenda item
+ * ids belongs to, and refuse unless that set is exactly the one authorized
+ * board.
+ *
+ * An INNER JOIN, deliberately: `agenda_item.meeting_id` is NOT NULL with an
+ * FK, so a missing join partner cannot happen for a row this town can see —
+ * but a LEFT JOIN would answer `null` for one if it ever did, and a `null`
+ * board compared against the authorized one is a comparison this defence
+ * must never be asked to make. Any id that does not come back (nonexistent,
+ * another town's, or a duplicate the caller sent twice — duplicates are
+ * refused at the input schema) is NOT_FOUND, for conventions item 3's
+ * reason: a foreign row and a nonexistent one must be indistinguishable.
+ *
+ * Returns the distinct meeting ids, which `reorder` uses for its own
+ * single-meeting check — a data-integrity question, not an authorization
+ * one, and answered separately below.
+ */
+async function assertItemsOnAuthorizedBoard(
+  ctx: BoardAuthorizedContext,
+  tx: TenantTx,
+  itemIds: readonly string[],
+): Promise<{ meetingIds: string[] }> {
+  const idList = sql.join(
+    itemIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  const rows = toRows<{ id: string; meeting_id: string; board_id: string }>(
+    await tx.execute(sql`
+      SELECT ai.id, ai.meeting_id, m.board_id
+      FROM agenda_item ai
+      JOIN meeting m ON m.id = ai.meeting_id
+      WHERE ai.id IN (${idList})
+    `),
+    (message) => new Error(`agendaItem.assertItemsOnAuthorizedBoard: ${message}`),
+  );
+  if (rows.length !== itemIds.length) throw new TRPCError({ code: "NOT_FOUND" });
+
+  // Once per DISTINCT board, not once for "the" board: a list spanning two
+  // boards must be refused even when one of the two is the authorized one.
+  for (const boardId of new Set(rows.map((r) => r.board_id))) {
+    assertMatchesAuthorizedBoard(ctx, boardId);
+  }
+  return { meetingIds: [...new Set(rows.map((r) => r.meeting_id))] };
+}
+
+/**
+ * The field bounds `components/meetings/InlineItemForm.tsx`'s own
+ * `ItemFormSchema` enforces today, carried over exactly — that form is the
+ * specification these writes replace (conventions item 1).
+ *
+ * They differ from `@town-meeting/shared`'s `AgendaItemSchema` in three
+ * places (`description` is `max(5000)` here and `max(2000)` there, `title` is
+ * `max(200)` here and `max(300)` there, `estimated_duration` allows `0` here
+ * and `min(1)` there). The form is what a clerk has actually been typing
+ * into for the life of this product, so it wins; reconciling the two schemas
+ * is a real question and not a migration's to settle.
+ */
+const itemFields = {
+  title: z.string().min(1, "Title is required").max(200),
+  description: z.string().max(5000).nullable(),
+  presenter: z.string().max(100).nullable(),
+  estimatedDuration: z.number().int().min(0).max(480).nullable(),
+  staffResource: z.string().max(200).nullable(),
+  background: z.string().max(5000).nullable(),
+  recommendation: z.string().max(2000).nullable(),
+  suggestedMotion: z.string().max(1000).nullable(),
+};
+
+/**
+ * `section_type` is a plain `text` column with no CHECK constraint. The
+ * eleven documented values live in the column's own COMMENT and in
+ * `@town-meeting/shared`'s `AgendaItemSectionType`, and validating against
+ * that enum here was considered and **declined**: only ONE of the two call
+ * sites picks a value from a fixed list (the builder's "add section" select,
+ * whose options are `SECTION_TYPE_LABELS` — the same eleven). The other,
+ * `InlineItemForm`, forwards the PARENT ROW's stored `section_type`, so an
+ * existing row carrying an undocumented value — this router's own test
+ * fixture has been writing `'new_business'` since wave 3 — would stop being
+ * able to take child items. `section_type` selects a label and a renderer;
+ * it is not an authorization input and no integrity constraint depends on
+ * it, so refusing a stored value buys nothing and breaks a real path. The
+ * length bound is the column's only real limit made explicit; every
+ * documented value is under twenty characters.
+ */
+const SectionTypeInput = z.string().min(1).max(50);
 
 export const agendaItemRouter = router({
   countByMeeting: protectedProcedure
@@ -49,4 +286,540 @@ export const agendaItemRouter = router({
         return rows[0]?.count ?? 0;
       });
     }),
+
+  /**
+   * The agenda builder's read (`routes/meetings.$meetingId.agenda.tsx`) —
+   * every agenda item for one meeting, FLAT and ordered, exactly as the
+   * `select("*").eq("meeting_id", …).order("sort_order")` query it replaces
+   * returned them. That screen groups parents and children itself (its
+   * `sections` `useMemo`), and returning a nested shape would be a design
+   * change smuggled into a migration; the children are all here, identified
+   * by `parent_item_id`.
+   *
+   * No permission guard: `agenda_item_tenant_isolation` is tenancy-only and
+   * the query this replaces had no application-level check either —
+   * conventions item 2's "a read whose old policy was tenancy-only gets
+   * `protectedProcedure` and no guard."
+   *
+   * Columns checked against `AgendaSection.tsx`, `AgendaItemRow.tsx`,
+   * `InlineItemForm.tsx`'s `initial` block, `AgendaPreviewDialog.tsx` and
+   * `PublishAgendaDialog.tsx` — the five files that read an item. NOT
+   * selected, each deliberately: `town_id` (RLS scopes this; conventions item
+   * 2's "no redundant WHERE town_id"), `meeting_id` (every row is this
+   * meeting's — it is the argument), `status`, `operator_notes` and
+   * `source_minutes_document_id` (nothing on the builder reads them; wave 5's
+   * live screen does read `status`, and adds it the day it needs it),
+   * `created_at`/`updated_at`, `search_vector`.
+   *
+   * `exhibit_count` is ADDED, not carried over: the builder counts exhibits
+   * today by reading every `exhibit` row in the town and filtering client-side
+   * to this meeting's items (`allExhibits`). A per-item count answers the
+   * "N exhibits" badge without that; the full exhibit ROWS the uploader needs
+   * belong to `exhibit.ts`, which is Task 2's file, so this read does not try
+   * to serve them.
+   *
+   * `ORDER BY sort_order, id` — the tiebreak on `id` is added. The Supabase
+   * query ordered on `sort_order` alone, which is not unique (every section's
+   * children restart at 0, and a section and a child can share a value), so
+   * its row order for ties was whatever Postgres returned that day. A stable
+   * order is not a behaviour change any screen can observe as a loss.
+   */
+  byMeeting: protectedProcedure
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertMeetingExists(tx, input.meetingId);
+        return toRows<{
+          id: string;
+          section_type: string;
+          sort_order: number;
+          title: string;
+          description: string | null;
+          presenter: string | null;
+          estimated_duration: number | null;
+          parent_item_id: string | null;
+          staff_resource: string | null;
+          background: string | null;
+          recommendation: string | null;
+          suggested_motion: string | null;
+          exhibit_count: number;
+        }>(
+          await tx.execute(sql`
+            SELECT ai.id, ai.section_type, ai.sort_order, ai.title, ai.description,
+                   ai.presenter, ai.estimated_duration, ai.parent_item_id,
+                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion,
+                   (SELECT count(*)::int FROM exhibit e WHERE e.agenda_item_id = ai.id)
+                     AS exhibit_count
+            FROM agenda_item ai
+            WHERE ai.meeting_id = ${input.meetingId}
+            ORDER BY ai.sort_order ASC, ai.id
+          `),
+          (message) => new Error(`agendaItem.byMeeting: ${message}`),
+        );
+      });
+    }),
+
+  /**
+   * Both raw inserts this replaces: the builder's "add section"
+   * (`parentItemId: null`) and `InlineItemForm`'s "add item" under a section.
+   *
+   * `townId` comes from `ctx.tenant`, never from input — both raw inserts
+   * sent it from client state. `status` is hardcoded `'pending'`, matching
+   * both (and matching `meeting.insert`'s reasoning for its own hardcoded
+   * `'draft'`: a new row is always freshly created, and accepting the field
+   * would let a caller mint an item that is already `completed`). `id` is the
+   * column's own `gen_random_uuid()` default rather than a browser-minted
+   * `crypto.randomUUID()`.
+   *
+   * `sortOrder` IS accepted from input: both call sites compute it (max + 1
+   * for a section, the section's child count for an item), and deriving it
+   * server-side would change where new rows land — a behaviour change this
+   * migration is not entitled to make.
+   */
+  insert: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to add an agenda item",
+      }),
+    )
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        meetingId: z.string().uuid(),
+        parentItemId: z.string().uuid().nullable(),
+        sectionType: SectionTypeInput,
+        sortOrder: z.number().int().min(0),
+        ...itemFields,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertMeetingOnAuthorizedBoard(ctx, tx, input.meetingId);
+
+        if (input.parentItemId !== null) {
+          // Existence AND same-meeting: a real parent in another meeting
+          // satisfies `agenda_item_parent_item_id_fkey` (FK checks bypass
+          // RLS) while hanging this item under a row that renders nowhere.
+          const parents = toRows<{ id: string }>(
+            await tx.execute(sql`
+              SELECT id FROM agenda_item
+              WHERE id = ${input.parentItemId} AND meeting_id = ${input.meetingId}
+            `),
+            (message) => new Error(`agendaItem.insert: ${message}`),
+          );
+          if (!parents[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        }
+
+        const rows = toRows<{ id: string }>(
+          await tx.execute(sql`
+            INSERT INTO agenda_item (
+              meeting_id, town_id, section_type, sort_order, title, description, presenter,
+              estimated_duration, parent_item_id, status, staff_resource, background,
+              recommendation, suggested_motion
+            )
+            VALUES (
+              ${input.meetingId}, ${ctx.tenant.townId}, ${input.sectionType}, ${input.sortOrder},
+              ${input.title}, ${input.description}, ${input.presenter},
+              ${input.estimatedDuration}, ${input.parentItemId},
+              'pending'::agenda_item_status, ${input.staffResource}, ${input.background},
+              ${input.recommendation}, ${input.suggestedMotion}
+            )
+            RETURNING id
+          `),
+          (message) => new Error(`agendaItem.insert: ${message}`),
+        );
+        return { id: rows[0]!.id };
+      });
+    }),
+
+  /**
+   * `InlineItemForm`'s edit branch. The eight editable fields and no others —
+   * `section_type`, `sort_order` and `parent_item_id` are structural and have
+   * their own procedures (`reorder`, and a delete-plus-insert for a move);
+   * the raw update this replaces did not touch them either.
+   */
+  update: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to edit an agenda item",
+      }),
+    )
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        itemId: z.string().uuid(),
+        ...itemFields,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        await tx.execute(sql`
+          UPDATE agenda_item SET
+            title = ${input.title},
+            description = ${input.description},
+            presenter = ${input.presenter},
+            estimated_duration = ${input.estimatedDuration},
+            staff_resource = ${input.staffResource},
+            background = ${input.background},
+            recommendation = ${input.recommendation},
+            suggested_motion = ${input.suggestedMotion},
+            updated_at = now()
+          WHERE id = ${input.itemId}
+        `);
+        return { id: input.itemId };
+      });
+    }),
+
+  /**
+   * Both drag-and-drop handlers: the builder's section reorder and
+   * `AgendaSection`'s child reorder. `sort_order` becomes the id's position
+   * in `itemIds`, which is what both handlers compute today (they skip rows
+   * whose value already matches; writing all of them reaches the identical
+   * end state in one round trip instead of N).
+   *
+   * Two separate refusals, in this order and for different reasons:
+   *
+   *   1. **Any board other than the authorized one → FORBIDDEN**, from the
+   *      DISTINCT board set (see `assertItemsOnAuthorizedBoard`). This is the
+   *      authorization check, and it runs first so that a list mixing two
+   *      boards is answered as a refusal rather than as a malformed request.
+   *   2. **More than one meeting → BAD_REQUEST.** `sort_order` is meaningful
+   *      only within a meeting, so a list spanning two of them would silently
+   *      interleave two agendas. Not an authorization question (two meetings
+   *      of the SAME board pass check 1 honestly), and not something either
+   *      call site can produce — both build their list from one meeting's own
+   *      items — so this refuses nothing the product does.
+   */
+  reorder: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to reorder the agenda",
+      }),
+    )
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        itemIds: z
+          .array(z.string().uuid())
+          .min(1)
+          .refine((ids) => new Set(ids).size === ids.length, {
+            message: "itemIds must not contain duplicates",
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, input.itemIds);
+        if (meetingIds.length > 1) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Every item in a reorder must belong to the same meeting — sort_order is " +
+              "scoped to one meeting's agenda.",
+          });
+        }
+        for (const [index, itemId] of input.itemIds.entries()) {
+          await tx.execute(sql`
+            UPDATE agenda_item SET sort_order = ${index}, updated_at = now()
+            WHERE id = ${itemId}
+          `);
+        }
+        return { count: input.itemIds.length };
+      });
+    }),
+
+  /**
+   * The cascading delete — `InlineItemForm`'s three unguarded round trips and
+   * `AgendaSection`'s per-child loop, both replaced by one statement inside
+   * one transaction. The database cascades child items and exhibits itself
+   * (see this file's header); there is nothing left to delete by hand.
+   */
+  delete: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to remove an agenda item",
+      }),
+    )
+    .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        await tx.execute(sql`DELETE FROM agenda_item WHERE id = ${input.itemId}`);
+        return { id: input.itemId };
+      });
+    }),
+
+  /**
+   * `lib/meeting-helpers.ts`'s `instantiateAgendaFromTemplate`, moved server
+   * side — Task 4's job to wire, but the procedure is this task's.
+   *
+   * **Takes a `templateId`, not the sections themselves.** The client helper
+   * reads the selected template's `sections` in the browser and posts them;
+   * this reads the same column off the same row inside the caller's own
+   * tenant transaction. Same data, with the content no longer travelling
+   * through the client, and one behaviour difference worth naming: a template
+   * deleted between page load and submit now answers NOT_FOUND instead of
+   * being instantiated from a stale copy.
+   *
+   * Sections are parsed the way the client's own `parseSections` parses them
+   * — per item, dropping any that fail `AgendaTemplateSectionSchema`, and
+   * unwrapping a double-encoded JSON string — because that is the behaviour
+   * the rows in the database were written against. A stricter all-or-nothing
+   * parse would turn one bad section into a meeting with no agenda at all.
+   *
+   * The `minutes_approval` branch is carried over in full: for a section of
+   * that type, children are the board's meetings awaiting minutes approval
+   * rather than the template's `default_items`, each with a suggested motion
+   * naming the board and the meeting's date. Without it, moving this helper
+   * to the server would quietly drop a feature — the reason it is one query
+   * here instead of the client's four is only round trips, not scope.
+   */
+  instantiateFromTemplate: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to create this meeting's agenda from a template",
+      }),
+    )
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        meetingId: z.string().uuid(),
+        templateId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const boardId = await assertMeetingOnAuthorizedBoard(ctx, tx, input.meetingId);
+        const sections = await loadTemplateSections(tx, input.templateId);
+
+        let created = 0;
+        for (const [index, section] of sections.entries()) {
+          const sectionRows = toRows<{ id: string }>(
+            await tx.execute(sql`
+              INSERT INTO agenda_item (
+                meeting_id, town_id, section_type, sort_order, title, description, status
+              )
+              VALUES (
+                ${input.meetingId}, ${ctx.tenant.townId}, ${section.section_type}, ${index},
+                ${section.title}, ${section.description ?? null}, 'pending'::agenda_item_status
+              )
+              RETURNING id
+            `),
+            (message) => new Error(`agendaItem.instantiateFromTemplate: ${message}`),
+          );
+          const sectionId = sectionRows[0]!.id;
+          created += 1;
+
+          if (section.section_type === "minutes_approval") {
+            created += await insertMinutesApprovalItems(tx, {
+              townId: ctx.tenant.townId,
+              meetingId: input.meetingId,
+              boardId,
+              sectionId,
+            });
+            continue;
+          }
+
+          for (const [childIndex, title] of (section.default_items ?? []).entries()) {
+            await tx.execute(sql`
+              INSERT INTO agenda_item (
+                meeting_id, town_id, section_type, sort_order, title, parent_item_id, status
+              )
+              VALUES (
+                ${input.meetingId}, ${ctx.tenant.townId}, ${section.section_type}, ${childIndex},
+                ${title}, ${sectionId}, 'pending'::agenda_item_status
+              )
+            `);
+            created += 1;
+          }
+        }
+        return { count: created };
+      });
+    }),
+
+  /**
+   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * `saveNotesMutation`, which today writes `operator_notes` through the dead
+   * Supabase client with no authorization check of any kind. See this file's
+   * header for why it lands here now and for the A2-versus-M1 question wave 5
+   * inherits.
+   */
+  setOperatorNotes: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to record operator notes on an agenda item",
+      }),
+    )
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        itemId: z.string().uuid(),
+        operatorNotes: z.string().max(5000).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        await tx.execute(sql`
+          UPDATE agenda_item SET operator_notes = ${input.operatorNotes}, updated_at = now()
+          WHERE id = ${input.itemId}
+        `);
+        return { id: input.itemId };
+      });
+    }),
+
+  /**
+   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * `markCompleteMutation`. Sets `status` and nothing else, matching that
+   * write exactly; it does NOT record an `agenda_item_transition` row (that
+   * table exists and nothing in the product writes it today — adding it here
+   * would be a feature, not a migration).
+   */
+  markComplete: protectedProcedure
+    .use(
+      requireBoardPermission("A2", boardIdFrom(), {
+        action: "to mark an agenda item complete",
+      }),
+    )
+    .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        await tx.execute(sql`
+          UPDATE agenda_item SET status = 'completed'::agenda_item_status, updated_at = now()
+          WHERE id = ${input.itemId}
+        `);
+        return { id: input.itemId };
+      });
+    }),
 });
+
+/**
+ * Read one template's sections, tenant-scoped, with the client's own
+ * per-item leniency — see `instantiateFromTemplate`'s doc comment.
+ *
+ * NOT_FOUND for a template in another town or one that does not exist: it is
+ * a foreign key from client input, and conventions item 3's rule applies
+ * whether the id is used for a write or, as here, to decide what to write.
+ */
+async function loadTemplateSections(
+  tx: TenantTx,
+  templateId: string,
+): Promise<AgendaTemplateSection[]> {
+  const rows = toRows<{ sections: unknown }>(
+    await tx.execute(sql`SELECT sections FROM agenda_template WHERE id = ${templateId}`),
+    (message) => new Error(`agendaItem.loadTemplateSections: ${message}`),
+  );
+  const row = rows[0];
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+
+  let raw: unknown = row.sections;
+  // The double-encoding `lib/agenda-template-helpers.ts`'s `parseSections`
+  // already handles: a JSONB column written as a STRING rather than an array.
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+
+  const parsed: AgendaTemplateSection[] = [];
+  for (const item of raw) {
+    const result = AgendaTemplateSectionSchema.safeParse(item);
+    if (result.success) parsed.push(result.data as AgendaTemplateSection);
+  }
+  return parsed;
+}
+
+/**
+ * The `minutes_approval` auto-population, carried over from
+ * `lib/meeting-helpers.ts`'s `autoPopulateMinutesApproval`.
+ *
+ * The client made four round trips (minutes documents, meetings, a merge
+ * query for reviewed meetings not already listed, and the board's name);
+ * this is one query plus the board's name, answering the same question: every
+ * meeting of this board, other than the one being built, that either sits in
+ * `adjourned`/`minutes_draft` OR already has a `review`-status minutes
+ * document — ordered by date.
+ *
+ * `md.board_id` is the filter the client used, and it is kept rather than
+ * "corrected" to a join through `meeting`: that column is denormalised and
+ * nullable (`rules.ts`'s `BoardScopedRow` warns against trusting it for
+ * AUTHORIZATION, which this is not), and a row where it is NULL does not
+ * match today. Changing which rows appear on a clerk's agenda is not this
+ * migration's call.
+ *
+ * `scheduled_date::text` is load-bearing, not decorative: postgres.js parses
+ * a `date` column into a JS `Date`, and the date formatting below is
+ * character-for-character the client's, which starts from the `YYYY-MM-DD`
+ * string.
+ */
+async function insertMinutesApprovalItems(
+  tx: TenantTx,
+  args: { townId: string; meetingId: string; boardId: string; sectionId: string },
+): Promise<number> {
+  const boardRows = toRows<{ name: string }>(
+    await tx.execute(sql`SELECT name FROM board WHERE id = ${args.boardId}`),
+    (message) => new Error(`agendaItem.insertMinutesApprovalItems: ${message}`),
+  );
+  const boardName = boardRows[0]?.name ?? "";
+
+  const candidates = toRows<{
+    id: string;
+    scheduled_date: string | null;
+    minutes_document_id: string | null;
+    has_amendments: boolean;
+  }>(
+    await tx.execute(sql`
+      SELECT m.id,
+             m.scheduled_date::text AS scheduled_date,
+             md.id AS minutes_document_id,
+             CASE
+               WHEN md.amendments_history IS NULL THEN false
+               WHEN jsonb_typeof(md.amendments_history) <> 'array' THEN false
+               ELSE jsonb_array_length(md.amendments_history) > 0
+             END AS has_amendments
+      FROM meeting m
+      LEFT JOIN minutes_document md
+        ON md.meeting_id = m.id AND md.board_id = ${args.boardId} AND md.status = 'review'
+      WHERE m.board_id = ${args.boardId}
+        AND m.id <> ${args.meetingId}
+        AND (m.status IN ('adjourned', 'minutes_draft') OR md.id IS NOT NULL)
+      ORDER BY m.scheduled_date ASC, m.id
+    `),
+    (message) => new Error(`agendaItem.insertMinutesApprovalItems: ${message}`),
+  );
+
+  let sortOrder = 0;
+  for (const row of candidates) {
+    const date = row.scheduled_date ?? "";
+    const formattedDate = date
+      ? new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "Unknown Date";
+    const suffix = row.has_amendments ? "as amended" : "as presented";
+    const suggestedMotion = boardName
+      ? `to approve the minutes of the ${boardName} meeting of ${formattedDate} ${suffix}`
+      : `to approve the minutes of the meeting of ${formattedDate} ${suffix}`;
+
+    await tx.execute(sql`
+      INSERT INTO agenda_item (
+        meeting_id, town_id, section_type, sort_order, title, parent_item_id, status,
+        suggested_motion, source_minutes_document_id
+      )
+      VALUES (
+        ${args.meetingId}, ${args.townId}, 'minutes_approval', ${sortOrder},
+        ${`Approval of Minutes — ${formattedDate}`}, ${args.sectionId},
+        'pending'::agenda_item_status, ${suggestedMotion}, ${row.minutes_document_id}
+      )
+    `);
+    sortOrder += 1;
+  }
+  return candidates.length;
+}

@@ -60,6 +60,18 @@ describe("router wiring", () => {
         "meeting.cancel",
         "meeting.updateStatus",
         "agendaItem.countByMeeting",
+        "agendaItem.byMeeting",
+        "agendaItem.insert",
+        "agendaItem.update",
+        "agendaItem.reorder",
+        "agendaItem.delete",
+        "agendaItem.instantiateFromTemplate",
+        // Unwired as of wave 4 — wave 5's `live.tsx` is the caller. Pinned
+        // here anyway: the point of shipping them now is that wave 5 extends
+        // this router instead of creating one, and a rename in the meantime
+        // should be caught here rather than in wave 5's first client change.
+        "agendaItem.setOperatorNotes",
+        "agendaItem.markComplete",
         "minutesDocument.byMeeting",
         "meetingAttendance.countByMeeting",
         "whoami",

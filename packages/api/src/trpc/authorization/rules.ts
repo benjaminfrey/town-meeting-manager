@@ -121,6 +121,18 @@ export interface BoardScopedRow {
 // ─── 1, 2 — agenda_item INSERT / UPDATE: A2, BOARD-SCOPED ─────────────
 //
 // A2 is in `TEMPLATE_BOARD_SPECIFIC_STAFF`, which grants it per board only.
+//
+// DELETE is A2 as well, and has no function here on purpose (Phase E wave 4,
+// Task 1 — read this before adding one). There is no delete-specific
+// `PermissionCode`: A2 (`edit_agenda`) is the governing action for the
+// agenda's contents, so an `assertCanDeleteAgendaItem` would be a third body
+// identical to the two below — and one with no caller, because
+// `agendaItem.delete`'s guard is `requireBoardPermission("A2", boardIdFrom(),
+// {action: "to remove an agenda item"})`, which IS this same
+// `assertPermission` call (conventions item 2's "reach for
+// requireBoardPermission first" for a single-code rule; `meeting.ts`'s header
+// makes the same argument for `assertCanInsertMeeting`). The absence is a
+// decision, not an oversight — see `routers/agenda-item.ts`'s header.
 
 export function assertCanInsertAgendaItem(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "A2", { boardId: scope.boardId, action: "to add an agenda item" });
