@@ -292,8 +292,12 @@ export const boardMemberRouter = router({
    * choices the raw Supabase read this replaces made
    * (`.eq("status", "active")`, no filter on the joined board's own archived
    * state; conventions item 1, "the query you are replacing is a
-   * specification"). No permission guard, deliberately, for the identical
-   * reason `board.ts`'s header gives for its own reads:
+   * specification"). One clause is ADDED beyond what that source query had:
+   * `ORDER BY b.name`, so a person's board list renders deterministically
+   * rather than in whatever order the planner happens to return — the
+   * original had no ordering at all (client-side, unsorted). No permission
+   * guard, deliberately, for the identical reason `board.ts`'s header gives
+   * for its own reads:
    * `board_member_tenant_isolation` (`0000_baseline.sql`) is a plain
    * `town_id = get_current_town_id()` policy, FOR ALL, no role predicate, so
    * tenancy is already the whole policy and `protectedProcedure` +

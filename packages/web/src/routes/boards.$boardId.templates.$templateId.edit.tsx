@@ -36,6 +36,7 @@ import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
 import { AlertTriangle, ChevronRight, Loader2, Save } from "lucide-react";
+import { toast } from "sonner";
 import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import type { Route } from "./+types/boards.$boardId.templates.$templateId.edit";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -47,7 +48,7 @@ import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
 import { queryClient as globalQueryClient } from "@/lib/queryClient";
-import { trpc } from "@/lib/trpc";
+import { trpc, errorMessage } from "@/lib/trpc";
 
 // ─── Route ───────────────────────────────────────────────────────────
 
@@ -192,6 +193,14 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
       // router, not just `list` (`boards.$boardId.templates.tsx`'s own
       // reader).
       queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
+    } catch (err) {
+      // A non-admin FORBIDDEN from the newly-guarded `agendaTemplate.update`
+      // (see this file's header) has to surface somewhere — the raw
+      // `.throwOnError()` this replaced was already silent here, but closing
+      // that authorization hole is what makes the refusal reachable in the
+      // first place, and a caught-and-dropped error is not actually
+      // surfaced. Same shape as `AddPersonDialog`'s `onError` handlers.
+      toast.error(errorMessage(err, "Couldn't save the template — please try again."));
     } finally {
       setIsSaving(false);
     }

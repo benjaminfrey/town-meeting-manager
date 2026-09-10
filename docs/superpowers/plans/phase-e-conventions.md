@@ -1532,18 +1532,39 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `Foo.pathfilter.test.tsx` that does not actually import `Foo.tsx` (see the check's own fixture
   tests for both). Comment-stripping is load-bearing the identical way item 11's marker grep needs
   it to be: without it, `routes/people.tsx` and `test/trpc.ts` both false-positive as writers because
-  each mentions `trpc.<router>.pathFilter()` in a comment, not real code. **The figures that used to
-  sit here — "28 files contain the raw substring at HEAD, 26 after stripping" — were anchored to no
-  commit at all, and had drifted by two waves; re-measured in wave 3, Tasks 3+4's fix round and
-  anchored the way item 11 requires.** At `8c1b5e2` (this round's parent) the walk over non-test
-  files under `packages/web/src` finds **35** containing the literal `.pathFilter()` and **33** after
-  stripping comments; this round adds five more writers (`AgendaItemDetailPanel.tsx`,
-  `AttendancePanel.tsx`, `AgendaSection.tsx`, `InlineItemForm.tsx`,
-  `routes/meetings.$meetingId.review.tsx`), taking those to **40** and **38**; the whole-branch fix
-  round adds a sixth, `routes/meetings.$meetingId.minutes.tsx` (see its own Known-gaps bullet below),
-  taking them to **41** and **39**. The two files the gap
-  between the pair accounts for are still the same two, which is the durable claim here — quote the
-  check's own `findUnpinnedWriters(SRC_DIR).writerCount` rather than any of these seven numbers.
+  each mentions `trpc.<router>.pathFilter()` in a comment, not real code — and, as of Phase E wave 4
+  Task 0's first commit (`f3a4afd`), so does a THIRD file, `routes/boards.$boardId.tsx`, whose new
+  header comment on that commit explains why `town.detail`'s legacy key stays un-invalidated by
+  naming `trpc.town.pathFilter()` in prose, not in a real call. **Caught by this fix round after the
+  task's own report claimed no other Known-gaps bullet's claims were falsified by the task's work —
+  they were: this bullet, and its sibling below, both still said "two." The unit of staleness is a
+  CLAIM, not a file (item 14), and checking by file (which files did this task's diff touch) is
+  exactly the failure mode that let it through.** **The figures that used to sit here — "28 files
+  contain the raw substring at HEAD, 26 after stripping" — were anchored to no commit at all, and had
+  drifted by two waves; re-measured in wave 3, Tasks 3+4's fix round and anchored the way item 11
+  requires.** At `8c1b5e2` (this round's parent) the walk over non-test files under
+  `packages/web/src` finds **35** containing the literal `.pathFilter()` and **33** after stripping
+  comments; this round adds five more writers (`AgendaItemDetailPanel.tsx`, `AttendancePanel.tsx`,
+  `AgendaSection.tsx`, `InlineItemForm.tsx`, `routes/meetings.$meetingId.review.tsx`), taking those to
+  **40** and **38**; the whole-branch fix round adds a sixth, `routes/meetings.$meetingId.minutes.tsx`
+  (see its own Known-gaps bullet below), taking them to **41** and **39**. Phase E wave 4 Task 0 then
+  adds `routes/boards.$boardId.tsx`'s comment-only mention (no real writer), taking the raw count to
+  **42** while the comment-stripped count stays **39** — verified at `8cbf749` (Task 0's own
+  close-out commit, this fix round's parent):
+  ```
+  $ grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  42
+  ```
+  The comment-stripped figure has no equivalent one-line grep (stripping `/* */` and `//` first is
+  what makes it differ from the raw count at all) — reproduce it by running
+  `pathfilter-pin-coverage.test.ts`'s own `stripComments` over the same file list, exactly as the
+  check itself does; walked that way at `8cbf749` it answers **39**, unchanged from the whole-branch
+  round's own last figure, because the one new mention this task added is comment-only.
+  The three files the gap between the pair accounts for are `routes/people.tsx`, `test/trpc.ts`, and
+  (as of this task) `routes/boards.$boardId.tsx` — this is the durable claim here, and it is a claim
+  about which FILES make up the gap, not a number that stays put; quote the check's own
+  `findUnpinnedWriters(SRC_DIR).writerCount` (and, for the raw/stripped gap specifically, re-run the
+  comment-stripping walk described above) rather than trust any of these numbers to still be current.
   Validated against `git archive` snapshots of three real commits,
   not assumed: HEAD (26 writers, 0 violations), `3b22df8` (16 writers, 3 violations —
   `AddMemberDialog.tsx`, `MemberArchiveDialog.tsx`, `MemberTransitionDialog.tsx`), `081a27e` (25
@@ -1579,7 +1600,13 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   ```
 
   (minus the two comment-only false positives the pin-coverage check's own comment-stripping already
-  excludes — `routes/people.tsx` and `test/trpc.ts`.) **This bullet used to say "`~21` sites at HEAD"
+  excludes at those two SHAs — `routes/people.tsx` and `test/trpc.ts`. **A third joined as of Phase E
+  wave 4, Task 0's first commit, `f3a4afd`: `routes/boards.$boardId.tsx`. It postdates both SHAs this
+  bullet's own 35/40 figures are anchored to, so those two numbers are unaffected by it — but a
+  reader stopping at this parenthetical without checking the date would come away believing "two" is
+  still the current count, which is exactly the drift the sibling bullet above was just corrected
+  for. See that bullet for the current (raw 42 / stripped 39, at `8cbf749`) figures and all three
+  names.**) **This bullet used to say "`~21` sites at HEAD"
   with no SHA attached** — off by fourteen against its own grep by the time it was re-run, which is
   precisely the drift item 11's "quote the grep, not the number" rule exists to prevent, in the
   document that states the rule. Re-run it; do not trust either figure above either.

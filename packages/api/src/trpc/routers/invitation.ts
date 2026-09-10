@@ -49,6 +49,22 @@
  * answers both questions with one query: does a `user_account` row with
  * THIS id, owned by THIS person, exist in my tenant.
  *
+ * `assertPersonExists` still earns its own keep alongside that check, not
+ * just alongside `person.insertStaffAccount`'s copy of it: every ordinary
+ * caller of THIS procedure has already gone through that copy (it runs
+ * immediately before this one, per "Authorization: reused, not invented"
+ * below), which is exactly why `invitation.test.ts`'s five original cases
+ * all refuse via `assertAccountBelongsToPerson` alone — deleting
+ * `assertPersonExists` left them all green. The case it alone catches is a
+ * `user_account` that was seeded (by a bug, or stale data) with a
+ * `person_id` FK pointing outside this tenant, in this tenant's OWN
+ * `user_account` table — `assertAccountBelongsToPerson`'s id+person_id match
+ * still succeeds for such a row (both columns really do agree), so only a
+ * direct, tenant-scoped read of `person` catches that the named person isn't
+ * here at all. `invitation.test.ts`'s "cross-tenant-corrupted user_account"
+ * case constructs exactly that row and proves it: with `assertPersonExists`
+ * deleted, that one test goes red and none of the other six move.
+ *
  * ─── Authorization: reused, not invented ───────────────────────────────────
  *
  * `assertCanInsertUserAccount` — the same rule `person.insertStaffAccount`

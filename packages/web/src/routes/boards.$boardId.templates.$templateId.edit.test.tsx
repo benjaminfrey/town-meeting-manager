@@ -21,6 +21,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.edit";
 
 // ─── Mock identity ──────────────────────────────────────────────────────
@@ -28,6 +29,11 @@ import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.ed
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: () => ({ townId: "town-1" }),
 }));
+
+// Same shape `MemberArchiveDialog.test.tsx`/`AddPersonDialog.test.tsx` use —
+// no `Toaster` is mounted by `renderWithProviders`, so asserting the toast
+// fired means mocking the module and checking the call, not the DOM.
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 // ─── Mock Supabase (only the board-name breadcrumb read still uses it) ──
 
@@ -202,6 +208,30 @@ describe("AgendaTemplateEditorPage", () => {
     // `agendaTemplate` router, including `list` — the key
     // `boards.$boardId.templates.tsx` reads under.
     await waitFor(() => expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true));
+  });
+
+  it("toasts an error and re-enables Save when agendaTemplate.update answers FORBIDDEN", async () => {
+    // The case Minor 5 of Task 0's fix round names: a non-admin save now
+    // reaches a real authorization gate (`agendaTemplate.update`'s
+    // `requireActor`) instead of writing silently, and that refusal has to
+    // be visible from the user's seat, not just re-enable a button with no
+    // explanation.
+    server.updateForbidden = true;
+    const { user } = renderRoute();
+    const nameInput = await screen.findByDisplayValue("Regular Meeting");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Updated Agenda");
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    await user.click(saveButton);
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Couldn't save the template — please try again."),
+    );
+    // The button re-enables (it was already doing this before this fix
+    // round — the `finally` block always ran) and the form stays dirty, so
+    // the user can retry without losing their edit.
+    await waitFor(() => expect(saveButton).toBeEnabled());
   });
 
   it("refetches this screen's own read when a writer invalidates trpc.agendaTemplate.pathFilter()", async () => {

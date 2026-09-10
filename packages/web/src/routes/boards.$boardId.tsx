@@ -57,7 +57,7 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 // `settings.minutes-workflow.tsx`) already invalidates BOTH that key and
 // `trpc.town.pathFilter()` — `towns: "town"` has been in
 // `cache-key-parity.test.ts`'s `MIGRATED` map since before this task. The
-// legacy key stays in `lib/queryKeys.ts` and un-invalidated nowhere: three
+// legacy key stays in `lib/queryKeys.ts` and un-invalidated nowhere: four
 // other files (`CreateMeetingDialog.tsx`, `meetings.$meetingId.review.tsx`,
 // `meetings.$meetingId.minutes.tsx`, `meetings.$meetingId.agenda.tsx`) still
 // READ `queryKeys.towns.detail` directly and are unaffected by this file's

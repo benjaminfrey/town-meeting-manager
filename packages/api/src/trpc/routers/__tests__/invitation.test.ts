@@ -231,6 +231,54 @@ describe("invitation.insert", () => {
     });
   });
 
+  it("answers NOT_FOUND for a personId whose only match is a cross-tenant-corrupted user_account (the case only assertPersonExists, not assertAccountBelongsToPerson, catches)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirPersonId = await seedPerson(db, theirs, "Their Person");
+
+        // A `user_account` seeded directly (not through
+        // `person.insertStaffAccount`, which would have refused this with its
+        // own `assertPersonExists`) inside MINE's tenant, but whose
+        // `person_id` FK points at a person who lives in THEIRS — the
+        // FK-bypasses-RLS hazard this router's own header and conventions
+        // item 3 name: `user_account_person_id_fkey` references `person(id)`
+        // with no town check at all, so nothing at the database layer stops
+        // this row from existing (a real bug elsewhere, or stale data from
+        // before a person was reassigned, could produce it).
+        const corruptedAccountId = randomUUID();
+        const permissions = JSON.stringify({ global: {}, board_overrides: [] });
+        await inTown(db, mine, (tx) =>
+          tx.execute(sql`
+            INSERT INTO user_account (id, person_id, town_id, role, permissions)
+            VALUES (${corruptedAccountId}, ${theirPersonId}, ${mine.townId},
+                    'staff'::user_role, ${permissions}::jsonb)
+          `),
+        );
+
+        // `assertAccountBelongsToPerson` alone PASSES here: the account is
+        // visible in mine's tenant (`town_id = mine`), and its `person_id`
+        // really does equal `theirPersonId` — the two columns match exactly,
+        // by construction. Only `assertPersonExists`, checking `theirPersonId`
+        // against MINE's own tenant-scoped `person` table, catches that the
+        // person named in the input is not actually in this tenant at all.
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.invitation.insert({ personId: theirPersonId, userAccountId: corruptedAccountId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await countInvitationsForPerson(db, theirs, theirPersonId)).toBe(0);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("answers NOT_FOUND for a userAccountId belonging to another town, and writes nothing", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
