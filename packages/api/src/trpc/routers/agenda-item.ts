@@ -568,6 +568,15 @@ export const agendaItemRouter = router({
    * the rows in the database were written against. A stricter all-or-nothing
    * parse would turn one bad section into a meeting with no agenda at all.
    *
+   * The template is NOT required to belong to the meeting's own board, only
+   * to the caller's town. That is deliberate: today the client sends the
+   * sections themselves, so ANY template's content — any board's, or none's
+   * (`agenda_template.board_id` is nullable) — can already reach this write,
+   * and refusing a cross-board template here would be a new restriction, not
+   * a preserved one. Authorization is unaffected either way: it is the
+   * MEETING's board that is authorized, and the template contributes text,
+   * not scope.
+   *
    * The `minutes_approval` branch is carried over in full: for a section of
    * that type, children are the board's meetings awaiting minutes approval
    * rather than the template's `default_items`, each with a suggested motion
