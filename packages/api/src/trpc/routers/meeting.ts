@@ -20,6 +20,28 @@
  * shortcut, it is the same check. `cancel`/`updateStatus` cannot do the
  * same — see below.
  *
+ * ─── `scheduled_date` needs no `::text` cast, and this is why ───────────
+ *
+ * Investigated and DECLINED in wave 4, Task 3, recorded so the next author
+ * does not spend the round rediscovering it. `agenda-item.ts`'s
+ * `insertMinutesApprovalItems` casts `m.scheduled_date::text` and calls the
+ * cast "load-bearing, not decorative: postgres.js parses a `date` column
+ * into a JS Date." That is true of a BARE `postgres()` client and NOT true
+ * of the path every router here actually uses. Probed both ways against the
+ * local database rather than reasoned about:
+ *
+ *     postgres()          SELECT '2026-03-15'::date  →  Date  (ISO string over the wire)
+ *     drizzle(postgres()) SELECT '2026-03-15'::date  →  "2026-03-15"  (a string)
+ *
+ * `drizzle-orm/postgres-js` installs identity parsers, so `tx.execute(sql…)`
+ * — which is how every procedure in this file reads — hands back the raw
+ * text for `date` AND `timestamptz`. So `scheduled_date: string` was accurate
+ * all along, `new Date(scheduled_date + "T00:00:00")` works in every consumer,
+ * and adding casts here would have been churn justified by a claim that does
+ * not reproduce on this code path. The same probe is what makes the `::int`
+ * casts elsewhere genuinely load-bearing: `count(*)` really does come back as
+ * the string `"1"`.
+ *
  * ─── Reads carry no guard ──────────────────────────────────────────────
  *
  * `meeting_tenant_isolation` (`0000_baseline.sql`) is `FOR ALL USING
@@ -395,6 +417,24 @@ export const meetingRouter = router({
    * `recording_secretary_id` (looked up by id there), `started_at`/
    * `ended_at` (rendered conditionally). Not `SELECT *`, unlike the query
    * this replaces — conventions item 1.
+   *
+   * **Four columns ADDED in wave 4, Task 3, for a SECOND screen.**
+   * `routes/meetings.$meetingId.agenda.tsx` migrated its own
+   * `select("*").eq("id", …).single()` onto this procedure and reads
+   * `agenda_packet_url`/`agenda_packet_generated_at`/`meeting_notice_url`/
+   * `meeting_notice_generated_at` — the four the "Generate/Regenerate
+   * Packet" and "Generate/Regenerate Notice" buttons switch their label on
+   * and the "Packet generated …" line renders. This is conventions item 1's
+   * "add it back the day something does", not a widening: every other column
+   * that screen used to get from `SELECT *` (`town_id`, `formality_override`,
+   * `created_by`, …) is still absent because nothing reads it.
+   *
+   * The two `generated_at` columns are `timestamp with time zone` and are
+   * NOT cast to `::text`, matching `started_at`/`ended_at` immediately above
+   * them: postgres.js hands back a `Date`, and with no tRPC transformer
+   * configured (`trpc.ts` / `web/src/lib/trpc.ts` set none) it reaches the
+   * browser as the ISO string this row type declares. An API test calling
+   * the caller directly sees the `Date` — assert on that side accordingly.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
@@ -414,11 +454,16 @@ export const meetingRouter = router({
           recording_secretary_id: string | null;
           started_at: string | null;
           ended_at: string | null;
+          agenda_packet_url: string | null;
+          agenda_packet_generated_at: string | null;
+          meeting_notice_url: string | null;
+          meeting_notice_generated_at: string | null;
         }>(
           await tx.execute(sql`
             SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
                    scheduled_time, location, presiding_officer_id, recording_secretary_id,
-                   started_at, ended_at
+                   started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
+                   meeting_notice_url, meeting_notice_generated_at
             FROM meeting WHERE id = ${input.meetingId}
           `),
           (message) => new Error(`meeting.detail: ${message}`),

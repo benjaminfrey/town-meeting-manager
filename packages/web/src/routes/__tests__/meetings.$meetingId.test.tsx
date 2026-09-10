@@ -58,6 +58,14 @@ const stub = installTRPCFetchStub({
       recording_secretary_id: SECRETARY_ID,
       started_at: null,
       ended_at: null,
+      // Added to `meeting.detail` in wave 4, Task 3 for the agenda builder;
+      // this shell reads none of the four, but `TestHandlers` infers a
+      // handler's return type from the real procedure, so a missing column is
+      // a typecheck error (conventions item 8).
+      agenda_packet_url: null,
+      agenda_packet_generated_at: null,
+      meeting_notice_url: null,
+      meeting_notice_generated_at: null,
     };
   },
   "board.detail": () => ({

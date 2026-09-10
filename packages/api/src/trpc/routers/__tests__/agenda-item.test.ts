@@ -282,7 +282,13 @@ describe("agendaItem.countByMeeting", () => {
 });
 
 describe("agendaItem.byMeeting", () => {
-  it("returns the meeting's items flat, ordered by sort_order, with a per-item exhibit count", async () => {
+  // Wave 4, Task 3 removed `exhibit_count` from this procedure's output — the
+  // unfiltered `count(*)` disagreed with `exhibit.byMeeting`'s rule-14 filter
+  // and disclosed the cardinality of the very rows that rule hides (see the
+  // procedure's own doc comment). The two exhibits seeded below stay: they are
+  // now the pin that this read does NOT count them, which is what
+  // `expect(row).not.toHaveProperty("exhibit_count")` asserts.
+  it("returns the meeting's items flat, ordered by sort_order, and counts no exhibits", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -307,12 +313,11 @@ describe("agendaItem.byMeeting", () => {
         expect(rows.map((r) => r.title)).toEqual(["New Business", "Budget"]);
         expect(rows[0]?.parent_item_id).toBeNull();
         expect(rows[1]?.parent_item_id).toBe(section);
-        expect(rows[0]?.exhibit_count).toBe(0);
-        expect(rows[1]?.exhibit_count).toBe(2);
-        // The ::int cast on the correlated count, pinned by TYPE and not
-        // only by value — postgres.js hands back count(*) as the string "0",
-        // which renders identically and compares loosely.
-        expect(typeof rows[1]?.exhibit_count).toBe("number");
+        // `child` has two exhibits and this read reports neither, by
+        // absence rather than by a zero: re-adding the column would turn
+        // this red.
+        expect(rows[0]).not.toHaveProperty("exhibit_count");
+        expect(rows[1]).not.toHaveProperty("exhibit_count");
       } finally {
         await app.end();
       }

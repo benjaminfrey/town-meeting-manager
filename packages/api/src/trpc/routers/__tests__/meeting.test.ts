@@ -167,6 +167,9 @@ describe("meeting.byTown", () => {
         const rows = await caller.meeting.byTown();
         expect(rows.map((r) => r.title)).toEqual(["Earlier", "Later"]);
         expect(rows[0]?.board_name).toBe("Planning Board");
+        // Wave 4, Task 3: the kanban builds a Date from this value with
+        // `+ "T00:00:00"`, so its bare-YYYY-MM-DD shape is load-bearing.
+        expect(rows.map((r) => r.scheduled_date)).toEqual(["2026-01-01", "2026-12-01"]);
       } finally {
         await app.end();
       }
@@ -217,6 +220,9 @@ describe("meeting.byBoard", () => {
 
         const rows = await caller.meeting.byBoard({ boardId: town.boardId });
         expect(rows.map((r) => r.title)).toEqual(["Newer", "Older"]);
+        // Wave 4, Task 3: `boards.$boardId.meetings.tsx` builds a Date from
+        // this value the same way.
+        expect(rows.map((r) => r.scheduled_date)).toEqual(["2026-06-01", "2026-01-01"]);
       } finally {
         await app.end();
       }
@@ -263,6 +269,80 @@ describe("meeting.detail", () => {
         expect(row.title).toBe("Annual Meeting");
         expect(row.board_id).toBe(town.boardId);
         expect(row.scheduled_time).toBe("19:00:00");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  // Wave 4, Task 3. `scheduled_date` is a `date` column, declared `string`
+  // here and NOT cast `::text` — see this router's header for the probe that
+  // settled why no cast is needed on the drizzle path. This pins the property
+  // the declaration depends on, by `typeof` and not only by value, because a
+  // Date would compare loosely in a template literal and render convincingly.
+  // The last assertion is the shape every consumer actually needs: a bare
+  // `YYYY-MM-DD` that `+ "T00:00:00"` turns into a valid local date.
+  it("returns scheduled_date as a plain YYYY-MM-DD string, not a Date", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Annual Meeting",
+          scheduledDate: "2026-03-14",
+        });
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const row = await caller.meeting.detail({ meetingId });
+        expect(row.scheduled_date).toBe("2026-03-14");
+        expect(typeof row.scheduled_date).toBe("string");
+        // The shape every consumer actually depends on.
+        expect(new Date(row.scheduled_date + "T00:00:00").getTime()).not.toBeNaN();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  // Wave 4, Task 3 added these four for `routes/meetings.$meetingId.agenda.tsx`
+  // — the buttons that switch between "Generate" and "Regenerate" read them.
+  it("returns the agenda-packet and meeting-notice document columns", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Annual Meeting",
+          scheduledDate: "2026-03-14",
+        });
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const before = await caller.meeting.detail({ meetingId });
+        expect(before.agenda_packet_url).toBeNull();
+        expect(before.agenda_packet_generated_at).toBeNull();
+        expect(before.meeting_notice_url).toBeNull();
+        expect(before.meeting_notice_generated_at).toBeNull();
+
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            UPDATE meeting
+            SET agenda_packet_url = 'https://example.test/packet.pdf',
+                agenda_packet_generated_at = now(),
+                meeting_notice_url = 'https://example.test/notice.pdf',
+                meeting_notice_generated_at = now()
+            WHERE id = ${meetingId}
+          `);
+        });
+
+        const after = await caller.meeting.detail({ meetingId });
+        expect(after.agenda_packet_url).toBe("https://example.test/packet.pdf");
+        expect(after.meeting_notice_url).toBe("https://example.test/notice.pdf");
+        expect(after.agenda_packet_generated_at).not.toBeNull();
+        expect(after.meeting_notice_generated_at).not.toBeNull();
       } finally {
         await app.end();
       }

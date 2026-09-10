@@ -311,12 +311,19 @@ export const agendaItemRouter = router({
    * live screen does read `status`, and adds it the day it needs it),
    * `created_at`/`updated_at`, `search_vector`.
    *
-   * `exhibit_count` is ADDED, not carried over: the builder counts exhibits
-   * today by reading every `exhibit` row in the town and filtering client-side
-   * to this meeting's items (`allExhibits`). A per-item count answers the
-   * "N exhibits" badge without that; the full exhibit ROWS the uploader needs
-   * belong to `exhibit.ts`, which is Task 2's file, so this read does not try
-   * to serve them.
+   * **`exhibit_count` was here and is GONE — removed in wave 4, Task 3, and
+   * the removal is the point rather than a tidy-up.** Task 1 added it as a
+   * raw correlated `count(*)` so the builder could render an "N exhibits"
+   * badge without reading every exhibit row in the town. Task 2 then shipped
+   * `exhibit.byMeeting`, which applies rule 14 per row — so the two disagreed
+   * for any caller the rule excludes rows from: the badge counted an
+   * `admin_only` staff memo the list beneath it refused to show. Worse than
+   * a cosmetic mismatch, an unfiltered count DISCLOSES THE CARDINALITY of
+   * exactly the attachments rule 14 hides, which is why the column is
+   * removed from the API surface rather than merely left unrendered. The
+   * screen counts the rows `exhibit.byMeeting` actually handed it
+   * (`routes/meetings.$meetingId.agenda.tsx`'s `exhibitsByItem`), which is
+   * both filtered and free.
    *
    * `ORDER BY sort_order, id` — the tiebreak on `id` is added. The Supabase
    * query ordered on `sort_order` alone, which is not unique (every section's
@@ -342,14 +349,11 @@ export const agendaItemRouter = router({
           background: string | null;
           recommendation: string | null;
           suggested_motion: string | null;
-          exhibit_count: number;
         }>(
           await tx.execute(sql`
             SELECT ai.id, ai.section_type, ai.sort_order, ai.title, ai.description,
                    ai.presenter, ai.estimated_duration, ai.parent_item_id,
-                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion,
-                   (SELECT count(*)::int FROM exhibit e WHERE e.agenda_item_id = ai.id)
-                     AS exhibit_count
+                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion
             FROM agenda_item ai
             WHERE ai.meeting_id = ${input.meetingId}
             ORDER BY ai.sort_order ASC, ai.id
