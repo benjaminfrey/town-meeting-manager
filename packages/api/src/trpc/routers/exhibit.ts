@@ -169,14 +169,16 @@
  * latent defect is a question for the owner, not something this migration
  * decides — see the report's own judgement call on it.
  *
- * **A consequence Task 3 inherits and should not discover on screen:**
- * `agendaItem.byMeeting`'s `exhibit_count` (Task 1) is a raw
- * `count(*)` and is NOT visibility-filtered, so for a caller the filter
- * excludes rows from, the "N exhibits" badge and the list below it can
- * disagree. Left alone deliberately rather than "fixed" in passing — making
- * the count actor-dependent is a change to a procedure this task does not own
- * and did not test, and the honest fix is for the screen to count the rows it
- * actually received.
+ * **The `exhibit_count` mismatch this section used to warn Task 3 about is
+ * gone.** `agendaItem.byMeeting` carried a raw, unfiltered `count(*)` beside
+ * this filtered list, so the "N exhibits" badge and the list below it
+ * disagreed for any caller rule 14 excludes rows from. Task 3 removed the
+ * column outright rather than leaving it unrendered: the honest fix really is
+ * for the screen to count the rows it received (it does), and on top of that
+ * an unfiltered count DISCLOSES THE CARDINALITY of exactly the attachments
+ * this rule hides, which is a smaller version of the same leak for any future
+ * consumer to pick up. `grep -rn 'exhibit_count' packages/api/src
+ * packages/web/src` answers empty.
  */
 
 import { sql } from "drizzle-orm";

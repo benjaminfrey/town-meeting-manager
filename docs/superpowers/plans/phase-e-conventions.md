@@ -545,6 +545,24 @@ look at it. Pinned as a PASSING cross-board test in `exhibit.test.ts`
 ("does NOT scope byMeeting's board_only tier to the member's own board"), mirroring the `link` pin above,
 so narrowing either one later is a deliberate change and not a silent one.
 
+**Wave 4, Task 3 — what wiring the two guards found, and it is not about the guards.** Task 3
+called `meeting.publishAgenda`, `exhibit.link`, `exhibit.byMeeting` and all seven `agendaItem`
+writes from the agenda builder. Both guard shapes worked exactly as this item describes, first try,
+with no change to `trpc.ts` and no fix round on the API side. What the wiring found is a client-side
+cost this item had not yet named, alongside the `boardId`-prop cost it already had:
+
+**Closing a hole moves a refusal into a place the UI may be hiding.** Item 13's rule is that every
+newly-guarded mutation surfaces its error, and this task wrote nine `onError` handlers to satisfy
+it — but two of them rendered into a region the user could not see, and both tests caught it only
+because they asserted on `role="alert"` rather than on the string. A Radix `AlertDialog` marks
+everything outside itself `aria-hidden`, and a REFUSED destructive write leaves that dialog open
+(the close lives in `onSuccess`). So an error rendered beside the form is invisible for exactly the
+case it exists for, and the user is left with a Delete button that appears to do nothing — the
+silent-refusal shape all over again, now one layer down. **Render a refusal INSIDE the confirmation
+dialog that triggered it** (`InlineItemForm.tsx` and `AgendaSection.tsx` both do, each with the
+outer branch suppressed while the dialog is open). Every wave 5/6 write behind a confirmation
+dialog inherits this.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`
@@ -1406,6 +1424,18 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # rather than removed — it said no procedure existed, which stopped
      # being true in Task 2's first commit. Neither file is wired yet; Task
      # 3 owns that.
+12   # at 24bfcd4, the close of Phase E wave 4, Task 3 — DOWN two from
+     # Task 2's 14, and the two removed are exactly the two Task 2 named:
+     # `PublishAgendaDialog.tsx`'s (`meeting.publishAgenda`, now wired) and
+     # `ExhibitUploader.tsx`'s (`exhibit.link`/`exhibit.byMeeting`, now
+     # wired). No marker was ADDED: `routes/meetings.$meetingId.agenda.tsx`,
+     # `AgendaSection.tsx`, `InlineItemForm.tsx`, `AgendaItemRow.tsx` and
+     # `ExhibitRow.tsx` all reach zero raw Supabase calls in the same task,
+     # so none of the five needed one. `InlineItemForm.tsx` is the one worth
+     # naming: it had NEVER carried a marker despite three raw, unauthorized
+     # `agenda_item` writes (its delete was three unwrapped round trips), so
+     # item 11's sweep had been reading it as done — the exact hole this
+     # item exists to close, found by a task brief rather than by the grep.
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -1718,6 +1748,13 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `pathfilter-pin-coverage.test.ts`'s own `stripComments` over the same file list, exactly as the
   check itself does; walked that way at `8cbf749` it answers **39**, unchanged from the whole-branch
   round's own last figure, because the one new mention this task added is comment-only.
+  **Re-measured at `24bfcd4` (wave 4, Task 3): raw 44, stripped 41.** The two new comment-stripped
+  writers are `components/meetings/ExhibitUploader.tsx` and `components/meetings/ExhibitRow.tsx`,
+  both of which gained `trpc.exhibit.pathFilter()` when the agenda builder's exhibit read moved;
+  the extra raw-only file is `components/meetings/agenda-types.ts`, whose header names the
+  `RouterOutputs`-derived types in prose. Zero violations — the check passes at that commit, so the
+  five writer files this task added or changed each have at least one test importing them and
+  asserting an invalidation.
   The three files the gap between the pair accounts for are `routes/people.tsx`, `test/trpc.ts`, and
   (as of this task) `routes/boards.$boardId.tsx` — this is the durable claim here, and it is a claim
   about which FILES make up the gap, not a number that stays put; quote the check's own
@@ -1795,6 +1832,13 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   keyed on the line number (so no other line moves), run the suite, `git checkout --` the file,
   record. `git checkout --` as the restore step means the sweep needs a CLEAN working tree — run it
   BEFORE the round's own edits, or back the file up by hand for a site you are actively changing.
+  **Wave 4, Task 3 ran it the second way and it is the better default: `cp` the file aside and `cp`
+  it back.** That task's whole diff was uncommitted while the sweep ran (every one of its twelve
+  sites was a line it had just written), and `git checkout --` would have destroyed it — a hazard
+  this bullet already named and an implementer earlier in the same wave hit for real. Its result:
+  **12 sites, 12 RED, each naming a specific test.** Scoping the per-site run to the touched
+  directories rather than the whole web suite took it from ~12s a site to ~7s, which is what makes
+  running it per-task rather than per-wave affordable.
 
 - **Re-checked in the wave's final whole-branch review (current as of `9e87b7b`) — four of the
   five bullets that used to sit here were stale, three of them CLOSED and described as open. This
@@ -2081,19 +2125,25 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   or later, none of them a defect this task introduced (fix round 1 corrected the scope of #2 and
   extended #3 from rule 15 to its exact twin in rule 14 — both were caught by review, not by this
   task's own first pass):
-  1. **Nothing calls `meeting.publishAgenda`, `exhibit.link` or `exhibit.byMeeting` yet.**
-     `PublishAgendaDialog.tsx` still writes `meeting.agenda_status` raw and
-     `ExhibitUploader.tsx` still raw-inserts a linked exhibit; both carry a
-     `TODO(phase-e-wave-4)` marker naming the procedure that now exists. **The A5 hole and the
-     unauthorized link-insert are therefore still OPEN in the running product**, and will be until
-     Task 3 wires them. Recorded this way deliberately: wave 3 reported a hole closed at the moment
-     its procedure shipped and had to correct itself one round later.
-  2. **`agendaItem.byMeeting`'s `exhibit_count` is not visibility-filtered and `exhibit.byMeeting`
-     is.** The count (Task 1) is a raw correlated `count(*)`; the list (Task 2) applies rule 14. For
-     a caller the rule excludes rows from, the "N exhibits" badge and the list under it disagree.
-     Left alone rather than fixed in passing — making the count actor-dependent changes a procedure
-     Task 2 does not own and did not test, and the honest fix is for the screen to count the rows it
-     actually received. Task 3 renders both.
+  1. ~~**Nothing calls `meeting.publishAgenda`, `exhibit.link` or `exhibit.byMeeting` yet.** … **The
+     A5 hole and the unauthorized link-insert are therefore still OPEN in the running product**, and
+     will be until Task 3 wires them.~~ — **closed in Task 3, and the careful wording above is
+     exactly what made the claim checkable.** All three procedures have real callers now
+     (`PublishAgendaDialog.tsx`, `ExhibitUploader.tsx`,
+     `routes/meetings.$meetingId.agenda.tsx`), both raw writes are GONE rather than merely bypassed,
+     and both files' `TODO(phase-e-wave-4)` markers are discharged (item 11's count above,
+     14 → 12). The evidence a reader should demand for "a hole is closed" is those two halves
+     together — the procedure is called AND the raw write is deleted — because wave 3 claimed the
+     first alone and had to correct itself.
+  2. ~~**`agendaItem.byMeeting`'s `exhibit_count` is not visibility-filtered and `exhibit.byMeeting`
+     is.** … the honest fix is for the screen to count the rows it actually received.~~ — **closed
+     in Task 3, by REMOVING the column rather than by leaving it unrendered.** The honest fix named
+     here was half of it: the screen does count the rows it received. The other half is that an
+     unfiltered `count(*)` still DISCLOSES THE CARDINALITY of exactly the attachments rule 14 hides,
+     so leaving the column in the API surface would have left a smaller version of the same leak for
+     any future consumer to pick up. `grep -rn 'exhibit_count' packages/api/src packages/web/src`
+     answers empty. **The general lesson for a wave that finds a filtered read and an unfiltered
+     count over the same rows: the count is part of the disclosure, not a rendering detail.**
   3. **Rule 15's board-member branch ignores the board — and rule 14's `board_only` branch has the
      exact same hole** (see item 2's "Wave 4, Task 2" section for the full statement). `isBoardMember`
      is a town-level fact in both rules, so `exhibit.link` lets any board member attach material to
@@ -2104,16 +2154,44 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      where it has been open since Stage 1/D1e. **Whether a board member seeing every other board's
      `board_only` material is intended or a latent defect is for the owner to decide — see this
      task's report for the fix round's explicit judgement on it.**
-  4. **The read's tightening is bigger than "admin_only" alone (fix round 1 correction).** The
-     original statement here and in `exhibit.ts`'s header said an A2-only clerk "stops seeing
-     `admin_only` exhibit titles." Measured against the built rule, the SAME clerk also stops seeing
-     `board_only` titles, for the same reason (neither `isAdmin`, A3, nor `isBoardMember` holds) —
-     and `board_only` is the tier a board packet lands in, so once Task 3 wires this read into the
-     agenda builder the visible change is materially larger than the original statement implied. Both
-     tiers are now pinned together against one clerk in `exhibit.test.ts`.
+  4. ~~**The read's tightening is bigger than "admin_only" alone (fix round 1 correction).** …
+     once Task 3 wires this read into the agenda builder the visible change is materially larger than
+     the original statement implied.~~ — **shipped in Task 3, and the prediction held.** The A2-only
+     clerk who is not a board member now sees NEITHER tier on the agenda builder. What Task 3 had to
+     add on top of the correct diagnosis is the DEGRADATION story, which no procedure could supply:
+     the screen must not merely show fewer exhibits, it must show a count that agrees with the list,
+     or a restricted clerk reads "3 exhibits" above an empty list and files a bug. That is why item 2
+     above (the `exhibit_count` removal) and this one closed in the same commit — they are the same
+     requirement seen from the two ends. Pinned by `meetings.$meetingId.agenda.test.tsx`'s "degrades
+     to zero exhibits, not to a broken screen, when rule 14 hides them all".
 
   Two things this task checked and found already correct, so a later wave does not re-open them:
   the exhibit DELETE (rule 16, A3-only, at the D1e endpoint, reached by `ExhibitRow.tsx` for BOTH
   file and URL exhibits) and the portal's `board_only` exclusion (`routes/portal.ts` filters with
   `portalVisibleExhibits`, and `exhibit.link` writes the very column that filter reads, so no row it
   can create bypasses it).
+
+- **Wave 4, Task 3's own open items.** Three, none of them a defect this task introduced, and the
+  first two are scoping rather than gaps:
+  1. **`agendaItem.instantiateFromTemplate` still has no caller.** Task 1 shipped it for
+     `CreateMeetingDialog.tsx`'s `instantiateAgendaFromTemplate` helper, which is **Task 4**'s file
+     and carries its own `TODO(phase-e-wave-4)` marker naming it. Task 3's file list is the agenda
+     BUILDER, and that screen never instantiates a template.
+  2. **`agendaItem.setOperatorNotes` and `markComplete` still have no caller**, as Task 1 said —
+     `AgendaItemDetailPanel.tsx` is reached only from `routes/meetings.$meetingId.live.tsx`, wave 5's
+     file. Wave 5 also inherits Task 1's undecided A2-versus-M1 question for those two.
+  3. **The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
+     last legacy reader does": `routes/meetings.$meetingId.review.tsx` still reads
+     `[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and that file is wave
+     6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.
+
+  And one claim this task probed and found does NOT reproduce, recorded so a later wave does not
+  spend a round on the same phantom: **`agenda-item.ts`'s `scheduled_date::text` comment said the
+  cast was "load-bearing, not decorative: postgres.js parses a `date` column into a JS Date."** That
+  is true of a bare `postgres()` client and false of `tx.execute(sql…)` — `drizzle-orm/postgres-js`
+  installs identity parsers, so `date` and `timestamptz` both come back as raw text. Task 3 started
+  by "fixing" three uncast `scheduled_date` reads in `meeting.ts`/`board.ts` on that comment's
+  authority, probed the two clients side by side, found the declared `string` had been accurate all
+  along, and reverted the churn. Both comments now carry the probe. **The generalisable bit: a
+  comment asserting driver behaviour is checkable in about ninety seconds, and "the codebase already
+  says so" is the reason nobody had.**

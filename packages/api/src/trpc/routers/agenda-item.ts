@@ -75,7 +75,8 @@
  * and `rules.ts`'s agenda_item section now says in so many words that DELETE
  * is A2 too, so a reader auditing that file alone does not read the absence
  * as an oversight. What is NOT acceptable — a delete authorized by nothing —
- * is what the raw Supabase cascade in `InlineItemForm.tsx` does today.
+ * is what the raw Supabase cascade in `InlineItemForm.tsx` did until wave 4,
+ * Task 3 wired that component to `delete` below and removed it.
  *
  * ─── The FK hazard, closed the way conventions item 3 requires ────────────
  *
@@ -98,9 +99,10 @@
  *
  * ─── `delete` is ONE statement, because the database already cascades ─────
  *
- * `InlineItemForm.tsx` deletes exhibits, then child items, then the item —
- * three round trips, no transaction, a partial delete on any failure. Both
- * FKs are already `ON DELETE CASCADE` (`agenda_item_parent_item_id_fkey`,
+ * `InlineItemForm.tsx` USED to delete exhibits, then child items, then the
+ * item — three round trips, no transaction, a partial delete on any failure
+ * (wired to this procedure in wave 4, Task 3, and pinned there by a test that
+ * asserts the call count is 1). Both FKs are already `ON DELETE CASCADE` (`agenda_item_parent_item_id_fkey`,
  * `exhibit_agenda_item_id_fkey`, verified in `0000_baseline.sql`), so the
  * single `DELETE FROM agenda_item WHERE id = $1` below removes exactly the
  * same rows, atomically. Pinned by a test that deletes a section with a child
@@ -782,10 +784,27 @@ async function loadTemplateSections(
  * migration's job is to state behaviour differences, not to reproduce a
  * looser one.
  *
- * `scheduled_date::text` is load-bearing, not decorative: postgres.js parses
- * a `date` column into a JS `Date`, and the date formatting below is
- * character-for-character the client's, which starts from the `YYYY-MM-DD`
- * string.
+ * `scheduled_date::text` is harmless and, on this code path, NOT load-bearing
+ * — corrected in wave 4, Task 3 after the claim was probed rather than
+ * repeated. This comment used to say the cast was "load-bearing, not
+ * decorative: postgres.js parses a `date` column into a JS `Date`." True of a
+ * BARE `postgres()` client, false of `tx.execute(sql…)`:
+ * `drizzle-orm/postgres-js` installs identity parsers, so a `date` (and a
+ * `timestamptz`) comes back as raw text either way. Measured against the
+ * local database, not reasoned about:
+ *
+ *     postgres()           SELECT '2026-03-15'::date  ->  Date
+ *     drizzle(postgres())  SELECT '2026-03-15'::date  ->  "2026-03-15"
+ *
+ * The cast STAYS — it makes the declared `string | null` explicit at the
+ * query rather than dependent on a driver detail, and the date formatting
+ * below really does need `YYYY-MM-DD` — but do not copy it into a new
+ * procedure believing it fixes an Invalid Date, and do not go adding it to
+ * the three uncast `scheduled_date` reads in `meeting.ts`/`board.ts` on this
+ * comment's old authority. `meeting.ts`'s header carries the same probe and
+ * the tests that pin the property. The `::int` casts in this file ARE
+ * load-bearing, and the same probe is what shows it: `count(*)` really does
+ * come back as the string `"1"`.
  */
 async function insertMinutesApprovalItems(
   tx: TenantTx,
