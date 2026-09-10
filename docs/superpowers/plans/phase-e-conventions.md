@@ -533,6 +533,18 @@ migration, and pinned as a PASSING test in `exhibit.test.ts` so that whoever mak
 test rather than silence. **The general lesson: `requireBoardActor` guarantees that the board a rule is
 asked about is the board the write is really about. It cannot guarantee that the rule looks at it.**
 
+**Fix round 1 caught the identical hole sitting one function away, undocumented.** `assertCanInsertExhibit`
+(rule 15, the write above) is not the only place `isBoardMember` appears board-blind: `canSelectExhibit`'s
+`board_only` case (rule 14, `rules.ts:431`) is `isAdmin(actor) || resolvePermission(actor, "A3", row.boardId)
+|| isBoardMember(actor)` — the same town-level fact in the same inert position. `exhibit.byMeeting` is the
+first tRPC consumer of that branch, so it inherits the property unchanged: any board member of the town
+reads any board's `board_only` exhibit titles, not just their own board's. Not a `requireBoardActor`
+question at all — `byMeeting` is a plain `protectedProcedure`, filtering per-row after the fact — but the
+same general lesson applies one level down: a per-row rule can be handed the row's real board and still not
+look at it. Pinned as a PASSING cross-board test in `exhibit.test.ts`
+("does NOT scope byMeeting's board_only tier to the member's own board"), mirroring the `link` pin above,
+so narrowing either one later is a deliberate change and not a silent one.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`
@@ -2065,8 +2077,10 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   `minutesDocument` router has `byMeeting` only, and no procedure exists for any of the six
   transitions.
 
-- **Wave 4, Task 2's own open items, named rather than left silent.** Three, all inherited by Task 3
-  or later, none of them a defect this task introduced:
+- **Wave 4, Task 2's own open items, named rather than left silent.** Four, all inherited by Task 3
+  or later, none of them a defect this task introduced (fix round 1 corrected the scope of #2 and
+  extended #3 from rule 15 to its exact twin in rule 14 — both were caught by review, not by this
+  task's own first pass):
   1. **Nothing calls `meeting.publishAgenda`, `exhibit.link` or `exhibit.byMeeting` yet.**
      `PublishAgendaDialog.tsx` still writes `meeting.agenda_status` raw and
      `ExhibitUploader.tsx` still raw-inserts a linked exhibit; both carry a
@@ -2080,10 +2094,23 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      Left alone rather than fixed in passing — making the count actor-dependent changes a procedure
      Task 2 does not own and did not test, and the honest fix is for the screen to count the rows it
      actually received. Task 3 renders both.
-  3. **Rule 15's board-member branch ignores the board** (see item 2's "Wave 4, Task 2" section for
-     the full statement). Pinned as a PASSING test in `exhibit.test.ts` so narrowing it is a
-     deliberate change with a failing test to greet it; genuinely open as a product question, and
-     the same at the D1e upload endpoint, where it has been open since Stage 1.
+  3. **Rule 15's board-member branch ignores the board — and rule 14's `board_only` branch has the
+     exact same hole** (see item 2's "Wave 4, Task 2" section for the full statement). `isBoardMember`
+     is a town-level fact in both rules, so `exhibit.link` lets any board member attach material to
+     ANY board's agenda item, and `exhibit.byMeeting` lets any board member read ANY board's
+     `board_only` exhibit titles. Both are pinned as PASSING tests in `exhibit.test.ts` so narrowing
+     either is a deliberate change with a failing test to greet it; genuinely open as a product
+     question, and the same at the D1e upload endpoint (the write) and download endpoint (the bytes),
+     where it has been open since Stage 1/D1e. **Whether a board member seeing every other board's
+     `board_only` material is intended or a latent defect is for the owner to decide — see this
+     task's report for the fix round's explicit judgement on it.**
+  4. **The read's tightening is bigger than "admin_only" alone (fix round 1 correction).** The
+     original statement here and in `exhibit.ts`'s header said an A2-only clerk "stops seeing
+     `admin_only` exhibit titles." Measured against the built rule, the SAME clerk also stops seeing
+     `board_only` titles, for the same reason (neither `isAdmin`, A3, nor `isBoardMember` holds) —
+     and `board_only` is the tier a board packet lands in, so once Task 3 wires this read into the
+     agenda builder the visible change is materially larger than the original statement implied. Both
+     tiers are now pinned together against one clerk in `exhibit.test.ts`.
 
   Two things this task checked and found already correct, so a later wave does not re-open them:
   the exhibit DELETE (rule 16, A3-only, at the D1e endpoint, reached by `ExhibitRow.tsx` for BOTH

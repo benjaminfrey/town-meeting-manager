@@ -128,17 +128,46 @@
  *   1. **Scoped to the meeting in SQL.** The client already discarded
  *      everything else, so nothing it rendered changes — but the rows no
  *      longer travel.
- *   2. **Filtered by rule 14.** This one a caller CAN observe: a clerk
- *      holding A2 but not A3, who is not a board member, currently sees the
- *      title of an `admin_only` staff memo on the agenda builder and will not
- *      after this. That is rule 14 doing exactly what it says
- *      (`admin_only` = administrator or A3-for-that-board), and it was
- *      already true of the FILE — `resolveExhibitForDownload` has applied
- *      `assertCanSelectExhibit` since D1e — so this closes a metadata leak
- *      the bytes never had. Conventions item 2's "a read whose old policy was
- *      tenancy-only gets no guard" does not reach this table: `exhibit`'s
- *      SELECT policy is rule 14, three tiers, restored in `rules.ts`; only
- *      the RLS half of it is tenancy-only.
+ *   2. **Filtered by rule 14, and the visible half of the change is BIGGER
+ *      than "admin_only" alone.** A clerk holding A2 but not A3, who is not
+ *      a board member, currently sees the titles of BOTH an `admin_only`
+ *      staff memo AND a `board_only` exhibit on the agenda builder, and will
+ *      see NEITHER after this — measured against the built rules, not
+ *      assumed: `canSelectExhibit(actor, {visibility: "board_only", ...})`
+ *      is `isAdmin(actor) || resolvePermission(actor, "A3", boardId) ||
+ *      isBoardMember(actor)`, and none of the three holds for an A2-only
+ *      clerk. `board_only` is the tier a board PACKET lands in, so this is
+ *      the materially larger half of the tightening once Task 3 wires this
+ *      read into the agenda builder — not a footnote to the `admin_only`
+ *      case. That is rule 14 doing exactly what it says (neither tier is
+ *      granted by A2 alone), and it was already true of the FILE —
+ *      `resolveExhibitForDownload` has applied `assertCanSelectExhibit`
+ *      since D1e — so this closes a metadata leak the bytes never had.
+ *      Conventions item 2's "a read whose old policy was tenancy-only gets
+ *      no guard" does not reach this table: `exhibit`'s SELECT policy is
+ *      rule 14, three tiers, restored in `rules.ts`; only the RLS half of it
+ *      is tenancy-only. Both tiers are pinned: `exhibit.test.ts` hides an
+ *      `admin_only` AND a `board_only` row from the same A2-only clerk in
+ *      one test, so a procedure that dropped only one of the two tiers
+ *      would still fail it.
+ *
+ * **Rule 14's `board_only` branch has the identical hole rule 15's insert
+ * side has** (see `link`'s own doc comment below, and this task's report):
+ * `isBoardMember(actor)` is `actor.role === "board_member"` — a TOWN-level
+ * fact, not a board — so it is inert as a scope check no matter which rule
+ * consults it. `byMeeting` is the first tRPC consumer of this branch, and it
+ * inherits the property unchanged: ANY board member of the town reads ANY
+ * board's `board_only` exhibit titles, not just their own board's. This is
+ * not new and not a regression — `resolveExhibitForDownload` has answered
+ * identically for the BYTES since D1e, and the raw query this replaces
+ * filtered nothing at all — but it is now reachable through a procedure, so
+ * it is pinned as a PASSING cross-board test in `exhibit.test.ts`
+ * ("does NOT scope byMeeting's board_only tier to the member's own board"),
+ * mirroring `link`'s identical pin, so that narrowing either one later is a
+ * deliberate, visible change and not a silent one. Whether a board member
+ * seeing every OTHER board's `board_only` material is product intent or a
+ * latent defect is a question for the owner, not something this migration
+ * decides — see the report's own judgement call on it.
  *
  * **A consequence Task 3 inherits and should not discover on screen:**
  * `agendaItem.byMeeting`'s `exhibit_count` (Task 1) is a raw

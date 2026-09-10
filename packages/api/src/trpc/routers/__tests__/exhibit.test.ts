@@ -19,7 +19,16 @@
  *    reach so that narrowing it later is a deliberate, visible change rather
  *    than a silent one.
  * 3. **Rule 14 on a list read.** `byMeeting` filters with `visibleExhibits`;
- *    the raw Supabase query it replaces returned every tier to everyone.
+ *    the raw Supabase query it replaces returned every tier to everyone. Both
+ *    restricted tiers are pinned against the same A2-only clerk (fix round 1:
+ *    the original two tests each varied one tier and could not tell
+ *    "board_only also hidden" apart from "board_only left unfiltered"), and
+ *    rule 14's `board_only` branch is separately pinned as a PASSING
+ *    cross-board test (fix round 1) for the identical reason item 2 above
+ *    pins `link`'s role branch: `isBoardMember(actor)` is a town-level fact
+ *    in BOTH rules, so a board member of the town reads ANY board's
+ *    `board_only` exhibit titles through `byMeeting`, not just their own
+ *    board's.
  * 4. **The FK existence check (conventions item 3).** `agendaItemId` is a
  *    foreign key from client input and FK enforcement bypasses RLS, so a
  *    cross-tenant id must answer NOT_FOUND rather than silently inserting a
@@ -55,9 +64,14 @@
  *    redundant with the FK. (The "never existed" case fails differently, as
  *    `INTERNAL_SERVER_ERROR` — there the FK genuinely has no row to point
  *    at, so Postgres raises. Only the CROSS-TENANT id is silent.)
- * 4. **`visibleExhibits` dropped from `byMeeting` → 2 red**, the `admin_only`
- *    and `board_only` tier tests, with the excluded titles present in the
- *    answer.
+ * 4. **`visibleExhibits` dropped from `byMeeting` → 3 of 22 red** (re-measured
+ *    in fix round 1, after adding the two tests below): the `admin_only`
+ *    tier test, the `board_only`-vs-member test, and the combined
+ *    "hides BOTH" test, each with the excluded titles present in the answer.
+ *    The cross-board pin ("does NOT scope byMeeting's board_only tier…")
+ *    stays GREEN under this mutation, on purpose — it asserts a row IS
+ *    visible, so removing the filter cannot turn it red; it is pinned by the
+ *    rule's own board-blind branch, not by this mutation.
  *
  * Same connection discipline as every other router test in this phase: every
  * case that touches tenancy or RLS runs through `connectAsAppRole`, never the
@@ -291,6 +305,94 @@ describe("exhibit.byMeeting", () => {
 
         const rows = await caller.exhibit.byMeeting({ meetingId });
         expect(rows.map((r) => r.title)).toEqual(["Draft Warrant"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * Fix round 1, closing I-2: the router header's original claim was that
+   * this tightening is observable as "an A2-only clerk stops seeing
+   * `admin_only` titles" — true, but incomplete. Measured against the built
+   * rule, `board_only` is refused to the SAME clerk for the SAME reason
+   * (neither `isAdmin`, nor A3, nor `isBoardMember` holds for a staff
+   * account with only A2), and `board_only` is the tier a board packet lands
+   * in — the materially larger half of the change once Task 3 wires this
+   * read into the agenda builder. The admin_only test above and the
+   * board_only-vs-member test above it each vary only ONE tier; this test
+   * is the missing combination — one clerk, both restricted tiers, in one
+   * assertion — so a procedure that tightened only `admin_only` and left
+   * `board_only` unfiltered would still fail it.
+   */
+  it("hides BOTH the admin_only and the board_only exhibit from a clerk holding A2 but not A3", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        await seedExhibit(db, town, itemId, { title: "Public Map", sortOrder: 0 });
+        await seedExhibit(db, town, itemId, {
+          title: "Draft Warrant",
+          visibility: "board_only",
+          sortOrder: 1,
+        });
+        await seedExhibit(db, town, itemId, {
+          title: "Personnel Memo",
+          visibility: "admin_only",
+          sortOrder: 2,
+        });
+        const clerk = await seedActor(db, town, { role: "staff", global: ["A2"] });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const rows = await caller.exhibit.byMeeting({ meetingId });
+        expect(rows.map((r) => r.title)).toEqual(["Public Map"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * Fix round 1, closing I-1: rule 14's `board_only` branch —
+   * `isAdmin(actor) || resolvePermission(actor, "A3", row.boardId) ||
+   * isBoardMember(actor)` (`rules.ts:431`) — has the exact twin of the hole
+   * this file already pins for rule 15's `link` insert: `isBoardMember`
+   * is `actor.role === "board_member"`, a TOWN-level fact with no board in
+   * it, so the row's board never enters the decision. The `board_only` test
+   * above seeds its exhibit on `town.boardId`, the same board the meeting is
+   * on, so it cannot tell "scoped to the member's own board" apart from
+   * "not scoped at all." This test can: a board member with no seat on
+   * EITHER board reads a `board_only` exhibit hanging off `otherBoardId`'s
+   * meeting.
+   *
+   * Pinned as a PASSING test on purpose, mirroring `link`'s identical pin
+   * (`does NOT scope the board-member branch to the member's own board`) —
+   * not new, not a regression (the raw query this replaces filtered nothing
+   * at all, and `resolveExhibitForDownload` has answered identically for the
+   * bytes since D1e), and not this task's to narrow. See the router's own
+   * doc comment and this task's report for the product question this
+   * raises.
+   */
+  it("does NOT scope byMeeting's board_only tier to the member's own board — pinned so narrowing it is deliberate", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const otherBoardMeeting = await seedMeeting(db, town, town.otherBoardId);
+        const otherBoardItem = await seedAgendaItem(db, town, otherBoardMeeting);
+        await seedExhibit(db, town, otherBoardItem, {
+          title: "Other Board's Draft Warrant",
+          visibility: "board_only",
+        });
+        const member = await seedActor(db, town, { role: "board_member", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, member));
+
+        const rows = await caller.exhibit.byMeeting({ meetingId: otherBoardMeeting });
+        expect(rows.map((r) => r.title)).toEqual(["Other Board's Draft Warrant"]);
       } finally {
         await app.end();
       }
