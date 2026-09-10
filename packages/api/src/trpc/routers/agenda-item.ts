@@ -761,6 +761,23 @@ async function loadTemplateSections(
  * match today. Changing which rows appear on a clerk's agenda is not this
  * migration's call.
  *
+ * One filter is NOT preserved character-for-character, and is stated here
+ * rather than left for a diff to find: the client
+ * (`lib/meeting-helpers.ts:100-140`) applies `.eq("board_id", boardId)` only
+ * to its FIRST query (`adjourned`/`minutes_draft` meetings); its SECOND query
+ * — the merge step that re-fetches reviewed meetings by id
+ * (`meeting-helpers.ts:134-140`, `.in("id", reviewedMeetingIds)`) — carries
+ * no board filter at all. The single query above applies
+ * `WHERE m.board_id = ${args.boardId}` to BOTH halves of what the client did
+ * as two separate queries, because here they are one `WHERE` clause covering
+ * one `LEFT JOIN`. This only diverges under denormalisation drift — a
+ * `minutes_document.board_id` that no longer matches its `meeting.board_id`
+ * — in which case the client would list that meeting here and the server
+ * would not. Deliberately NOT changed to match the client: the server's
+ * board-scoped behaviour is the more defensible of the two, and this
+ * migration's job is to state behaviour differences, not to reproduce a
+ * looser one.
+ *
  * `scheduled_date::text` is load-bearing, not decorative: postgres.js parses
  * a `date` column into a JS `Date`, and the date formatting below is
  * character-for-character the client's, which starts from the `YYYY-MM-DD`

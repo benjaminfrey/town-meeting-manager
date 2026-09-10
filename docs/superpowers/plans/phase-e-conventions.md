@@ -445,14 +445,35 @@ consequences a wave-5/6 author should not have to rediscover:
   outcomes of one `SELECT`. With a join they are still one `SELECT`, but a missing `agenda_item` and
   a missing `meeting` are now distinguishable states that must both answer `NOT_FOUND` — an INNER
   JOIN gets this right by construction and a LEFT JOIN does not.
-- **A write touching MANY rows has a board SET, not a board.** `agendaItem.reorder` takes a list of
-  item ids; one re-authorization of "the" board is not enough, because the ids can span meetings and
-  therefore boards. It derives the DISTINCT board set with `SELECT DISTINCT m.board_id … WHERE
-ai.id = ANY(...)` and calls `assertMatchesAuthorizedBoard` once per distinct board, so a list
-  mixing the authorized board with any other is refused even though one of the two would have passed
-  a single check. Pinned by a test that mixes ids from two meetings on two boards
-  (`agenda-item.test.ts`). `motion`, `vote_record`, `minutes_section` and `meeting_attendance` all
-  have bulk-write shapes ahead of them; copy the set form, not the single-value form.
+- **A write touching MANY rows has a board SET, not a board — and its existence check is a COUNT,
+  not a null check.** `agendaItem.reorder` takes a list of item ids; one re-authorization of "the"
+  board is not enough, because the ids can span meetings and therefore boards. **It does NOT derive
+  the board set with `SELECT DISTINCT board_id`** — that form discards the per-id rows the existence
+  check below needs to count. The shipped query, quoted verbatim from `agenda-item.ts`'s
+  `assertItemsOnAuthorizedBoard`, returns one row per id:
+
+  ```sql
+  SELECT ai.id, ai.meeting_id, m.board_id
+  FROM agenda_item ai
+  JOIN meeting m ON m.id = ai.meeting_id
+  WHERE ai.id IN (${idList})
+  ```
+
+  The existence check compares the ROW COUNT to the id count —
+  `if (rows.length !== itemIds.length) throw new TRPCError({ code: "NOT_FOUND" })` — and it runs
+  BEFORE the distinct board set is ever computed (`new Set(rows.map((r) => r.board_id))`), which is
+  then passed to `assertMatchesAuthorizedBoard` once per distinct board, so a list mixing the
+  authorized board with any other is refused even though one of the two would have passed a single
+  check. **This is the many-row form of the bullet above, and the failure shape is different: the
+  single-row case fails by returning NO row; the many-row case fails by returning FEWER rows than
+  ids requested.** A `SELECT DISTINCT board_id` cannot detect that — it never carries the per-id
+  rows to count against the request, so a copier who reaches for the distinct-set form gets the
+  authorization loop with no existence check at all, silently. Pinned by a test that mixes ids from
+  two meetings on two boards (`agenda-item.test.ts`). `motion`, `vote_record`, `minutes_section` and
+  `meeting_attendance` all have bulk-write shapes ahead of them: copy the per-id query and the
+  row-count check together, not a distinct-board query alone — the count check is what closes the
+  FK-bypasses-RLS hazard for the many-row case, exactly as the `NOT_FOUND` check does for the
+  single-row case above.
 
 **Three of the seven are now checked; four are not.** Wave 3, Task 3 built the read-only routers over
 `agenda_item`, `meeting_attendance` and `minutes_document`, and its fix round confirmed all three
