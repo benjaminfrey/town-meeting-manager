@@ -280,6 +280,47 @@ export const boardMemberRouter = router({
   }),
 
   /**
+   * Phase E wave 4, Task 0 — `routes/people.tsx`'s board-membership half:
+   * for every ACTIVE seat in the town, which person holds it and on which
+   * board. Answers the marker that router's own `TODO(phase-e-wave-2)` left
+   * open ("`boardMember.listByTown` (or equivalent)"), after `roster`
+   * (board-scoped) and `memberCount` (a bare count) were both checked
+   * directly and confirmed NOT to answer this — neither returns a person id
+   * paired with a board name across the whole town.
+   *
+   * `status = 'active'` and no `board.archived_at` filter — the same two
+   * choices the raw Supabase read this replaces made
+   * (`.eq("status", "active")`, no filter on the joined board's own archived
+   * state; conventions item 1, "the query you are replacing is a
+   * specification"). No permission guard, deliberately, for the identical
+   * reason `board.ts`'s header gives for its own reads:
+   * `board_member_tenant_isolation` (`0000_baseline.sql`) is a plain
+   * `town_id = get_current_town_id()` policy, FOR ALL, no role predicate, so
+   * tenancy is already the whole policy and `protectedProcedure` +
+   * `ctx.withTenant` IS that policy.
+   *
+   * No writer invalidation change was needed to add this: `members:
+   * "boardMember"` has been in `cache-key-parity.test.ts`'s `MIGRATED` map
+   * since wave 2, so every writer that touches a `board_member` row already
+   * calls `trpc.boardMember.pathFilter()` — which matches every procedure
+   * under this router by prefix, this one included.
+   */
+  listByTown: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) =>
+      toRows<{ person_id: string; board_id: string; board_name: string }>(
+        await tx.execute(sql`
+          SELECT bm.person_id, bm.board_id, b.name AS board_name
+          FROM board_member bm
+          JOIN board b ON b.id = bm.board_id
+          WHERE bm.status = 'active'
+          ORDER BY b.name
+        `),
+        (message) => new Error(`boardMember.listByTown: ${message}`),
+      ),
+    );
+  }),
+
+  /**
    * `MemberRoster.tsx`'s read: every `board_member` row on one board, joined
    * with the person's name/email, their (at most one, per
    * `user_account_person_id_key`) account, and their MOST RECENT invitation —

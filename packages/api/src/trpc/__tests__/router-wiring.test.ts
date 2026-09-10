@@ -18,6 +18,7 @@ describe("router wiring", () => {
         "board.update",
         "board.copyNoticeTemplate",
         "boardMember.memberCount",
+        "boardMember.listByTown",
         "boardMember.roster",
         "boardMember.searchCandidates",
         "boardMember.personEmailExists",
