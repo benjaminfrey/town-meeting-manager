@@ -186,6 +186,16 @@ const FAMILIES: ReadonlyArray<{
     label: "exhibit uploads",
     allowed: (actor, boardId) => !throws(() => rules.assertCanInsertExhibit(actor, { boardId })),
   },
+  {
+    // Phase E wave 4, Task 2. A5 (`publish_agenda`) is in
+    // `BOARD_SCOPED_CODES` and in `TEMPLATE_BOARD_SPECIFIC_STAFF`, but had no
+    // guard in this codebase at all until that task — so this table, which
+    // exists to prove every board-scoped family is actually board-scoped,
+    // silently skipped one of the families the templates grant.
+    code: "A5",
+    label: "agenda publication",
+    allowed: (actor, boardId) => !throws(() => rules.assertCanPublishAgenda(actor, { boardId })),
+  },
 ];
 
 function throws(fn: () => unknown): boolean {

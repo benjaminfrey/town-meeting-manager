@@ -1,6 +1,10 @@
 /**
  * `meeting.byTown` / `.byBoard` / `.detail` / `.insert` / `.cancel` /
- * `.updateStatus`.
+ * `.updateStatus` / `.publishAgenda`.
+ *
+ * `publishAgenda` is Phase E wave 4, Task 2's — the first procedure in this
+ * codebase to consult A5 at all. Its own describe block at the bottom of this
+ * file carries the reasoning; everything below is wave 3's.
  *
  * `insert`/`cancel`/`updateStatus` are this codebase's first REAL call sites
  * for the board-scoped half of conventions item 2 (`requireBoardPermission`/
@@ -109,6 +113,15 @@ async function readMeetingStatus(db: TestDb, town: TownFixture, meetingId: strin
       .then((r) => toRows<{ status: string }>(r, (m) => new Error(m))),
   );
   return rows[0]?.status ?? null;
+}
+
+async function readAgendaStatus(db: TestDb, town: TownFixture, meetingId: string) {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(sql`SELECT agenda_status FROM meeting WHERE id = ${meetingId}`)
+      .then((r) => toRows<{ agenda_status: string }>(r, (m) => new Error(m))),
+  );
+  return rows[0]?.agenda_status ?? null;
 }
 
 async function countMeetingsNamed(db: TestDb, town: TownFixture, title: string): Promise<number> {
@@ -1030,6 +1043,255 @@ describe("meeting.updateStatus", () => {
             status: "cancelled",
           }),
         ).rejects.toThrow();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * `meeting.publishAgenda` — Phase E wave 4, Task 2.
+ *
+ * The code under test is the FIRST thing in `packages/api` to consult A5:
+ * before this task `grep -rn "A5" packages/api/src` matched only two test
+ * fixtures, so `PublishAgendaDialog`'s write was governed by nothing but
+ * `meeting_tenant_isolation` — any signed-in member of the town, any role,
+ * could declare any board's agenda the public record.
+ *
+ * Two properties these tests establish that no other `meeting` test does:
+ *
+ *   - A5 is NOT A1 and NOT A2. A clerk who may schedule meetings, or edit
+ *     this agenda's items, is still refused here unless the matrix grants
+ *     A5 as well — otherwise the new guard would be decorative, satisfied by
+ *     any permission the same account is likely to already hold.
+ *   - The refusal is FORBIDDEN even when the rest of the input does not
+ *     parse (the reorder pin), which is what proves `.use()` sits before
+ *     `.input()`.
+ *
+ * Deletion pin, run and recorded rather than asserted: with the
+ * `.use(requireBoardPermission("A5", ...))` line removed, this block goes
+ * from 8 green to 6 red — the two NOT_FOUND/`assertMeetingExists`-style
+ * cases survive (they are answered before the mismatch defence), every other
+ * case fails, and the successful ones fail too, with
+ * `assertMatchesAuthorizedBoard`'s wiring-bug `Error` rather than a refusal.
+ * Same shape `agenda-item.test.ts`'s header records for `update`.
+ */
+describe("meeting.publishAgenda", () => {
+  it("lets a caller holding A5 on this board publish the agenda", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "To Publish",
+          scheduledDate: "2026-05-01",
+        });
+        const clerk = await seedActor(db, town, { role: "staff", global: ["A5"] });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.meeting.publishAgenda({ meetingId, boardId: town.boardId });
+        expect(result.agenda_status).toBe("published");
+        expect(await readAgendaStatus(db, town, meetingId)).toBe("published");
+        // `status` is a different column with its own procedure — this write
+        // must not touch it. See the router header.
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with no A5 on this board, and leaves the agenda a draft", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Not Published",
+          scheduledDate: "2026-05-01",
+        });
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId, boardId: town.boardId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(err.message).toContain("A5");
+        expect(await readAgendaStatus(db, town, meetingId)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * A5 is its own action. A clerk holding A1 (schedule meetings) and A2
+   * (edit the agenda) — the two codes the account that BUILDS an agenda
+   * almost always has — is still refused, because publishing is a separate
+   * grant in the matrix. Without this test, wiring the guard to A1 or A2
+   * instead would pass every other case in this block.
+   */
+  it("refuses a caller holding A1 and A2 but not A5 — publishing is its own action", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Built But Not Publishable",
+          scheduledDate: "2026-05-01",
+        });
+        const builder = await seedActor(db, town, { role: "staff", global: ["A1", "A2"] });
+        const caller = appRouter.createCaller(contextFor(db, town, builder));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId, boardId: town.boardId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readAgendaStatus(db, town, meetingId)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("honours a REVOKING board override: refused on the barred board, allowed for the same actor on another", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const barred = await seedMeeting(db, town, town.boardId, {
+          title: "Barred Board Meeting",
+          scheduledDate: "2026-05-01",
+        });
+        const other = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Other Board Meeting",
+          scheduledDate: "2026-05-02",
+        });
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: ["A5"],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A5: false } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId: barred, boardId: town.boardId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readAgendaStatus(db, town, barred)).toBe("draft");
+
+        const result = await caller.meeting.publishAgenda({
+          meetingId: other,
+          boardId: town.otherBoardId,
+        });
+        expect(result.agenda_status).toBe("published");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The mismatch defence, identical shape to `cancel`'s and
+   * `updateStatus`'s: the guard authorizes the CLAIMED board, the write
+   * targets a row named by `meetingId`, and `meeting_tenant_isolation` has
+   * no board predicate — so any town member can already learn any meeting's
+   * true board and name it here.
+   */
+  it("refuses when the claimed boardId does not match the meeting's real board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const theirMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Not This Clerk's Board",
+          scheduledDate: "2026-05-01",
+        });
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A5: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({
+            meetingId: theirMeeting,
+            boardId: town.boardId,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readAgendaStatus(db, town, theirMeeting)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId: "not-a-uuid", boardId: town.boardId }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a meetingId in another town", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirMeeting = await seedMeeting(db, theirs, theirs.boardId, {
+          title: "Not Mine",
+          scheduledDate: "2026-01-01",
+        });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId: theirMeeting, boardId: mine.boardId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readAgendaStatus(db, theirs, theirMeeting)).toBe("draft");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a meetingId that never existed", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.publishAgenda({ meetingId: randomUUID(), boardId: town.boardId }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
       } finally {
         await app.end();
       }

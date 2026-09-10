@@ -500,22 +500,29 @@ export function requireActor<R>(
  * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board) is the first real
  * caller (`meeting.ts`'s `cancel`); the reviewer who specified this function
  * (Phase E wave 3's fix round) enumerated `rules.ts`'s other `BoardScope`
- * rules and found sixteen of EIGHTEEN ARE exactly one `assertPermission`
+ * rules and found all but two ARE exactly one `assertPermission`
  * call (use `requireBoardPermission` for those — reach for it FIRST; this
  * function is for the remainder). Re-derived in the whole-branch fix round
  * after the count shipped as "nineteen" here and in
  * `phase-e-conventions.md` item 2 — quote the grep, not the number
- * (conventions item 11):
+ * (conventions item 11); it answered 18 then and answers 19 now, because
+ * Phase E wave 4, Task 2 added `assertCanPublishAgenda` (A5, the one
+ * board-scoped code with no rule in this codebase at all until that task):
  *
- *     $ grep -nE ": BoardScope" packages/api/src/trpc/authorization/rules.ts | wc -l
- *     18
+ *     $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
+ *     19
  *
  * The two that are not one `assertPermission` call are
  * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board — this function's
  * own reason for existing) and `assertCanInsertExhibit` (A3 OR
- * `isBoardMember(actor)`, a ROLE branch rather than a second code; it fits
- * this shape structurally and is simply unused here yet). The nineteenth
- * rule the old count was reaching for is `assertCanInsertVoteRecord`, which
+ * `isBoardMember(actor)`, a ROLE branch rather than a second code —
+ * ~~it fits this shape structurally and is simply unused here yet~~
+ * **wired in wave 4, Task 2: `exhibit.link` is its first call site through
+ * this function; see `routers/exhibit.ts`'s header for what that first use
+ * found, including the branch this function's `BoardScope` cannot reach**).
+ * The extra rule the old "nineteen"
+ * was reaching for (a DIFFERENT nineteenth from the real one this grep now
+ * counts) is `assertCanInsertVoteRecord`, which
  * takes no `BoardScope` at all — its signature is `(actor: Actor, tx:
  * TenantTx, subject: VoteRecordSubject)`, so the `TenantTx` is its SECOND
  * argument, not "a third argument" as this comment previously said. It stays

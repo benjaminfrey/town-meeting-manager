@@ -189,6 +189,56 @@
  * noticed→active drag sends `"open"`. Recorded here rather than left as a
  * live forward-reference — conventions item 14's lens, applied to a router
  * header instead of a Known-gaps bullet.
+ *
+ * ─── `publishAgenda`: the third raw write, and the code that had no rule ──
+ *
+ * Phase E wave 4, Task 2. `PublishAgendaDialog.tsx` writes
+ * `meeting.agenda_status = 'published'` through raw Supabase with no
+ * authorization check of any kind — the same shape wave 3 closed for
+ * `status`, on a different column, and flagged there by that dialog's own
+ * `TODO(phase-e-wave-4)` marker.
+ *
+ * What made it worse than `updateStatus`'s hole: there was no rule to reach
+ * for. `PERMISSIONS.A5` is `publish_agenda` and A5 is one of the 18
+ * `BOARD_SCOPED_CODES`, but before this task the only occurrences of "A5" in
+ * `packages/api` were two test fixtures — no `assertCanPublishAgenda`
+ * existed at all. `rules.ts` now carries it (see its own "21a" section for
+ * why it is a rule rather than a bare code, given Task 1 declined to add
+ * `assertCanDeleteAgendaItem` on what looks like the opposite reasoning),
+ * and this procedure reaches A5 through
+ * `requireBoardPermission("A5", boardIdFrom())` — the single-code form
+ * conventions item 2 says to reach for FIRST, and the same `assertPermission`
+ * call the rule itself makes.
+ *
+ * A5, not A2 and not `assertCanUpdateMeeting`: publishing is a distinct
+ * governable action from editing the agenda's contents (A2) and from moving
+ * the meeting's own `status` (rule 21). The permission matrix grants the
+ * three independently, so folding this into either would hand publication to
+ * everyone holding the other.
+ *
+ * Row re-authorization is `cancel`'s and `updateStatus`'s, exactly: the
+ * target is named by `meetingId`, the guard authorized a CLIENT-CLAIMED
+ * `boardId`, and `meeting_tenant_isolation` has no board predicate — so the
+ * resolver re-reads the row's real `board_id` inside the write's own
+ * transaction and calls `assertMatchesAuthorizedBoard` before the UPDATE.
+ *
+ * What it does NOT do, stated so a reviewer does not read the absence as an
+ * oversight: it does not require the agenda to have at least one item. The
+ * dialog checks that client-side (`hasItems`) and the raw write it replaces
+ * enforced nothing server-side, so adding the precondition here would be a
+ * new rule rather than a preserved one — conventions item 1's "the query you
+ * are replacing is a specification." It also does not touch `meeting.status`:
+ * `agenda_status` and `status` are separate columns with separate
+ * procedures, and the raw write set only this one. Nor does it accept a
+ * target value — `'published'` is the only transition the dialog performs,
+ * and an `agenda_status` input would let a caller move a published agenda
+ * back to `'draft'` through a guard named "publish".
+ *
+ * **Wiring:** Task 3 wires `PublishAgendaDialog.tsx` to this. Until it does,
+ * the hole is NOT closed — the procedure exists and the dialog still writes
+ * raw Supabase. Wave 3 reported a hole closed at the moment its procedure
+ * shipped and had to correct itself; recorded here so the same claim is not
+ * made twice.
  */
 
 import { sql } from "drizzle-orm";
@@ -487,6 +537,40 @@ export const meetingRouter = router({
           WHERE id = ${input.meetingId}
         `);
         return { id: input.meetingId, status: input.status };
+      });
+    }),
+
+  /**
+   * `PublishAgendaDialog.tsx`'s write — see this file's header,
+   * "`publishAgenda`: the third raw write, and the code that had no rule."
+   *
+   * `updated_at` is set alongside `agenda_status`, matching the raw update
+   * this replaces (it sent `updated_at: new Date().toISOString()` from the
+   * browser's clock; `now()` is the database's, which is the same intent
+   * without trusting a client clock).
+   */
+  publishAgenda: protectedProcedure
+    .use(
+      requireBoardPermission("A5", boardIdFrom(), {
+        action: "to publish this meeting's agenda",
+      }),
+    )
+    .input(z.object({ meetingId: z.string().uuid(), boardId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string; board_id: string }>(
+          await tx.execute(sql`SELECT id, board_id FROM meeting WHERE id = ${input.meetingId}`),
+          (message) => new Error(`meeting.publishAgenda: ${message}`),
+        );
+        const meeting = rows[0];
+        if (!meeting) throw new TRPCError({ code: "NOT_FOUND" });
+        assertMatchesAuthorizedBoard(ctx, meeting.board_id);
+
+        await tx.execute(sql`
+          UPDATE meeting SET agenda_status = 'published', updated_at = now()
+          WHERE id = ${input.meetingId}
+        `);
+        return { id: input.meetingId, agenda_status: "published" as const };
       });
     }),
 });
