@@ -9,10 +9,13 @@
  *
  * Phase E, wave 1, Task 3 — the person and user_account writes are
  * `trpc.person.insert`/`trpc.person.insertStaffAccount` now, both admin-gated
- * server-side (`assertCanInsertPerson`/`assertCanInsertUserAccount`). The
- * `invitation` write stays on Supabase:
- * TODO(phase-e-wave-2): invitation.insert — no `invitation` router/rule
- * exists yet, so this is a genuine partial migration, not an oversight.
+ * server-side (`assertCanInsertPerson`/`assertCanInsertUserAccount`). Phase E
+ * wave 4, Task 0 closes the `invitation` write too, onto `trpc.invitation.insert`
+ * (new: no `invitation` router or rule existed before this task — see that
+ * router's own header for the two FK checks and why its guard reuses
+ * `assertCanInsertUserAccount` rather than inventing a new rule). The token is
+ * now `gen_random_uuid()`, generated IN THE DATABASE — this dialog no longer
+ * mints its own with `crypto.randomUUID()` in the browser.
  */
 
 import { useState } from "react";
@@ -103,10 +106,10 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
   });
 
   const insertStaffAccount = useMutation(trpc.person.insertStaffAccount.mutationOptions());
+  const insertInvitation = useMutation(trpc.invitation.insert.mutationOptions());
 
   const createStaff = useMutation({
     mutationFn: async (staffResult: StaffAccountResult) => {
-      const now = new Date().toISOString();
       const person = await insertPerson.mutateAsync({
         name: personForm.values.name.trim(),
         email,
@@ -117,24 +120,13 @@ export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogP
         permissions: staffResult.permissions,
       });
 
-      // TODO(phase-e-wave-2): invitation.insert — no `invitation` router or
-      // authorization rule exists yet. Kept on Supabase; see this file's
-      // header.
-      const invId = crypto.randomUUID();
-      const { error: invErr } = await supabase.from("invitation").insert({
-        id: invId,
-        person_id: person.id,
-        user_account_id: account.id,
-        town_id: townId,
-        token: crypto.randomUUID(),
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        status: "pending",
-        created_at: now,
+      const invitation = await insertInvitation.mutateAsync({
+        personId: person.id,
+        userAccountId: account.id,
       });
-      if (invErr) throw invErr;
 
       // Best-effort invitation email (non-blocking; admin can resend from a board roster).
-      void apiFetch(`/api/invitations/${invId}/send`, { method: "POST" }).catch(() => {
+      void apiFetch(`/api/invitations/${invitation.id}/send`, { method: "POST" }).catch(() => {
         /* non-critical — an admin can resend from a board roster */
       });
 

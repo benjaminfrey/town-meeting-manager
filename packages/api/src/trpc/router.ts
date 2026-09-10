@@ -22,6 +22,7 @@ import { boardRouter } from "./routers/board.js";
 import { boardMemberRouter } from "./routers/board-member.js";
 import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
+import { invitationRouter } from "./routers/invitation.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 import { meetingRouter } from "./routers/meeting.js";
 import { agendaItemRouter } from "./routers/agenda-item.js";
@@ -63,6 +64,14 @@ export const appRouter = router({
    * `routers/person.ts` for why. The four writes are all admin gates.
    */
   person: personRouter,
+
+  /**
+   * `AddPersonDialog.tsx`'s invitation write — the one invitation insert
+   * `boardMember.ts`'s private `insertInvitation` helper cannot reach (that
+   * dialog never seats anyone on a board). One admin-gated procedure — see
+   * `routers/invitation.ts`.
+   */
+  invitation: invitationRouter,
 
   /**
    * A person's own notification preferences. No permission guard — see

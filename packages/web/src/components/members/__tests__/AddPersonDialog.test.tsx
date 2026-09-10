@@ -12,9 +12,10 @@
  *
  * `@/lib/trpc` is NOT mocked — see `boards.$boardId.test.tsx` for the
  * pattern this copies. Only `globalThis.fetch` is replaced, by
- * `installTRPCFetchStub`. `invitation` still writes through `@/lib/supabase`
- * (see `AddPersonDialog.tsx`'s own `TODO(phase-e-wave-2)` marker), so that
- * module is mocked too, just enough to resolve.
+ * `installTRPCFetchStub`. `invitation` moved onto `trpc.invitation.insert` in
+ * Phase E wave 4, Task 0 — stubbed below like `person.insert`/
+ * `person.insertStaffAccount`. `@/lib/supabase` is still mocked, narrowly:
+ * only the live email-uniqueness check reads through it now.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -37,22 +38,15 @@ vi.mock("@/hooks/useWizardForm", () => ({
   }),
 }));
 
-// ─── Mock Supabase (only the email-uniqueness check and `invitation` insert
-//     still use it — see this file's header) ───────────────────────────
-
-const { insertedTables } = vi.hoisted(() => ({ insertedTables: [] as string[] }));
+// ─── Mock Supabase (only the email-uniqueness check still uses it) ─────
 
 vi.mock("@/hooks/useSupabase", () => ({
   useSupabase: () => ({
-    from: (table: string) => {
+    from: () => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
         limit: () => Promise.resolve({ data: [], error: null }), // emailExists → false
-        insert: () => {
-          insertedTables.push(table);
-          return Promise.resolve({ error: null });
-        },
       };
       return chain;
     },
@@ -85,6 +79,7 @@ const stub = installTRPCFetchStub({
     person_id: input.personId,
     gov_title: input.govTitle ?? null,
   }),
+  "invitation.insert": () => ({ id: "new-invitation" }),
 });
 
 const props = { townId: "town-1", open: true, onOpenChange: vi.fn() };
@@ -94,10 +89,6 @@ function renderDialog() {
 }
 
 describe("AddPersonDialog", () => {
-  beforeEach(() => {
-    insertedTables.length = 0;
-  });
-
   it("step 1 collects name + email", () => {
     renderDialog();
     expect(screen.getByText("Add person")).toBeInTheDocument();
@@ -145,8 +136,12 @@ describe("AddPersonDialog", () => {
 
     await waitFor(() => expect(stub.countFor("person.insertStaffAccount")).toBe(1));
     expect(stub.calls.some((c) => c.paths.includes("person.insert"))).toBe(true);
-    // The invitation write is still Supabase (see this file's header).
-    await waitFor(() => expect(insertedTables).toContain("invitation"));
+    await waitFor(() => expect(stub.countFor("invitation.insert")).toBe(1));
+    const invitationCall = stub.calls.find((c) => c.paths.includes("invitation.insert"));
+    expect(invitationCall?.inputs["0"]).toMatchObject({
+      personId: "new-person",
+      userAccountId: "new-account",
+    });
   });
 
   it("invalidates trpc.person.pathFilter() after creating a staff account", async () => {
