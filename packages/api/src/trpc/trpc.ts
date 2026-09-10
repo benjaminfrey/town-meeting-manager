@@ -239,6 +239,31 @@ export interface RequirePermissionOptions {
  *
  * For a board-scoped code, prefer `requireBoardPermission` — this function
  * throws for one anyway, but the named variant says what it is doing.
+ *
+ * ─── The board form carries its authorized board forward ─────────────────
+ *
+ * Passing `options.board` here DELEGATES to `requireBoardPermission` below,
+ * which sets `ctx.authorizedBoardId` before calling `next()` — the same field
+ * `requireBoardActor` sets, read by `assertMatchesAuthorizedBoard` below.
+ * Added in Phase E wave 4, Task 1, because without it the two pieces of
+ * shipped guidance contradicted each other: `phase-e-conventions.md` item 2
+ * says "reach for `requireBoardPermission` FIRST; use `requireBoardActor`
+ * only when the rule spans more than one code", while item 2's own
+ * mismatch-defence section makes `assertMatchesAuthorizedBoard` the DEFAULT
+ * for every row-targeted board-scoped write — and that function threw a
+ * plain `Error` ("this procedure's guard must be requireBoardActor") for any
+ * procedure guarded the narrower way. A wave-4 author following both would
+ * have shipped a procedure that compiles, passes its FORBIDDEN refusal test,
+ * and then answers INTERNAL_SERVER_ERROR on the first real call. Every
+ * board-scoped write in waves 4–6 needs the defence, so the alternative —
+ * `requireBoardActor` everywhere — would have spread that function's known
+ * residual (it cannot preserve this function's import-time refusal for a
+ * board-scoped code used with no board) across three waves to buy nothing.
+ *
+ * The GLOBAL form sets nothing: there is no board to carry, and a procedure
+ * that later called `assertMatchesAuthorizedBoard` after a global check
+ * would be exactly the wiring bug that function's plain `Error` exists to
+ * report.
  */
 export function requirePermission(code: PermissionCode, options: RequirePermissionOptions = {}) {
   if (!options.board && BOARD_SCOPED_CODES.includes(code)) {
@@ -253,65 +278,119 @@ export function requirePermission(code: PermissionCode, options: RequirePermissi
     );
   }
 
+  // The board form is a SEPARATE middleware below, not a branch inside this
+  // one, and that is a type-level requirement rather than tidiness: a single
+  // middleware whose body can reach either `opts.next()` or
+  // `opts.next({ctx: …})` has its downstream context type inferred from BOTH
+  // returns, so `authorizedBoardId` never reaches the resolver's `ctx` TYPE
+  // even though it reaches it at runtime. Measured, not assumed — the first
+  // version of this change kept one body with two returns and
+  // `assertMatchesAuthorizedBoard(ctx, …)` in a `requireBoardPermission`
+  // procedure's resolver failed with `TS2559: Type '{ actor: …; tenant: …; }'
+  // has no properties in common with type '{ authorizedBoardId?: string }'`.
+  // Keeping them apart also PRESERVES that TS2559 as a useful signal for the
+  // global form: calling the mismatch defence in a procedure guarded by a
+  // global check is a compile error, which is exactly what it should be.
+  if (options.board) return requireBoardPermission(code, options.board, { action: options.action });
+
   return middleware(async (opts) => {
     const ctx = opts.ctx;
-    if (!ctx.actor) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message:
-          "A permission check ran on a procedure with no tenant context. Permission " +
-          "checks are only meaningful for a signed-in member of a town; build the " +
-          "procedure on protectedProcedure.",
-      });
-    }
-
-    let boardId: string | undefined;
-    if (options.board) {
-      // `getRawInput()`, not `opts.input` — declared before `.input()`, this
-      // middleware runs before parsing, so `opts.input` is `undefined` and
-      // `options.board` would refuse every call (fail-closed, but dead).
-      // `getRawInput()` returns the UNVALIDATED body; `boardIdFrom` already
-      // narrows it at runtime and returns `undefined` on anything that is
-      // not a non-empty string at the key, and the refusal below already
-      // fires on that — so reading unvalidated input widens nothing. A junk
-      // board id fails closed exactly as it did before this change.
-      //
-      // This does mean the guard authorizes against the PRE-validation board
-      // id, while the resolver (after `.input()` runs) acts on the
-      // POST-validation one. They are the same value today for every
-      // board-scoped procedure in this repo. They would NOT be the same if
-      // an input schema ever applied `.transform()` to the board id field —
-      // do not do that; a guard must authorize the same value the resolver
-      // acts on.
-      boardId = options.board(await opts.getRawInput());
-      if (!boardId) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            `The ${code} check on this procedure is scoped to a board, but no board id ` +
-            "was supplied. Refusing rather than falling back to the global grant, which " +
-            "would ignore an override that revokes this permission for that board.",
-        });
-      }
-    }
-
+    assertTenantContext(ctx);
     const actor = await ctx.actor();
-    assertPermission(actor, code, { boardId, action: options.action });
+    assertPermission(actor, code, { action: options.action });
     return opts.next();
   });
+}
+
+/**
+ * The tenant half of every guard in this file, shared so the three of them
+ * cannot drift apart.
+ *
+ * All three fields are checked, not `ctx.actor` alone: the board-scoped
+ * guards have to FORWARD `ctx.withTenant`/`ctx.tenant` into `next({ctx: …})`,
+ * and narrowing on `!ctx.actor` alone does not carry over to the other two
+ * independently-optional fields — a spread built from an only-`actor`-narrowed
+ * `ctx` leaves `withTenant` typed possibly `undefined` for every downstream
+ * resolver (`TS2722` at the resolver's own `ctx.withTenant(...)` call).
+ * Checking all three costs the global form nothing: `context.ts`'s
+ * `bindTenantAccess` sets `tenant`, `withTenant` and `actor` together or not
+ * at all, so no context can satisfy one and fail another.
+ */
+function assertTenantContext(ctx: TrpcContext): asserts ctx is TrpcContext & AuthenticatedContext {
+  if (!ctx.actor || !ctx.withTenant || !ctx.tenant) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "A permission check ran on a procedure with no tenant context. Permission " +
+        "checks are only meaningful for a signed-in member of a town; build the " +
+        "procedure on protectedProcedure.",
+    });
+  }
 }
 
 /**
  * The board-scoped form. `board` is required, so it cannot be forgotten.
  *
  *     .use(requireBoardPermission("A1", boardIdFrom()))
+ *
+ * Sets `ctx.authorizedBoardId` for the resolver's own
+ * `assertMatchesAuthorizedBoard` call — see `requirePermission`'s doc comment
+ * for why that is this function's job as much as `requireBoardActor`'s.
  */
 export function requireBoardPermission(
   code: PermissionCode,
   board: (input: unknown) => string | undefined,
   options: { action?: string } = {},
 ) {
-  return requirePermission(code, { ...options, board });
+  return middleware(async (opts) => {
+    const ctx = opts.ctx;
+    assertTenantContext(ctx);
+
+    // `getRawInput()`, not `opts.input` — declared before `.input()`, this
+    // middleware runs before parsing, so `opts.input` is `undefined` and
+    // `board` would refuse every call (fail-closed, but dead).
+    // `getRawInput()` returns the UNVALIDATED body; `boardIdFrom` already
+    // narrows it at runtime and returns `undefined` on anything that is
+    // not a non-empty string at the key, and the refusal below already
+    // fires on that — so reading unvalidated input widens nothing. A junk
+    // board id fails closed exactly as it did before this change.
+    //
+    // This does mean the guard authorizes against the PRE-validation board
+    // id, while the resolver (after `.input()` runs) acts on the
+    // POST-validation one. They are the same value today for every
+    // board-scoped procedure in this repo. They would NOT be the same if
+    // an input schema ever applied `.transform()` to the board id field —
+    // do not do that; a guard must authorize the same value the resolver
+    // acts on.
+    const boardId = board(await opts.getRawInput());
+    if (!boardId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          `The ${code} check on this procedure is scoped to a board, but no board id ` +
+          "was supplied. Refusing rather than falling back to the global grant, which " +
+          "would ignore an override that revokes this permission for that board.",
+      });
+    }
+
+    const actor = await ctx.actor();
+    assertPermission(actor, code, { boardId, action: options.action });
+    // Carries the AUTHORIZED board forward for a resolver-side
+    // `assertMatchesAuthorizedBoard` call. Each field re-listed explicitly
+    // rather than a bare `{...ctx, authorizedBoardId}` spread, for the reason
+    // `requireBoardActor`'s identical block records: the spread's inferred
+    // type does not carry the guard clause's narrowing into what `next()`
+    // reports downstream.
+    return opts.next({
+      ctx: {
+        ...ctx,
+        tenant: ctx.tenant,
+        withTenant: ctx.withTenant,
+        actor: ctx.actor,
+        authorizedBoardId: boardId,
+      } satisfies AuthenticatedContext & { authorizedBoardId: string },
+    });
+  });
 }
 
 /**
@@ -487,6 +566,14 @@ export function requireActor<R>(
  *
  * ─── The mismatch defence: carrying the authorized board forward ─────────
  *
+ * **Not this function's alone any more: `requireBoardPermission` sets
+ * `ctx.authorizedBoardId` too, as of Phase E wave 4, Task 1** — see
+ * `requirePermission`'s own doc comment for why (item 2 tells authors to
+ * reach for the narrower guard FIRST, and the defence below was the default
+ * for every row-targeted board-scoped write, so the two rules cancelled each
+ * other out until both guards supported it). Everything the rest of this
+ * section says applies identically to a procedure guarded either way.
+ *
  * A board-scoped write whose target is identified by something OTHER than
  * the board id itself (a row id, not the board id, as the mutation's key —
  * `meeting.cancel`'s `meetingId` is the first instance) needs a SECOND,
@@ -538,24 +625,10 @@ export function requireBoardActor<A extends RequireBoardActorRule>(
 ) {
   return middleware(async (opts) => {
     const ctx = opts.ctx;
-    // All three checked together, not just `ctx.actor` (the other guards'
-    // usual single check): this middleware is the first one that has to
-    // FORWARD `ctx.withTenant`/`ctx.tenant` into `next({ctx: ...})` below,
-    // and TypeScript's narrowing on `!ctx.actor` alone does not carry over
-    // to the other two independently-optional fields — a spread built from
-    // only-`actor`-narrowed `ctx` would leave `withTenant` typed possibly
-    // `undefined` for every downstream resolver, caught by `tsc` (TS2722 at
-    // the resolver's own `ctx.withTenant(...)` call) the moment this was
-    // tried without the extra checks.
-    if (!ctx.actor || !ctx.withTenant || !ctx.tenant) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message:
-          "A permission check ran on a procedure with no tenant context. Permission " +
-          "checks are only meaningful for a signed-in member of a town; build the " +
-          "procedure on protectedProcedure.",
-      });
-    }
+    // All three fields checked, not just `ctx.actor` — see
+    // `assertTenantContext`'s own doc comment, which this guard shared its
+    // three-way check with in wave 4 rather than keeping a third copy.
+    assertTenantContext(ctx);
     // `getRawInput()`, not `opts.input` — see `requirePermission`'s own
     // doc comment for why: declared before `.input()`, this middleware
     // runs before parsing, so `opts.input` is `undefined` here.
@@ -598,19 +671,37 @@ export function requireBoardActor<A extends RequireBoardActorRule>(
 }
 
 /**
- * The resolver-side half of `requireBoardActor`'s mismatch defence — see
- * that function's own doc comment. Call this after reading a row's REAL
- * board id from the database and before writing to it, whenever the
- * procedure's target is identified by something other than the board id
- * itself.
+ * The resolver-side half of the mismatch defence — see `requireBoardActor`'s
+ * doc comment above, and `requirePermission`'s "the board form carries its
+ * authorized board forward". Call this after reading a row's REAL board id
+ * from the database and before writing to it, whenever the procedure's
+ * target is identified by something other than the board id itself.
+ *
+ * **`actualBoardId` is "the board this write is really about", however that
+ * was established — not necessarily a column on the row being written.**
+ * Wave 3's only callers (`meeting.cancel`/`updateStatus`) read
+ * `meeting.board_id` straight off the target row, and this comment used to
+ * say "the row's real board" as though a column were the only source. From
+ * wave 4 on it usually is not: `agenda_item` has no `board_id` at all, so
+ * `agenda-item.ts` derives it with `SELECT m.board_id FROM agenda_item ai
+ * JOIN meeting m ON m.id = ai.meeting_id`, and `exhibit` is two joins out.
+ * The signature is unchanged and needs no change — a `string` is a `string`
+ * — but what a caller must satisfy is: the value passed here was read from
+ * the database inside the same tenant transaction as the write, never taken
+ * from client input.
+ *
+ * For a write touching MANY rows, "the board" may be a SET. Call this once
+ * per DISTINCT board derived from the whole target set — see
+ * `agendaItem.reorder`, which does exactly that, so a list of ids spanning
+ * two boards is refused even when one of the two is the authorized board.
  *
  * Throws FORBIDDEN (via `AuthorizationError`, translated the identical way
  * every other refusal in this layer is) when `ctx.authorizedBoardId` — the
- * board `requireBoardActor` actually authorized — does not match the row's
- * real board. Throws a plain `Error`, not a refusal, when
- * `ctx.authorizedBoardId` is missing entirely: that means this procedure's
- * guard is not `requireBoardActor`, which is a wiring bug in the
- * procedure, not something about THIS caller to refuse.
+ * board the guard actually authorized — does not match. Throws a plain
+ * `Error`, not a refusal, when `ctx.authorizedBoardId` is missing entirely:
+ * that means this procedure carries neither `requireBoardActor` nor
+ * `requireBoardPermission`, which is a wiring bug in the procedure, not
+ * something about THIS caller to refuse.
  */
 export function assertMatchesAuthorizedBoard(
   ctx: { authorizedBoardId?: string },
@@ -619,7 +710,10 @@ export function assertMatchesAuthorizedBoard(
   if (ctx.authorizedBoardId === undefined) {
     throw new Error(
       "assertMatchesAuthorizedBoard called on a context with no authorizedBoardId set. This " +
-        "procedure's guard must be requireBoardActor — it is the only thing that sets it.",
+        "procedure's guard must be requireBoardActor or requireBoardPermission — those two " +
+        "are the only things that set it (requireBoardPermission joined them in Phase E " +
+        "wave 4; a GLOBAL requirePermission check still sets nothing, because it authorizes " +
+        "no board).",
     );
   }
   if (ctx.authorizedBoardId !== actualBoardId) {

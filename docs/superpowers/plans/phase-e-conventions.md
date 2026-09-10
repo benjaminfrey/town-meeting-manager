@@ -346,7 +346,23 @@ protectedProcedure
 ```
 
 **Reach for `requireBoardPermission` first; use `requireBoardActor` only when the rule spans more than
-one code (or a role branch).** Two type-level checks close the same mistakes `requireActor` closes for
+one code (or a role branch).** **That advice did not work for eleven days, and wave 4's Task 1 is what
+made it true.** As shipped in wave 3, only `requireBoardActor` set `ctx.authorizedBoardId`, and
+`assertMatchesAuthorizedBoard` (the mismatch defence this item calls the DEFAULT for a row-targeted
+board-scoped write, four paragraphs down) threw a plain `Error` without it — message: _"This
+procedure's guard must be requireBoardActor — it is the only thing that sets it."_ So an author
+following BOTH rules got a procedure that compiles, passes its FORBIDDEN refusal test, and answers
+INTERNAL_SERVER_ERROR on the first real call. Since every board-scoped write in waves 4–6 needs the
+defence, "narrower first" was dead on arrival for all of them. **`requireBoardPermission` now sets
+`ctx.authorizedBoardId` too** (`requirePermission`'s board branch — the GLOBAL form still sets
+nothing, because it authorizes no board), so both guards support the defence and the preference above
+survives. The alternative considered and declined — use `requireBoardActor` everywhere — would have
+spread its known residual (no import-time refusal for a board-scoped code used with no board, two
+paragraphs down) across three waves to buy nothing. Pinned by two tests on a synthetic
+`requireBoardPermission` procedure whose resolver runs the defence
+(`require-permission.test.ts`'s `editAgendaWithMismatchDefence`), both verified by mutation: deleting
+the `next({ctx: {… authorizedBoardId}})` block turns them red with the wiring-bug `Error`, not with a
+refusal. Two type-level checks close the same mistakes `requireActor` closes for
 its own shape, plus one it does not need: a boolean predicate (`requireActor`'s own hole, reproduced
 here because the parameter shape is identical) AND an actor-only rule like `assertCanUpdateTown` —
 NEW to this shape, because a one-parameter function IS structurally assignable to a two-parameter type
@@ -409,6 +425,34 @@ construction) — which is exactly why this did not surface in Task 1's `insert`
 over:** `agenda_item`, `motion`, `vote_record`, `meeting_attendance`, `minutes_document`,
 `minutes_section` and `exhibit` are all board-scoped writes targeted by a row id, not the board id —
 the shape this hazard needs, not a shape unique to `cancel`.
+
+**What survives once the board is behind a JOIN, and what does not (wave 4, Task 1).** Everything
+above was written from `meeting`, where `board_id` is a column on the row being written, and one
+sentence of it was load-bearingly narrow: "read fresh from the database" was fine, "the row's real
+board" was not. `agenda_item` has **no `board_id` column at all** — its board is
+`SELECT m.board_id FROM agenda_item ai JOIN meeting m ON m.id = ai.meeting_id WHERE ai.id = $1`, and
+`exhibit` is one join further out. What survives is the whole mechanism: the guard authorizes a
+client-claimed board before `.input()`, the resolver re-derives the real one inside the same
+`ctx.withTenant` transaction as the write, and `assertMatchesAuthorizedBoard` compares the two. What
+does not survive is the assumption that the second value is a COLUMN READ. The helper's signature
+needed no change (a `string` is a `string`) and its doc comment did — it now states the actual
+requirement, which is about provenance, not shape: **the value passed must have been read from the
+database inside the same tenant transaction as the write, never taken from client input**. Two
+consequences a wave-5/6 author should not have to rediscover:
+
+- **A derivation that returns no row is `NOT_FOUND`, and it must run before the mismatch check, not
+  after.** With the board on the row, "the row is missing" and "the board does not match" were two
+  outcomes of one `SELECT`. With a join they are still one `SELECT`, but a missing `agenda_item` and
+  a missing `meeting` are now distinguishable states that must both answer `NOT_FOUND` — an INNER
+  JOIN gets this right by construction and a LEFT JOIN does not.
+- **A write touching MANY rows has a board SET, not a board.** `agendaItem.reorder` takes a list of
+  item ids; one re-authorization of "the" board is not enough, because the ids can span meetings and
+  therefore boards. It derives the DISTINCT board set with `SELECT DISTINCT m.board_id … WHERE
+ai.id = ANY(...)` and calls `assertMatchesAuthorizedBoard` once per distinct board, so a list
+  mixing the authorized board with any other is refused even though one of the two would have passed
+  a single check. Pinned by a test that mixes ids from two meetings on two boards
+  (`agenda-item.test.ts`). `motion`, `vote_record`, `minutes_section` and `meeting_attendance` all
+  have bulk-write shapes ahead of them; copy the set form, not the single-value form.
 
 **Three of the seven are now checked; four are not.** Wave 3, Task 3 built the read-only routers over
 `agenda_item`, `meeting_attendance` and `minutes_document`, and its fix round confirmed all three
