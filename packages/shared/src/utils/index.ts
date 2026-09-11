@@ -34,6 +34,8 @@ export {
   type MeetingValidationError,
 } from "./meeting-validation.js";
 
+export { calculateVoteResult, type VoteEntry, type VoteResult } from "./vote-tally.js";
+
 export {
   checkSubdomain,
   normaliseSubdomain,

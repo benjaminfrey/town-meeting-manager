@@ -4,98 +4,24 @@
  * Pure functions — not a React hook. Computes vote results from
  * an array of vote records, supporting simple majority and
  * supermajority thresholds.
+ *
+ * **`calculateVoteResult` and its two types now live in
+ * `@town-meeting/shared` (`utils/vote-tally.ts`) and are re-exported here
+ * unchanged** — Phase E, wave 5, Task 3. `voteRecord.recordForMotion`
+ * computes a motion's outcome server-side rather than accepting the browser's
+ * word for whether it carried, so the tally needs a body `packages/api` can
+ * import. Re-exported rather than relocated-and-rewired so every existing
+ * import of this module (`VotePanel.tsx`, `MotionCard`, the tests) is
+ * untouched, and so there is exactly ONE majority rule in the repository
+ * rather than two that drift.
+ *
+ * The formatters below stay here: they are display concerns with no server
+ * caller.
  */
 
-// ─── Types ──────────────────────────────────────────────────────────
+export { calculateVoteResult, type VoteEntry, type VoteResult } from "@town-meeting/shared";
 
-export interface VoteEntry {
-  boardMemberId: string;
-  vote: string; // "yes" | "no" | "abstain" | "recusal" | "absent"
-  recusalReason?: string | null;
-}
-
-export interface VoteResult {
-  yeas: number;
-  nays: number;
-  abstentions: number;
-  recusals: number;
-  absent: number;
-  /** Total members who actually voted yea or nay */
-  votingMembers: number;
-  /** Majority threshold needed to pass */
-  majorityNeeded: number;
-  /** Whether the motion passed */
-  passed: boolean;
-  /** "passed" or "failed" */
-  result: "passed" | "failed";
-}
-
-// ─── Calculation ────────────────────────────────────────────────────
-
-/**
- * Calculate vote results from an array of individual votes.
- *
- * Majority rules:
- * - Eligible voters who actually voted = yea + nay (abstentions excluded)
- * - Simple majority = floor(votingMembers / 2) + 1
- * - Passed = yeas >= majorityNeeded
- *
- * @param votes - Array of vote entries for all board members
- * @param requiredMajority - "simple" (default) or "two_thirds"
- */
-export function calculateVoteResult(
-  votes: VoteEntry[],
-  requiredMajority: "simple" | "two_thirds" = "simple",
-): VoteResult {
-  let yeas = 0;
-  let nays = 0;
-  let abstentions = 0;
-  let recusals = 0;
-  let absent = 0;
-
-  for (const v of votes) {
-    switch (v.vote) {
-      case "yes":
-        yeas++;
-        break;
-      case "no":
-        nays++;
-        break;
-      case "abstain":
-        abstentions++;
-        break;
-      case "recusal":
-        recusals++;
-        break;
-      case "absent":
-        absent++;
-        break;
-    }
-  }
-
-  const votingMembers = yeas + nays;
-  let majorityNeeded: number;
-
-  if (requiredMajority === "two_thirds") {
-    majorityNeeded = votingMembers > 0 ? Math.ceil((votingMembers * 2) / 3) : 1;
-  } else {
-    majorityNeeded = votingMembers > 0 ? Math.floor(votingMembers / 2) + 1 : 1;
-  }
-
-  const passed = yeas >= majorityNeeded;
-
-  return {
-    yeas,
-    nays,
-    abstentions,
-    recusals,
-    absent,
-    votingMembers,
-    majorityNeeded,
-    passed,
-    result: passed ? "passed" : "failed",
-  };
-}
+import type { VoteEntry, VoteResult } from "@town-meeting/shared";
 
 // ─── Display Formatting ─────────────────────────────────────────────
 
