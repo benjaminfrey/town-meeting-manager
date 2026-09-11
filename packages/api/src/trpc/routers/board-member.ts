@@ -325,6 +325,57 @@ export const boardMemberRouter = router({
   }),
 
   /**
+   * Phase E wave 4, Task 4 — `CreateMeetingDialog.tsx`'s prerequisite check:
+   * how many ACTIVE seats does this one board have? Answers that file's
+   * `TODO(phase-e-wave-4)` marker, whose own wording said no exact procedure
+   * existed and named the two that do not fit.
+   *
+   * Re-checked directly rather than taken from the marker, and it was right:
+   * `memberCount` above counts EVERY `board_member` row in the whole town,
+   * active or archived, with no board filter; `roster` below is board-scoped
+   * and carries `status`, so a client-side
+   * `roster.filter((r) => r.status === "active").length` would answer the same
+   * number — and that is why this is a new procedure rather than a reuse.
+   * `roster` returns the person's name and email, their account's role and
+   * archived state, and their most recent **invitation id, token and status**;
+   * `CreateMeetingDialog` renders a scheduling form and needs one integer.
+   * Sending a board's live invitation tokens to every user who opens that
+   * dialog, to count rows the server can count, is not a trade worth making to
+   * avoid a nine-line procedure.
+   *
+   * The query this replaces, as a specification (conventions item 1):
+   * `.from("board_member").select("*", {count: "exact", head: true})
+   * .eq("board_id", boardId).eq("status", "active")` — same two filters, no
+   * clause added or dropped.
+   *
+   * `assertBoardExists` for the same reason `list`/`countForBoard` in
+   * `agenda-template.ts` call it: without it, a `boardId` naming another
+   * town's board degrades to a convincing `0` (RLS filters the rows; there
+   * simply are none in scope) instead of NOT_FOUND — conventions item 3's
+   * "empty-but-real" failure. Not an FK check: this is a read, and nothing
+   * here writes a foreign key.
+   *
+   * No permission guard, for the same tenancy-only reason `listByTown` above
+   * carries none.
+   */
+  activeCountForBoard: protectedProcedure
+    .input(z.object({ boardId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertBoardExists(tx, input.boardId);
+        const rows = toRows<{ count: number }>(
+          await tx.execute(sql`
+            SELECT count(*)::int AS count FROM board_member
+            WHERE board_id = ${input.boardId} AND status = 'active'
+          `),
+          (message) => new Error(`boardMember.activeCountForBoard: ${message}`),
+        );
+        // The ::int cast is load-bearing — see `memberCount`'s identical note.
+        return rows[0]?.count ?? 0;
+      });
+    }),
+
+  /**
    * `MemberRoster.tsx`'s read: every `board_member` row on one board, joined
    * with the person's name/email, their (at most one, per
    * `user_account_person_id_key`) account, and their MOST RECENT invitation —

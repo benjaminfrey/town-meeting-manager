@@ -294,6 +294,104 @@ describe("agendaTemplate.countForBoard", () => {
   });
 });
 
+/**
+ * Phase E wave 4, Task 4. The four properties that make this NOT `list` with
+ * the board filter dropped — see the procedure's own doc comment: town-wide
+ * scope, the board's name instead of the template's sections, ordering by
+ * template name, and board-less rows included.
+ */
+describe("agendaTemplate.listByTown", () => {
+  /** Insert a template with NO board — `agenda_template.board_id` is nullable. */
+  async function seedBoardlessTemplate(
+    db: TestDb,
+    town: TownFixture,
+    name: string,
+  ): Promise<string> {
+    const id = randomUUID();
+    const sectionsJson = JSON.stringify(sampleSections());
+    await inTown(db, town, async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO agenda_template (id, board_id, town_id, name, is_default, sections)
+        VALUES (${id}, NULL, ${town.townId}, ${name}, false, ${sectionsJson}::jsonb)
+      `);
+    });
+    return id;
+  }
+
+  it("returns every board's templates with the board's name, ordered by template name", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const assessors = await seedBoard(db, town, { name: "Assessors" });
+        const zoning = await seedBoard(db, town, { name: "Zoning Board" });
+        await seedTemplate(db, town, zoning, { name: "Zoning Regular" });
+        await seedTemplate(db, town, assessors, { name: "Assessors Regular" });
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.agendaTemplate.listByTown();
+
+        expect(rows.map((r) => r.name)).toEqual(["Assessors Regular", "Zoning Regular"]);
+        expect(rows[0]?.board_id).toBe(assessors);
+        expect(rows[0]?.board_name).toBe("Assessors");
+        expect(rows[1]?.board_name).toBe("Zoning Board");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("includes a template with NO board — the LEFT JOIN the screen's Unassigned group needs", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Assessors" });
+        await seedTemplate(db, town, boardId, { name: "Board Template" });
+        const orphanId = await seedBoardlessTemplate(db, town, "Adrift Template");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const rows = await caller.agendaTemplate.listByTown();
+
+        const orphan = rows.find((r) => r.id === orphanId);
+        expect(orphan).toBeDefined();
+        expect(orphan?.board_id).toBeNull();
+        expect(orphan?.board_name).toBeNull();
+        expect(rows).toHaveLength(2);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not return another town's templates", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const theirBoard = await seedBoard(db, theirs, { name: "Their Board" });
+        await seedTemplate(db, theirs, theirBoard, { name: "Not Mine" });
+        const myBoard = await seedBoard(db, mine, { name: "My Board" });
+        await seedTemplate(db, mine, myBoard, { name: "Mine" });
+        const actor = await seedActor(db, mine, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+        const rows = await caller.agendaTemplate.listByTown();
+
+        expect(rows.map((r) => r.name)).toEqual(["Mine"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
 describe("agendaTemplate.insert", () => {
   it("refuses a caller who is not an administrator, and writes nothing", async () => {
     await withTestDb(async (client) => {

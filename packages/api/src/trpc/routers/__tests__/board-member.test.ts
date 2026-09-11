@@ -279,6 +279,66 @@ describe("boardMember.listByTown", () => {
   });
 });
 
+/**
+ * Phase E wave 4, Task 4 — `CreateMeetingDialog.tsx`'s prerequisite count.
+ * The three properties that distinguish it from `memberCount` above (which
+ * is town-wide and counts archived seats too): board-scoped, active-only,
+ * NOT_FOUND for a foreign board.
+ */
+describe("boardMember.activeCountForBoard", () => {
+  it("counts only this board's ACTIVE seats, as a number", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const assessors = await seedBoard(db, town, { name: "Assessors" });
+        const cemetery = await seedBoard(db, town, { name: "Cemetery Committee" });
+        const one = await seedPerson(db, town, "Active One");
+        const two = await seedPerson(db, town, "Active Two");
+        const gone = await seedPerson(db, town, "Archived One");
+        const elsewhere = await seedPerson(db, town, "Other Board");
+        await seedBoardMember(db, town, assessors, one, "active");
+        await seedBoardMember(db, town, assessors, two, "active");
+        await seedBoardMember(db, town, assessors, gone, "archived");
+        await seedBoardMember(db, town, cemetery, elsewhere, "active");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        const count = await caller.boardMember.activeCountForBoard({ boardId: assessors });
+
+        expect(count).toBe(2);
+        // The ::int cast: postgres returns count(*) as the string "2".
+        expect(typeof count).toBe("number");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a board in another town, rather than a convincing 0", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreign = await seedBoard(db, theirs, { name: "Their Board" });
+        const theirPerson = await seedPerson(db, theirs, "Their Member");
+        await seedBoardMember(db, theirs, foreign, theirPerson, "active");
+        const actor = await seedActor(db, mine, { role: "staff", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+        await expect(caller.boardMember.activeCountForBoard({ boardId: foreign })).rejects.toThrow(
+          /NOT_FOUND/,
+        );
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
 describe("boardMember.roster", () => {
   it("joins person, account and the most recent invitation for each seat", async () => {
     await withTestDb(async (client) => {
