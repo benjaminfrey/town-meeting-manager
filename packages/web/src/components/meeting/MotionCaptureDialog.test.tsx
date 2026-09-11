@@ -1,46 +1,26 @@
+/**
+ * `MotionCaptureDialog`'s form behaviour and its one write.
+ *
+ * Phase E wave 5, Task 5. The Supabase chainable mock is gone;
+ * `globalThis.fetch` is stubbed instead (conventions item 8), so the submit
+ * test asserts the PROCEDURE'S OWN INPUT rather than a `.insert()` payload —
+ * and the three fields that disappeared from that payload (`town_id`, `id`,
+ * `created_at`) are asserted absent, because the server supplies all three and
+ * a client that still sent them would be sending values it must not choose.
+ */
+
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { fireEvent } from "@testing-library/react";
-import { renderWithProviders, screen, waitFor } from "@/test/render";
+import { renderWithProviders, screen, waitFor, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub } from "@/test/trpc";
 import { MotionCaptureDialog } from "./MotionCaptureDialog";
 import type { MotionDialogMode } from "./MotionCaptureDialog";
 
-// ─── Supabase chainable mock ──────────────────────────────────────────────────
+const queryClient = setupAppQueryClient();
 
-const { mockChain, mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: null, error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
+const stub = installTRPCFetchStub({
+  "motion.insert": () => ({ id: "motion-new" }),
 });
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
 
 // ─── Test data ───────────────────────────────────────────────────────
 
@@ -54,7 +34,7 @@ const defaultProps = {
   open: true,
   onOpenChange: vi.fn(),
   meetingId: "meeting-1",
-  townId: "town-1",
+  boardId: "board-1",
   agendaItemId: "item-1",
   presentMembers,
 };
@@ -64,29 +44,6 @@ const defaultProps = {
 describe("MotionCaptureDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Restore chainable mock after clear
-    mockFrom.mockReturnValue(mockChain);
-    for (const m of [
-      "select",
-      "insert",
-      "update",
-      "delete",
-      "eq",
-      "neq",
-      "order",
-      "limit",
-      "single",
-      "throwOnError",
-      "or",
-      "filter",
-      "upsert",
-      "in",
-      "maybeSingle",
-    ]) {
-      if (typeof mockChain[m]?.mockReturnValue === "function") {
-        mockChain[m].mockReturnValue(mockChain);
-      }
-    }
   });
 
   it("renders dialog title for main motion mode", () => {
@@ -181,11 +138,13 @@ describe("MotionCaptureDialog", () => {
     expect(recordButton).not.toBeDisabled();
   });
 
-  it("submits motion via Supabase insert and closes dialog", async () => {
+  it("submits the motion through motion.insert and closes the dialog", async () => {
     const mode: MotionDialogMode = { type: "main" };
     const onOpenChange = vi.fn();
+    const before = stub.countFor("motion.insert");
     const { user } = renderWithProviders(
       <MotionCaptureDialog {...defaultProps} mode={mode} onOpenChange={onOpenChange} />,
+      { queryClient },
     );
 
     // Fill in the form
@@ -200,20 +159,25 @@ describe("MotionCaptureDialog", () => {
     expect(recordButton).not.toBeDisabled();
     await user.click(recordButton);
 
-    await waitFor(() => {
-      expect(mockFrom).toHaveBeenCalledWith("motion");
-      expect(mockChain.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agenda_item_id: "item-1",
-          meeting_id: "meeting-1",
-          town_id: "town-1",
-          motion_text: "To approve the annual town report",
-          motion_type: "main",
-          moved_by: "bm-1",
-          seconded_by: "bm-2",
-        }),
-      );
+    await waitFor(() => expect(stub.countFor("motion.insert")).toBe(before + 1));
+
+    const input = Object.values(stub.calls[stub.calls.length - 1]!.inputs)[0] as Record<
+      string,
+      unknown
+    >;
+    expect(input).toMatchObject({
+      boardId: "board-1",
+      meetingId: "meeting-1",
+      agendaItemId: "item-1",
+      motionText: "To approve the annual town report",
+      motionType: "main",
+      movedBy: "bm-1",
+      secondedBy: "bm-2",
     });
+    // The server owns these three now — see the file header.
+    expect(input).not.toHaveProperty("townId");
+    expect(input).not.toHaveProperty("id");
+    expect(input).not.toHaveProperty("createdAt");
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

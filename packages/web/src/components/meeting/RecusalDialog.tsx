@@ -13,9 +13,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage } from "@/lib/trpc";
 import {
   Dialog,
   DialogContent,
@@ -35,8 +34,13 @@ interface RecusalDialogProps {
   memberName: string;
   boardMemberId: string;
   meetingId: string;
-  townId: string;
-  agendaItemId: string;
+  /**
+   * The board this meeting belongs to — `voteRecord.insert`'s guard runs
+   * before `.input()` and has only the request body to authorize on. See
+   * `MotionCaptureDialog`'s own `boardId` note; the cost is the same one
+   * conventions item 2 names for every row-targeted board-scoped write.
+   */
+  boardId: string;
   /** If there's an active motion (in_vote status), record the recusal immediately */
   activeMotionId: string | null;
   onRecusalRecorded: (boardMemberId: string, reason: string, scope: "item" | "remaining") => void;
@@ -50,38 +54,52 @@ export function RecusalDialog({
   memberName,
   boardMemberId,
   meetingId,
-  townId,
-  agendaItemId,
+  boardId,
   activeMotionId,
   onRecusalRecorded,
 }: RecusalDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
   const [scope, setScope] = useState<"item" | "remaining">("item");
-  const [error, setError] = useState<string | null>(null);
 
-  const recusalMutation = useMutation({
-    mutationFn: async ({ trimmedReason }: { trimmedReason: string }) => {
-      // If there's an active motion being voted on, create the vote_record immediately
-      if (activeMotionId) {
-        const { error: insertError } = await supabase.from("vote_record").insert({
-          id: crypto.randomUUID(),
-          motion_id: activeMotionId,
-          meeting_id: meetingId,
-          town_id: townId,
-          board_member_id: boardMemberId,
-          vote: "recusal",
-          recusal_reason: trimmedReason,
-          created_at: new Date().toISOString(),
-        });
-        if (insertError) throw insertError;
-      }
-    },
-    onSuccess: (_data, { trimmedReason }) => {
-      if (activeMotionId) {
+  /**
+   * The local half of recording a recusal — the toast, the parent's
+   * quorum-impact bookkeeping, and closing the dialog.
+   *
+   * Split out because it runs on BOTH paths and only one of them is a write:
+   * with no motion in front of the board there is nothing to insert, and the
+   * raw mutation this replaces expressed that as a `mutationFn` with an empty
+   * body whose `onSuccess` still fired. A tRPC mutation cannot call nothing, so
+   * the branch moved to the caller and the shared tail moved here.
+   */
+  const finishRecusal = (trimmedReason: string) => {
+    toast.success("Recusal recorded");
+    onRecusalRecorded(boardMemberId, trimmedReason, scope);
+    onOpenChange(false);
+    setReason("");
+    setScope("item");
+  };
+
+  /**
+   * Wave 5, Task 5 — `voteRecord.insert` in place of the raw insert.
+   *
+   * `meeting_id`, `town_id`, `id` and `created_at` are gone from the payload:
+   * the procedure derives the meeting from the MOTION (so a recusal can no
+   * longer be filed whose `meeting_id` disagrees with its motion's), the town
+   * from the caller's session, and the other two from column defaults.
+   *
+   * This is the one path in the product on which rule 5's self-vote branch is
+   * reachable, so the refusal a board member sees comes from the rule rather
+   * than from the middleware prefilter — see `routers/vote-record.ts`'s header.
+   * Either way it is FORBIDDEN, newly reachable, and rendered inside this
+   * dialog, which stays open on a refusal and `aria-hidden`s everything
+   * outside itself.
+   */
+  const recusalMutation = useMutation(
+    trpc.voteRecord.insert.mutationOptions({
+      onSuccess: (_data, variables) => {
         void queryClient.invalidateQueries({
-          queryKey: queryKeys.voteRecords.byMotion(activeMotionId),
+          queryKey: queryKeys.voteRecords.byMotion(variables.motionId),
         });
         void queryClient.invalidateQueries({
           queryKey: queryKeys.voteRecords.byMeeting(meetingId),
@@ -89,24 +107,28 @@ export function RecusalDialog({
         // The live screen reads votes through `trpc.voteRecord.byMeeting` as
         // of wave 5, Task 4; neither legacy key above reaches it.
         void queryClient.invalidateQueries(trpc.voteRecord.pathFilter());
-      }
-      toast.success("Recusal recorded");
-      onRecusalRecorded(boardMemberId, trimmedReason, scope);
-      onOpenChange(false);
-      setReason("");
-      setScope("item");
-    },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : "Failed to record recusal");
-    },
-  });
+        finishRecusal(variables.recusalReason ?? "");
+      },
+    }),
+  );
 
   const canSubmit = reason.trim().length > 0 && !recusalMutation.isPending;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
-    setError(null);
-    recusalMutation.mutate({ trimmedReason: reason.trim() });
+    const trimmedReason = reason.trim();
+    if (!activeMotionId) {
+      finishRecusal(trimmedReason);
+      return;
+    }
+    recusalMutation.reset();
+    recusalMutation.mutate({
+      boardId,
+      motionId: activeMotionId,
+      boardMemberId,
+      vote: "recusal",
+      recusalReason: trimmedReason,
+    });
   };
 
   return (
@@ -176,7 +198,11 @@ export function RecusalDialog({
             </div>
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {recusalMutation.error && (
+            <p className="text-sm text-destructive" role="alert">
+              {refusalMessage(recusalMutation.error, "record this recusal")}
+            </p>
+          )}
         </div>
 
         <DialogFooter>

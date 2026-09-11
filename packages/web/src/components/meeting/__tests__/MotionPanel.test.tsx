@@ -1,35 +1,44 @@
 /**
- * `MotionPanel` — its two `trpc.motion.pathFilter()` calls.
+ * `MotionPanel` — its two `trpc.motion.pathFilter()` calls, and its two
+ * refusals.
  *
- * Phase E wave 5, Task 4. Calling the vote and withdrawing both write
- * `motion.status`, which the live meeting renders from `trpc.motion.byMeeting`
- * as of this task; the `queryKeys.motions.byMeeting` line each handler already
- * carried stopped reaching it. Conventions item 7, pinned per item 8 — one
- * test per call site, because a single test would credit the file for both and
- * leave whichever it did not reach unpinned (item 8's demonstrated per-file
- * credit bleed).
+ * Phase E wave 5, Task 5. Both controls are tRPC now (`motion.callVote`,
+ * `motion.withdraw`), and both **start working**: each raw update sent
+ * `updated_at`, a column `motion` does not have, so PostgREST rejected the
+ * body and neither button did anything — silently, since neither mutation had
+ * an `onError`.
+ *
+ * **Two refusal tests, one per reachability path** (conventions item 2, wave 4
+ * Task 3's fix round). "Call the Vote" fires straight from the card and its
+ * message renders there; "Withdraw" goes through an `AlertDialog` that STAYS
+ * OPEN on a refusal, `aria-hidden`ing everything outside itself, so its message
+ * renders inside the dialog. A single test written against whichever path was
+ * convenient would leave the other `role="alert"` site unpinned while the
+ * file's raw site count still matched its assertion count — the exact shape
+ * that hid an unpinned site in `AgendaSection.tsx`.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: () => {
-      const chain = {
-        update: () => chain,
-        eq: () => Promise.resolve({ error: null }),
-      };
-      return chain;
-    },
-  }),
-}));
-
 import { MotionPanel } from "../MotionPanel";
 
 const queryClient = setupAppQueryClient();
+
+const server = { callVoteRefuses: false, withdrawRefuses: false };
+
+installTRPCFetchStub({
+  "motion.callVote": ({ motionId }) => {
+    if (server.callVoteRefuses) trpcTestError("FORBIDDEN");
+    return { id: motionId };
+  },
+  "motion.withdraw": ({ motionId }) => {
+    if (server.withdrawRefuses) trpcTestError("FORBIDDEN");
+    return { id: motionId };
+  },
+});
 
 const motion = {
   id: "motion-1",
@@ -57,7 +66,7 @@ function renderPanel() {
       memberNameMap={new Map([["bm-1", "Alice"]])}
       motionDisplayFormat="inline_narrative"
       meetingId="m1"
-      townId="town-1"
+      boardId="board-1"
       agendaItemId="item-1"
       allMembers={[]}
       presentMembers={[]}
@@ -69,7 +78,12 @@ function renderPanel() {
   );
 }
 
-describe("MotionPanel cache invalidation", () => {
+describe("MotionPanel", () => {
+  beforeEach(() => {
+    server.callVoteRefuses = false;
+    server.withdrawRefuses = false;
+  });
+
   it("invalidates trpc.motion.pathFilter() when the vote is called", async () => {
     const key = seedMotionRead();
     const { user } = renderPanel();
@@ -87,5 +101,30 @@ describe("MotionPanel cache invalidation", () => {
     await user.click(screen.getByRole("button", { name: /confirm withdrawal/i }));
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("shows a refusal beside the motion when calling the vote is FORBIDDEN", async () => {
+    server.callVoteRefuses = true;
+    const { user } = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /call the vote/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to call a vote on this motion/i);
+  });
+
+  it("shows a refusal INSIDE the confirmation dialog when a withdrawal is FORBIDDEN", async () => {
+    server.withdrawRefuses = true;
+    const { user } = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /^withdraw$/i }));
+    await user.click(screen.getByRole("button", { name: /confirm withdrawal/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to withdraw this motion/i);
+    // Inside the dialog, which a refusal leaves open — everything outside it
+    // is `aria-hidden`, so a message on the card behind would be unreadable.
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByRole("alert")).toBe(alert);
   });
 });

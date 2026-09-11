@@ -4,42 +4,6 @@ import { fireEvent } from "@testing-library/react";
 import { AdjournmentControls } from "./AdjournmentControls";
 import { AdjournWithoutObjectionDialog } from "./AdjournWithoutObjectionDialog";
 
-const { mockChain, mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: null, error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
-});
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
-
 // ─── AdjournmentControls ────────────────────────────────────────────
 
 describe("AdjournmentControls", () => {

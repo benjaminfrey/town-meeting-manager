@@ -123,7 +123,10 @@ interface AgendaItemDetailPanelProps {
   /**
    * The board this meeting belongs to.
    *
-   * Required by `agendaItem.setOperatorNotes` and `agendaItem.markComplete`,
+   * Required by `agendaItem.setOperatorNotes`, `agendaItem.markComplete` and —
+   * as of wave 5, Task 5 — by every write in this panel's children
+   * (`MotionPanel`'s two, `VotePanel`'s, `MotionCaptureDialog`'s,
+   * `RecusalDialog`'s and `GuestSpeakerEntry`'s two),
    * whose guard (`requireBoardActor(assertCanUpdateAgendaItemProgress)`) runs
    * BEFORE `.input()` and therefore has nothing but the request body to
    * authorize on. Conventions item 2 names this cost explicitly: a row-targeted
@@ -132,7 +135,6 @@ interface AgendaItemDetailPanelProps {
    * its own transaction and refuses a mismatch.
    */
   boardId: string;
-  townId: string;
   allMembers: MemberInfo[];
   presentMembers: MemberInfo[];
   memberNameMap: Map<string, string>;
@@ -161,7 +163,6 @@ export function AgendaItemDetailPanel({
   item,
   meetingId,
   boardId,
-  townId,
   allMembers,
   presentMembers,
   memberNameMap,
@@ -473,7 +474,7 @@ export function AgendaItemDetailPanel({
           memberNameMap={memberNameMap}
           motionDisplayFormat={motionDisplayFormat}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={item.id}
           allMembers={allMembers}
           presentMembers={presentMembers}
@@ -495,7 +496,7 @@ export function AgendaItemDetailPanel({
           <GuestSpeakerEntry
             meetingId={meetingId}
             agendaItemId={item.id}
-            townId={townId}
+            boardId={boardId}
             speakers={item.speakers}
             readOnly={readOnly}
           />
@@ -593,7 +594,7 @@ export function AgendaItemDetailPanel({
           onOpenChange={setMotionDialogOpen}
           mode={motionDialogMode}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={item.id}
           presentMembers={presentMembers}
         />
@@ -607,8 +608,7 @@ export function AgendaItemDetailPanel({
           memberName={recusalMember.name}
           boardMemberId={recusalMember.boardMemberId}
           meetingId={meetingId}
-          townId={townId}
-          agendaItemId={item.id}
+          boardId={boardId}
           activeMotionId={activeVotingMotionId}
           onRecusalRecorded={handleRecusalRecorded}
         />

@@ -11,15 +11,13 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { Gavel, Vote, Pencil, XCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -44,12 +42,17 @@ interface MemberInfo {
   seatTitle?: string | null;
 }
 
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-}
+/**
+ * One `meeting_attendance` row and one `vote_record` row, as the procedures
+ * return them — conventions item 10, applied in Phase E wave 5, Task 5 to the
+ * last two components in the live-meeting tree still restating them by hand.
+ * Task 4 retyped `AttendancePanel`, `MeetingStartFlow` and
+ * `AgendaItemDetailPanel`; these two received the same payloads through a
+ * narrower hand-written interface, which structural typing accepted silently
+ * and which is exactly how a column the procedure stops selecting becomes a
+ * runtime `undefined` instead of a compile error.
+ */
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface MotionData {
   id: string;
@@ -68,13 +71,7 @@ interface MotionData {
   voteSummary: unknown;
 }
 
-interface VoteRecordData {
-  id: string;
-  motion_id: string;
-  board_member_id: string;
-  vote: string;
-  recusal_reason: string | null;
-}
+type VoteRecordData = RouterOutputs["voteRecord"]["byMeeting"][number];
 
 interface BoardQuorumConfig {
   quorumType: string | null;
@@ -88,7 +85,13 @@ interface MotionPanelProps {
   memberNameMap: Map<string, string>;
   motionDisplayFormat: string | null;
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to — `motion.callVote`, `motion.withdraw`
+   * and (through `VotePanel`) `voteRecord.recordForMotion` are all guarded by
+   * `requireBoardPermission("M3", boardIdFrom())`, declared before `.input()`.
+   * Conventions item 2's named cost, threaded one level further down.
+   */
+  boardId: string;
   agendaItemId: string;
   allMembers: MemberInfo[];
   presentMembers: MemberInfo[];
@@ -144,7 +147,7 @@ export function MotionPanel({
   memberNameMap,
   motionDisplayFormat,
   meetingId,
-  townId,
+  boardId,
   agendaItemId,
   allMembers,
   presentMembers,
@@ -154,7 +157,6 @@ export function MotionPanel({
   readOnly,
   onAmend,
 }: MotionPanelProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [expandedMotionId, setExpandedMotionId] = useState<string | null>(null);
   const [votingMotionId, setVotingMotionId] = useState<string | null>(null);
@@ -180,51 +182,70 @@ export function MotionPanel({
 
   // ─── Handlers ─────────────────────────────────────────────────
 
-  const callVoteMutation = useMutation({
-    mutationFn: async (motionId: string) => {
-      const { error } = await supabase
-        .from("motion")
-        .update({ status: "in_vote", updated_at: new Date().toISOString() })
-        .eq("id", motionId);
-      if (error) throw error;
-    },
-    onSuccess: (_data, motionId) => {
-      setVotingMotionId(motionId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
-      // Moves `motion.status` to `in_vote`, which the live screen renders from
-      // `trpc.motion.byMeeting` as of wave 5, Task 4.
-      void queryClient.invalidateQueries(trpc.motion.pathFilter());
-    },
-  });
+  /**
+   * ─── Wave 5, Task 5: these two buttons START WORKING ─────────────────────
+   *
+   * Both raw updates sent `updated_at: new Date().toISOString()` alongside
+   * `status`, and **`motion` has no `updated_at` column** — twelve columns in
+   * `0000_baseline.sql`'s `CREATE TABLE public.motion`, none of them that, and
+   * no later `ALTER TABLE … ADD COLUMN`. PostgREST rejects an unknown column in
+   * the body rather than ignoring it, so "Call the Vote" and "Withdraw" have
+   * been FAILING in the browser since they shipped, and failing silently:
+   * neither mutation had an `onError` at all.
+   *
+   * `motion.callVote` and `motion.withdraw` write `status` alone. So this is a
+   * user-visible behaviour change and not a migration — the two controls do
+   * what they say for the first time. It is also why each now has a refusal
+   * surface, which it needs twice over: the write is newly guarded (M3,
+   * board-scoped; `motion_tenant_isolation` is tenancy-only and checked
+   * nothing) AND newly capable of failing in a way a user can act on.
+   *
+   * **Two surfaces, because there are two reachability paths.** "Call the
+   * Vote" fires straight from the card, so its refusal renders on the card.
+   * "Withdraw" goes through an `AlertDialog`, and a refused write leaves that
+   * dialog OPEN while Radix marks everything outside it `aria-hidden` — a
+   * message on the card behind it would be invisible for exactly the case it
+   * exists for (conventions item 2, wave 4 Task 3). Its refusal therefore
+   * renders inside the dialog, and `AlertDialogAction` is replaced by a plain
+   * `Button` so that a refusal does not dismiss the dialog it belongs to.
+   */
+  const callVoteMutation = useMutation(
+    trpc.motion.callVote.mutationOptions({
+      onSuccess: (_data, variables) => {
+        setVotingMotionId(variables.motionId);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+        // Moves `motion.status` to `in_vote`, which the live screen renders from
+        // `trpc.motion.byMeeting` as of wave 5, Task 4.
+        void queryClient.invalidateQueries(trpc.motion.pathFilter());
+      },
+    }),
+  );
 
-  const withdrawMotionMutation = useMutation({
-    mutationFn: async (motionId: string) => {
-      const { error } = await supabase
-        .from("motion")
-        .update({ status: "withdrawn", updated_at: new Date().toISOString() })
-        .eq("id", motionId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      setWithdrawConfirmId(null);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
-      // Its own call site — see `callVoteMutation` above.
-      void queryClient.invalidateQueries(trpc.motion.pathFilter());
-    },
-  });
+  const withdrawMotionMutation = useMutation(
+    trpc.motion.withdraw.mutationOptions({
+      onSuccess: () => {
+        setWithdrawConfirmId(null);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+        // Its own call site — see `callVoteMutation` above.
+        void queryClient.invalidateQueries(trpc.motion.pathFilter());
+      },
+    }),
+  );
 
   const callVote = useCallback(
     (motionId: string) => {
-      callVoteMutation.mutate(motionId);
+      callVoteMutation.reset();
+      callVoteMutation.mutate({ boardId, motionId });
     },
-    [callVoteMutation],
+    [boardId, callVoteMutation],
   );
 
   const withdrawMotion = useCallback(
     (motionId: string) => {
-      withdrawMotionMutation.mutate(motionId);
+      withdrawMotionMutation.reset();
+      withdrawMotionMutation.mutate({ boardId, motionId });
     },
-    [withdrawMotionMutation],
+    [boardId, withdrawMotionMutation],
   );
 
   const handleVoteComplete = useCallback(() => {
@@ -246,6 +267,11 @@ export function MotionPanel({
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Motions</h3>
+      {callVoteMutation.error && (
+        <p className="mb-2 text-sm text-destructive" role="alert">
+          {refusalMessage(callVoteMutation.error, "call a vote on this motion")}
+        </p>
+      )}
       <div className="space-y-2">
         {parentMotions.map((motion) => (
           <div key={motion.id}>
@@ -272,7 +298,7 @@ export function MotionPanel({
                 <VotePanel
                   motionId={motion.id}
                   meetingId={meetingId}
-                  townId={townId}
+                  boardId={boardId}
                   allMembers={allMembers}
                   attendanceRecords={attendanceRecords}
                   existingVotes={votesByMotion.get(motion.id) ?? []}
@@ -308,7 +334,7 @@ export function MotionPanel({
                     <VotePanel
                       motionId={amendment.id}
                       meetingId={meetingId}
-                      townId={townId}
+                      boardId={boardId}
                       allMembers={allMembers}
                       attendanceRecords={attendanceRecords}
                       existingVotes={votesByMotion.get(amendment.id) ?? []}
@@ -334,15 +360,26 @@ export function MotionPanel({
             <AlertDialogTitle>Withdraw Motion?</AlertDialogTitle>
             <AlertDialogDescription>
               The mover wishes to withdraw this motion. This action cannot be undone.
+              {/* A refused withdrawal leaves this dialog open, and Radix marks
+                  everything outside it `aria-hidden` — so the message has to
+                  live in here. */}
+              {withdrawMotionMutation.error && (
+                <span className="mt-2 block text-destructive" role="alert">
+                  {refusalMessage(withdrawMotionMutation.error, "withdraw this motion")}
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
+            {/* A plain `Button`, not `AlertDialogAction`: that one closes the
+                dialog on click, which would take the refusal above with it. */}
+            <Button
               onClick={() => withdrawConfirmId && withdrawMotion(withdrawConfirmId)}
+              disabled={withdrawMotionMutation.isPending}
             >
               Confirm Withdrawal
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

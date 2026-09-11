@@ -8,11 +8,9 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MeetingTimer } from "./MeetingTimer";
@@ -38,7 +36,14 @@ type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface AttendancePanelProps {
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to — `meetingAttendance.setStatus` is
+   * guarded by `requireBoardPermission("M2", boardIdFrom())`, declared before
+   * `.input()`. Conventions item 2's named cost; `townId` is gone, because the
+   * procedure takes the town from the caller's own session rather than from
+   * client state.
+   */
+  boardId: string;
   members: MemberInfo[];
   attendance: AttendanceRecord[];
   presidingOfficerId: string | null;
@@ -76,7 +81,7 @@ const CYCLE_ORDER = ["absent", "present", "late_arrival", "early_departure"] as 
 
 export function AttendancePanel({
   meetingId,
-  townId,
+  boardId,
   members,
   attendance,
   presidingOfficerId,
@@ -91,65 +96,62 @@ export function AttendancePanel({
   readOnly,
   onRecuse,
 }: AttendancePanelProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
 
   const getAttendance = (boardMemberId: string): AttendanceRecord | undefined =>
     attendance.find((a) => a.board_member_id === boardMemberId);
 
-  const cycleStatusMutation = useMutation({
-    mutationFn: async (member: MemberInfo) => {
-      const record = getAttendance(member.boardMemberId);
-      const currentStatus = (record?.status as string) ?? "absent";
-      const currentIdx = CYCLE_ORDER.indexOf(currentStatus as (typeof CYCLE_ORDER)[number]);
-      const nextStatus = CYCLE_ORDER[(currentIdx + 1) % CYCLE_ORDER.length];
-      const now = new Date().toISOString();
-
-      if (record) {
-        const arrivedAt = nextStatus === "late_arrival" ? now : record.arrived_at;
-        const departedAt = nextStatus === "early_departure" ? now : null;
-        const { error } = await supabase
-          .from("meeting_attendance")
-          .update({
-            status: nextStatus,
-            arrived_at: arrivedAt,
-            departed_at: departedAt,
-            is_recording_secretary: record.is_recording_secretary,
-          })
-          .eq("id", record.id);
-        if (error) throw error;
-      } else {
-        const arrivedAt = nextStatus === "late_arrival" ? now : null;
-        const { error } = await supabase.from("meeting_attendance").insert({
-          id: crypto.randomUUID(),
-          meeting_id: meetingId,
-          town_id: townId,
-          board_member_id: member.boardMemberId,
-          person_id: member.personId,
-          status: nextStatus,
-          is_recording_secretary: 0,
-          arrived_at: arrivedAt,
-          departed_at: null,
-        });
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
-      // The `else` branch above INSERTs a `meeting_attendance` row for a
-      // member with no record yet, which changes exactly the number
-      // `routes/meetings.$meetingId.tsx`'s shell renders through
-      // `trpc.meetingAttendance.countByMeeting` ("N members recorded").
-      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
-    },
-    onError: () => {
-      toast.error("Couldn't update attendance — please try again.");
-    },
-  });
+  /**
+   * Wave 5, Task 5 — `meetingAttendance.setStatus` in place of the raw
+   * update-or-insert.
+   *
+   * Three things change, and only the first is invisible:
+   *
+   *   - **The branch is gone.** The browser used to read its own `attendance`
+   *     array, decide between UPDATE and INSERT, and issue one — so two clerks
+   *     taking attendance at once both saw "no record", both INSERTed, and the
+   *     loser collided with `attendance_unique_per_meeting`. The procedure is
+   *     one `INSERT … ON CONFLICT DO UPDATE`; the client sends only the next
+   *     status, which is still computed here from `CYCLE_ORDER`.
+   *   - **`is_recording_secretary: 0` is gone**, and it was a type defect, not
+   *     a value: the column is `boolean` (`0000_baseline.sql`). Wave 5 Task 4
+   *     fixed this component's PROP types and left the literal, which was this
+   *     task's. The procedure does not take the column at all — it writes
+   *     `false` on insert and leaves it alone on update, which is what the raw
+   *     writes meant.
+   *   - **A refusal is now possible.** `meeting_attendance_tenant_isolation` is
+   *     tenancy-only, so this write was authorized by nothing; it is M2,
+   *     board-scoped, now. The message renders inline above the roster rather
+   *     than as the toast the raw version used: a refusal is not a "please try
+   *     again" condition, and a toast that has timed out is a message nobody
+   *     can go back and read.
+   */
+  const cycleStatusMutation = useMutation(
+    trpc.meetingAttendance.setStatus.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+        // The upsert creates a `meeting_attendance` row for a member with no
+        // record yet, which changes exactly the number
+        // `routes/meetings.$meetingId.tsx`'s shell renders through
+        // `trpc.meetingAttendance.countByMeeting` ("N members recorded").
+        void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
+      },
+    }),
+  );
 
   const cycleStatus = (member: MemberInfo) => {
     if (readOnly) return;
-    cycleStatusMutation.mutate(member);
+    const record = getAttendance(member.boardMemberId);
+    const currentStatus = (record?.status as string) ?? "absent";
+    const currentIdx = CYCLE_ORDER.indexOf(currentStatus as (typeof CYCLE_ORDER)[number]);
+    const nextStatus = CYCLE_ORDER[(currentIdx + 1) % CYCLE_ORDER.length]!;
+    cycleStatusMutation.reset();
+    cycleStatusMutation.mutate({
+      boardId,
+      meetingId,
+      boardMemberId: member.boardMemberId,
+      status: nextStatus,
+    });
   };
 
   return (
@@ -176,6 +178,12 @@ export function AttendancePanel({
           {quorumRequired} needed {hasQuorum ? "— met" : "— NOT MET"}
         </p>
       </div>
+
+      {cycleStatusMutation.error && (
+        <p className="border-b px-4 py-2 text-xs text-destructive" role="alert">
+          {refusalMessage(cycleStatusMutation.error, "change recorded attendance")}
+        </p>
+      )}
 
       {/* Member list */}
       <div className="flex-1 overflow-y-auto px-2 py-2">

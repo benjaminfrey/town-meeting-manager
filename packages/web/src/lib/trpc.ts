@@ -17,7 +17,7 @@ import {
   splitLink,
 } from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
-import type { inferRouterOutputs } from "@trpc/server";
+import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
 import { queryClient } from "./queryClient";
 
@@ -33,6 +33,21 @@ import { queryClient } from "./queryClient";
  * has no `town_id` key at all — the same mistake is a compile error now.
  */
 export type RouterOutputs = inferRouterOutputs<AppRouter>;
+
+/**
+ * The server's real INPUT shapes, for the handful of places a component holds
+ * a value in local state that a procedure's schema constrains.
+ *
+ * Added in Phase E wave 5, Task 5 for exactly one case worth the export:
+ * `MotionCaptureDialog` keeps the chosen motion type in `useState`, and
+ * `motion.insert`'s schema is `z.enum(MOTION_TYPES)` — eight literals. Typed
+ * `string`, the component compiles against a `<select>` whose options could
+ * drift from that enum and the disagreement surfaces as a BAD_REQUEST in a
+ * live meeting. `RouterInputs["motion"]["insert"]["motionType"]` makes it a
+ * compile error, and is the input-side twin of what `RouterOutputs` does for
+ * a payload's columns (conventions item 10).
+ */
+export type RouterInputs = inferRouterInputs<AppRouter>;
 
 /**
  * `splitLink`, added in Phase E wave 5, Task 4, and it corrects the ADR.

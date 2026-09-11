@@ -3,14 +3,36 @@
  *
  * Shows each board member with Yea/Nay/Abstain buttons. Absent members
  * are auto-filled and grayed. Recused members show reason and are not
- * clickable. Records all votes via sequential Supabase calls.
+ * clickable.
+ *
+ * ─── Phase E, wave 5, Task 5: one call, and everything that follows from it ─
+ *
+ * "Record Vote" was `1 + N + 1` untransacted Supabase round trips — delete
+ * every vote on the motion, insert the roll one member at a time, stamp the
+ * motion — so a failure at member four left a motion with three votes, no
+ * outcome, and the previous roll already destroyed. It is
+ * `voteRecord.recordForMotion` now: one transaction, and the OUTCOME is
+ * computed on the server from the votes rather than posted by the browser (a
+ * client that sent its own `status` could declare a motion carried; see that
+ * procedure's header). `calculateVoteResult` stays here for the live tally
+ * the operator watches while voting, which is a preview and not a record.
+ *
+ * **And the consequences of the motion passing are the server's too.** Four
+ * `useEffect`s in `routes/meetings.$meetingId.live.tsx` used to watch for this
+ * write's result arriving back over the realtime subscription and then act on
+ * it — on every connected device at once. They are inside this one transaction
+ * now, and the three fields the call returns (`executiveSession`,
+ * `minutesApproved`, `adjourned`) are how the ONE caller that performed it
+ * learns what else happened, so it can invalidate the right caches and say the
+ * right thing. Every other device learns the same facts from the SSE topics
+ * the procedure publishes.
  */
 
 import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
+import { apiFetch } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -31,20 +53,19 @@ interface MemberInfo {
   seatTitle?: string | null;
 }
 
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-}
+/**
+ * One `meeting_attendance` row and one `vote_record` row, as the procedures
+ * return them — conventions item 10, applied in Phase E wave 5, Task 5 to the
+ * last two components in the live-meeting tree still restating them by hand.
+ * Task 4 retyped `AttendancePanel`, `MeetingStartFlow` and
+ * `AgendaItemDetailPanel`; these two received the same payloads through a
+ * narrower hand-written interface, which structural typing accepted silently
+ * and which is exactly how a column the procedure stops selecting becomes a
+ * runtime `undefined` instead of a compile error.
+ */
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
-interface VoteRecordData {
-  id: string;
-  motion_id: string;
-  board_member_id: string;
-  vote: string;
-  recusal_reason: string | null;
-}
+type VoteRecordData = RouterOutputs["voteRecord"]["byMeeting"][number];
 
 interface BoardQuorumConfig {
   quorumType: string | null;
@@ -55,7 +76,12 @@ interface BoardQuorumConfig {
 interface VotePanelProps {
   motionId: string;
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to — `voteRecord.recordForMotion` is
+   * guarded by `requireBoardPermission("M3", boardIdFrom())`, declared before
+   * `.input()`. Conventions item 2's named cost.
+   */
+  boardId: string;
   allMembers: MemberInfo[];
   attendanceRecords: AttendanceRecord[];
   existingVotes: VoteRecordData[];
@@ -69,7 +95,7 @@ interface VotePanelProps {
 export function VotePanel({
   motionId,
   meetingId,
-  townId,
+  boardId,
   allMembers,
   attendanceRecords,
   existingVotes,
@@ -77,7 +103,6 @@ export function VotePanel({
   memberNameMap,
   onComplete,
 }: VotePanelProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
 
   // Build attendance status map
@@ -173,86 +198,117 @@ export function VotePanel({
 
   // ─── Record Vote ──────────────────────────────────────────────
 
-  const recordVoteMutation = useMutation({
-    mutationFn: async () => {
-      // Build final vote entries
-      const finalEntries: VoteEntry[] = memberVoteStatus.map((m) => {
-        if (!m.isPresent) return { boardMemberId: m.boardMemberId, vote: "absent" };
-        if (m.isRecused)
-          return {
-            boardMemberId: m.boardMemberId,
-            vote: "recusal",
-            recusalReason: m.recusalReason,
-          };
-        return {
-          boardMemberId: m.boardMemberId,
-          vote: votes.get(m.boardMemberId) ?? "abstain",
-        };
-      });
-
-      const result = calculateVoteResult(finalEntries);
-      const now = new Date().toISOString();
-      const voteSummary = {
-        yeas: result.yeas,
-        nays: result.nays,
-        abstentions: result.abstentions,
-        recusals: result.recusals,
-        absent: result.absent,
-        result: result.result,
-        passed: result.passed,
-      };
-
-      // Delete existing vote records for this motion (in case of re-vote)
-      const { error: deleteError } = await supabase
-        .from("vote_record")
-        .delete()
-        .eq("motion_id", motionId);
-      if (deleteError) throw deleteError;
-
-      // Insert vote records sequentially
-      for (const entry of finalEntries) {
-        const { error: insertError } = await supabase.from("vote_record").insert({
-          id: crypto.randomUUID(),
-          motion_id: motionId,
-          meeting_id: meetingId,
-          town_id: townId,
-          board_member_id: entry.boardMemberId,
-          vote: entry.vote,
-          recusal_reason: entry.recusalReason ?? null,
-          created_at: now,
+  const recordVoteMutation = useMutation(
+    trpc.voteRecord.recordForMotion.mutationOptions({
+      onSuccess: (data) => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(motionId) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.voteRecords.byMeeting(meetingId),
         });
-        if (insertError) throw insertError;
-      }
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+        // This write deletes and re-records every vote on the motion AND stamps
+        // the motion's outcome, so it moves both reads the live screen now takes
+        // from tRPC (wave 5, Task 4).
+        void queryClient.invalidateQueries(trpc.voteRecord.pathFilter());
+        void queryClient.invalidateQueries(trpc.motion.pathFilter());
+        toast.success("Vote recorded");
 
-      // Update motion status + vote summary
-      const { error: updateError } = await supabase
-        .from("motion")
-        .update({ status: result.result, vote_summary: voteSummary, updated_at: now })
-        .eq("id", motionId);
-      if (updateError) throw updateError;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(motionId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
-      // This write deletes and re-records every vote on the motion AND stamps
-      // the motion's outcome, so it moves both reads the live screen now takes
-      // from tRPC (wave 5, Task 4).
-      void queryClient.invalidateQueries(trpc.voteRecord.pathFilter());
-      void queryClient.invalidateQueries(trpc.motion.pathFilter());
-      toast.success("Vote recorded");
-      onComplete();
-    },
-    onError: (err) => {
-      console.error("Failed to record vote:", err);
-      toast.error("Couldn't record the vote — please try again.");
-    },
-  });
+        // ─── What else the transaction did ─────────────────────────────
+        //
+        // Each branch below invalidates a read that a `useEffect` in
+        // `live.tsx` used to write and then invalidate for itself. The server
+        // decided each of these once; this only tells the cache.
+
+        if (data.executiveSession !== null) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+          });
+          void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
+        }
+
+        if (data.minutesApproved !== null) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
+          });
+          // The document approved belongs to an EARLIER meeting (it is reached
+          // through `agenda_item.source_minutes_document_id`), so the legacy
+          // key above — keyed by the LIVE meeting — never reached the shell
+          // that renders it. The router-level filter does; one more reason
+          // conventions item 7 prefers it.
+          void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
+
+          // Re-render the PDF without the DRAFT watermark, fire-and-forget.
+          //
+          // **Preserved, including its defect.** This names the LIVE meeting,
+          // which is not the meeting whose minutes were just approved — see
+          // `routers/minutes-document.ts`'s `approveMinutesForPassedMotion`.
+          // The live meeting usually has no minutes document, so the request
+          // 404s into the `catch` below and the watermark is never removed.
+          // Fixing it means deciding what a re-render of another meeting's
+          // legal record should do, which is wave 6's surface, not a
+          // migration's.
+          void apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
+            method: "POST",
+            json: { is_draft: false },
+          }).catch(() => {
+            // Non-critical — the minutes screen can re-render on demand.
+          });
+        }
+
+        if (data.adjourned) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+          });
+          // The adjournment defers the unreached items, closes the open
+          // transition and moves the meeting's own status — three routers, and
+          // `trpc.meeting.pathFilter()` is also what makes the live screen
+          // refetch and route itself to the review page, on this device and
+          // every other one.
+          void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+          void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+          void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+          toast.success("Meeting adjourned");
+        }
+
+        onComplete();
+      },
+    }),
+  );
 
   const recordVote = useCallback(() => {
     if (!allVoted) return;
-    recordVoteMutation.mutate();
-  }, [allVoted, recordVoteMutation]);
+    // The roll the server is asked to record — every seat, including the
+    // absent and the recused, exactly as the raw version built it. The server
+    // computes the outcome from these; nothing about the tally is sent.
+    const finalEntries: VoteEntry[] = memberVoteStatus.map((m) => {
+      if (!m.isPresent) return { boardMemberId: m.boardMemberId, vote: "absent" };
+      if (m.isRecused)
+        return {
+          boardMemberId: m.boardMemberId,
+          vote: "recusal",
+          recusalReason: m.recusalReason,
+        };
+      return {
+        boardMemberId: m.boardMemberId,
+        vote: votes.get(m.boardMemberId) ?? "abstain",
+      };
+    });
+
+    recordVoteMutation.reset();
+    recordVoteMutation.mutate({
+      boardId,
+      motionId,
+      votes: finalEntries.map((entry) => ({
+        boardMemberId: entry.boardMemberId,
+        vote: entry.vote as "yes" | "no" | "abstain" | "recusal" | "absent",
+        recusalReason: entry.recusalReason ?? null,
+      })),
+    });
+  }, [allVoted, boardId, motionId, memberVoteStatus, votes, recordVoteMutation]);
 
   // ─── Render ───────────────────────────────────────────────────
 
@@ -329,6 +385,12 @@ export function VotePanel({
         )}
         {tally.absent > 0 && <span className="text-muted-foreground">Absent: {tally.absent}</span>}
       </div>
+
+      {recordVoteMutation.error && (
+        <p className="text-sm text-destructive" role="alert">
+          {refusalMessage(recordVoteMutation.error, "record the votes on this motion")}
+        </p>
+      )}
 
       {/* Result preview + Record button */}
       <div className="flex items-center justify-between border-t pt-3">

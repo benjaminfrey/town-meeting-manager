@@ -1095,7 +1095,6 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     return (
       <MeetingStartFlow
         meetingId={meetingId}
-        townId={townId}
         boardId={boardId}
         members={members}
         attendance={attendanceRows}
@@ -1202,7 +1201,6 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             item={currentItemDetail}
             meetingId={meetingId}
             boardId={boardId}
-            townId={townId}
             allMembers={members}
             presentMembers={presentMembers}
             memberNameMap={memberNameMap}
@@ -1229,7 +1227,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         <ErrorBoundary FallbackComponent={PanelErrorFallback}>
           <AttendancePanel
             meetingId={meetingId}
-            townId={townId}
+            boardId={boardId}
             members={members}
             attendance={attendanceRows}
             presidingOfficerId={meeting.presiding_officer_id}
@@ -1267,7 +1265,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             prefillText: pendingExecCitation.motionText,
           }}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={currentItemId}
           presentMembers={presentMembers}
         />
@@ -1279,6 +1277,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           open={exitExecDialogOpen}
           onOpenChange={setExitExecDialogOpen}
           execSessionId={activeExecSession.id}
+          boardId={boardId}
           onReturnWithActions={handleExitExecWithActions}
           onReturnNoActions={handleExitExecNoActions}
         />
@@ -1295,7 +1294,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
             prefillText: "to adjourn the meeting",
           }}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={currentItemId}
           presentMembers={presentMembers}
         />

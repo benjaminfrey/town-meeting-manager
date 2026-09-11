@@ -83,7 +83,6 @@ function renderPanel() {
       item={item}
       meetingId="m1"
       boardId="b1"
-      townId="town-1"
       allMembers={[]}
       presentMembers={[]}
       memberNameMap={new Map()}
