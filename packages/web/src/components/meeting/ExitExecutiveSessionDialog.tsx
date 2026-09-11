@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,10 @@ export function ExitExecutiveSessionDialog({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.executiveSessions.detail(execSessionId),
       });
+      // `routes/meetings.$meetingId.live.tsx` reads this table through
+      // `trpc.executiveSession.byMeeting` as of wave 5, Task 4 — the legacy
+      // key above no longer reaches the banner this write dismisses.
+      void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
       toast.success("Returned to open session");
       setStep("post_actions");
     },

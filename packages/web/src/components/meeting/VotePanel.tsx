@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -234,6 +235,11 @@ export function VotePanel({
       void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMotion(motionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.voteRecords.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+      // This write deletes and re-records every vote on the motion AND stamps
+      // the motion's outcome, so it moves both reads the live screen now takes
+      // from tRPC (wave 5, Task 4).
+      void queryClient.invalidateQueries(trpc.voteRecord.pathFilter());
+      void queryClient.invalidateQueries(trpc.motion.pathFilter());
       toast.success("Vote recorded");
       onComplete();
     },

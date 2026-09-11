@@ -9,6 +9,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,6 +65,9 @@ export function GuestSpeakerEntry({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
       });
+      // The live screen reads speakers through `trpc.guestSpeaker.byMeeting`
+      // as of wave 5, Task 4; the two legacy keys above no longer reach it.
+      void queryClient.invalidateQueries(trpc.guestSpeaker.pathFilter());
       setName("");
       setAddress("");
       setTopic("");
@@ -83,6 +87,9 @@ export function GuestSpeakerEntry({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
       });
+      // Same as the insert above — its own call site, so deleting either one
+      // is caught (conventions item 8's per-file credit bleed).
+      void queryClient.invalidateQueries(trpc.guestSpeaker.pathFilter());
     },
   });
 

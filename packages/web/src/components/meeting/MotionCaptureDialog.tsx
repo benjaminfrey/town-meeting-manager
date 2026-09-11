@@ -16,6 +16,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -174,6 +175,9 @@ export function MotionCaptureDialog({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byItem(agendaItemId) });
+      // The live screen reads motions through `trpc.motion.byMeeting` as of
+      // wave 5, Task 4; neither legacy key above reaches it.
+      void queryClient.invalidateQueries(trpc.motion.pathFilter());
       toast.success("Motion recorded");
       onOpenChange(false);
     },

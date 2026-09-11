@@ -15,6 +15,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import {
   Dialog,
   DialogContent,
@@ -85,6 +86,9 @@ export function RecusalDialog({
         void queryClient.invalidateQueries({
           queryKey: queryKeys.voteRecords.byMeeting(meetingId),
         });
+        // The live screen reads votes through `trpc.voteRecord.byMeeting` as
+        // of wave 5, Task 4; neither legacy key above reaches it.
+        void queryClient.invalidateQueries(trpc.voteRecord.pathFilter());
       }
       toast.success("Recusal recorded");
       onRecusalRecorded(boardMemberId, trimmedReason, scope);
