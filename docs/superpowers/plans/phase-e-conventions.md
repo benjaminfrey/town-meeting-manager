@@ -879,9 +879,12 @@ plan alone:
   category as the row-level "these minutes are still a draft" rules above — not a gap in the guard
   catalogue, but a fifth shape this item's four-shape count (Actor-only, board-scoped-by-code,
   board-scoped-by-rule, subject-carrying) does not cover, because none of the first four rules that
-  motivated them needed a `TenantTx` of their own. Whichever wave wires it should record why it
+  motivated them needed a `TenantTx` of their own. ~~Whichever wave wires it should record why it
   stays resolver-side next to the rule itself, the way `assertMatchesAuthorizedBoard`'s own doc
-  comment does, rather than re-deriving the reasoning silently.
+  comment does, rather than re-deriving the reasoning silently.~~ — **wired in wave 5, Task 3
+  (`voteRecord.insert`), and recorded in `routers/vote-record.ts`'s header. It is not ONE guard:
+  see "Wave 5, Task 3" below, finding 1 — resolver-side alone was not available, so the procedure
+  carries a synchronous necessary condition in middleware AND the real rule in the resolver.**
 - ~~**Two tables have no rule at all today**, per wave 5's own plan: `agenda_item_transition` and
   `future_item_queue`. Deciding what code authorizes them (or minting a new one) is a wave-5
   decision this item does not make for them — named here only so "no rule exists yet" is not
@@ -1087,6 +1090,93 @@ wrong code, because the actors it seeds hold and lose the two codes together. Th
 procedure's tests red (the `ctx.authorizedBoardId` wiring-bug shape `agenda-item.test.ts`'s header
 already records), and moving one after `.input()` turns exactly ONE red, the reorder pin, with
 `expected 'BAD_REQUEST' to be 'FORBIDDEN'`.
+
+**Wave 5, Task 3 — the routers those rules exist for, and the four things the wave found that this item
+did not already say.**
+
+Nineteen writes across seven routers (`motion`, `vote_record`, `meeting_attendance`,
+`executive_session`, `guest_speaker`, `meeting`'s three composites, `agenda_item`'s seven publishes),
+plus a read on each. Every guard shape this item catalogues worked as described, first try, with no
+change to `trpc.ts`. What follows is what it did NOT already say.
+
+**1. The FIFTH guard shape has a real call site now, and it is TWO guards, not one.**
+The bullet above ("`assertCanInsertVoteRecord` needs a FIFTH guard shape") said it "stays
+resolver-side" and asked whichever wave wired it to record why. Recorded — in
+`routers/vote-record.ts`'s header — and the answer is more than "resolver-side": **resolver-side
+ALONE is not available**, for two reasons this item already establishes elsewhere and had not
+connected:
+
+- a procedure with no middleware guard loses FORBIDDEN-before-BAD_REQUEST (this item's central rule);
+- and it never sets `ctx.authorizedBoardId`, so `assertMatchesAuthorizedBoard` — the default defence
+  for a row-targeted board-scoped write — throws its wiring-bug `Error` on the first real call.
+
+So `voteRecord.insert` carries a local, synchronous **necessary condition** in middleware
+(`assertCouldRecordAVote`: M3 for the board, or the `board_member` role — structurally
+`assertCanInsertExhibit`, which `requireBoardActor` already handles) AND the real rule in the
+resolver. The cost is that the rule is expressed in two places, and it is paid down by keeping the
+weaker copy OUT of `rules.ts` (so an auditor of that file finds rule 5 and only rule 5) and by a
+named test for the exact gap between them — a board member who passes the guard and is refused by
+the rule. **A wave-6 author with an `async` rule should copy this shape, not invent a third.**
+
+**2. A composite procedure has a rule per TABLE, and picking one is a decision with a cost.**
+New in this wave and not covered above: `meeting.callToOrder`, `meeting.navigateToAgendaItem` and
+`meeting.adjourn` each write three or four tables in one transaction, and each table has its own
+`assertCan*` — 21 (admin/A1/M1), 8 (M2), 2a (A2 or M1), 21d (M1), 21e (M1). All three are guarded by
+the rule governing their PRIMARY write (`assertCanUpdateMeeting`) and not by the union. The reasoning
+is in `callToOrder`'s own doc comment; the general form belongs here:
+
+- **Requiring every rule** refuses a caller who can perform the act's main effect because of a
+  subordinate one. An M1 presiding officer holding no M2 could not call a meeting to order, over the
+  recording-secretary flag. That is rule 2a's own stated failure ("worse than either answer") one act
+  earlier.
+- **Requiring the narrowest** (M1 here) is coherent but contradicts a procedure that already ships:
+  `meeting.updateStatus` lets an A1 holder drag a meeting to `open` or `adjourned` from the kanban, so
+  an M1-only `callToOrder` would allow through one procedure what it refuses through another.
+- **What shipped**: the primary write's rule, applied to the whole act, with the gap named. It is a
+  NARROWING either way — all of these writes were authorized by nothing at all before — but it stops
+  short of the rules for M2 specifically, and that is a decision to revisit with rule 21 rather than
+  in a router.
+
+**3. The publish inventory's per-file canary fires by file name, and that was verified by breaking a
+file rather than by reading the check.** `trpc/__tests__/router-wiring.test.ts`'s "every router file
+that writes a live-meeting table is represented in the scan" is the guard `realtime/events.ts` tells
+Task 3 to trust. Re-indenting `guest-speaker.ts`'s three procedure keys from two spaces to four —
+something prettier would not produce but a hand edit can — produces exactly the intended failure:
+
+```
+AssertionError: guest-speaker.ts writes a live-meeting table (matched directly against the raw file
+text) but the scan attributed NO mutation to "guestSpeaker." — a formatting or structural change
+likely broke PROCEDURE_KEY or TOP_LEVEL_FUNCTION for this file specifically, and it is now silently
+unprotected.
+```
+
+No regex needed widening: five new router files were picked up with no change to the scan.
+`AWAITING_PUBLISH` went 11 → 0, and the inventory gained one assertion it needs now that the ledger
+is empty — that `publishes` is really being read off the source for its two named canaries, since a
+`publishes` stuck at `true` would make an empty-ledger check green for the wrong reason.
+
+**4. The inventory is a boolean per mutation, so a COMPOSITE needs a topic-set test of its own.**
+The check asks "does this mutation call `publishRealtimeEvent` at all". Three of this wave's
+mutations write four live-meeting tables; announcing one of the four passes it and leaves three
+panels stale on every other device — the exact silent failure `realtime/events.ts` exists to prevent,
+one level down from where that file looks for it. The answer is a test helper
+(`routers/__tests__/live-fixtures.ts`'s `captureRealtimeEvents`) that opens a real `LISTEN`
+connection and asserts the exact topic SET, used on every write this wave added. **Any future
+multi-table mutation needs one; the inventory will not ask for it.**
+
+**Verified by mutation, per item 13, each restored from a copy with the checksum re-checked:**
+
+| mutation                                                         | result                                                                                                                                     |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| delete `motion.insert`'s `.use()`                                | 8 of 8 tests red — the `ctx.authorizedBoardId` wiring-bug shape                                                                            |
+| move `motion.callVote`'s `.use()` after `.input()`               | exactly 1 red, `expected 'BAD_REQUEST' to be 'FORBIDDEN'`                                                                                  |
+| drop `assertMatchesAuthorizedBoard` from the row-targeted helper | 8 board-mismatch tests red, across four routers                                                                                            |
+| drop it from the by-meeting helper                               | 7 board-mismatch tests red, a disjoint set                                                                                                 |
+| drop `assertBoardMembersOnBoard`'s row-count check               | 6 red — and `motion.insert` then **succeeds silently** with a mover from another town (the ninth reproduction of the FK-bypasses-RLS hole) |
+| drop `voteRecord.insert`'s resolver-side rule 5 call             | exactly the 2 board-member tests red; the M3 path stays green                                                                              |
+| drop `guestSpeaker.delete`'s publish                             | the inventory fails naming `guestSpeaker.delete`                                                                                           |
+| re-indent `guest-speaker.ts`'s procedure keys                    | the per-file canary fails naming `guest-speaker.ts`                                                                                        |
+| drop `meeting.adjourn`'s already-adjourned early return          | exactly 1 red, the two-device race test                                                                                                    |
 
 ### Subscriptions follow item 2's rule unchanged, plus one
 
