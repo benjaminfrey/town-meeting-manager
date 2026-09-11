@@ -996,8 +996,17 @@ describe("LiveMeetingPage cache invalidation", () => {
     await armPostSessionActions();
     deliverTopic("motion");
 
+    // `toBeGreaterThan`, not `toBe(before + 1)`: the effect's dependencies can
+    // settle on either the `executive_session` refetch or the `motion` one
+    // depending on which lands first, so the CALL COUNT is a race. What is not
+    // a race — and is the claim this test exists for — is the SHAPE of what
+    // the client sends, which is the delta and nothing else however many times
+    // the effect fires. That is what makes the union on the server the thing
+    // that has to be right.
     await waitFor(() =>
-      expect(stub.countFor("executiveSession.appendPostSessionActionMotions")).toBe(before + 1),
+      expect(stub.countFor("executiveSession.appendPostSessionActionMotions")).toBeGreaterThan(
+        before,
+      ),
     );
     expect(lastInputFor("executiveSession.appendPostSessionActionMotions")).toMatchObject({
       executiveSessionId: "es-1",

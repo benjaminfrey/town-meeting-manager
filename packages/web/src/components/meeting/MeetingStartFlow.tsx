@@ -181,10 +181,17 @@ export function MeetingStartFlow({
     const currentStatus = (record?.status as string) ?? "absent";
     const nextStatus = currentStatus === "present" ? "absent" : "present";
     toggleAttendanceMutation.reset();
-    return new Promise((resolve, reject) => {
+    // Settles either way, and never REJECTS. The caller is
+    // `AttendanceStep`'s `onClick={() => void onToggle(member)}`, so a
+    // rejection here is an unhandled promise rejection — which vitest fails
+    // the whole run on, and which a browser logs and nobody reads. It used to
+    // be harmless only because the raw write had no failure a user could act
+    // on; now that this can answer FORBIDDEN, the refusal is RENDERED (from
+    // `toggleAttendanceMutation.error`) rather than thrown.
+    return new Promise((resolve) => {
       toggleAttendanceMutation.mutate(
         { boardId, meetingId, boardMemberId: member.boardMemberId, status: nextStatus },
-        { onSuccess: () => resolve(), onError: reject },
+        { onSuccess: () => resolve(), onError: () => resolve() },
       );
     });
   };
