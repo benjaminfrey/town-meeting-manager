@@ -2,7 +2,10 @@
  * Stage 1, Task D1d — the board-scoped rules, and the two things that had to
  * stay true while they changed.
  *
- * Sixteen of the guards in `authorization/rules.ts` gained a REQUIRED board.
+ * Sixteen of the guards in `authorization/rules.ts` gained a REQUIRED board
+ * in that task (`grep -cE ": BoardScope" …` answered 16 then and answers 29 at
+ * HEAD — quote the grep, not the number; the additions since are wave 4 Task
+ * 2's `assertCanPublishAgenda` and wave 5 Task 2's ten).
  * That is a change to how every one of them answers, so it needs more than
  * "the new case works":
  *
@@ -134,7 +137,7 @@ describe("board scope is additive for an account with no overrides", () => {
  * The families, as (code, a guard that consults it) pairs.
  *
  * One per action family rather than one per guard: the guards inside a family
- * differ only in the message, and a table that lists all sixteen invites the
+ * differ only in the message, and a table that lists every guard invites the
  * reader to skim it rather than check it.
  */
 const FAMILIES: ReadonlyArray<{
@@ -195,6 +198,46 @@ const FAMILIES: ReadonlyArray<{
     code: "A5",
     label: "agenda publication",
     allowed: (actor, boardId) => !throws(() => rules.assertCanPublishAgenda(actor, { boardId })),
+  },
+  // Phase E wave 5, Task 2. M6, M7 and M1 are all in `BOARD_SCOPED_CODES` and
+  // in `TEMPLATE_BOARD_SPECIFIC_STAFF`, and before that task the strings "M6"
+  // and "M7" did not occur in `packages/api` at all — not even as a fixture,
+  // which is how A5 above at least showed up. M1 occurred only inside
+  // `assertCanUpdateMeeting`'s third branch, where this table could not reach
+  // it: that rule's FIRST branch is A1, so a `global: ["M1"]` actor and a
+  // `global: []` actor answer identically through it and the revoking-override
+  // case below would have proved nothing about M1 specifically.
+  {
+    code: "M6",
+    label: "executive session writes",
+    allowed: (actor, boardId) =>
+      !throws(() => rules.assertCanInsertExecutiveSession(actor, { boardId })),
+  },
+  {
+    code: "M7",
+    label: "speaker queue writes",
+    allowed: (actor, boardId) =>
+      !throws(() => rules.assertCanInsertGuestSpeaker(actor, { boardId })),
+  },
+  {
+    code: "M1",
+    label: "agenda item transitions",
+    allowed: (actor, boardId) =>
+      !throws(() => rules.assertCanInsertAgendaItemTransition(actor, { boardId })),
+  },
+  {
+    // Listed separately from the transition above even though both turn on M1,
+    // for the reason the two A3 entries are listed separately: they are
+    // different tables with different resolvers ahead of them, and a mutation
+    // that dropped the board from one would be covered by the other's test.
+    code: "M1",
+    label: "future item queue writes",
+    allowed: (actor, boardId) => !throws(() => rules.assertCanInsertFutureItem(actor, { boardId })),
+  },
+  {
+    code: "M3",
+    label: "vote record clearing",
+    allowed: (actor, boardId) => !throws(() => rules.assertCanDeleteVoteRecord(actor, { boardId })),
   },
 ];
 
@@ -512,4 +555,231 @@ describe("the designated_boards permission templates, seeded as the product writ
       });
     });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// 5. The rules Phase E wave 5, Task 2 added — one named test each
+//
+// The FAMILIES table above proves a family is board-SCOPED. It does not prove
+// a rule consults the RIGHT code: a guard that resolved M7 where the product
+// means M6 would pass every assertion in it, because both codes are granted
+// and revoked together by the actors that table seeds.
+//
+// So each rule below gets its own named test, and each test seeds an actor
+// holding EVERY code except the one under test. That shape fails two ways at
+// once, which is what makes it a mutation pin rather than a restatement:
+//
+//   - delete the `assertPermission` call and the function is a no-op, so the
+//     "refuses" half goes red;
+//   - change the code (M6 → M7, M1 → A2, M3 → M8) and the actor holding all
+//     twenty-nine other codes is ALLOWED, so the "refuses" half goes red too.
+//
+// Verified by mutation, one rule at a time, in this task's own fix pass — see
+// the task report for the recorded output of each.
+// ═══════════════════════════════════════════════════════════════════════
+
+const WAVE_5_RULES: ReadonlyArray<{
+  rule: string;
+  code: PermissionCode;
+  call: (actor: rules.ActorArg, boardId: string) => void;
+}> = [
+  {
+    rule: "assertCanInsertExecutiveSession",
+    code: "M6",
+    call: (actor, boardId) => rules.assertCanInsertExecutiveSession(actor, { boardId }),
+  },
+  {
+    rule: "assertCanUpdateExecutiveSession",
+    code: "M6",
+    call: (actor, boardId) => rules.assertCanUpdateExecutiveSession(actor, { boardId }),
+  },
+  {
+    rule: "assertCanDeleteExecutiveSession",
+    code: "M6",
+    call: (actor, boardId) => rules.assertCanDeleteExecutiveSession(actor, { boardId }),
+  },
+  {
+    rule: "assertCanInsertGuestSpeaker",
+    code: "M7",
+    call: (actor, boardId) => rules.assertCanInsertGuestSpeaker(actor, { boardId }),
+  },
+  {
+    rule: "assertCanDeleteGuestSpeaker",
+    code: "M7",
+    call: (actor, boardId) => rules.assertCanDeleteGuestSpeaker(actor, { boardId }),
+  },
+  {
+    rule: "assertCanInsertAgendaItemTransition",
+    code: "M1",
+    call: (actor, boardId) => rules.assertCanInsertAgendaItemTransition(actor, { boardId }),
+  },
+  {
+    rule: "assertCanUpdateAgendaItemTransition",
+    code: "M1",
+    call: (actor, boardId) => rules.assertCanUpdateAgendaItemTransition(actor, { boardId }),
+  },
+  {
+    rule: "assertCanInsertFutureItem",
+    code: "M1",
+    call: (actor, boardId) => rules.assertCanInsertFutureItem(actor, { boardId }),
+  },
+  {
+    rule: "assertCanDeleteVoteRecord",
+    code: "M3",
+    call: (actor, boardId) => rules.assertCanDeleteVoteRecord(actor, { boardId }),
+  },
+];
+
+describe("the live-meeting rules wave 5 added resolve their OWN code", () => {
+  for (const { rule, code, call } of WAVE_5_RULES) {
+    it(`${rule} requires ${code} on the board, and nothing else substitutes for it`, async () => {
+      await withTestDb(async (client) => {
+        const db = testDb(client);
+        const town = await seedTown(db);
+
+        // Granted exactly this code, on one board only — the shape the two
+        // `designated_boards` templates actually produce.
+        const held = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { [code]: true } }],
+        });
+        expect(() => call(held.actor, town.boardId), `${rule}: granted board`).not.toThrow();
+        await expectRefusal(() => call(held.actor, town.otherBoardId), { code });
+
+        // Every OTHER code, globally, and not this one. A rule keyed to the
+        // wrong code would allow this caller.
+        const everythingElse = await seedActor(db, town, {
+          role: "staff",
+          global: PERMISSION_CODES.filter((c) => c !== code),
+        });
+        await expectRefusal(() => call(everythingElse.actor, town.boardId), { code });
+
+        // And an administrator is still allowed — `resolvePermission`
+        // short-circuits the role, and no rule here re-states that.
+        const admin = await seedActor(db, town, { role: "admin" });
+        expect(() => call(admin.actor, town.boardId), `${rule}: admin`).not.toThrow();
+      });
+    });
+  }
+});
+
+describe("assertCanDeleteVoteRecord does NOT carry rule 5's self-vote branch", () => {
+  it("refuses a board member clearing the votes on a motion of their own board", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const member = await seedActor(db, town, { role: "board_member" });
+      await seedBoardSeat(db, town, member.personId, town.boardId);
+
+      // The same actor `assertCanInsertVoteRecord` ALLOWS on this seat (M8,
+      // `BOARD_MEMBER_ALWAYS_ACTIONS`). The delete the product performs is
+      // `.eq("motion_id", motionId)` — every member's vote on that motion, not
+      // one seat's — so the self-vote branch must not reach it.
+      await expectRefusal(
+        () => rules.assertCanDeleteVoteRecord(member.actor, { boardId: town.boardId }),
+        {
+          code: "M3",
+        },
+      );
+    });
+  });
+});
+
+describe("assertCanUpdateAgendaItemProgress takes M1 OR A2 — both branches, per board", () => {
+  it("allows a presiding officer holding M1 and NO A2, on their own board only", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const officer = await seedActor(db, town, {
+        role: "staff",
+        global: [],
+        boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+      });
+
+      // The whole point of the rule: this caller is refused by every OTHER
+      // agenda_item rule, which is A2-only.
+      expect(() =>
+        rules.assertCanUpdateAgendaItemProgress(officer.actor, { boardId: town.boardId }),
+      ).not.toThrow();
+      await expectRefusal(
+        () => rules.assertCanUpdateAgendaItem(officer.actor, { boardId: town.boardId }),
+        { code: "A2" },
+      );
+      await expectRefusal(
+        () =>
+          rules.assertCanUpdateAgendaItemProgress(officer.actor, { boardId: town.otherBoardId }),
+        { code: "M1" },
+      );
+    });
+  });
+
+  it("allows a clerk holding A2 and NO M1, so the rule only widens", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const clerk = await seedActor(db, town, {
+        role: "staff",
+        global: [],
+        boardOverrides: [{ boardId: town.boardId, permissions: { A2: true } }],
+      });
+
+      expect(() =>
+        rules.assertCanUpdateAgendaItemProgress(clerk.actor, { boardId: town.boardId }),
+      ).not.toThrow();
+      await expectRefusal(
+        () => rules.assertCanUpdateAgendaItemProgress(clerk.actor, { boardId: town.otherBoardId }),
+        { code: "M1" },
+      );
+    });
+  });
+
+  it("refuses a caller holding every code except A2 and M1", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const other = await seedActor(db, town, {
+        role: "staff",
+        global: PERMISSION_CODES.filter((c) => c !== "A2" && c !== "M1"),
+      });
+
+      await expectRefusal(
+        () => rules.assertCanUpdateAgendaItemProgress(other.actor, { boardId: town.boardId }),
+        { code: "M1" },
+      );
+    });
+  });
+
+  it("honours a REVOKING override on BOTH branches, not just the first one checked", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      // Holds both codes globally; the town barred this board from both. A
+      // rule that resolved either code globally would allow this caller.
+      const barred = await seedActor(db, town, {
+        role: "staff",
+        global: ["A2", "M1"],
+        boardOverrides: [{ boardId: town.boardId, permissions: { A2: false, M1: false } }],
+      });
+
+      await expectRefusal(
+        () => rules.assertCanUpdateAgendaItemProgress(barred.actor, { boardId: town.boardId }),
+        { code: "M1" },
+      );
+      expect(() =>
+        rules.assertCanUpdateAgendaItemProgress(barred.actor, { boardId: town.otherBoardId }),
+      ).not.toThrow();
+
+      // Revoking only ONE of the two must still leave the other working —
+      // otherwise "A2 OR M1" would silently be "A2 AND M1".
+      const a2Only = await seedActor(db, town, {
+        role: "staff",
+        global: ["A2", "M1"],
+        boardOverrides: [{ boardId: town.boardId, permissions: { M1: false } }],
+      });
+      expect(() =>
+        rules.assertCanUpdateAgendaItemProgress(a2Only.actor, { boardId: town.boardId }),
+      ).not.toThrow();
+    });
+  });
 });

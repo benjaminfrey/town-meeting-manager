@@ -618,21 +618,31 @@ export function requireActor<R>(
  * function is for the remainder). Re-derived in the whole-branch fix round
  * after the count shipped as "nineteen" here and in
  * `phase-e-conventions.md` item 2 — quote the grep, not the number
- * (conventions item 11); it answered 18 then and answers 19 now, because
- * Phase E wave 4, Task 2 added `assertCanPublishAgenda` (A5, the one
- * board-scoped code with no rule in this codebase at all until that task):
+ * (conventions item 11); it answered 18 then, 19 after Phase E wave 4, Task 2
+ * added `assertCanPublishAgenda` (A5, the one board-scoped code with no rule
+ * in this codebase at all until that task), and 29 now, after wave 5, Task 2
+ * added ten more — the four live-meeting tables that had no rule at all
+ * (`executive_session` M6, `guest_speaker` M7, `agenda_item_transition` M1,
+ * `future_item_queue` M1), the missing `vote_record` DELETE (M3), and
+ * `assertCanUpdateAgendaItemProgress`:
  *
  *     $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
- *     19
+ *     29
  *
- * The two that are not one `assertPermission` call are
- * `assertCanUpdateMeeting` (admin OR A1@board OR M1@board — this function's
- * own reason for existing) and `assertCanInsertExhibit` (A3 OR
- * `isBoardMember(actor)`, a ROLE branch rather than a second code —
+ * **All but THREE are exactly one `assertPermission` call, as of wave 5.** The
+ * two long-standing ones are `assertCanUpdateMeeting` (admin OR A1@board OR
+ * M1@board — this function's own reason for existing) and
+ * `assertCanInsertExhibit` (A3 OR `isBoardMember(actor)`, a ROLE branch rather
+ * than a second code —
  * ~~it fits this shape structurally and is simply unused here yet~~
  * **wired in wave 4, Task 2: `exhibit.link` is its first call site through
  * this function; see `routers/exhibit.ts`'s header for what that first use
  * found, including the branch this function's `BoardScope` cannot reach**).
+ * The third is wave 5, Task 2's `assertCanUpdateAgendaItemProgress` (A2 OR
+ * M1@board — the settled answer to `routers/agenda-item.ts`'s A2-versus-M1
+ * question); `agendaItem.setOperatorNotes` and `agendaItem.markComplete` are
+ * its call sites, and the ten OTHER rules that task added are all single-code
+ * and belong behind `requireBoardPermission`, not here.
  * The extra rule the old "nineteen"
  * was reaching for (a DIFFERENT nineteenth from the real one this grep now
  * counts) is `assertCanInsertVoteRecord`, which
