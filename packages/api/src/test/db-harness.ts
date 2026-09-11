@@ -61,9 +61,20 @@
  *
  * ─── Why `postgres.js` and not `pg` ─────────────────────────────────────
  *
- * The project standardizes on both `postgres` (postgres.js) and `pg`
+ * ~~The project standardizes on both `postgres` (postgres.js) and `pg`
  * depending on use case — `pg` is expected to back the dedicated `LISTEN`
- * connection later. For this harness, `postgres.js` is the simpler choice
+ * connection later.~~ **That expectation did not survive Phase E wave 5, Task
+ * 1, which built the `LISTEN` connection: it is `postgres.js` too, and `pg`
+ * remains a declared dependency imported nowhere.** The deciding property was
+ * measured rather than argued — `sql.listen()` reconnects on its own after a
+ * real `pg_terminate_backend` of the listening backend and re-fires its
+ * `onListen` callback, which is exactly the hook a "notifications published
+ * while we were disconnected are lost, resync everyone" broadcast needs.
+ * With `pg` that loop and its backoff would be hand-written and hand-tested
+ * for no gain, and a `LISTEN` connection that dies silently stops every live
+ * meeting in the process with no error anywhere. See `realtime/bus.ts`.
+ *
+ * For this harness, `postgres.js` is the simpler choice
  * for two concrete reasons: its tagged-template query API
  * (`` sql`SELECT ...` ``) is exactly what test code should be able to write
  * against the client this harness hands back, and its `sql.file(path)`

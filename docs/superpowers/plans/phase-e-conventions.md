@@ -926,6 +926,70 @@ re-recorded rather than carried forward silently a second wave.**
    than assumed. Recorded here only so a reader of this specific carry-over list sees all four
    accounted for in one place; the decision itself is not duplicated a third time.
 
+### Subscriptions follow item 2's rule unchanged, plus one
+
+Added in **wave 5, Task 1**, which shipped the first `.subscription(` in this codebase
+(`trpc/routers/realtime.ts`). Everything above about guard placement carries over, and that was
+**measured against a real Fastify server and a real `httpSubscriptionLink` client** rather than
+assumed from the mutation case:
+
+- **Middleware runs at SUBSCRIBE time, before the generator body.** A middleware that throws means
+  the generator's first line never runs. So `.use(...)` still goes BEFORE `.input()`, for the
+  identical reason.
+- **`opts.getRawInput()` resolves for a subscription**, even though the request is a GET with input
+  in the query string. `requireBoardPermission`, `requireBoardActor` and `boardIdFrom()` therefore
+  work on one exactly as they do on a mutation.
+- **A reconnect re-runs the whole chain.** The client merges `lastEventId` into the same raw input
+  and the server builds a NEW context, so the Fastify gate (session, account, tenant, origin) and
+  every middleware run again.
+
+The one addition: **nothing may be yielded until every refusal has had its chance.** A guard that
+runs after the first `yield` is not a guard — the client has already acted on an event it was not
+entitled to, and no later refusal takes that back. Refuse with a `TRPCError`, never a plain
+`Error`: a `TRPCError` thrown from middleware OR from inside the generator reaches the client's
+`onError` and the client stops, while a plain `Error` is treated as a dropped connection and
+silently resumed (both measured).
+
+**Authorization lifetime, stated rather than left implicit.** A subscription's context is built once
+and lives for the whole stream, and a live meeting runs for hours. `trpc.ts` sets
+`sse.maxDurationMs` (`SSE_MAX_STREAM_DURATION_MS`, five minutes), so the server ends every stream on
+that cadence and the client's own verified resume handshake opens a new request. **Authorization is
+therefore evaluated when a stream opens and re-evaluated in full at every reconnect, which the server
+forces at least every five minutes; it is not re-evaluated between those points.** Measured: at the
+deadline the generator's `finally` runs with `signal.aborted === true`, the client resumes with no
+gap, no duplicate and no `onError`, and a fresh context is built.
+
+**A subscription must open at most one `ctx.withTenant`, at subscribe time.** Two OVERLAPPING calls
+are what `bindTenantAccess`'s `inTransaction` guard refuses, and a stream that fans out per-event
+work is the only shape in this codebase that could produce them. Events carry no payload, so there
+is nothing per event to read. `routers/__tests__/realtime.test.ts` counts the transactions and the
+actor resolutions, so adding either goes red rather than being discovered under load.
+
+### Realtime events are invalidation signals, and the tenancy filter is application code
+
+A `LISTEN` connection **cannot** carry tenant context: `LISTEN` is session-scoped, `app.town_id` is
+`SET LOCAL` transaction-scoped, and a notification is delivered between transactions. No policy
+applies to the delivery. So `eventMatchesSubscriber` in `realtime/bus.ts` is the whole of the
+tenancy guarantee for this transport — the one place in Phase E where "no redundant `WHERE town_id`
+alongside RLS" does not apply, because there is no RLS to be redundant with. It is pinned by a test
+in two places (`realtime/__tests__/bus.test.ts` and `routers/__tests__/realtime.test.ts`); deleting
+the town comparison turns both red.
+
+An event carries a TOPIC and nothing else. Both the `NOTIFY` payload's fields (`townId`,
+`meetingId`) are filter inputs that stop at the bus. That is not only simpler — a `NOTIFY` channel
+is GLOBAL to the database and any session that can connect can read it, so a payload carrying row
+data would be visible to every tenant's connection with nothing in the schema saying so.
+
+**What wave 5's Task 3 owes this:** `publishRealtimeEvent(tx, ...)` is application-level, so a write
+that forgets to call it leaves every other device stale with no error anywhere. It is called from
+inside the write's own `ctx.withTenant` transaction, which is what makes the invalidation
+transactional — `pg_notify` is delivered at COMMIT and discarded on ROLLBACK (measured and pinned),
+so no client is ever told to refetch a row that then did not happen. A database trigger on the nine
+tables could not be forgotten and is the documented escalation if the per-mutation call proves
+unwieldy across Task 3's thirty-five write sites; it was declined because a trigger knows the TABLE
+and the topic is not always the table, and because it would fire for the 60-second notification
+sweep and every background `TenantJob`.
+
 ---
 
 ## 3. NOT_FOUND, not FORBIDDEN, for a row in another town
