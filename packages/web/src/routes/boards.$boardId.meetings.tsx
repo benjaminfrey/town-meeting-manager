@@ -33,7 +33,6 @@ import {
 } from "@/components/meetings/meeting-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 
@@ -59,9 +58,6 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
   const { boardId } = loaderData;
   const navigate = useNavigate();
-  const currentUser = useCurrentUser();
-  const townId = currentUser?.townId ?? "";
-
   const [createOpen, setCreateOpen] = useState(false);
   const [cancelMeeting, setCancelMeeting] = useState<{
     id: string;
@@ -121,7 +117,6 @@ export default function MeetingListPage({ loaderData }: Route.ComponentProps) {
       <CreateMeetingDialog
         boardId={boardId}
         boardName={boardName}
-        townId={townId}
         open={createOpen}
         onOpenChange={setCreateOpen}
       />
