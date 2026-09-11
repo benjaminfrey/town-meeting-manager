@@ -129,6 +129,7 @@ describe("the public portal's read rules", () => {
       rules.assertCanUpdateExhibit,
       rules.assertCanInsertMeeting,
       rules.assertCanUpdateMeeting,
+      rules.assertCanPublishAgenda,
     ]) {
       expect(() => assert(anon, board)).toThrow();
     }

@@ -4,9 +4,16 @@
  * Section numbering: sections = 1, 2, 3...
  * Items = A, B, C...
  * Sub-items = i, ii, iii...
+ *
+ * Phase E, wave 4, Task 3: `sections`/`allExhibits` are the procedures' own
+ * row types instead of `Record<string, unknown>` bags (conventions item 10 —
+ * the audit covers props handed to children, not only the screen's own JSX).
+ * `allExhibits` is already filtered by rule 14 before it reaches here, so the
+ * preview shows exactly what the builder behind it shows.
  */
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { MeetingExhibit, SectionWithChildren } from "./agenda-types";
 
 interface AgendaPreviewDialogProps {
   open: boolean;
@@ -17,10 +24,8 @@ interface AgendaPreviewDialogProps {
   scheduledDate: string;
   scheduledTime: string;
   location: string;
-  sections: (Record<string, unknown> & {
-    children: Record<string, unknown>[];
-  })[];
-  allExhibits: Record<string, unknown>[];
+  sections: SectionWithChildren[];
+  allExhibits: MeetingExhibit[];
 }
 
 const ROMAN = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
@@ -60,10 +65,10 @@ export function AgendaPreviewDialog({
         <div className="space-y-6 py-4">
           {sections.map((section, sectionIdx) => {
             const sectionNum = sectionIdx + 1;
-            const sectionTitle = String(section.title ?? "");
+            const sectionTitle = section.title;
 
             return (
-              <div key={String(section.id)}>
+              <div key={section.id}>
                 <h4 className="font-bold text-sm uppercase tracking-wide border-b pb-1 mb-2">
                   {sectionNum}. {sectionTitle}
                 </h4>
@@ -75,17 +80,17 @@ export function AgendaPreviewDialog({
                 {section.children.map((item, itemIdx) => {
                   const letter = String.fromCharCode(65 + itemIdx);
                   const label = `${sectionNum}${letter}`;
-                  const itemTitle = String(item.title ?? "");
-                  const presenter = (item.presenter as string) || null;
-                  const duration = item.estimated_duration ? Number(item.estimated_duration) : null;
-                  const description = (item.description as string) || null;
-                  const background = (item.background as string) || null;
-                  const recommendation = (item.recommendation as string) || null;
-                  const suggestedMotion = (item.suggested_motion as string) || null;
+                  const itemTitle = item.title;
+                  const presenter = item.presenter;
+                  const duration = item.estimated_duration;
+                  const description = item.description;
+                  const background = item.background;
+                  const recommendation = item.recommendation;
+                  const suggestedMotion = item.suggested_motion;
                   const itemExhibits = allExhibits.filter((e) => e.agenda_item_id === item.id);
 
                   return (
-                    <div key={String(item.id)} className="ml-6 mb-3">
+                    <div key={item.id} className="ml-6 mb-3">
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-xs text-muted-foreground w-8 shrink-0">
                           {label}.
@@ -134,9 +139,9 @@ export function AgendaPreviewDialog({
                         <div className="ml-8 mt-1 text-xs text-muted-foreground">
                           Exhibits:{" "}
                           {itemExhibits.map((e, i) => (
-                            <span key={String(e.id)}>
+                            <span key={e.id}>
                               {i > 0 ? ", " : ""}
-                              {String(e.title ?? `Exhibit ${i + 1}`)}
+                              {e.title || `Exhibit ${i + 1}`}
                             </span>
                           ))}
                         </div>

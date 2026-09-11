@@ -4,68 +4,64 @@
  * Lists every board's reusable agenda templates, grouped by board. Creating and
  * editing happens in each board's Templates tab; this is the cross-board view.
  *
- * TODO(phase-e-wave-4): agendaTemplate.listByTown (or equivalent) — not a
- * simple swap onto an existing procedure: `agendaTemplate.list`/`.detail`
- * (`packages/api/src/trpc/routers/agenda-template.ts`) are both BOARD-scoped
- * (take a `boardId`), and this screen's own question is town-wide, grouped
- * by board — the identical shape gap `home.tsx`'s board-picker marker named
- * for `board.listActive` before that procedure existed. No authorization
- * delta versus the raw read below either way (`agendaTemplate.list` is a
- * plain `protectedProcedure` — see conventions item 11 and wave 3's Task 0,
- * which added this marker). Wave number is a best guess, not a plan
- * citation — no wave plan document names this file yet (checked directly:
- * wave 3's own plan lists `CreateMeetingDialog.tsx` and `routes/templates.tsx`
- * together as the two files missing this marker, but only schedules the
- * former's conversion, in this same wave's Task 2). `wave-4` is chosen
- * because that wave already owns the agenda surface generally, not because
- * any document says so — retag when a wave plan actually claims this file,
- * per conventions item 14's `home.tsx` precedent for the identical
- * situation.
+ * Phase E, wave 4, Task 4 — the read moves onto
+ * `trpc.agendaTemplate.listByTown`, a NEW procedure. The wave-3 marker this
+ * discharges asked whether `agendaTemplate.list` would do, and the answer is
+ * no, for four reasons stated in full on the procedure itself: `list` is
+ * board-scoped, returns the template's `sections` blob instead of the board's
+ * name, orders `is_default DESC, name ASC`, and — the one that makes it
+ * impossible rather than merely wasteful — can never return a template with
+ * NO board, which `agenda_template.board_id`'s nullability allows and this
+ * screen's "Unassigned" group exists to render.
+ *
+ * **Cache keys.** This screen's old key was a hand-written
+ * `["agendaTemplates", "byTown", townId]` — not from `lib/queryKeys.ts`, and
+ * NOTHING in the tree ever invalidated it. Every template writer
+ * (`CreateTemplateDialog`, `DeleteTemplateDialog`,
+ * `boards.$boardId.templates.tsx`, `…templates.$templateId.edit.tsx`)
+ * invalidates `queryKeys.agendaTemplates.byBoard(boardId)` and
+ * `trpc.agendaTemplate.pathFilter()`, and neither reached that key. So this
+ * page went stale for the full 60s `staleTime` after any template change, and
+ * moving the read onto the tRPC key fixes that as a side effect: the four
+ * writers' existing `pathFilter()` calls match this procedure by router
+ * prefix. No writer changed in this commit; the key they were already
+ * invalidating is now the key this screen reads.
  */
 
 import { useMemo } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, ChevronRight } from "lucide-react";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { supabase } from "@/lib/supabase";
+import { isTRPCClientError } from "@trpc/client";
+import { FileText, ChevronRight, AlertTriangle } from "lucide-react";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { queryClient } from "@/lib/queryClient";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
-interface TemplateRow {
-  id: string;
-  name: string;
-  board: { id: string; name: string } | null;
-}
+type TemplateRow = RouterOutputs["agendaTemplate"]["listByTown"][number];
 
 export async function clientLoader() {
+  // Not wrapped in try/catch — conventions item 12: a rejection before mount
+  // routes to `RouteErrorBoundary`, which is exported at the bottom of this
+  // module. `listByTown` cannot 404 (an empty town is a legitimate answer),
+  // so this is a prime, not a guard.
+  await queryClient.ensureQueryData(trpc.agendaTemplate.listByTown.queryOptions());
   return {};
 }
 
 export default function TemplatesPage() {
-  const currentUser = useCurrentUser();
-  const townId = currentUser?.townId ?? "";
-
-  // TODO(phase-e-wave-4): agendaTemplate.listByTown — see this file's header.
-  const { data: templates = [], isLoading } = useQuery({
-    queryKey: ["agendaTemplates", "byTown", townId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_template")
-        .select("id, name, board:board_id(id, name)")
-        .eq("town_id", townId)
-        .order("name")
-        .throwOnError();
-      return (data ?? []) as unknown as TemplateRow[];
-    },
-    enabled: !!townId,
-  });
+  const {
+    data: templates = [],
+    isLoading,
+    isError,
+    error,
+  } = useQuery(trpc.agendaTemplate.listByTown.queryOptions());
 
   const groups = useMemo(() => {
     const byBoard = new Map<string, { boardId: string; boardName: string; items: TemplateRow[] }>();
     for (const t of templates) {
-      const boardId = t.board?.id ?? "none";
-      const boardName = t.board?.name ?? "Unassigned";
+      const boardId = t.board_id ?? "none";
+      const boardName = t.board_name ?? "Unassigned";
       const g = byBoard.get(boardId) ?? { boardId, boardName, items: [] as TemplateRow[] };
       g.items.push(t);
       byBoard.set(boardId, g);
@@ -83,7 +79,28 @@ export default function TemplatesPage() {
         </p>
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        // Conventions item 5: a failure AFTER mount (a refetch, a `staleTime`
+        // expiry) never re-enters the route error boundary, so the screen owns
+        // its own visible error state. Before this task there was none — the
+        // read simply resolved to `[]` and the page rendered its empty state,
+        // telling a clerk their town has no templates when the request failed.
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-lg border border-destructive/50 bg-destructive/5 p-6 text-center"
+        >
+          <AlertTriangle className="mx-auto h-8 w-8 text-destructive" aria-hidden="true" />
+          <p className="mt-3 font-medium">
+            {isTRPCClientError(error) && error.data?.code === "NOT_FOUND"
+              ? "These agenda templates could not be found."
+              : "Something went wrong loading agenda templates."}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try reloading the page. If the problem continues, contact support.
+          </p>
+        </div>
+      ) : isLoading ? (
         <MeetingListSkeleton rows={4} />
       ) : groups.length === 0 ? (
         <div className="rounded-lg border bg-card p-8 text-center">

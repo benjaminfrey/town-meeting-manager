@@ -14,6 +14,16 @@
  *
  * The download link is new. An uploaded exhibit had no way to be read back at
  * all, because the bucket it was written to never existed.
+ *
+ * Phase E, wave 4, Task 3: the DELETE stays exactly where it is — a tRPC
+ * resolver cannot remove the bytes after the transaction commits, which is
+ * the defect D1e was built to fix (see `exhibit.ts`'s header for the full
+ * reasoning). What changed here is the CACHE KEY it owes: the agenda builder
+ * now reads its exhibits through `trpc.exhibit.byMeeting`, so this writer
+ * gained `trpc.exhibit.pathFilter()` alongside its legacy per-item key
+ * (conventions item 7 — a read owns its key, and the writer that abandons it
+ * updates in the same commit). The `exhibit` prop is the procedure's own row
+ * type rather than `Record<string, unknown>`, per item 10.
  */
 
 import { useCallback, useState } from "react";
@@ -21,6 +31,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiJson } from "@/lib/api-client";
 import { exhibitDownloadUrl } from "@/hooks/useExhibitUpload";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
+import type { MeetingExhibit } from "./agenda-types";
 import { Download, FileText, Link as LinkIcon, Trash2 } from "lucide-react";
 import { EXHIBIT_TYPE_LABELS } from "./meeting-labels";
 import { Button } from "@/components/ui/button";
@@ -34,7 +46,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 interface ExhibitRowProps {
-  exhibit: Record<string, unknown>;
+  exhibit: MeetingExhibit;
   index: number;
   readOnly: boolean;
 }
@@ -44,23 +56,25 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const title = String(exhibit.title ?? `Exhibit ${index + 1}`);
-  const fileType = String(exhibit.file_type ?? "");
-  const exhibitType = String(exhibit.exhibit_type ?? "other");
-  const isUrl = fileType === "url";
+  const title = exhibit.title || `Exhibit ${index + 1}`;
+  const exhibitType = exhibit.exhibit_type ?? "other";
+  const isUrl = exhibit.file_type === "url";
 
   const handleDelete = useCallback(async () => {
     try {
-      await apiJson(`/api/files/exhibits/${String(exhibit.id)}`, { method: "DELETE" });
+      await apiJson(`/api/files/exhibits/${exhibit.id}`, { method: "DELETE" });
     } catch (err) {
       // The API's refusal names the permission and who can grant it.
       setDeleteError(err instanceof Error ? err.message : "Could not delete this exhibit.");
       return;
     }
-    const agendaItemId = String(exhibit.agenda_item_id ?? "");
+    const agendaItemId = exhibit.agenda_item_id;
     if (agendaItemId) {
       await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
     }
+    // DELETEs an `exhibit` row, which is what the agenda builder's own
+    // `exhibit.byMeeting` read returns (wave 4, Task 3).
+    void queryClient.invalidateQueries(trpc.exhibit.pathFilter());
     setConfirmDelete(false);
   }, [queryClient, exhibit.id, exhibit.agenda_item_id]);
 
@@ -73,7 +87,14 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
               <AlertDialogTitle>Delete Exhibit</AlertDialogTitle>
               <AlertDialogDescription>
                 Delete "{title}"? This cannot be undone.
-                {deleteError && <span className="mt-2 block text-destructive">{deleteError}</span>}
+                {/* Inside the dialog already — this is not the aria-hidden
+                    bug (conventions item 2) — but had no `role="alert"` and
+                    no pin until wave 4, Task 3's fix round 1. */}
+                {deleteError && (
+                  <span className="mt-2 block text-destructive" role="alert">
+                    {deleteError}
+                  </span>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -100,7 +121,7 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
       </span>
       {isUrl ? (
         <a
-          href={String(exhibit.file_storage_path ?? "")}
+          href={exhibit.file_storage_path}
           target="_blank"
           rel="noreferrer noopener"
           className="text-muted-foreground hover:text-foreground"
@@ -110,7 +131,7 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
         </a>
       ) : (
         <a
-          href={exhibitDownloadUrl(String(exhibit.id))}
+          href={exhibitDownloadUrl(exhibit.id)}
           className="text-muted-foreground hover:text-foreground"
           aria-label={`Download ${title}`}
         >
@@ -123,8 +144,9 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
           size="sm"
           className="h-6 w-6 p-0 text-destructive hover:text-destructive"
           onClick={() => setConfirmDelete(true)}
+          aria-label={`Delete ${title}`}
         >
-          <Trash2 className="h-3 w-3" />
+          <Trash2 className="h-3 w-3" aria-hidden="true" />
         </Button>
       )}
     </div>

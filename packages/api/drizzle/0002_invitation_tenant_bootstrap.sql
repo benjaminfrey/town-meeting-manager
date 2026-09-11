@@ -44,8 +44,15 @@
 --     sha256(token) → town_id
 --
 -- and nothing else. Kept in step with `public.invitation` by a trigger, so it
--- is correct no matter who writes the invitation — including the web client,
--- which still inserts invitations directly and is not migrated until Phase E.
+-- is correct no matter who writes the invitation — a property that mattered
+-- when this migration was written, because the web client still inserted
+-- invitations directly through Supabase at the time. That call site was
+-- migrated onto `invitation.insert` (tRPC) in Phase E wave 4, Task 0 — see
+-- `packages/api/src/trpc/routers/invitation.ts`'s own header — and
+-- `grep -rn '"invitation"' packages/web/src` (non-test) now answers empty.
+-- The trigger stays correct either way: it does not care who writes the row,
+-- only that a write happened, and this migration's SQL is already applied
+-- and is not being changed for this correction — only this comment.
 --
 -- ─── Four properties, stated so they can be checked ───────────────────────
 --

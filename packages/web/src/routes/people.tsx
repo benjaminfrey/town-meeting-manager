@@ -8,10 +8,20 @@
  * "Add Member" picker).
  *
  * Phase E, wave 1, Task 3 — the person + user_account halves of this read are
- * `trpc.person.list` now, not two separate Supabase queries joined in JS. The
- * board-membership half stays on Supabase — see the `TODO(phase-e-wave-2)`
- * marker below and `person.ts`'s own doc comment for why that join was
- * deliberately NOT folded into the procedure.
+ * `trpc.person.list` now, not two separate Supabase queries joined in JS.
+ * Phase E wave 4, Task 0 closes the board-membership half too, onto
+ * `trpc.boardMember.listByTown` (new: `boardMember.roster` is scoped to ONE
+ * board and `boardMember.memberCount` returns a bare count, so neither
+ * answered this town-wide "which boards does each person hold a seat on"
+ * question — see that procedure's own doc comment). Still a SEPARATE read
+ * from `person.list`, not folded into it: `person.ts`'s own doc comment
+ * explains why a `board_member` join does not belong in that procedure (it
+ * would make `trpc.person.pathFilter()` a key every Board → Members writer
+ * owed an invalidation to, none of which this task touched). No writer
+ * change was needed either way — `members: "boardMember"` has been in
+ * `cache-key-parity.test.ts`'s `MIGRATED` map since wave 2, so every writer
+ * that seats or archives a board member already calls
+ * `trpc.boardMember.pathFilter()`, which reaches this new procedure too.
  *
  * No `ensureQueryData(trpc.person.list.queryOptions())` in `clientLoader` —
  * deliberate, not an oversight, and the same call `settings.town.tsx` made
@@ -32,19 +42,12 @@ import { isTRPCClientError } from "@trpc/client";
 import { Users, Plus, Pencil, AlertTriangle } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { AddPersonDialog } from "@/components/members/AddPersonDialog";
 import { EditPersonDialog } from "@/components/members/EditPersonDialog";
-
-interface MembershipRow {
-  person_id: string;
-  board: { id: string; name: string } | null;
-}
 
 const ROLE_LABEL: Record<string, string> = {
   sys_admin: "System admin",
@@ -75,37 +78,15 @@ export default function PeoplePage() {
     error: peopleError,
   } = useQuery(trpc.person.list.queryOptions());
 
-  // TODO(phase-e-wave-2): boardMember.listByTown (or equivalent) — the
-  // `boardMember` router exists now (Phase E, wave 2, Task 3), but no
-  // procedure on it answers this question: `boardMember.roster` is scoped to
-  // ONE board and `boardMember.memberCount` returns a bare count, neither the
-  // town-wide "which boards does each person hold a seat on" join this read
-  // needs. Re-checked directly in Task 4 rather than assumed closed by that
-  // router's existence — see that task's report. Kept on Supabase; see
-  // `person.ts`'s own doc comment for why this join was deliberately NOT
-  // folded into `person.list` (it would make `trpc.person.pathFilter()` a
-  // key every Board → Members writer — none of them touched by this task —
-  // owed an invalidation to).
-  const { data: memberships = [] } = useQuery({
-    queryKey: [...queryKeys.members.all, "byTown", townId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board_member")
-        .select("person_id, board:board_id(id, name)")
-        .eq("town_id", townId)
-        .eq("status", "active")
-        .throwOnError();
-      return (data ?? []) as unknown as MembershipRow[];
-    },
-    enabled: !!townId,
-  });
+  const { data: memberships = [], isError: isMembershipsError } = useQuery(
+    trpc.boardMember.listByTown.queryOptions(),
+  );
 
   const rows = useMemo(() => {
     const boardsByPerson = new Map<string, string[]>();
     for (const m of memberships) {
-      if (!m.board) continue;
       const list = boardsByPerson.get(m.person_id) ?? [];
-      if (!list.includes(m.board.name)) list.push(m.board.name);
+      if (!list.includes(m.board_name)) list.push(m.board_name);
       boardsByPerson.set(m.person_id, list);
     }
     return people.map((p) => {
@@ -173,6 +154,25 @@ export default function PeoplePage() {
           </Button>
         )}
       </div>
+
+      {/* `boardMember.listByTown` failed — the people list itself still
+          rendered, so say which half is missing rather than silently
+          showing everyone with no board memberships (conventions item 5).
+          Without this banner, `memberships` defaults to `[]` above and every
+          row's "Boards" column reads "—" indistinguishably from a person who
+          genuinely holds no seat. */}
+      {isMembershipsError && (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          role="alert"
+        >
+          <p className="font-medium">Board memberships could not be loaded.</p>
+          <p className="text-xs">
+            The people below are complete, but their "Boards" column may be missing seats they
+            actually hold. Try reloading.
+          </p>
+        </div>
+      )}
 
       {isLoading ? (
         <MeetingListSkeleton rows={5} />

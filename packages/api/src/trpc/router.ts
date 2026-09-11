@@ -22,9 +22,11 @@ import { boardRouter } from "./routers/board.js";
 import { boardMemberRouter } from "./routers/board-member.js";
 import { agendaTemplateRouter } from "./routers/agenda-template.js";
 import { personRouter } from "./routers/person.js";
+import { invitationRouter } from "./routers/invitation.js";
 import { notificationPreferenceRouter } from "./routers/notification-preference.js";
 import { meetingRouter } from "./routers/meeting.js";
 import { agendaItemRouter } from "./routers/agenda-item.js";
+import { exhibitRouter } from "./routers/exhibit.js";
 import { minutesDocumentRouter } from "./routers/minutes-document.js";
 import { meetingAttendanceRouter } from "./routers/meeting-attendance.js";
 
@@ -65,6 +67,14 @@ export const appRouter = router({
   person: personRouter,
 
   /**
+   * `AddPersonDialog.tsx`'s invitation write — the one invitation insert
+   * `boardMember.ts`'s private `insertInvitation` helper cannot reach (that
+   * dialog never seats anyone on a board). One admin-gated procedure — see
+   * `routers/invitation.ts`.
+   */
+  invitation: invitationRouter,
+
+  /**
    * A person's own notification preferences. No permission guard — see
    * `routers/notification-preference.ts` for why (self-scoped by
    * construction, not by an `assertCan*` rule).
@@ -83,11 +93,25 @@ export const appRouter = router({
   meeting: meetingRouter,
 
   /**
-   * The agenda item count `routes/meetings.$meetingId.tsx`'s shell needs.
-   * One procedure today — wave 4 owns the full agenda surface and extends
-   * this router rather than creating it. See `routers/agenda-item.ts`.
+   * The agenda surface: the shell's item count, the builder's ordered read,
+   * and every `agenda_item` write — `insert`, `update`, `reorder`, a
+   * cascading `delete`, and `instantiateFromTemplate`. `setOperatorNotes`
+   * and `markComplete` ship here UNWIRED for wave 5's live screen. Every
+   * write is board-scoped through a JOIN (`agenda_item` has no `board_id`)
+   * — see `routers/agenda-item.ts`'s header for the derivation and the
+   * mismatch defence it feeds.
    */
   agendaItem: agendaItemRouter,
+
+  /**
+   * An agenda item's attachments: one read, and the LINK creation path only.
+   * The file-upload path and the delete both stay at the D1e endpoints
+   * (`routes/files.ts` → `storage/documents.ts`), which already apply the
+   * same rules against the same derived board and additionally manage the
+   * bytes — see `routers/exhibit.ts`'s header for why duplicating either
+   * here would weaken it.
+   */
+  exhibit: exhibitRouter,
 
   /**
    * The one minutes document a meeting has, if any — `routes/

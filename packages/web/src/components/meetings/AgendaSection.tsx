@@ -3,13 +3,34 @@
  *
  * Displays a section header with type badge and item list.
  * Supports adding items and removing non-fixed sections.
+ *
+ * ─── Phase E, wave 4, Task 3 ──────────────────────────────────────────────
+ *
+ * Both writes were raw Supabase against `agenda_item`, under a tenancy-only
+ * RLS policy and with no application-level check at all. Now:
+ *
+ *   - the child drag-reorder is `agendaItem.reorder` — ONE request writing
+ *     `sort_order = <position>` for every id, replacing a loop that issued
+ *     one UPDATE per moved row with no transaction around them;
+ *   - "Remove section" is `agendaItem.delete` — ONE statement, replacing a
+ *     per-child delete loop followed by a delete of the section. Both FKs are
+ *     `ON DELETE CASCADE`, so the database removes the children (and their
+ *     exhibits) itself; see `agenda-item.ts`'s header.
+ *
+ * Both are A2, board-scoped, so both can now answer FORBIDDEN — and both
+ * surface it. A destructive button that silently does nothing is the failure
+ * wave 3 shipped twice.
+ *
+ * Deleting a section cascades to its children's EXHIBITS, so both handlers
+ * invalidate `trpc.exhibit.pathFilter()` as well as `trpc.agendaItem`'s —
+ * the reorder does not touch exhibits and does not.
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage } from "@/lib/trpc";
+import type { AgendaItem, MeetingExhibit, SectionWithChildren } from "./agenda-types";
 import {
   DndContext,
   closestCenter,
@@ -39,14 +60,13 @@ import {
 } from "@/components/ui/alert-dialog";
 
 interface AgendaSectionProps {
-  section: Record<string, unknown> & {
-    children: Record<string, unknown>[];
-  };
+  section: SectionWithChildren;
   sectionIndex: number;
-  children_items: Record<string, unknown>[];
+  children_items: AgendaItem[];
   meetingId: string;
-  townId: string;
-  exhibits: Record<string, unknown>[];
+  /** The meeting's board — every write below authorizes against it. */
+  boardId: string;
+  exhibits: MeetingExhibit[];
   readOnly: boolean;
 }
 
@@ -55,19 +75,19 @@ export function AgendaSection({
   sectionIndex,
   children_items,
   meetingId,
-  townId,
+  boardId,
   exhibits,
   readOnly,
 }: AgendaSectionProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [isExpanded, setIsExpanded] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const sectionId = String(section.id);
-  const sectionTitle = String(section.title ?? "");
-  const sectionType = String(section.section_type ?? "other");
+  const sectionId = section.id;
+  const sectionTitle = section.title;
+  const sectionType = section.section_type;
   const itemCount = children_items.length;
 
   // DnD for item reordering
@@ -77,57 +97,69 @@ export function AgendaSection({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const itemIds = useMemo(() => children_items.map((item) => String(item.id)), [children_items]);
+  const itemIds = useMemo(() => children_items.map((item) => item.id), [children_items]);
+
+  const reorderItems = useMutation(
+    trpc.agendaItem.reorder.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // Reorders `agenda_item` rows — no count change, but an `agenda_item`
+        // write all the same; invalidated at the router per conventions item 7
+        // rather than encoding which of that router's procedures exist today.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      },
+      onError: (err) => setError(refusalMessage(err, "reorder these items")),
+    }),
+  );
+
+  const deleteSection = useMutation(
+    trpc.agendaItem.delete.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
+        // DELETEs the section and every child item — this one really does move
+        // the "N items" count `routes/meetings.$meetingId.tsx`'s shell renders
+        // through `trpc.agendaItem.countByMeeting`.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        // …and cascades to those children's exhibits
+        // (`exhibit_agenda_item_id_fkey` is ON DELETE CASCADE), which is a
+        // separate router's read.
+        void queryClient.invalidateQueries(trpc.exhibit.pathFilter());
+        setConfirmDelete(false);
+      },
+      onError: (err) => setError(refusalMessage(err, "remove this section")),
+    }),
+  );
 
   const handleItemDragEnd = useCallback(
-    async (event: DragEndEvent) => {
+    (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
-      const oldIndex = children_items.findIndex((item) => String(item.id) === active.id);
-      const newIndex = children_items.findIndex((item) => String(item.id) === over.id);
+      const oldIndex = children_items.findIndex((item) => item.id === active.id);
+      const newIndex = children_items.findIndex((item) => item.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
 
-      const now = new Date().toISOString();
       const reordered = [...children_items];
       const [moved] = reordered.splice(oldIndex, 1);
       reordered.splice(newIndex, 0, moved!);
 
-      for (let i = 0; i < reordered.length; i++) {
-        const item = reordered[i]!;
-        if (Number(item.sort_order) !== i) {
-          const { error } = await supabase
-            .from("agenda_item")
-            .update({ sort_order: i, updated_at: now })
-            .eq("id", String(item.id));
-          if (error) throw error;
-        }
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      // Reorders `agenda_item` rows — no count change, but an `agenda_item`
-      // write all the same; invalidated at the router per conventions item 7
-      // rather than encoding which of that router's procedures exist today.
-      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      setError(null);
+      reorderItems.mutate({ boardId, itemIds: reordered.map((item) => item.id) });
     },
-    [children_items, supabase, queryClient, meetingId],
+    [children_items, boardId, reorderItems],
   );
 
-  const handleDeleteSection = useCallback(async () => {
-    // Delete all children first
-    for (const child of children_items) {
-      const { error } = await supabase.from("agenda_item").delete().eq("id", String(child.id));
-      if (error) throw error;
-    }
-    // Delete the section itself
-    const { error } = await supabase.from("agenda_item").delete().eq("id", sectionId);
-    if (error) throw error;
-    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-    // DELETEs the section and every child item — this one really does move
-    // the "N items" count `routes/meetings.$meetingId.tsx`'s shell renders
-    // through `trpc.agendaItem.countByMeeting`.
-    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-    setConfirmDelete(false);
-  }, [supabase, queryClient, sectionId, children_items, meetingId]);
+  const handleDeleteSection = useCallback(() => {
+    setError(null);
+    // One statement: the database cascades this section's child items and
+    // their exhibits (see this file's header).
+    deleteSection.mutate({ boardId, itemId: sectionId });
+  }, [deleteSection, boardId, sectionId]);
 
   return (
     <div className="rounded-lg border bg-card shadow-sm">
@@ -140,18 +172,37 @@ export function AgendaSection({
               <AlertDialogDescription>
                 Remove "{sectionTitle}" and its {itemCount} item
                 {itemCount !== 1 ? "s" : ""}? This cannot be undone.
+                {/* A refused delete leaves this dialog open, and Radix marks
+                    everything outside it `aria-hidden` — see
+                    `InlineItemForm`'s identical branch. */}
+                {error && (
+                  <span className="mt-2 block text-destructive" role="alert">
+                    {error}
+                  </span>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                 Keep
               </Button>
-              <Button variant="destructive" onClick={() => void handleDeleteSection()}>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteSection}
+                disabled={deleteSection.isPending}
+              >
                 Remove
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {/* A refused or failed write — visible, not a button that does nothing. */}
+      {error && !confirmDelete && (
+        <p className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive" role="alert">
+          {error}
+        </p>
       )}
 
       {/* Section header */}
@@ -179,7 +230,7 @@ export function AgendaSection({
               variant="ghost"
               size="sm"
               className="text-destructive hover:text-destructive"
-              onClick={() => (itemCount > 0 ? setConfirmDelete(true) : void handleDeleteSection())}
+              onClick={() => (itemCount > 0 ? setConfirmDelete(true) : handleDeleteSection())}
               title="Remove section"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -195,18 +246,18 @@ export function AgendaSection({
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragEnd={(e) => void handleItemDragEnd(e)}
+            onDragEnd={handleItemDragEnd}
           >
             <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
               {children_items.map((item, itemIndex) => (
                 <AgendaItemRow
-                  key={String(item.id)}
+                  key={item.id}
                   item={item}
                   itemIndex={itemIndex}
                   sectionType={sectionType}
                   sectionId={sectionId}
                   meetingId={meetingId}
-                  townId={townId}
+                  boardId={boardId}
                   exhibits={exhibits.filter((e) => e.agenda_item_id === item.id)}
                   readOnly={readOnly}
                 />
@@ -219,7 +270,7 @@ export function AgendaSection({
             <div className="p-4">
               <InlineItemForm
                 meetingId={meetingId}
-                townId={townId}
+                boardId={boardId}
                 parentItemId={sectionId}
                 sectionType={sectionType}
                 sortOrder={itemCount}

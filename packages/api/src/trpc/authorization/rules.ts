@@ -121,6 +121,18 @@ export interface BoardScopedRow {
 // ─── 1, 2 — agenda_item INSERT / UPDATE: A2, BOARD-SCOPED ─────────────
 //
 // A2 is in `TEMPLATE_BOARD_SPECIFIC_STAFF`, which grants it per board only.
+//
+// DELETE is A2 as well, and has no function here on purpose (Phase E wave 4,
+// Task 1 — read this before adding one). There is no delete-specific
+// `PermissionCode`: A2 (`edit_agenda`) is the governing action for the
+// agenda's contents, so an `assertCanDeleteAgendaItem` would be a third body
+// identical to the two below — and one with no caller, because
+// `agendaItem.delete`'s guard is `requireBoardPermission("A2", boardIdFrom(),
+// {action: "to remove an agenda item"})`, which IS this same
+// `assertPermission` call (conventions item 2's "reach for
+// requireBoardPermission first" for a single-code rule; `meeting.ts`'s header
+// makes the same argument for `assertCanInsertMeeting`). The absence is a
+// decision, not an oversight — see `routers/agenda-item.ts`'s header.
 
 export function assertCanInsertAgendaItem(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "A2", { boardId: scope.boardId, action: "to add an agenda item" });
@@ -577,6 +589,49 @@ export function assertCanUpdateMeeting(actor: Actor, scope: BoardScope): void {
       "this board, or the administrator role.",
     { code: "M1", boardId: scope.boardId },
   );
+}
+
+// ─── 21a — meeting agenda_status PUBLISH: A5, BOARD-SCOPED ────────────
+//
+// Phase E wave 4, Task 2. NOT one of the 21 restored policies — like 9a and
+// 9b, this is a code that had no row-level policy to restore, and unlike them
+// it had no guard ANYWHERE: before this commit, the only occurrences of the
+// string "A5" in `packages/api` were two TEST FIXTURES
+// (`admin-gates.test.ts`'s maximal matrix and `require-permission.test.ts`'s
+// `BOARD_SCOPED_CODES` roster). `PERMISSIONS.A5` is `publish_agenda`, one of
+// the thirty governable actions and one of the 18 `BOARD_SCOPED_CODES`
+// (`TEMPLATE_BOARD_SPECIFIC_STAFF` grants it per board, global all-false), so
+// an account existed that held it and nothing ever asked.
+//
+// Publishing is a SEPARATE act from editing, which is why this is not folded
+// into rule 21 or into A2: A2 (`edit_agenda`) is who may change the agenda's
+// contents; A5 is who may declare a version of it the public record. The two
+// are granted independently by the permission matrix, and a clerk who drafts
+// agendas is not automatically the person who publishes them.
+//
+// `meeting.publishAgenda` reaches this code through
+// `requireBoardPermission("A5", boardIdFrom())` rather than importing this
+// function — that middleware resolves exactly one `PermissionCode` via
+// `assertPermission`, which IS the call below, so the code form is the same
+// check and not a shortcut around it (`meeting.ts`'s header makes the
+// identical argument for `assertCanInsertMeeting`, and conventions item 2
+// says to reach for `requireBoardPermission` FIRST for a single-code rule).
+//
+// This function therefore exists for the reason the agenda_item DELETE
+// comment above says a THIRD copy of A2 would not: A5 had no entry in this
+// file at all, so a reader auditing the rules for "what governs publishing an
+// agenda" found nothing and could reasonably conclude nothing governed it.
+// Adding `assertCanDeleteAgendaItem` would have duplicated a code this file
+// already documents twice; adding this documents a code this file did not
+// mention once. It is also the callable form every other board-scoped code
+// has, which `board-scope.test.ts`'s and `portal-rules.test.ts`'s
+// rule-by-rule tables need in order to cover A5 the way they cover A1–A3.
+
+export function assertCanPublishAgenda(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "A5", {
+    boardId: scope.boardId,
+    action: "to publish this meeting's agenda",
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════

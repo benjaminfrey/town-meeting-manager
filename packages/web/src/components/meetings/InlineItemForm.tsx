@@ -4,13 +4,37 @@
  * Used inside AgendaSection (for adding) and AgendaItemRow (for editing).
  * Supports commentary fields (staff_resource, background, recommendation,
  * suggested_motion) toggled by showCommentary prop.
+ *
+ * ─── Phase E, wave 4, Task 3 ──────────────────────────────────────────────
+ *
+ * Three raw `agenda_item` writes, none of which had any authorization check
+ * (`agenda_item_tenant_isolation` is tenancy-only), replaced by
+ * `agendaItem.insert` / `agendaItem.update` / `agendaItem.delete` — all three
+ * A2, board-scoped.
+ *
+ * **The delete is the one worth naming.** It used to be three unwrapped round
+ * trips — every `exhibit` for the item, then every child `agenda_item`, then
+ * the item — with no transaction, so any failure left a half-deleted item;
+ * and it carried no `TODO(phase-e-wave-*)` marker, so item 11's completeness
+ * sweep read this file as done. It is now ONE statement inside one
+ * transaction, because both FKs are already `ON DELETE CASCADE`
+ * (`agenda_item_parent_item_id_fkey`, `exhibit_agenda_item_id_fkey`); the
+ * database removes exactly the same rows. See `agenda-item.ts`'s header.
+ *
+ * `town_id`, `id`, `status` and `created_at`/`updated_at` are no longer sent
+ * from the browser: the procedures take `town_id` from the caller's own
+ * session, mint the id with the column's `gen_random_uuid()` default, and
+ * hardcode `'pending'` (see `agendaItem.insert`'s doc comment for why the
+ * status is not an input). `ItemFormSchema` below stays as the form's own
+ * validation — `agenda-item.ts`'s `itemFields` carries the identical bounds
+ * on purpose, and says so.
  */
 
 import { useCallback, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage } from "@/lib/trpc";
+import type { AgendaItem } from "./agenda-types";
 import { Loader2, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useWizardForm } from "@/hooks/useWizardForm";
@@ -45,11 +69,12 @@ type ItemFormData = z.infer<typeof ItemFormSchema>;
 
 interface InlineItemFormProps {
   meetingId: string;
-  townId: string;
+  /** The meeting's board — every write below authorizes against it. */
+  boardId: string;
   parentItemId: string;
   sectionType: string;
   sortOrder: number;
-  existingItem?: Record<string, unknown>;
+  existingItem?: AgendaItem;
   showCommentary?: boolean;
   onSaved: () => void;
   onCancel: () => void;
@@ -57,7 +82,7 @@ interface InlineItemFormProps {
 
 export function InlineItemForm({
   meetingId,
-  townId,
+  boardId,
   parentItemId,
   sectionType,
   sortOrder,
@@ -66,25 +91,20 @@ export function InlineItemForm({
   onSaved,
   onCancel,
 }: InlineItemFormProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
-  const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const isEditing = !!existingItem;
 
   const initial: ItemFormData = {
-    title: isEditing ? String(existingItem.title ?? "") : "",
-    description: isEditing ? ((existingItem.description as string) ?? null) : null,
-    presenter: isEditing ? ((existingItem.presenter as string) ?? null) : null,
-    estimated_duration: isEditing
-      ? existingItem.estimated_duration != null
-        ? Number(existingItem.estimated_duration)
-        : null
-      : null,
-    staff_resource: isEditing ? ((existingItem.staff_resource as string) ?? null) : null,
-    background: isEditing ? ((existingItem.background as string) ?? null) : null,
-    recommendation: isEditing ? ((existingItem.recommendation as string) ?? null) : null,
-    suggested_motion: isEditing ? ((existingItem.suggested_motion as string) ?? null) : null,
+    title: existingItem?.title ?? "",
+    description: existingItem?.description ?? null,
+    presenter: existingItem?.presenter ?? null,
+    estimated_duration: existingItem?.estimated_duration ?? null,
+    staff_resource: existingItem?.staff_resource ?? null,
+    background: existingItem?.background ?? null,
+    recommendation: existingItem?.recommendation ?? null,
+    suggested_motion: existingItem?.suggested_motion ?? null,
   };
 
   const { values, errors, isValid, setValue, handleBlur, validate } = useWizardForm(
@@ -92,105 +112,105 @@ export function InlineItemForm({
     initial,
   );
 
-  const handleSave = useCallback(async () => {
+  /**
+   * The legacy key plus the router filter (conventions item 7). The legacy
+   * `queryKeys.agendaItems.byMeeting` line stays because `SourceDataPanel`,
+   * `live.tsx` and `review.tsx` still read it.
+   */
+  const invalidateItems = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
+    // The INSERT branch changes the "N items" count
+    // `routes/meetings.$meetingId.tsx`'s shell renders through
+    // `trpc.agendaItem.countByMeeting` — this is the exact "add two agenda
+    // items, go back, still says 3" regression the `MIGRATED` entry for
+    // `agendaItems` exists to catch. The UPDATE branch changes what this
+    // screen's own `agendaItem.byMeeting` returns.
+    void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+  }, [queryClient, meetingId]);
+
+  const insertItem = useMutation(
+    trpc.agendaItem.insert.mutationOptions({
+      onSuccess: () => {
+        invalidateItems();
+        onSaved();
+      },
+      onError: (err) => setError(refusalMessage(err, "add an item to this agenda")),
+    }),
+  );
+
+  const updateItem = useMutation(
+    trpc.agendaItem.update.mutationOptions({
+      onSuccess: () => {
+        invalidateItems();
+        onSaved();
+      },
+      onError: (err) => setError(refusalMessage(err, "edit this agenda item")),
+    }),
+  );
+
+  const deleteItem = useMutation(
+    trpc.agendaItem.delete.mutationOptions({
+      onSuccess: () => {
+        invalidateItems();
+        void queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
+        // The delete cascades to this item's own exhibits and to its
+        // children's, so `exhibit.byMeeting` — this screen's exhibit read
+        // since this task — is stale too.
+        void queryClient.invalidateQueries(trpc.exhibit.pathFilter());
+        setConfirmDelete(false);
+        onSaved();
+      },
+      onError: (err) => setError(refusalMessage(err, "delete this agenda item")),
+    }),
+  );
+
+  const isSaving = insertItem.isPending || updateItem.isPending;
+
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
+    setError(null);
 
-    setIsSaving(true);
-    try {
-      const now = new Date().toISOString();
+    const fields = {
+      title: data.title,
+      description: data.description,
+      presenter: data.presenter,
+      estimatedDuration: data.estimated_duration,
+      staffResource: data.staff_resource,
+      background: data.background,
+      recommendation: data.recommendation,
+      suggestedMotion: data.suggested_motion,
+    };
 
-      if (isEditing) {
-        const { error } = await supabase
-          .from("agenda_item")
-          .update({
-            title: data.title,
-            description: data.description,
-            presenter: data.presenter,
-            estimated_duration: data.estimated_duration,
-            staff_resource: data.staff_resource,
-            background: data.background,
-            recommendation: data.recommendation,
-            suggested_motion: data.suggested_motion,
-            updated_at: now,
-          })
-          .eq("id", String(existingItem.id));
-        if (error) throw error;
-      } else {
-        const id = crypto.randomUUID();
-        const { error } = await supabase.from("agenda_item").insert({
-          id,
-          meeting_id: meetingId,
-          town_id: townId,
-          section_type: sectionType,
-          sort_order: sortOrder,
-          title: data.title,
-          description: data.description,
-          presenter: data.presenter,
-          estimated_duration: data.estimated_duration,
-          parent_item_id: parentItemId,
-          status: "pending",
-          staff_resource: data.staff_resource,
-          background: data.background,
-          recommendation: data.recommendation,
-          suggested_motion: data.suggested_motion,
-          created_at: now,
-          updated_at: now,
-        });
-        if (error) throw error;
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      // The `else` branch above INSERTs a new `agenda_item`, which changes
-      // the "N items" count `routes/meetings.$meetingId.tsx`'s shell renders
-      // through `trpc.agendaItem.countByMeeting` — this is the exact
-      // "add two agenda items, go back, still says 3" regression the
-      // `MIGRATED` entry for `agendaItems` exists to catch.
-      await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-      onSaved();
-    } finally {
-      setIsSaving(false);
+    if (existingItem) {
+      updateItem.mutate({ boardId, itemId: existingItem.id, ...fields });
+    } else {
+      insertItem.mutate({
+        boardId,
+        meetingId,
+        parentItemId,
+        sectionType,
+        sortOrder,
+        ...fields,
+      });
     }
   }, [
     validate,
-    isEditing,
     existingItem,
-    supabase,
-    queryClient,
+    boardId,
     meetingId,
-    townId,
+    parentItemId,
     sectionType,
     sortOrder,
-    parentItemId,
-    onSaved,
+    insertItem,
+    updateItem,
   ]);
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     if (!existingItem) return;
-    const itemId = String(existingItem.id);
-    // Delete exhibits first
-    const { error: exhibitError } = await supabase
-      .from("exhibit")
-      .delete()
-      .eq("agenda_item_id", itemId);
-    if (exhibitError) throw exhibitError;
-    // Delete child items
-    const { error: childError } = await supabase
-      .from("agenda_item")
-      .delete()
-      .eq("parent_item_id", itemId);
-    if (childError) throw childError;
-    // Delete the item itself
-    const { error } = await supabase.from("agenda_item").delete().eq("id", itemId);
-    if (error) throw error;
-    await queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byMeeting(meetingId) });
-    // DELETEs the item and its children — the same count, in the other
-    // direction. (`exhibit` has no router yet, so its legacy key above has
-    // no tRPC counterpart to pair with.)
-    await queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-    setConfirmDelete(false);
-    onSaved();
-  }, [existingItem, supabase, queryClient, meetingId, onSaved]);
+    setError(null);
+    deleteItem.mutate({ boardId, itemId: existingItem.id });
+  }, [existingItem, boardId, deleteItem]);
 
   return (
     <div className="space-y-3">
@@ -202,18 +222,40 @@ export function InlineItemForm({
               <AlertDialogTitle>Delete Item</AlertDialogTitle>
               <AlertDialogDescription>
                 Delete "{values.title}"? This will also remove any sub-items and exhibits.
+                {/* A refused delete leaves this dialog open (it closes in
+                    `onSuccess`), and Radix marks everything outside it
+                    `aria-hidden`, so the error has to be shown IN here or the
+                    user is left with a Delete button that appears to do
+                    nothing — the exact failure this task exists to avoid. */}
+                {error && (
+                  <span className="mt-2 block text-destructive" role="alert">
+                    {error}
+                  </span>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <Button variant="outline" onClick={() => setConfirmDelete(false)}>
                 Keep
               </Button>
-              <Button variant="destructive" onClick={() => void handleDelete()}>
+              <Button variant="destructive" onClick={handleDelete} disabled={deleteItem.isPending}>
                 Delete
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {/* A refused or failed write — visible, not a Save button that does
+          nothing. These writes are guarded for the first time in this task,
+          so FORBIDDEN is newly reachable here. */}
+      {error && !confirmDelete && (
+        <p
+          className="rounded border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
       )}
 
       {/* Title */}
@@ -334,7 +376,7 @@ export function InlineItemForm({
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => void handleSave()} disabled={!isValid || isSaving}>
+          <Button size="sm" onClick={handleSave} disabled={!isValid || isSaving}>
             {isSaving && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
             {isEditing ? "Save" : "Add"}
           </Button>

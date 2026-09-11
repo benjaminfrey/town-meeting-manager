@@ -15,9 +15,9 @@
  *
  * `@/lib/trpc` is NOT mocked. The real client and options proxy run; only
  * `globalThis.fetch` is replaced by `installTRPCFetchStub`. Board memberships
- * still read through `@/lib/supabase` (see `people.tsx`'s own
- * `TODO(phase-e-wave-2)` marker), so that module is mocked too, just enough
- * to resolve.
+ * moved onto `trpc.boardMember.listByTown` in Phase E wave 4, Task 0 — no
+ * `@/lib/supabase` mock is needed any more; that procedure is stubbed below
+ * like `person.list`.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -45,22 +45,6 @@ vi.mock("@/components/members/EditPersonDialog", () => ({
   EditPersonDialog: () => null,
 }));
 
-// ─── Mock Supabase (only the board-membership read still uses it) ─────
-
-/** Mutable so a test can change what the board-membership "read" returns. */
-const server = {
-  memberships: [] as Array<{ person_id: string; board: { id: string; name: string } | null }>,
-};
-
-vi.mock("@/lib/supabase", () => {
-  const chain: Record<string, unknown> = {};
-  chain["throwOnError"] = () => Promise.resolve({ data: server.memberships, error: null });
-  for (const m of ["select", "eq"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { supabase: { from: vi.fn().mockReturnValue(chain) } };
-});
-
 import PeoplePage from "../people";
 
 const queryClient = setupAppQueryClient();
@@ -71,10 +55,20 @@ const peopleServer = {
   rejects: false,
 };
 
+/** Mutable so a test can change what `boardMember.listByTown` returns. */
+const membershipServer = {
+  memberships: [] as RouterOutputs["boardMember"]["listByTown"],
+  rejects: false,
+};
+
 const stub = installTRPCFetchStub({
   "person.list": () => {
     if (peopleServer.rejects) trpcTestError("INTERNAL_SERVER_ERROR");
     return peopleServer.people;
+  },
+  "boardMember.listByTown": () => {
+    if (membershipServer.rejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return membershipServer.memberships;
   },
 });
 
@@ -87,7 +81,8 @@ describe("PeoplePage", () => {
     mockUsePermission.mockReturnValue({ allowed: true });
     peopleServer.people = [];
     peopleServer.rejects = false;
-    server.memberships = [];
+    membershipServer.memberships = [];
+    membershipServer.rejects = false;
   });
 
   it("lists board members, staff, and account-less people with the right role", async () => {
@@ -114,7 +109,9 @@ describe("PeoplePage", () => {
         gov_title: null,
       },
     ];
-    server.memberships = [{ person_id: "p1", board: { id: "b1", name: "Select Board" } }];
+    membershipServer.memberships = [
+      { person_id: "p1", board_id: "b1", board_name: "Select Board" },
+    ];
 
     renderPage();
 
@@ -196,5 +193,50 @@ describe("PeoplePage", () => {
 
     await waitFor(() => expect(stub.countFor("person.list")).toBeGreaterThan(before));
     expect(await screen.findByText("Alicia Renamed")).toBeInTheDocument();
+  });
+
+  it("refetches the board-membership read when a writer invalidates trpc.boardMember.pathFilter()", async () => {
+    // Every writer that seats or archives a board member already calls
+    // `trpc.boardMember.pathFilter()` (`AddMemberDialog`, `MemberArchiveDialog`,
+    // `MemberTransitionDialog`, etc. — see this file's own header). Proves
+    // that invalidation actually reaches THIS screen's `boardMember.listByTown`
+    // read, not only the board-scoped `roster`/`searchCandidates` reads those
+    // dialogs were written against.
+    peopleServer.people = [
+      { id: "p1", name: "Alice Board", email: "a@t.gov", role: null, gov_title: null },
+    ];
+    membershipServer.memberships = [];
+    renderPage();
+    expect(await screen.findByText("Alice Board")).toBeInTheDocument();
+    expect(await screen.findByText("No role yet")).toBeInTheDocument();
+    const before = stub.countFor("boardMember.listByTown");
+
+    membershipServer.memberships = [
+      { person_id: "p1", board_id: "b1", board_name: "Select Board" },
+    ];
+    await queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+
+    await waitFor(() => expect(stub.countFor("boardMember.listByTown")).toBeGreaterThan(before));
+    expect(await screen.findByText("Select Board")).toBeInTheDocument();
+  });
+
+  /**
+   * Regression pin for LOW-4 (whole-branch review, wave 4): before this,
+   * `boardMember.listByTown` had no `isError` branch, so a failed read
+   * silently defaulted `memberships` to `[]` and every person rendered as
+   * holding no board seats — plausible-looking wrong data, not a visible
+   * failure. The people list itself must still render (this is degradation,
+   * not a blank page), alongside a banner naming which half is missing.
+   */
+  it("shows a banner (not a blank Boards column) when boardMember.listByTown rejects", async () => {
+    peopleServer.people = [
+      { id: "p1", name: "Alice Board", email: "a@t.gov", role: null, gov_title: null },
+    ];
+    membershipServer.rejects = true;
+    renderPage();
+
+    expect(await screen.findByText("Alice Board")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(await screen.findByText("Board memberships could not be loaded.")).toBeInTheDocument();
   });
 });

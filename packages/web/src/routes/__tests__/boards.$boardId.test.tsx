@@ -18,13 +18,12 @@
  *     `AppRouter`, so renaming a column here is a compile error rather than a
  *     green test against a shape the server does not return.
  *
- * `town` still reads through `@/lib/supabase` in the component (see its
- * comment — not this task's file list), so that module is mocked too, just
- * enough that the query resolves instead of hitting a real network client in
- * jsdom. The Overview tab's template count moved onto
- * `trpc.agendaTemplate.countForBoard` in wave 2, Task 2 — stubbed below like
- * `board.detail`/`board.stats`/`board.recentMeetings`, not through the
- * Supabase mock.
+ * `town` moved onto `trpc.town.detail` in Phase E wave 4, Task 0 — the last
+ * raw Supabase read this file had (see the comment above its `useQuery` call
+ * in the component). No `@/lib/supabase` mock is needed any more; `town.detail`
+ * is stubbed below like `board.detail`/`board.stats`/`board.recentMeetings`.
+ * The Overview tab's template count moved onto `trpc.agendaTemplate.countForBoard`
+ * in wave 2, Task 2 — stubbed the same way.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -32,18 +31,8 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
+import type { MeetingFormality } from "@town-meeting/shared";
 import BoardDetailPage from "../boards.$boardId";
-
-// ─── Mock Supabase (only the town read still uses it) ──────────────────────
-
-vi.mock("@/lib/supabase", () => {
-  const chain: Record<string, unknown> = {};
-  chain["throwOnError"] = () => Promise.resolve({ data: [], count: 0, error: null });
-  for (const m of ["select", "eq", "limit", "order", "neq"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { supabase: { from: vi.fn().mockReturnValue(chain) } };
-});
 
 // ─── Mock identity ──────────────────────────────────────────────────────
 //
@@ -59,7 +48,13 @@ vi.mock("@/hooks/useCurrentUser", () => ({
 const queryClient = setupAppQueryClient();
 
 /** Mutable so a test can change what the server returns between refetches. */
-const server = { boardName: "Select Board", detailRejects: false };
+const server = {
+  boardName: "Select Board",
+  detailRejects: false,
+  townName: "Newcastle",
+  townMeetingFormality: "semi_formal" as MeetingFormality,
+  townRejects: false,
+};
 
 // Collection scope, once per file — see `installTRPCFetchStub`'s doc comment.
 // Per-test variation goes through `server` above, which the handlers close
@@ -94,6 +89,30 @@ const stub = installTRPCFetchStub({
   "board.stats": () => ({ active_members: 3, meetings: 7 }),
   "board.recentMeetings": () => [],
   "agendaTemplate.countForBoard": () => 2,
+  "town.detail": () => {
+    if (server.townRejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return {
+      id: "town-1",
+      name: server.townName,
+      state: "ME",
+      municipality_type: "town",
+      population_range: "under_1000",
+      contact_name: "Jamie Clerk",
+      contact_role: "Town Clerk",
+      meeting_formality: server.townMeetingFormality,
+      minutes_style: "summary",
+      presiding_officer_default: null,
+      minutes_recorder_default: null,
+      staff_roles_present: null,
+      subdomain: "newcastle",
+      seal_url: null,
+      retention_policy_acknowledged_at: null,
+      minutes_workflow_configured_at: null,
+      audio_retention_policy: "retain_30_days",
+      auto_publish_on_approval: false,
+      minutes_review_window_days: 7,
+    };
+  },
 });
 
 function renderRoute(boardId: string) {
@@ -110,6 +129,9 @@ describe("board detail", () => {
   beforeEach(() => {
     server.boardName = "Select Board";
     server.detailRejects = false;
+    server.townName = "Newcastle";
+    server.townMeetingFormality = "semi_formal";
+    server.townRejects = false;
   });
 
   it("shows the board's name and its member and meeting counts", async () => {
@@ -121,6 +143,21 @@ describe("board detail", () => {
     // `agendaTemplate.countForBoard` (wave 2, Task 2) — the Overview tab's
     // template count, no longer read off `@/lib/supabase`.
     expect(await screen.findByText("2 templates")).toBeInTheDocument();
+  });
+
+  it("shows the Overview tab's effective formality, sourced from the town default", async () => {
+    // `board.meeting_formality_override` is `null` in the stub above, so
+    // `getEffectiveBoardSettings` falls through to `town.detail`'s own
+    // `meeting_formality` — the read this task wired up. Proves the town
+    // read actually reaches the Overview tab's "town default" row, not just
+    // that the query resolves.
+    renderRoute("b1");
+    expect(await screen.findByText("Structured (semi-formal)")).toBeInTheDocument();
+    // Both the formality AND minutes-style rows fall through to the town
+    // default here (neither board override is set in the stub above), so
+    // two rows carry the "— town default" suffix — findAllByText, not
+    // findByText.
+    expect((await screen.findAllByText("— town default")).length).toBe(2);
   });
 
   it("shows an error state when a query rejects, not an empty page", async () => {
@@ -149,5 +186,32 @@ describe("board detail", () => {
       expect(stub.countFor("board.detail")).toBeGreaterThan(before);
     });
     expect((await screen.findAllByText("Renamed Board")).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Regression pin for LOW-4 (whole-branch review, wave 4): before this,
+   * `town.detail` had no `isError` branch, so a failed read silently fell
+   * through to hardcoded defaults (Overview's formality/minutes-style rows
+   * just vanish; the Settings tab's `townDefaults` becomes
+   * `retain_30_days`/`auto_publish: false`) while the UI kept labeling those
+   * values "town default" — a wrong value shown as authoritative for a
+   * governance setting. The board itself must still render (this is
+   * degradation, not a blank page), alongside a banner naming what may be
+   * stale.
+   */
+  it("shows a banner (not silently-wrong town defaults) when town.detail rejects", async () => {
+    server.townRejects = true;
+    renderRoute("b1");
+
+    expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "This board's information is complete, but the town's settings could not be loaded.",
+      ),
+    ).toBeInTheDocument();
+    // The town-sourced rows do not silently fall back and relabel themselves
+    // "town default" — they are simply absent, since `effective` is null.
+    expect(screen.queryByText("— town default")).not.toBeInTheDocument();
   });
 });

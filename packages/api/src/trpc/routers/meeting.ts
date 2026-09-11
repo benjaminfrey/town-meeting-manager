@@ -20,6 +20,28 @@
  * shortcut, it is the same check. `cancel`/`updateStatus` cannot do the
  * same — see below.
  *
+ * ─── `scheduled_date` needs no `::text` cast, and this is why ───────────
+ *
+ * Investigated and DECLINED in wave 4, Task 3, recorded so the next author
+ * does not spend the round rediscovering it. `agenda-item.ts`'s
+ * `insertMinutesApprovalItems` casts `m.scheduled_date::text` and calls the
+ * cast "load-bearing, not decorative: postgres.js parses a `date` column
+ * into a JS Date." That is true of a BARE `postgres()` client and NOT true
+ * of the path every router here actually uses. Probed both ways against the
+ * local database rather than reasoned about:
+ *
+ *     postgres()          SELECT '2026-03-15'::date  →  Date  (ISO string over the wire)
+ *     drizzle(postgres()) SELECT '2026-03-15'::date  →  "2026-03-15"  (a string)
+ *
+ * `drizzle-orm/postgres-js` installs identity parsers, so `tx.execute(sql…)`
+ * — which is how every procedure in this file reads — hands back the raw
+ * text for `date` AND `timestamptz`. So `scheduled_date: string` was accurate
+ * all along, `new Date(scheduled_date + "T00:00:00")` works in every consumer,
+ * and adding casts here would have been churn justified by a claim that does
+ * not reproduce on this code path. The same probe is what makes the `::int`
+ * casts elsewhere genuinely load-bearing: `count(*)` really does come back as
+ * the string `"1"`.
+ *
  * ─── Reads carry no guard ──────────────────────────────────────────────
  *
  * `meeting_tenant_isolation` (`0000_baseline.sql`) is `FOR ALL USING
@@ -189,6 +211,56 @@
  * noticed→active drag sends `"open"`. Recorded here rather than left as a
  * live forward-reference — conventions item 14's lens, applied to a router
  * header instead of a Known-gaps bullet.
+ *
+ * ─── `publishAgenda`: the third raw write, and the code that had no rule ──
+ *
+ * Phase E wave 4, Task 2. `PublishAgendaDialog.tsx` writes
+ * `meeting.agenda_status = 'published'` through raw Supabase with no
+ * authorization check of any kind — the same shape wave 3 closed for
+ * `status`, on a different column, and flagged there by that dialog's own
+ * `TODO(phase-e-wave-4)` marker.
+ *
+ * What made it worse than `updateStatus`'s hole: there was no rule to reach
+ * for. `PERMISSIONS.A5` is `publish_agenda` and A5 is one of the 18
+ * `BOARD_SCOPED_CODES`, but before this task the only occurrences of "A5" in
+ * `packages/api` were two test fixtures — no `assertCanPublishAgenda`
+ * existed at all. `rules.ts` now carries it (see its own "21a" section for
+ * why it is a rule rather than a bare code, given Task 1 declined to add
+ * `assertCanDeleteAgendaItem` on what looks like the opposite reasoning),
+ * and this procedure reaches A5 through
+ * `requireBoardPermission("A5", boardIdFrom())` — the single-code form
+ * conventions item 2 says to reach for FIRST, and the same `assertPermission`
+ * call the rule itself makes.
+ *
+ * A5, not A2 and not `assertCanUpdateMeeting`: publishing is a distinct
+ * governable action from editing the agenda's contents (A2) and from moving
+ * the meeting's own `status` (rule 21). The permission matrix grants the
+ * three independently, so folding this into either would hand publication to
+ * everyone holding the other.
+ *
+ * Row re-authorization is `cancel`'s and `updateStatus`'s, exactly: the
+ * target is named by `meetingId`, the guard authorized a CLIENT-CLAIMED
+ * `boardId`, and `meeting_tenant_isolation` has no board predicate — so the
+ * resolver re-reads the row's real `board_id` inside the write's own
+ * transaction and calls `assertMatchesAuthorizedBoard` before the UPDATE.
+ *
+ * What it does NOT do, stated so a reviewer does not read the absence as an
+ * oversight: it does not require the agenda to have at least one item. The
+ * dialog checks that client-side (`hasItems`) and the raw write it replaces
+ * enforced nothing server-side, so adding the precondition here would be a
+ * new rule rather than a preserved one — conventions item 1's "the query you
+ * are replacing is a specification." It also does not touch `meeting.status`:
+ * `agenda_status` and `status` are separate columns with separate
+ * procedures, and the raw write set only this one. Nor does it accept a
+ * target value — `'published'` is the only transition the dialog performs,
+ * and an `agenda_status` input would let a caller move a published agenda
+ * back to `'draft'` through a guard named "publish".
+ *
+ * **Wiring:** Task 3 wires `PublishAgendaDialog.tsx` to this. Until it does,
+ * the hole is NOT closed — the procedure exists and the dialog still writes
+ * raw Supabase. Wave 3 reported a hole closed at the moment its procedure
+ * shipped and had to correct itself; recorded here so the same claim is not
+ * made twice.
  */
 
 import { sql } from "drizzle-orm";
@@ -345,6 +417,40 @@ export const meetingRouter = router({
    * `recording_secretary_id` (looked up by id there), `started_at`/
    * `ended_at` (rendered conditionally). Not `SELECT *`, unlike the query
    * this replaces — conventions item 1.
+   *
+   * **Four columns ADDED in wave 4, Task 3, for a SECOND screen.**
+   * `routes/meetings.$meetingId.agenda.tsx` migrated its own
+   * `select("*").eq("id", …).single()` onto this procedure and reads
+   * `agenda_packet_url`/`agenda_packet_generated_at`/`meeting_notice_url`/
+   * `meeting_notice_generated_at` — the four the "Generate/Regenerate
+   * Packet" and "Generate/Regenerate Notice" buttons switch their label on
+   * and the "Packet generated …" line renders. This is conventions item 1's
+   * "add it back the day something does", not a widening: every other column
+   * that screen used to get from `SELECT *` (`town_id`, `formality_override`,
+   * `created_by`, …) is still absent because nothing reads it.
+   *
+   * The two `generated_at` columns are `timestamp with time zone` and are
+   * NOT cast to `::text`, matching `started_at`/`ended_at` immediately above
+   * them — but NOT for the reason a first draft of this comment gave.
+   * Probed the same way `scheduled_date` was above, because "postgres.js
+   * hands back a `Date`" is a claim about a BARE `postgres()` client, and
+   * every procedure in this file reads through `drizzle(postgres())`:
+   *
+   *     drizzle(postgres()) SELECT now()::timestamptz  →  "2026-09-10 19:53:56.526853-04"
+   *
+   * — raw postgres text, not a `Date`, and not the ISO-8601 string this row
+   * type's declared `string | null` would suggest. `toRows` does no
+   * conversion (`packages/api/src/db/rows.ts`) and no tRPC transformer is
+   * configured (`trpc.ts` / `web/src/lib/trpc.ts` set none), so that raw text
+   * is what actually reaches the browser and what an API test calling the
+   * caller directly sees too — there is no `Date` on either side of this
+   * boundary. `new Date(agendaPacketGeneratedAt).toLocaleString()` still
+   * works today because V8 happens to parse a space-separated timestamp with
+   * a 6-digit fraction and a 2-digit offset, not because the value is
+   * ISO-8601 — a stricter engine is not obligated to accept it. See
+   * `meeting.test.ts`'s "returns the agenda-packet and meeting-notice
+   * document columns" for the `typeof`/shape assertion pinning this, the
+   * same treatment `scheduled_date` gets above.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
@@ -364,11 +470,16 @@ export const meetingRouter = router({
           recording_secretary_id: string | null;
           started_at: string | null;
           ended_at: string | null;
+          agenda_packet_url: string | null;
+          agenda_packet_generated_at: string | null;
+          meeting_notice_url: string | null;
+          meeting_notice_generated_at: string | null;
         }>(
           await tx.execute(sql`
             SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
                    scheduled_time, location, presiding_officer_id, recording_secretary_id,
-                   started_at, ended_at
+                   started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
+                   meeting_notice_url, meeting_notice_generated_at
             FROM meeting WHERE id = ${input.meetingId}
           `),
           (message) => new Error(`meeting.detail: ${message}`),
@@ -487,6 +598,40 @@ export const meetingRouter = router({
           WHERE id = ${input.meetingId}
         `);
         return { id: input.meetingId, status: input.status };
+      });
+    }),
+
+  /**
+   * `PublishAgendaDialog.tsx`'s write — see this file's header,
+   * "`publishAgenda`: the third raw write, and the code that had no rule."
+   *
+   * `updated_at` is set alongside `agenda_status`, matching the raw update
+   * this replaces (it sent `updated_at: new Date().toISOString()` from the
+   * browser's clock; `now()` is the database's, which is the same intent
+   * without trusting a client clock).
+   */
+  publishAgenda: protectedProcedure
+    .use(
+      requireBoardPermission("A5", boardIdFrom(), {
+        action: "to publish this meeting's agenda",
+      }),
+    )
+    .input(z.object({ meetingId: z.string().uuid(), boardId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string; board_id: string }>(
+          await tx.execute(sql`SELECT id, board_id FROM meeting WHERE id = ${input.meetingId}`),
+          (message) => new Error(`meeting.publishAgenda: ${message}`),
+        );
+        const meeting = rows[0];
+        if (!meeting) throw new TRPCError({ code: "NOT_FOUND" });
+        assertMatchesAuthorizedBoard(ctx, meeting.board_id);
+
+        await tx.execute(sql`
+          UPDATE meeting SET agenda_status = 'published', updated_at = now()
+          WHERE id = ${input.meetingId}
+        `);
+        return { id: input.meetingId, agenda_status: "published" as const };
       });
     }),
 });

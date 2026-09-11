@@ -14,39 +14,74 @@
  *
  * `meeting.insert` generates and returns the meeting's own `id` — this
  * dialog no longer mints one client-side with `crypto.randomUUID()` before
- * the write. Agenda instantiation (`instantiateAgendaFromTemplate`, a raw
- * Supabase writer) still runs as a separate step after the insert succeeds,
- * exactly as before; that write belongs to whichever router owns
- * `agenda_item` (wave 4's agenda surface), not this one — see `meeting.ts`'s
- * own doc comment on `insert`.
+ * the write.
  *
- * Before this task, `insert`'s raw Supabase write could never be refused —
+ * Before that task, `insert`'s raw Supabase write could never be refused —
  * there was no authorization check at all, so a caught-and-surfaced error
  * path was unreachable, including from `boards.$boardId.meetings.tsx`'s own
  * ungated "Create Meeting" button (no `usePermission("A1")` check there).
  * Closing the hole made FORBIDDEN a real outcome; without a visible error
  * here, a refused create leaves the dialog open with nothing said.
  *
- * TODO(phase-e-wave-4): this dialog still reads/writes raw Supabase in three
- * places, none a completeness gap this task closed: the active
- * `board_member` count (no exact procedure exists —
- * `boardMember.roster`/`.memberCount` are board-roster and town-wide-total
- * respectively, neither an active-count-for-one-board; a new procedure or a
- * client-side filter over `roster` would be needed), the town
- * retention/state read (`trpc.town.detail` already exists and would be a
- * drop-in replacement — not swapped here to stay within this task's own
- * file-list scope), and `instantiateAgendaFromTemplate`'s `agenda_item`
- * writes (wave 4's own agenda surface, per this file's `insert` doc comment
- * above).
+ * ─── Phase E, wave 4, Task 4 — the remaining three markers, discharged ─────
+ *
+ * All three raw Supabase reads/writes this file's wave-3 marker named are
+ * gone, and the file no longer imports the Supabase client at all:
+ *
+ *   - the active `board_member` count → `trpc.boardMember.activeCountForBoard`,
+ *     a NEW procedure. The marker said no exact one existed and it was still
+ *     true: `memberCount` is town-wide and counts archived seats, `roster`
+ *     would answer it client-side but ships every seat's invitation TOKEN to
+ *     count rows. See that procedure's own doc comment.
+ *   - the town retention/state read → `trpc.town.detail`, which already
+ *     existed and was a drop-in. It takes NO input: the town comes from the
+ *     caller's own bridged session, not from this component's `townId` prop —
+ *     which is why that prop is gone (see below).
+ *   - `instantiateAgendaFromTemplate` → `trpc.agendaItem.instantiateFromTemplate`
+ *     (wave 4, Task 1). `lib/meeting-helpers.ts`, whose only caller this was,
+ *     is DELETED in the same commit.
+ *
+ * **This fixed a live defect, not just a transport.** The helper wrote
+ * `agenda_item` rows through the Supabase client, which carries no credential
+ * since Stage 1 Task C2 (`lib/supabase.ts`'s own header). Every
+ * create-from-template therefore produced a meeting with an EMPTY agenda —
+ * and, because the helper throws and the old `handleSave` had ONE `try` around
+ * both steps, the failure was reported as "Couldn't create this meeting",
+ * which was false: the meeting had been created. Clicking the button again
+ * made a second one.
+ *
+ * ─── Two calls, not one, and what the user sees if the second fails ───────
+ *
+ * `meeting.insert` and `agendaItem.instantiateFromTemplate` stay SEPARATE
+ * procedures, deliberately:
+ *
+ *   - they are authorized by different codes. `insert` is A1
+ *     (`create_meeting`, via `requireBoardPermission("A1", …)`);
+ *     `instantiateFromTemplate` is A2 (`edit_agenda`). Folding them into one
+ *     procedure would need a rule spanning both codes — one that does not
+ *     exist in `rules.ts` — and would change who may schedule a meeting: a
+ *     clerk holding A1 and not A2 can schedule one today, and under a folded
+ *     procedure would be refused outright (or have the agenda silently
+ *     dropped, which is worse). That is a product decision, not a migration's
+ *     to make (conventions item 1: the query you are replacing is a
+ *     specification).
+ *   - `agenda_item` is not the `meeting` router's noun (conventions item 1).
+ *
+ * The cost is real and is NOT hidden: the meeting exists before instantiation
+ * runs, so a refused or failed instantiation leaves a meeting with an empty
+ * agenda. The dialog says exactly that ("The meeting was created, but …") and
+ * swaps its primary action from "Create Meeting" to "Open agenda", so the only
+ * action offered is the one that is not a duplicate create. The previous
+ * behaviour — a message blaming the create, with the create button still
+ * armed — is what made this worth spelling out.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { refusalMessage, trpc } from "@/lib/trpc";
 import { z } from "zod";
 import { AlertCircle, Info, Loader2 } from "lucide-react";
 import {
@@ -54,7 +89,6 @@ import {
   forecastEarliestMeetingDate,
   type MeetingType,
 } from "@town-meeting/shared";
-import type { AgendaTemplateSection } from "@town-meeting/shared/types";
 import {
   Dialog,
   DialogContent,
@@ -74,8 +108,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWizardForm } from "@/hooks/useWizardForm";
-import { parseSections } from "@/lib/agenda-template-helpers";
-import { instantiateAgendaFromTemplate } from "@/lib/meeting-helpers";
 import { MEETING_TYPE_LABELS } from "./meeting-labels";
 
 // ─── Schema ──────────────────────────────────────────────────────────
@@ -101,10 +133,18 @@ type CreateMeetingFormData = z.infer<typeof CreateMeetingFormSchema>;
 
 // ─── Component ───────────────────────────────────────────────────────
 
+/**
+ * No `townId`. Every read this component makes is either board-scoped
+ * (`activeCountForBoard`, `agendaTemplate.list`) or resolves the town from the
+ * caller's own session server-side (`town.detail`), so a town id passed down
+ * from a route had nothing left to do — and a client-supplied town id that
+ * nothing checks is the shape conventions item 10 warns about. Dropped from
+ * all three call sites (`boards.$boardId.meetings.tsx`, `home.tsx`,
+ * `meetings.tsx`) in the same commit.
+ */
 interface CreateMeetingDialogProps {
   boardId: string;
   boardName: string;
-  townId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -112,15 +152,30 @@ interface CreateMeetingDialogProps {
 export function CreateMeetingDialog({
   boardId,
   boardName,
-  townId,
   open,
   onOpenChange,
 }: CreateMeetingDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * Set ONLY when the meeting was created and its agenda instantiation then
+   * failed — the one state in which "Create Meeting" would make a duplicate.
+   * See this file's header, "Two calls, not one".
+   */
+  const [createdMeetingId, setCreatedMeetingId] = useState<string | null>(null);
+
+  // The dialog is mounted permanently on `boards.$boardId.meetings.tsx`
+  // (`open` is a prop, not a mount condition), so without this a refusal from
+  // one attempt is still on screen — and the "Open agenda" button still
+  // pointing at the previous meeting — when the dialog is reopened.
+  useEffect(() => {
+    if (open) {
+      setSubmitError(null);
+      setCreatedMeetingId(null);
+    }
+  }, [open]);
 
   // Default title suggestion
   const today = new Date();
@@ -142,36 +197,15 @@ export function CreateMeetingDialog({
   );
 
   // ─── Queries for validation & templates ─────────────────────────────
-  // TODO(phase-e-wave-4): no exact procedure exists yet — see this file's
-  // header.
   const { data: activeMemberCount = 0 } = useQuery({
-    queryKey: [...queryKeys.members.byBoard(boardId), "activeCount"],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("board_member")
-        .select("*", { count: "exact", head: true })
-        .eq("board_id", boardId)
-        .eq("status", "active");
-      if (error) throw error;
-      return count ?? 0;
-    },
+    ...trpc.boardMember.activeCountForBoard.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
-  // TODO(phase-e-wave-4): town.detail — see this file's header.
-  const { data: townData } = useQuery({
-    queryKey: queryKeys.towns.detail(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("town")
-        .select("retention_policy_acknowledged_at, state")
-        .eq("id", townId)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!townId,
-  });
+  // No `enabled` guard and no input: `town.detail` reads
+  // `ctx.tenant.townId` — the caller's own session — so there is no id to wait
+  // for. See that procedure's doc comment.
+  const { data: townData } = useQuery(trpc.town.detail.queryOptions());
 
   const { data: templates = [] } = useQuery({
     ...trpc.agendaTemplate.list.queryOptions({ boardId }),
@@ -179,7 +213,10 @@ export function CreateMeetingDialog({
   });
 
   const retentionAck = townData?.retention_policy_acknowledged_at ?? null;
-  const townState = String((townData as Record<string, unknown> | undefined)?.state ?? "ME");
+  // `town.detail` types `state` as `NewEnglandStateCode`, so the
+  // `Record<string, unknown>` cast the raw Supabase row needed is gone
+  // (conventions item 10).
+  const townState: string = townData?.state ?? "ME";
 
   // Compliance forecast — show when meeting type has special notice requirements
   const forecast = useMemo(() => {
@@ -215,17 +252,35 @@ export function CreateMeetingDialog({
     }),
   );
 
+  const instantiateMutation = useMutation(
+    trpc.agendaItem.instantiateFromTemplate.mutationOptions({
+      onSuccess: () => {
+        // Defensive rather than load-bearing, and worth saying which: the
+        // meeting id was minted by `meeting.insert` moments ago, so no cached
+        // `agendaItem` query for it can exist yet and this invalidation has
+        // nothing to drop today. It is here because `agendaItem` is a
+        // MIGRATED entity in `cache-key-parity.test.ts`'s map and every other
+        // writer of `agenda_item` rows in this wave carries it (conventions
+        // item 7) — a writer that is the exception by omission is the one
+        // nobody re-checks the day a re-instantiate path appears.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      },
+    }),
+  );
+
   const handleSave = useCallback(async () => {
     const data = validate();
     if (!data) return;
 
     setIsSaving(true);
     setSubmitError(null);
+
+    // `meeting.insert` mints the meeting's own id and derives `created_by`
+    // from the caller's own session server-side — neither is sent from
+    // here any more (see this file's header).
+    let meetingId: string;
     try {
-      // `meeting.insert` mints the meeting's own id and derives `created_by`
-      // from the caller's own session server-side — neither is sent from
-      // here any more (see this file's header).
-      const { id } = await insertMutation.mutateAsync({
+      const created = await insertMutation.mutateAsync({
         boardId,
         title: data.title,
         meetingType: data.meeting_type,
@@ -233,29 +288,41 @@ export function CreateMeetingDialog({
         scheduledTime: data.scheduled_time,
         location: data.location || null,
       });
-
-      // Instantiate agenda from selected template
-      // TODO(phase-e-wave-4): agenda_item writes — see this file's header.
-      const selectedTemplate = templates.find((t) => String(t.id) === data.template_id);
-      if (selectedTemplate?.sections) {
-        const sections = parseSections(
-          selectedTemplate.sections as string,
-        ) as AgendaTemplateSection[];
-        await instantiateAgendaFromTemplate(id, boardId, townId, sections);
-      }
-
-      onOpenChange(false);
-      void navigate(`/meetings/${id}/agenda`);
+      meetingId = created.id;
     } catch (err) {
-      setSubmitError(
-        isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
-          ? "You don't have permission to schedule a meeting for this board."
-          : "Couldn't create this meeting. Try again.",
-      );
-    } finally {
+      setSubmitError(refusalMessage(err, "schedule a meeting for this board"));
       setIsSaving(false);
+      return;
     }
-  }, [validate, insertMutation, boardId, townId, templates, onOpenChange, navigate]);
+
+    // A SEPARATE try, deliberately — everything past this point runs with the
+    // meeting already in the database, so a failure here may not be reported
+    // as a failure to create the meeting (this file's header).
+    if (data.template_id) {
+      try {
+        await instantiateMutation.mutateAsync({
+          boardId,
+          meetingId,
+          templateId: data.template_id,
+        });
+      } catch (err) {
+        // Not `refusalMessage`: both of its sentences say the action did not
+        // happen, and half of this one did. The meeting exists.
+        setSubmitError(
+          isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
+            ? "The meeting was created, but you don't have permission to build its agenda from a template. Open the agenda to add items by hand."
+            : "The meeting was created, but its agenda couldn't be filled in from the template. Open the agenda to add items by hand.",
+        );
+        setCreatedMeetingId(meetingId);
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    setIsSaving(false);
+    onOpenChange(false);
+    void navigate(`/meetings/${meetingId}/agenda`);
+  }, [validate, insertMutation, instantiateMutation, boardId, onOpenChange, navigate]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -410,12 +477,25 @@ export function CreateMeetingDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
+            {createdMeetingId ? "Close" : "Cancel"}
           </Button>
-          <Button onClick={() => void handleSave()} disabled={!isValid || isSaving}>
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Create Meeting
-          </Button>
+          {createdMeetingId ? (
+            // The meeting exists; "Create Meeting" here would make a second
+            // one. See this file's header.
+            <Button
+              onClick={() => {
+                onOpenChange(false);
+                void navigate(`/meetings/${createdMeetingId}/agenda`);
+              }}
+            >
+              Open agenda
+            </Button>
+          ) : (
+            <Button onClick={() => void handleSave()} disabled={!isValid || isSaving}>
+              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create Meeting
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

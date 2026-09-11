@@ -480,7 +480,6 @@ export default function MeetingsPage() {
         <CreateMeetingDialog
           boardId={selectedBoard.id}
           boardName={selectedBoard.name}
-          townId={townId}
           open={!!selectedBoard}
           onOpenChange={(open) => {
             if (!open) setSelectedBoard(null);

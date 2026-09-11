@@ -7,13 +7,40 @@
  * enforcement: the API re-checks the size and sniffs the file's actual bytes,
  * because anything a component decides is a decision the client makes about
  * itself. See `useExhibitUpload` and `packages/api/src/storage/paths.ts`.
+ *
+ * ─── Phase E, wave 4, Task 3 — the second creation path, closed ──────────
+ *
+ * `handleAddUrl` was a SECOND, unauthorized creation path for the same table
+ * the file upload writes properly: a raw `exhibit` INSERT through the dead
+ * Supabase client with no rule, no existence check on `agenda_item_id` (FK
+ * enforcement bypasses RLS — conventions item 3), a client-supplied
+ * `town_id`, `uploaded_by` left NULL, and a `sort_order` taken from the
+ * length of a client-side array. `exhibit_tenant_isolation` is tenancy-only,
+ * so nothing else was checking either.
+ *
+ * It is now `exhibit.link` (wave 4, Task 2), which applies the SAME rule 15
+ * against the SAME board the upload endpoint derives, checks the agenda item
+ * exists in this tenant, takes `town_id`/`uploaded_by`/`sort_order` from the
+ * server, and validates the URL as `http`/`https` (this component renders it
+ * straight into an `href`). The refusal is shown — rule 15 is A3 for this
+ * board OR a board seat, so a staff member with neither is refused for the
+ * first time and an "Add Link" button that quietly did nothing would be the
+ * silent-refusal failure wave 3 shipped twice.
+ *
+ * The `exhibits` prop now comes from `exhibit.byMeeting`, filtered by rule 14
+ * — see `routes/meetings.$meetingId.agenda.tsx`'s header for what that
+ * changes for a clerk. The FILE upload stays at the D1e endpoint (multipart,
+ * byte sniffing, the 5 MB ceiling, the row written in the same transaction as
+ * the bytes) and the DELETE stays in `ExhibitRow.tsx`; see `exhibit.ts`'s
+ * header for why neither moves.
  */
 
 import { useCallback, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
-import { Loader2, Plus, Link as LinkIcon } from "lucide-react";
+import { trpc, refusalMessage } from "@/lib/trpc";
+import type { MeetingExhibit } from "./agenda-types";
+import { Loader2, Plus } from "lucide-react";
 import { ExhibitRow } from "./ExhibitRow";
 import { useExhibitUpload } from "@/hooks/useExhibitUpload";
 import { Button } from "@/components/ui/button";
@@ -40,22 +67,27 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5 MB — matches MAX_UPLOAD_BYTES on the se
 interface ExhibitUploaderProps {
   agendaItemId: string;
   meetingId: string;
-  townId: string;
-  exhibits: Record<string, unknown>[];
+  /** The agenda item's board — `exhibit.link` authorizes against it. */
+  boardId: string;
+  exhibits: MeetingExhibit[];
   readOnly: boolean;
 }
 
 export function ExhibitUploader({
   agendaItemId,
   meetingId,
-  townId,
+  boardId,
   exhibits,
   readOnly,
 }: ExhibitUploaderProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const { upload, isUploading } = useExhibitUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The "File" label had no `htmlFor` and the input no `id`, so the two were
+  // never associated — a real accessibility gap, and the reason a test could
+  // not find the control by its label. Per item, so two expanded items on one
+  // screen do not share an id.
+  const fileInputId = `exhibit-file-${agendaItemId}`;
 
   const [isAdding, setIsAdding] = useState(false);
   const [isUrl, setIsUrl] = useState(false);
@@ -63,6 +95,18 @@ export function ExhibitUploader({
   const [url, setUrl] = useState("");
   const [exhibitType, setExhibitType] = useState("supporting_document");
   const [fileError, setFileError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  /**
+   * The legacy per-item key plus the router filter (conventions item 7). The
+   * legacy line stays because `AgendaItemDetailPanel`-adjacent screens and
+   * `review.tsx` still read `queryKeys.exhibits.*`; the router filter is what
+   * reaches this screen's own `exhibit.byMeeting` read, added in this task.
+   */
+  const invalidateExhibits = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
+    void queryClient.invalidateQueries(trpc.exhibit.pathFilter());
+  }, [queryClient, agendaItemId]);
 
   const resetForm = useCallback(() => {
     setIsAdding(false);
@@ -71,7 +115,18 @@ export function ExhibitUploader({
     setUrl("");
     setExhibitType("supporting_document");
     setFileError(null);
+    setLinkError(null);
   }, []);
+
+  const addLink = useMutation(
+    trpc.exhibit.link.mutationOptions({
+      onSuccess: () => {
+        invalidateExhibits();
+        resetForm();
+      },
+      onError: (err) => setLinkError(refusalMessage(err, "attach a link to this item")),
+    }),
+  );
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,7 +153,10 @@ export function ExhibitUploader({
         // never stored (or, as it happened, a file that never stored because
         // the bucket did not exist).
         await upload({ file, agendaItemId, title, exhibitType, visibility: "public" });
-        await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
+        // Creates an `exhibit` row, which is what this screen's own
+        // `exhibit.byMeeting` read returns — the D1e endpoint is a different
+        // transport, not a different table (conventions item 7).
+        invalidateExhibits();
         resetForm();
       } catch (err) {
         // Shown, not swallowed. The previous `catch {}` here is why nobody
@@ -106,43 +164,23 @@ export function ExhibitUploader({
         setFileError(err instanceof Error ? err.message : "Upload failed.");
       }
     },
-    [upload, queryClient, agendaItemId, title, exhibitType, resetForm],
+    [upload, invalidateExhibits, agendaItemId, title, exhibitType, resetForm],
   );
 
-  const handleAddUrl = useCallback(async () => {
+  const handleAddUrl = useCallback(() => {
     if (!title.trim() || !url.trim()) return;
-
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-
-    const { error } = await supabase.from("exhibit").insert({
-      id,
-      agenda_item_id: agendaItemId,
-      town_id: townId,
+    setLinkError(null);
+    // `visibility` is not sent: the procedure defaults to `'public'`, which
+    // is what the raw insert hardcoded. Offering the other two tiers here
+    // would be a feature, not a migration — see `exhibit.link`'s doc comment.
+    addLink.mutate({
+      boardId,
+      agendaItemId,
       title: title.trim(),
-      file_storage_path: url.trim(),
-      file_type: "url",
-      file_size: 0,
-      file_name: null,
-      exhibit_type: exhibitType,
-      visibility: "public",
-      sort_order: exhibits.length,
-      created_at: now,
+      url: url.trim(),
+      exhibitType,
     });
-    if (error) throw error;
-    await queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });
-    resetForm();
-  }, [
-    title,
-    url,
-    exhibitType,
-    agendaItemId,
-    townId,
-    exhibits.length,
-    supabase,
-    queryClient,
-    resetForm,
-  ]);
+  }, [title, url, exhibitType, agendaItemId, boardId, addLink]);
 
   if (readOnly && exhibits.length === 0) return null;
 
@@ -156,7 +194,7 @@ export function ExhibitUploader({
       {exhibits.length > 0 && (
         <div className="space-y-0.5 mb-2">
           {exhibits.map((exhibit, i) => (
-            <ExhibitRow key={String(exhibit.id)} exhibit={exhibit} index={i} readOnly={readOnly} />
+            <ExhibitRow key={exhibit.id} exhibit={exhibit} index={i} readOnly={readOnly} />
           ))}
         </div>
       )}
@@ -199,18 +237,30 @@ export function ExhibitUploader({
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder="https://..."
                   />
+                  {linkError && (
+                    <p className="text-xs text-destructive" role="alert">
+                      {linkError}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <Label className="text-xs">File</Label>
+                  <Label className="text-xs" htmlFor={fileInputId}>
+                    File
+                  </Label>
                   <input
+                    id={fileInputId}
                     ref={fileInputRef}
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"
                     onChange={(e) => void handleFileSelect(e)}
                     className="text-sm"
                   />
-                  {fileError && <p className="text-xs text-destructive">{fileError}</p>}
+                  {fileError && (
+                    <p className="text-xs text-destructive" role="alert">
+                      {fileError}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -228,9 +278,10 @@ export function ExhibitUploader({
                   {isUrl && (
                     <Button
                       size="sm"
-                      onClick={() => void handleAddUrl()}
-                      disabled={!title.trim() || !url.trim()}
+                      onClick={handleAddUrl}
+                      disabled={!title.trim() || !url.trim() || addLink.isPending}
                     >
+                      {addLink.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
                       Add Link
                     </Button>
                   )}

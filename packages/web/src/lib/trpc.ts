@@ -62,3 +62,27 @@ export const trpc = createTRPCOptionsProxy<AppRouter>({
 export function errorMessage(err: unknown, fallback: string): string {
   return isTRPCClientError(err) && err.data?.code === "CONFLICT" ? err.message : fallback;
 }
+
+/**
+ * The message for a write that can answer FORBIDDEN — "You don't have
+ * permission to <action>." — falling back to "Couldn't <action>. Try again."
+ *
+ * `errorMessage` above is the CONFLICT half of this and does not fit: it
+ * returns the generic fallback for a refusal, and "something went wrong" for
+ * a permission problem sends a clerk hunting a bug that is not there.
+ *
+ * Extracted in Phase E wave 4, Task 3 rather than copied a sixth time.
+ * `CancelMeetingDialog.tsx`, `CreateMeetingDialog.tsx` and
+ * `boards.$boardId.templates.tsx` each grew their own inline version of this
+ * branch as wave 3 closed the holes that made FORBIDDEN reachable, and this
+ * task closes two more holes across five files — the same four-copies-of-
+ * three-lines shape `errorMessage`'s own doc comment describes, caught one
+ * wave earlier this time. `action` is a bare verb phrase ("remove this
+ * section"), so it reads correctly in both sentences.
+ */
+export function refusalMessage(err: unknown, action: string): string {
+  if (isTRPCClientError(err) && err.data?.code === "FORBIDDEN") {
+    return `You don't have permission to ${action}.`;
+  }
+  return `Couldn't ${action}. Try again.`;
+}

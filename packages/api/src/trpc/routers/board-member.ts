@@ -280,6 +280,102 @@ export const boardMemberRouter = router({
   }),
 
   /**
+   * Phase E wave 4, Task 0 — `routes/people.tsx`'s board-membership half:
+   * for every ACTIVE seat in the town, which person holds it and on which
+   * board. Answers the marker that router's own `TODO(phase-e-wave-2)` left
+   * open ("`boardMember.listByTown` (or equivalent)"), after `roster`
+   * (board-scoped) and `memberCount` (a bare count) were both checked
+   * directly and confirmed NOT to answer this — neither returns a person id
+   * paired with a board name across the whole town.
+   *
+   * `status = 'active'` and no `board.archived_at` filter — the same two
+   * choices the raw Supabase read this replaces made
+   * (`.eq("status", "active")`, no filter on the joined board's own archived
+   * state; conventions item 1, "the query you are replacing is a
+   * specification"). One clause is ADDED beyond what that source query had:
+   * `ORDER BY b.name`, so a person's board list renders deterministically
+   * rather than in whatever order the planner happens to return — the
+   * original had no ordering at all (client-side, unsorted). No permission
+   * guard, deliberately, for the identical reason `board.ts`'s header gives
+   * for its own reads:
+   * `board_member_tenant_isolation` (`0000_baseline.sql`) is a plain
+   * `town_id = get_current_town_id()` policy, FOR ALL, no role predicate, so
+   * tenancy is already the whole policy and `protectedProcedure` +
+   * `ctx.withTenant` IS that policy.
+   *
+   * No writer invalidation change was needed to add this: `members:
+   * "boardMember"` has been in `cache-key-parity.test.ts`'s `MIGRATED` map
+   * since wave 2, so every writer that touches a `board_member` row already
+   * calls `trpc.boardMember.pathFilter()` — which matches every procedure
+   * under this router by prefix, this one included.
+   */
+  listByTown: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) =>
+      toRows<{ person_id: string; board_id: string; board_name: string }>(
+        await tx.execute(sql`
+          SELECT bm.person_id, bm.board_id, b.name AS board_name
+          FROM board_member bm
+          JOIN board b ON b.id = bm.board_id
+          WHERE bm.status = 'active'
+          ORDER BY b.name
+        `),
+        (message) => new Error(`boardMember.listByTown: ${message}`),
+      ),
+    );
+  }),
+
+  /**
+   * Phase E wave 4, Task 4 — `CreateMeetingDialog.tsx`'s prerequisite check:
+   * how many ACTIVE seats does this one board have? Answers that file's
+   * `TODO(phase-e-wave-4)` marker, whose own wording said no exact procedure
+   * existed and named the two that do not fit.
+   *
+   * Re-checked directly rather than taken from the marker, and it was right:
+   * `memberCount` above counts EVERY `board_member` row in the whole town,
+   * active or archived, with no board filter; `roster` below is board-scoped
+   * and carries `status`, so a client-side
+   * `roster.filter((r) => r.status === "active").length` would answer the same
+   * number — and that is why this is a new procedure rather than a reuse.
+   * `roster` returns the person's name and email, their account's role and
+   * archived state, and their most recent **invitation id, token and status**;
+   * `CreateMeetingDialog` renders a scheduling form and needs one integer.
+   * Sending a board's live invitation tokens to every user who opens that
+   * dialog, to count rows the server can count, is not a trade worth making to
+   * avoid a nine-line procedure.
+   *
+   * The query this replaces, as a specification (conventions item 1):
+   * `.from("board_member").select("*", {count: "exact", head: true})
+   * .eq("board_id", boardId).eq("status", "active")` — same two filters, no
+   * clause added or dropped.
+   *
+   * `assertBoardExists` for the same reason `list`/`countForBoard` in
+   * `agenda-template.ts` call it: without it, a `boardId` naming another
+   * town's board degrades to a convincing `0` (RLS filters the rows; there
+   * simply are none in scope) instead of NOT_FOUND — conventions item 3's
+   * "empty-but-real" failure. Not an FK check: this is a read, and nothing
+   * here writes a foreign key.
+   *
+   * No permission guard, for the same tenancy-only reason `listByTown` above
+   * carries none.
+   */
+  activeCountForBoard: protectedProcedure
+    .input(z.object({ boardId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await assertBoardExists(tx, input.boardId);
+        const rows = toRows<{ count: number }>(
+          await tx.execute(sql`
+            SELECT count(*)::int AS count FROM board_member
+            WHERE board_id = ${input.boardId} AND status = 'active'
+          `),
+          (message) => new Error(`boardMember.activeCountForBoard: ${message}`),
+        );
+        // The ::int cast is load-bearing — see `memberCount`'s identical note.
+        return rows[0]?.count ?? 0;
+      });
+    }),
+
+  /**
    * `MemberRoster.tsx`'s read: every `board_member` row on one board, joined
    * with the person's name/email, their (at most one, per
    * `user_account_person_id_key`) account, and their MOST RECENT invitation —

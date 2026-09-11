@@ -43,30 +43,26 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { queryKeys } from "@/lib/queryKeys";
 // `agendaTemplate.countForBoard` (wave 2, Task 1) closed the template-count
 // half of the `TODO(phase-e-wave-2)` marker this file used to carry for the
-// Overview tab. `supabase` stays imported: this file's own town read (the
-// Overview "effective settings" rows, and the defaults passed to
-// EditBoardDialog / MinutesWorkflowEditor) is NOT in this task's file list
-// (`routes/boards.tsx`, `boards.$boardId.tsx`, `boards.$boardId.templates.tsx`,
-// `AddBoardDialog.tsx`, `EditBoardDialog.tsx`, `settings.town.tsx`,
-// `ProgressChecklist.tsx`) and stays on Supabase — `town.detail` existing is
-// not the same as this file having been migrated to use it, and that
-// migration (retyping two components' props, re-checking the
-// effective-settings mapping) is real work left for whoever picks this file
-// up next.
-//
-// Restored in this wave's whole-branch review: closing the template-count
-// half above dropped this file's marker entirely, which left the
-// town-settings gap below with no grep-able token — exactly the completeness
-// sweep hole conventions item 11 exists to prevent, since `town.detail`
-// existing elsewhere reads as "done" to a grep unless the marker says
-// otherwise.
-// TODO(phase-e-wave-2): town.detail (exists, not yet wired here for the
-// Overview "effective settings" read — see the paragraph above).
-import { supabase } from "@/lib/supabase";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+// Overview tab. Phase E wave 4, Task 0 closes the other half: the town read
+// (the Overview "effective settings" rows, and the defaults passed to
+// EditBoardDialog / MinutesWorkflowEditor) now goes through `trpc.town.detail`
+// — the same `useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId
+// })` shape `boards.tsx`/`settings.town.tsx`/`settings.minutes-workflow.tsx`/
+// `home.tsx` already use. No writer invalidation change was needed: every
+// writer of the legacy `queryKeys.towns.detail(townId)` key
+// (`MeetingDefaultsEditor`, `TownSettingsEditor`, `RetentionPolicyModal`,
+// `TownSealUpload`, `SetPortalAddressModal`, `MeetingRolesEditor`,
+// `settings.minutes-workflow.tsx`) already invalidates BOTH that key and
+// `trpc.town.pathFilter()` — `towns: "town"` has been in
+// `cache-key-parity.test.ts`'s `MIGRATED` map since before this task. The
+// legacy key stays in `lib/queryKeys.ts` and un-invalidated nowhere: four
+// other files (`CreateMeetingDialog.tsx`, `meetings.$meetingId.review.tsx`,
+// `meetings.$meetingId.minutes.tsx`, `meetings.$meetingId.agenda.tsx`) still
+// READ `queryKeys.towns.detail` directly and are unaffected by this file's
+// own migration.
+import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
@@ -158,17 +154,8 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     enabled: activeTab === "meetings",
   });
 
-  const { data: townRows } = useQuery({
-    queryKey: queryKeys.towns.detail(townId ?? ""),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId!)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
+  const { data: town, isError: isTownError } = useQuery({
+    ...trpc.town.detail.queryOptions(),
     enabled: !!townId,
   });
 
@@ -176,7 +163,6 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     trpc.agendaTemplate.countForBoard.queryOptions({ boardId }),
   );
 
-  const town = townRows?.[0] as Record<string, unknown> | undefined;
   const memberCount = stats?.active_members ?? 0;
   const mtgCount = stats?.meetings ?? 0;
   const tmplCount = templateCount ?? 0;
@@ -269,15 +255,10 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
       {editOpen && (
         <EditBoardDialog
           townId={townId ?? ""}
-          // This file's own town read is still Supabase's untyped client
-          // (see the comment above `supabase`'s import), so there is no
-          // router type to infer `town` from here — cast at the call site,
-          // visibly, rather than widen `EditBoardDialog`'s prop back to a
-          // bag (conventions item 10). Every field `EditBoardDialog` reads
-          // off `town` (`meeting_formality`/`minutes_style`, for its two
-          // "use town default" labels) really is present in a `select("*")`
-          // row.
-          town={town as unknown as RouterOutputs["town"]["detail"] | undefined}
+          // `town` is `trpc.town.detail`'s own real output now — no cast
+          // needed (conventions item 10). Was a bag-typed `as unknown as`
+          // cast before this file's own town read moved off raw Supabase.
+          town={town}
           board={board}
           open={editOpen}
           onOpenChange={setEditOpen}
@@ -319,6 +300,33 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               })}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* `town.detail` failed — this board still renders, so say which half is
+          missing rather than silently showing wrong data (conventions item
+          5). Without this, `effective` above goes null (Overview's
+          Formality/Minutes-style rows just vanish) and the Settings tab's
+          `townDefaults` falls back to hardcoded values (`retain_30_days`,
+          `auto_publish: false`) while `MinutesWorkflowEditor` still labels
+          them "Town default" — a wrong value shown as authoritative, worse
+          than a blank screen for a governance setting. */}
+      {isTownError && (
+        <div
+          className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30"
+          role="alert"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+              This board's information is complete, but the town's settings could not be loaded.
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            Any "town default" values below (Overview's Formality/Minutes style, and the Settings
+            tab's minutes-workflow defaults) may not reflect this town's actual settings. Try
+            reloading before relying on them.
+          </p>
         </div>
       )}
 
@@ -635,8 +643,8 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
                 (board.auto_publish_on_approval_override as boolean | null) ?? null,
             }}
             townDefaults={{
-              audio_retention_policy: (town?.audio_retention_policy as string) ?? "retain_30_days",
-              auto_publish_on_approval: (town?.auto_publish_on_approval as boolean) ?? false,
+              audio_retention_policy: town?.audio_retention_policy ?? "retain_30_days",
+              auto_publish_on_approval: town?.auto_publish_on_approval ?? false,
             }}
           />
         </div>

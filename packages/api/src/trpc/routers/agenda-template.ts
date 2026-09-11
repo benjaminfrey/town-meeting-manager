@@ -10,6 +10,11 @@
  * `agendaTemplate.countForBoard` — the other three named in `board.ts`'s own
  * header.
  *
+ * Phase E wave 4, Task 4 added a fourth read, `listByTown`, for
+ * `routes/templates.tsx`'s cross-board overview. It is NOT `list` with the
+ * board filter dropped — see its own doc comment for the four differences and
+ * for why calling `list` per board cannot answer the same question.
+ *
  * ─── Tenancy ────────────────────────────────────────────────────────────
  *
  * `agenda_template_tenant_isolation` (`0000_baseline.sql`) is a plain
@@ -139,6 +144,61 @@ export const agendaTemplateRouter = router({
         );
       });
     }),
+
+  /**
+   * Phase E wave 4, Task 4 — `routes/templates.tsx`'s town-wide overview,
+   * answering that file's `TODO(phase-e-wave-4): agendaTemplate.listByTown`
+   * marker.
+   *
+   * **Not a duplicate of `list` above, and the marker was right to ask for a
+   * separate procedure.** `list` is BOARD-scoped (`WHERE board_id = $1`),
+   * returns `is_default` and the whole `sections` blob, orders
+   * `is_default DESC, name ASC`, and calls `assertBoardExists`. This is
+   * town-scoped (the whole `WHERE` clause is RLS), carries the board's NAME
+   * rather than the template's structure, orders by template name alone, and
+   * — the difference that makes reuse impossible rather than merely
+   * wasteful — **includes templates with no board at all**
+   * (`agenda_template.board_id` is nullable, `db/schema.ts`), which `list`
+   * can never return for any `boardId`. The screen renders those under
+   * "Unassigned". Answering this by calling `list` once per board would both
+   * drop that group and ship every board's `sections` payload to a screen
+   * that renders only names.
+   *
+   * The query this replaces, as a specification (conventions item 1) —
+   * `routes/templates.tsx`'s `supabase.from("agenda_template")
+   * .select("id, name, board:board_id(id, name)").eq("town_id", townId)
+   * .order("name")`:
+   *
+   *   - `.eq("town_id", townId)` becomes RLS + `ctx.withTenant`, which is the
+   *     same filter and no longer trusts a client-supplied town id.
+   *   - the embedded `board:board_id(id, name)` becomes a LEFT JOIN. LEFT, not
+   *     INNER: PostgREST's embed is null-tolerant, and an INNER JOIN would
+   *     silently drop the board-less rows the screen's "Unassigned" group
+   *     exists for.
+   *   - no `board.archived_at` filter, because the source query had none.
+   *   - **One clause is ADDED: `, t.id` as an ORDER BY tiebreaker.** The
+   *     source ordered on `name` alone, so two templates sharing a name
+   *     (possible — `template_name_unique_per_board` is per BOARD, and this
+   *     read spans boards) came back in whatever order the planner chose.
+   *     Stated rather than left for a diff to find; same reasoning as
+   *     `boardMember.listByTown`'s added `ORDER BY b.name`.
+   *
+   * No permission guard, for the identical tenancy-only reason this file's
+   * header gives for `list`/`detail`/`countForBoard`.
+   */
+  listByTown: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) =>
+      toRows<{ id: string; name: string; board_id: string | null; board_name: string | null }>(
+        await tx.execute(sql`
+          SELECT t.id, t.name, t.board_id, b.name AS board_name
+          FROM agenda_template t
+          LEFT JOIN board b ON b.id = t.board_id
+          ORDER BY t.name ASC, t.id
+        `),
+        (message) => new Error(`agendaTemplate.listByTown: ${message}`),
+      ),
+    );
+  }),
 
   /**
    * `boards.$boardId.templates.$templateId.edit.tsx`'s read: one template's

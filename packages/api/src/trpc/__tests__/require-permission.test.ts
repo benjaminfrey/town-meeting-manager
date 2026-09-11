@@ -37,6 +37,7 @@ import {
   requireBoardPermission,
   boardIdFrom,
   createCallerFactory,
+  assertMatchesAuthorizedBoard,
   BOARD_SCOPED_CODES,
 } from "../trpc.js";
 import { DEFAULT_PERMISSION_TEMPLATES, PERMISSIONS } from "@town-meeting/shared";
@@ -88,6 +89,24 @@ const testRouter = router({
     .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
     .input(z.object({ boardId: z.string().uuid(), name: z.string().min(5) }))
     .mutation(() => "edited" as const),
+
+  // Phase E wave 4, Task 1 — the pin for `requireBoardPermission` setting
+  // `ctx.authorizedBoardId`. Its resolver runs the mismatch defence against
+  // a board the CALLER supplies as a second field, standing in for the
+  // board a real procedure reads out of the database (`agenda-item.ts`
+  // derives it by joining `agenda_item` to `meeting`). Deleting the
+  // `next({ctx: ...})` block from `requirePermission` makes both tests
+  // below fail with the wiring-bug `Error` rather than the outcomes they
+  // assert — which is exactly the INTERNAL_SERVER_ERROR a wave-4 author
+  // following item 2's "reach for requireBoardPermission first" would have
+  // shipped before this change.
+  editAgendaWithMismatchDefence: protectedProcedure
+    .use(requireBoardPermission("A2", boardIdFrom(), { action: "to edit an agenda" }))
+    .input(z.object({ boardId: z.string().uuid(), rowsRealBoardId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      assertMatchesAuthorizedBoard(ctx, input.rowsRealBoardId);
+      return "edited" as const;
+    }),
 
   // A procedure that reaches the database, to prove the handle works.
   countBoards: protectedProcedure.query(async ({ ctx }) =>
@@ -154,6 +173,57 @@ describe("requirePermission", () => {
       );
       expect(err.code).toBe("FORBIDDEN");
       expect(err.message).toContain("A2");
+    });
+  });
+
+  /**
+   * Phase E wave 4, Task 1. Before this, only `requireBoardActor` set
+   * `ctx.authorizedBoardId`, so `assertMatchesAuthorizedBoard` threw a plain
+   * `Error` ("this procedure's guard must be requireBoardActor") in any
+   * procedure guarded by `requireBoardPermission` — the guard item 2 tells
+   * authors to reach for FIRST. The two rules cancelled each other out for
+   * every row-targeted board-scoped write in waves 4–6.
+   *
+   * Verified by mutation: deleting the `next({ctx: {... authorizedBoardId}})`
+   * block from `requirePermission` turns this test red with
+   * `assertMatchesAuthorizedBoard called on a context with no
+   * authorizedBoardId set`, not with a refusal.
+   */
+  it("carries the authorized board forward, so a resolver's assertMatchesAuthorizedBoard passes when the row's real board matches", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const granted = await seedActor(db, town, { role: "staff", global: ["A2"] });
+
+      await expect(
+        createCaller(contextFor(db, town, granted)).editAgendaWithMismatchDefence({
+          boardId: town.boardId,
+          rowsRealBoardId: town.boardId,
+        }),
+      ).resolves.toBe("edited");
+    });
+  });
+
+  /**
+   * The other half, and the reason the field is carried at all: an
+   * authorized caller naming a row that really belongs to a DIFFERENT board
+   * is refused FORBIDDEN — an `AuthorizationError` translated the ordinary
+   * way, not the wiring-bug `Error`.
+   */
+  it("refuses FORBIDDEN when the resolver's real board differs from the one requireBoardPermission authorized", async () => {
+    await withTestDb(async (client) => {
+      const db = testDb(client);
+      const town = await seedTown(db);
+      const granted = await seedActor(db, town, { role: "staff", global: ["A2"] });
+
+      const err = await expectForbidden(() =>
+        createCaller(contextFor(db, town, granted)).editAgendaWithMismatchDefence({
+          boardId: town.boardId,
+          rowsRealBoardId: town.otherBoardId,
+        }),
+      );
+      expect(err.code).toBe("FORBIDDEN");
+      expect(err.message).toContain("authorized against a different board");
     });
   });
 
