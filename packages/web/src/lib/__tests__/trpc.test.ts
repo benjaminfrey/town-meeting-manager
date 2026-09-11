@@ -7,9 +7,11 @@ import { queryClient } from "../queryClient";
 import { trpc, trpcClient } from "../trpc";
 
 const originalFetch = globalThis.fetch;
+const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  (globalThis as { EventSource?: unknown }).EventSource = originalEventSource;
   vi.restoreAllMocks();
 });
 
@@ -86,5 +88,91 @@ describe("the tRPC client", () => {
     });
 
     await waitFor(() => expect(onDefaultSuccess).toHaveBeenCalledTimes(1));
+  });
+});
+
+/**
+ * The `splitLink` routing seam.
+ *
+ * Phase E, wave 5, Task 4's fix round. Task 4's own report called this
+ * "unautomatable in jsdom" and deferred it to a manual check against a dev
+ * server; that was wrong, and the way it was wrong is worth naming, because a
+ * reviewer wrote these two tests in about forty lines with no new dependency.
+ * The reasoning that produced the wrong answer was "jsdom has no
+ * `EventSource`, therefore a subscription cannot be exercised here" — true of
+ * a REAL stream and irrelevant to the question actually being asked, which is
+ * only WHICH LINK an operation takes. `httpSubscriptionLink` resolves
+ * `globalThis.EventSource` LAZILY, at subscribe time, inside its
+ * `observable((observer) => …)` body (`@trpc/client/dist/index.mjs`, the
+ * `EventSource: opts.EventSource ?? globalThis.EventSource` line) — so a fake
+ * constructor assigned to the global is a complete answer to "did this
+ * operation go down the subscription branch?", and no transport has to work.
+ *
+ * It is worth the forty lines because the regression is 100% SILENT.
+ * Measured: flipping `trpc.ts`'s `condition` to `() => false` — routing every
+ * subscription into `httpBatchLink`, which refuses one outright — leaves the
+ * whole web suite green and typecheck and lint blind. It would present in a
+ * browser as "the live meeting never updates", with nothing red anywhere.
+ *
+ * Both directions are pinned, so the predicate cannot be inverted either:
+ * a subscription MUST open an `EventSource`, and a query MUST NOT.
+ */
+
+/** A stand-in for the transport. It never connects; it only records. */
+class FakeEventSource {
+  static urls: string[] = [];
+  constructor(url: string) {
+    FakeEventSource.urls.push(String(url));
+  }
+  addEventListener() {}
+  removeEventListener() {}
+  close() {}
+}
+
+describe("the link split", () => {
+  it("sends a SUBSCRIPTION down httpSubscriptionLink, not the batch link", async () => {
+    // If the split ever routes this to `httpBatchLink`, that link throws at
+    // subscribe — "Subscriptions are unsupported by `httpLink` - use
+    // `httpSubscriptionLink` or `wsLink`" — and opens no `EventSource`. The
+    // throw is what fails this test (measured: it propagates out of
+    // `.subscribe()` rather than reaching `onError`); `errors` is asserted
+    // empty as well, so a future client version that routes the refusal
+    // through `onError` instead is caught by the same test.
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    FakeEventSource.urls = [];
+    const errors: unknown[] = [];
+
+    const sub = trpcClient.realtime.onMeetingChange.subscribe(
+      { meetingId: "11111111-1111-1111-1111-111111111111" },
+      { onError: (error) => errors.push(error) },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    sub.unsubscribe();
+
+    expect(errors.map(String)).toEqual([]);
+    expect(FakeEventSource.urls.length).toBe(1);
+    expect(FakeEventSource.urls[0]).toContain("realtime.onMeetingChange");
+  });
+
+  it("sends a QUERY down httpBatchLink — no EventSource at all", async () => {
+    // The other direction. A predicate inverted to `op.type !== "subscription"`
+    // would satisfy the test above's shape for the wrong operations, so the
+    // ordinary path is pinned too: a query goes over `fetch` and opens no
+    // stream.
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    FakeEventSource.urls = [];
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify([{ result: { data: null } }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await trpcClient.whoami.query().catch(() => undefined);
+
+    expect(calls.length).toBe(1);
+    expect(FakeEventSource.urls).toEqual([]);
   });
 });

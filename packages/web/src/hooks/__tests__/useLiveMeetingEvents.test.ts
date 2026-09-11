@@ -29,10 +29,47 @@
 
 import path from "node:path";
 import fs from "node:fs";
-import { describe, it, expect } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createElement } from "react";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook } from "@testing-library/react";
+import { TRPCClientError } from "@trpc/client";
 import { trpc } from "@/lib/trpc";
-import { LIVE_MEETING_TOPIC_ROUTERS, liveMeetingPathFilter } from "@/hooks/useLiveMeetingEvents";
+import {
+  LIVE_MEETING_TOPIC_ROUTERS,
+  LIVE_STREAM_ERROR_TOAST_ID,
+  liveMeetingPathFilter,
+  useLiveMeetingEvents,
+} from "@/hooks/useLiveMeetingEvents";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+/**
+ * The options object `useSubscription` was handed — the same seam
+ * `routes/meetings.$meetingId.live.test.tsx` uses, for the same reason: jsdom
+ * has no live stream, and the thing under test is what the hook DOES with the
+ * subscription's callbacks, not the transport. (Which link a subscription
+ * takes is pinned separately, in `lib/__tests__/trpc.test.ts`.)
+ */
+const subscription: {
+  options: { onData?: (e: unknown) => void; onError?: (e: unknown) => void } | null;
+} = { options: null };
+
+vi.mock("@trpc/tanstack-react-query", async () => {
+  const actual = await vi.importActual<typeof import("@trpc/tanstack-react-query")>(
+    "@trpc/tanstack-react-query",
+  );
+  return {
+    ...actual,
+    useSubscription: vi.fn((opts: { onData?: (e: unknown) => void }) => {
+      subscription.options = opts;
+      return { status: "pending", data: undefined, error: null, reset: () => {} };
+    }),
+  };
+});
+
+import { toast } from "sonner";
 
 const PROJECT_ROOT = path.resolve(__dirname, "../../../../..");
 const EVENTS_TS = path.join(PROJECT_ROOT, "packages/api/src/realtime/events.ts");
@@ -117,5 +154,73 @@ describe("live meeting topic mapping", () => {
 
     expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(exhibitKey)?.isInvalidated).toBe(true);
+  });
+});
+
+/**
+ * The stream's own failure, which this hook used to drop on the floor.
+ *
+ * Added in Task 4's fix round. `realtime.onMeetingChange` refuses with a
+ * `TRPCError` (NOT_FOUND for a meeting outside the caller's tenant, or
+ * whatever the auth chain throws at subscribe), and the transport ADR's
+ * addendum measured that a `TRPCError` makes this client STOP rather than
+ * silently resume. The hook discarded `useSubscription`'s whole result, so
+ * that ended a live meeting's updates permanently with nothing on screen —
+ * and `ConnectionStatusBar`, still on a Supabase heartbeat until Task 6
+ * replaces it, would have gone on reporting healthy.
+ */
+describe("a refusal on the stream", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    vi.mocked(toast.error).mockClear();
+  });
+
+  function renderTheHook() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    return renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+  }
+
+  it("raises a persistent toast — a dead stream is never silent", () => {
+    renderTheHook();
+    expect(subscription.options, "the hook no longer opens a subscription").not.toBeNull();
+    expect(
+      subscription.options!.onError,
+      "the hook passes no onError — a refusal on the stream is silent again",
+    ).toBeTypeOf("function");
+
+    subscription.options!.onError!(
+      new TRPCClientError("That meeting does not exist.", {
+        result: { error: { code: -32004, message: "That meeting does not exist.", data: null } },
+      } as never),
+    );
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    const [message, options] = vi.mocked(toast.error).mock.calls[0]!;
+    expect(message).toContain("Live updates have stopped");
+    // Infinity, not a timeout: the stream does not come back on its own, so a
+    // message that disappears after four seconds is one an operator who was
+    // looking at the agenda cannot go back and read.
+    expect((options as { duration?: number }).duration).toBe(Infinity);
+    // A stable id, so a refusing reconnect loop replaces one toast rather
+    // than stacking a column of them over the operator's controls.
+    expect((options as { id?: string }).id).toBe(LIVE_STREAM_ERROR_TOAST_ID);
+    // The server's own sentence is carried through — "That meeting does not
+    // exist." tells a clerk something "something went wrong" does not.
+    expect((options as { description?: string }).description).toContain(
+      "That meeting does not exist.",
+    );
+  });
+
+  it("still says what is broken when the error is not a tRPC one", () => {
+    renderTheHook();
+    subscription.options!.onError!(new Error("boom"));
+
+    const [, options] = vi.mocked(toast.error).mock.calls[0]!;
+    expect((options as { description?: string }).description).toContain(
+      "will not appear here until you reload",
+    );
   });
 });

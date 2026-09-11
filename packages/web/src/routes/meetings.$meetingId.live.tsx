@@ -19,8 +19,10 @@
  *
  * ─── Phase E, wave 5, Task 4: the reads and the transport ────────────────
  *
- * Every read on this screen is tRPC now — nine of them, replacing nine raw
- * Supabase queries, and the eight `useRealtimeSubscription` channels that kept
+ * Every read on this screen is tRPC now — ELEVEN of them, replacing nine raw
+ * Supabase queries (the next paragraph is why the counts differ: two of the
+ * nine were PostgREST embeds and each split into two procedures), and the
+ * eight `useRealtimeSubscription` channels that kept
  * them fresh are one SSE subscription (`hooks/useLiveMeetingEvents.ts`). See
  * that file for why it is one stream and not eight, and for the topic →
  * query-key mapping the multiplexing costs.
@@ -111,11 +113,13 @@ type TransitionRow = RouterOutputs["agendaItemTransition"]["byMeeting"][number];
  * `RouteErrorBoundary` — visible, rather than the indefinite "Loading meeting
  * data..." the old `.single()` produced.
  *
- * Primes the same five reads the component makes; the other four
+ * Primes SIX of the eleven reads the component makes (`meeting.detail`, then
+ * `agendaItem.byMeeting`, `meetingAttendance.byMeeting`, `motion.byMeeting`,
+ * `board.detail` and `boardMember.roster` in parallel); the other FIVE
  * (`voteRecord`, `guestSpeaker`, `agendaItemTransition`, `executiveSession`,
  * `exhibit`) were not primed before this task either and still are not — the
  * panels that render them tolerate an empty first paint, which is what the
- * pre-migration loader's own choice of four already asserted.
+ * pre-migration loader's own choice already asserted.
  */
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const meetingId = params.meetingId!;

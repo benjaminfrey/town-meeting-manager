@@ -1413,11 +1413,18 @@ describe("agendaItem.instantiateFromTemplate", () => {
 });
 
 /**
- * The two procedures nothing calls yet — wave 5's `live.tsx` is the caller.
- * Tested exactly like the wired writes, so wave 5 inherits a guard that is
- * already proven rather than one that has only ever been read.
+ * The two procedures wave 5, Task 4 wired. They were written a wave ahead of
+ * their caller and tested exactly like the wired writes, so `live.tsx`'s
+ * `AgendaItemDetailPanel` inherited a guard that was already proven rather
+ * than one that had only ever been read.
+ *
+ * The "(unwired — wave 5)" these two `describe`s carried until Task 4's fix
+ * round is what conventions item 14 calls a stale CLAIM behind an unchanged
+ * file: Task 4's close-out struck the identical claim in the conventions' own
+ * Known-gaps bullet and missed these two labels, one directory over, in a
+ * file the same task edited.
  */
-describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
+describe("agendaItem.setOperatorNotes (wired — live.tsx's AgendaItemDetailPanel)", () => {
   it("lets a caller holding A2 record and clear operator notes", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
@@ -1584,7 +1591,7 @@ describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
   });
 });
 
-describe("agendaItem.markComplete (unwired — wave 5)", () => {
+describe("agendaItem.markComplete (wired — live.tsx's AgendaItemDetailPanel)", () => {
   it("lets a caller holding A2 mark an item complete", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);

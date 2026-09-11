@@ -1245,6 +1245,52 @@ here — it governs CORS requests, and `/api/trpc` is same-origin through the Vi
 proxy in development and nginx in production, so the session cookie is sent
 either way.
 
+**And the split is PINNED, in jsdom, in about forty lines.** Task 4's report
+called this seam unautomatable and deferred a manual dev-server check to Task 6
+or 7; a reviewer then wrote the test, so the claim is struck and the method is
+recorded here because every later subscription needs it. Measured first: with
+`condition: () => false` — routing every subscription into `httpBatchLink`,
+which refuses one — the web suite was green at 505 passed / 80 files before this
+test existed, and typecheck (5 successful) and lint (0 errors) are blind to the
+mutation with or without it. The regression was 100% silent and presented only as
+"the live meeting never updates". With the test in place the same mutation
+answers `1 failed | 508 passed`, and the one failure is it. The test is `lib/__tests__/trpc.test.ts`'s "the link
+split", and it works because `httpSubscriptionLink` resolves
+`globalThis.EventSource` LAZILY, at subscribe time, inside its
+`observable((observer) => …)` body. A fake constructor on the global therefore
+answers "which branch did this operation take?" without any transport working at
+all. Both directions are asserted, so the predicate cannot be inverted either: a
+subscription MUST open an `EventSource` (verified — `() => false` reddens exactly
+that test, with `httpBatchLink`'s own refusal as the message) and a query MUST
+NOT (verified — `() => true` reddens the query half).
+
+**The generalisation, which cost this wave twice: "jsdom cannot do X" is a claim
+about the TRANSPORT, and it is almost never a claim about the BEHAVIOUR under
+test.** Two implementers in wave 5 declared something unautomatable and a
+reviewer automated both. Before writing "unautomatable" in a report, state what
+the test would have to observe, then check whether the library resolves that
+thing lazily or takes it as an option — a fake at the seam is usually enough,
+and the alternative on offer (a manual check, deferred to a later task) is
+coverage nobody will run twice.
+
+**A subscription's `error` is not its `status`, and dropping it is not the same
+decision.** `useLiveMeetingEvents` returns `void` because nothing has ever read
+the connection `status` and `ConnectionStatusBar` (Task 6) should define that
+vocabulary. Discarding `useSubscription`'s whole result also discarded its
+`error`, which is a different thing: a `TRPCError` — `NOT_FOUND` for a meeting
+outside the caller's tenant, or anything the auth chain throws at subscribe —
+makes this client STOP rather than resume (the transport ADR's addendum measured
+exactly that), so the stream died permanently with nothing on screen and, until
+Task 6, a `ConnectionStatusBar` still reporting a Supabase heartbeat this screen
+no longer uses. **Every subscription this phase adds must pass an `onError` that
+reaches a human.** This one raises a `duration: Infinity` toast under a stable
+id — persistent because the condition is, one id because a refusing reconnect
+loop would otherwise stack a column of them, and a toast rather than a banner
+because the hook is called above the screen's status routing and fires for a
+meeting still in `MeetingStartFlow`. Pinned in
+`hooks/__tests__/useLiveMeetingEvents.test.ts`; deleting `onError` from the
+`subscriptionOptions` call turns both of its tests red.
+
 **The topic → query-key mapping is the client's, and the coupling needs TWO
 mechanisms, not one.** A topic with no client mapping is received, matched by
 nothing and dropped: a panel that stops updating on other devices, with no error
@@ -2088,8 +2134,12 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Supabase calls, and `lib/meeting-helpers.ts` — which never carried a
      # marker at all despite being the live create-from-template writer — is
      # deleted rather than marked.
- 6   # unchanged again at dcb12e4 (wave 5, Task 4's close-out) — the same six
-     # lines. Task 4 REWROTE `meetings.$meetingId.live.tsx`'s marker rather
+ 6   # unchanged again at 59d8f91 (wave 5, Task 4's close-out) — the same six
+     # lines. (Anchored to `dcb12e4` when first written, which is the
+     # PRE-AMEND sha of `c8bd764` and is reachable from nothing: item 11 asks
+     # for the grep AND a commit that exists, and a sha that has been rebased
+     # or amended away fails the second half silently. Re-run and unchanged at
+     # `59d8f91`, which is on the branch.) Task 4 REWROTE `meetings.$meetingId.live.tsx`'s marker rather
      # than discharging it (its reads are all tRPC now; its WRITES are Task
      # 5's, and the marker names them), and left MeetingStartFlow.tsx's
      # alone for the same reason. A marker whose claim changes without its
@@ -2367,7 +2417,11 @@ they make, and re-ran the grep or read the code behind each. What moved:
   file-based sweep would have found; recording it here because the other three
   below are the kind it would not.
 - **Item 8's raw `pathFilter()` file count moved 45 → 53** and is re-run above,
-  anchored to `dcb12e4`. Eight new writer files, all live-meeting.
+  anchored to `59d8f91`. Eight new writer files, all live-meeting. (The
+  close-out originally anchored this and the marker count to `dcb12e4` — the
+  pre-amend sha of `c8bd764`, reachable from no branch. Both greps re-run at
+  `59d8f91` and answer the same numbers; item 11's rule is the grep AND a
+  commit that exists, and only the first half had been met.)
 - **Item 11's marker count did NOT move (6), and that is a claim in its own
   right** — `meetings.$meetingId.live.tsx`'s marker was REWRITTEN rather than
   discharged (its reads are migrated; its writes are Task 5's), which is a
@@ -2383,7 +2437,10 @@ they make, and re-ran the grep or read the code behind each. What moved:
   feeding the guard"), paid again, not a new one.
 
 Checked and still true, unchanged: item 9's `useMockAuth`/`MockAuthProvider`
-claims (this task added seven test files and none reaches either); "Wave 4, Task
+claims (this task added EIGHT test files — six live-meeting writer files,
+`hooks/__tests__/useLiveMeetingEvents.test.ts`, and
+`hooks/__tests__/useQuorumCheck.test.tsx` replacing the deleted
+`hooks/useQuorumCheck.test.ts` — and none reaches either); "Wave 4, Task
 3's own open items" #3 (the legacy `queryKeys.exhibits.*` lines stay —
 `meetings.$meetingId.review.tsx` still reads them, and that file is wave 6's);
 item 7's `initConnectionErrorHandler` carve-out (still the one bare
@@ -2548,9 +2605,9 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `RouterOutputs`-derived types in prose. Zero violations — the check passes at that commit, so the
   five writer files this task added or changed each have at least one test importing them and
   asserting an invalidation.
-  **Re-measured at `dcb12e4` (wave 5, Task 4): raw 53.** Eight more non-test files call
+  **Re-measured at `59d8f91` (wave 5, Task 4): raw 53.** Eight more non-test files call
   `pathFilter()` than at `cd10b54`, and every one of the eight is a live-meeting writer that gained
-  its first call when this task moved the live screen's nine reads onto tRPC — `MotionPanel.tsx`,
+  its first call when this task moved the live screen's nine raw Supabase reads onto tRPC (eleven procedures) — `MotionPanel.tsx`,
   `MotionCaptureDialog.tsx`, `VotePanel.tsx`, `RecusalDialog.tsx`, `GuestSpeakerEntry.tsx`,
   `ExitExecutiveSessionDialog.tsx`, plus `hooks/useLiveMeetingEvents.ts` (the SSE topic mapping,
   which is a writer in the sense that matters here: another device's write arriving) and

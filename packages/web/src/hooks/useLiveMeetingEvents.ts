@@ -14,6 +14,11 @@
  * `useSubscription`'s own result, which this hook deliberately does not
  * pre-empt by inventing a second vocabulary for it.
  *
+ * That argument covers the `status` and NOT the `error`, which the first
+ * version of this hook discarded along with it — a refusal on the stream left
+ * a live meeting permanently stale with nothing visible anywhere. See
+ * `onError` at the bottom of this file.
+ *
  * ─── One stream, not eight, and the cost that buys ────────────────────────
  *
  * `packages/api/src/trpc/routers/realtime.ts`'s header states why the server
@@ -60,7 +65,8 @@
  *
  * The legacy `queryKeys.*` keys the eight deleted callbacks invalidated are
  * NOT reproduced here. They were invalidated because the LIVE SCREEN read
- * them; it no longer does (this task moved all nine of its reads onto tRPC),
+ * them; it no longer does (this task moved all nine of its raw Supabase reads
+ * onto tRPC, where they are eleven procedures),
  * and the other files still on those keys — `meetings.$meetingId.review.tsx`,
  * `components/minutes/SourceDataPanel.tsx` — are not subscribed to anything
  * and never were. Invalidating a key no subscribed screen reads is the
@@ -69,7 +75,9 @@
 
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import { useSubscription } from "@trpc/tanstack-react-query";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -173,6 +181,14 @@ export function liveMeetingPathFilter(name: LiveMeetingRouterName) {
 }
 
 /**
+ * The id the stream's failure toast is raised under.
+ *
+ * Stable, so a reconnect loop that refuses repeatedly replaces one toast
+ * instead of stacking a column of identical ones over the operator's controls.
+ */
+export const LIVE_STREAM_ERROR_TOAST_ID = "live-meeting-stream-error";
+
+/**
  * Subscribe to one meeting's change stream and invalidate what it names.
  *
  * Called unconditionally by `routes/meetings.$meetingId.live.tsx`, exactly as
@@ -180,7 +196,9 @@ export function liveMeetingPathFilter(name: LiveMeetingRouterName) {
  * that component's status routing too, so a `noticed` meeting waiting in
  * `MeetingStartFlow` has been subscribed the whole time and still is.
  *
- * Returns nothing. See this file's header.
+ * Returns nothing. See this file's header for why the `status` is not carried
+ * forward — and `onError` below for the half of that argument that did NOT
+ * hold.
  */
 export function useLiveMeetingEvents(meetingId: string): void {
   const queryClient = useQueryClient();
@@ -194,5 +212,48 @@ export function useLiveMeetingEvents(meetingId: string): void {
     [queryClient],
   );
 
-  useSubscription(trpc.realtime.onMeetingChange.subscriptionOptions({ meetingId }, { onData }));
+  /**
+   * **A dead stream must not be silent, and without this it was.**
+   *
+   * Added in this task's fix round. The `void` return above is a good answer
+   * for the subscription's `status` — nothing has ever read it, and inventing
+   * a connection-state vocabulary ahead of Task 6's `ConnectionStatusBar`
+   * would only have to be unpicked. It is NOT a good answer for its `error`,
+   * and the two were conflated: discarding the result discarded both.
+   *
+   * What that cost. `realtime.onMeetingChange` refuses with a `TRPCError` —
+   * `NOT_FOUND` for a meeting not visible in the caller's tenant, or anything
+   * the auth chain throws at subscribe — and `docs/advisory-resolutions/
+   * 5.1-realtime-transport.md`'s addendum measured what a `TRPCError` does to
+   * this client: unlike a plain `Error` (which reconnects silently, with
+   * resume) it STOPS. So the failure mode was a live meeting whose panels
+   * quietly stop reflecting other devices, permanently, for the rest of the
+   * session, with nothing red anywhere on the screen — and, until Task 6
+   * rebuilds it, a `ConnectionStatusBar` still reporting a Supabase heartbeat
+   * this screen no longer uses, i.e. an indicator showing healthy while the
+   * transport that matters is dead.
+   *
+   * A toast rather than a rendered banner, deliberately: this hook is called
+   * above the screen's status routing, so it fires for a meeting sitting in
+   * `MeetingStartFlow` as well as one in the three-panel layout, and a toast
+   * needs no place in either. `duration: Infinity` because the stream does not
+   * come back on its own — the standard objection to a toast for something
+   * important ("one that has timed out is a message nobody can go back and
+   * read", as `AgendaItemDetailPanel`'s refusals argue) applies in full to a
+   * condition that persists, and dismissing it is the operator's choice rather
+   * than a timer's.
+   */
+  const onError = useCallback((error: unknown) => {
+    toast.error("Live updates have stopped", {
+      id: LIVE_STREAM_ERROR_TOAST_ID,
+      description: isTRPCClientError(error)
+        ? `${error.message} Changes made on other devices will not appear here until you reload this page.`
+        : "Changes made on other devices will not appear here until you reload this page.",
+      duration: Infinity,
+    });
+  }, []);
+
+  useSubscription(
+    trpc.realtime.onMeetingChange.subscriptionOptions({ meetingId }, { onData, onError }),
+  );
 }
