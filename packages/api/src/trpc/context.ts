@@ -88,12 +88,74 @@
  * same way `createTrpcContext` assembles it," and that promise is what makes
  * the guard testable at all: a test using a DIFFERENT, hand-rolled
  * actor/withTenant pairing could not exercise the real code path.
+ *
+ * ─── How long a context lives, now that one of them is a stream ───────────
+ *
+ * Phase E, wave 5, Task 1. Everything above was written when a context lived
+ * for one HTTP request and a few milliseconds. A tRPC SSE subscription's
+ * context is built once and lives for the whole stream, so both pieces of
+ * per-request state in `bindTenantAccess` had to be re-examined against a
+ * live meeting that runs for hours. The answers are recorded here because
+ * they are properties of THIS file, and because the next subscription's author
+ * will read this header and not the wave plan.
+ *
+ * **`inTransaction` cannot be tripped by a subscription, and that is
+ * structural rather than careful.** The hazard is two OVERLAPPING
+ * `ctx.withTenant` calls — a stream fanning out concurrent per-event work.
+ * `routers/realtime.ts` opens exactly one transaction, at subscribe time,
+ * before its first `yield`, and makes no database call for the rest of the
+ * stream's life: its events carry no payload, so there is nothing to read.
+ * `routers/__tests__/realtime.test.ts` pins the count at one across a stream
+ * that delivers several events, so a future author who adds a per-event read
+ * fails a named test rather than discovering the guard in production.
+ *
+ * A subscription also cannot interfere with the caller's ORDINARY requests.
+ * `inTransaction` is closed over per call to `bindTenantAccess`, and
+ * `createTrpcContext` calls it once per Fastify request — a query issued by
+ * the same browser while its stream is open is a different request, a
+ * different context and a different flag. `__tests__/context.test.ts` pins
+ * that two contexts do not share the flag.
+ *
+ * **The memoised actor's staleness is bounded by `sse.maxDurationMs`, not by
+ * the meeting.** The worry is real in principle: an actor resolved once and
+ * reused would let a clerk whose permissions were revoked keep acting on the
+ * old answer for as long as the stream stayed up. Two things close it.
+ *
+ * First, the subscription this task ships never resolves an actor at all. Its
+ * only rule is tenancy, which RLS and the Fastify gate answer between them, so
+ * `phase-e-conventions.md` item 2's "a query whose only rule is tenancy is
+ * answered by RLS" applies and the memo is never warmed. There is no stale
+ * actor because there is no actor.
+ *
+ * Second — and this is what makes the answer hold for a FUTURE subscription
+ * that does need a permission code — `trpc.ts` sets `sse.maxDurationMs`, so
+ * every stream is ended by the server on a fixed cadence and the client's own
+ * resume handshake opens a NEW request. Measured during this task against a
+ * real Fastify server and a real `httpSubscriptionLink` client: at the
+ * deadline the server aborts the subscription's signal (the generator's
+ * `finally` runs with `signal.aborted === true`), the client reconnects
+ * transparently carrying `lastEventId`, resumes with no gap and no duplicate,
+ * never fires `onError`, and the server builds a NEW context — which re-runs
+ * `auth/fastify.ts`'s gate (session validity, account archival, tenant
+ * resolution, the cross-origin check) and the whole tRPC middleware chain.
+ *
+ * So the honest statement of the exposure, which is what the wave plan asked
+ * for in writing: **authorization on a subscription is evaluated when the
+ * stream is opened, and re-evaluated in full each time the client reconnects —
+ * which the server forces at least every `SSE_MAX_STREAM_DURATION_MS`. It is
+ * not re-evaluated between those points.** A permission revoked one second
+ * after a stream opens is therefore honoured within that window, and never
+ * later than it. What a subscriber can do inside the window is bounded by what
+ * an event is: a topic name, for a meeting in the town their session resolved
+ * to. Every refetch it prompts is an ordinary request with its own fresh
+ * context, its own fresh actor and its own RLS.
  */
 
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { CreateFastifyContextOptions } from "@trpc/server/adapters/fastify";
 import type { TenantTx } from "../db/with-tenant.js";
 import type { ResolvedTenant } from "../auth/tenant-context.js";
+import type { RealtimeBus } from "../realtime/bus.js";
 import { loadActor, type Actor, type ActorTenant } from "./authorization/actor.js";
 
 export interface AuthenticatedIdentity {
@@ -120,6 +182,21 @@ export interface TrpcContext {
    * something other than the database.
    */
   readonly actor?: () => Promise<Actor>;
+  /**
+   * The `LISTEN` bridge a subscription attaches to.
+   *
+   * Optional, and absent by default, because it is process-wide infrastructure
+   * rather than anything derived from this request: `server.ts` opens one bus
+   * and closes it with the server, and hands it to the context factory. A
+   * context built without one (every test that does not exercise a
+   * subscription) reaches `requireRealtimeBus` in `trpc.ts` and gets a wiring
+   * error naming the omission, rather than a subscription that silently never
+   * yields.
+   *
+   * Carries no tenancy of its own — see `realtime/bus.ts` for why a `LISTEN`
+   * connection cannot, and where the filtering therefore lives.
+   */
+  readonly realtime?: RealtimeBus;
 }
 
 /** What `bindTenantAccess` hands back — the pair every `TrpcContext` carries together. */
@@ -214,6 +291,43 @@ export function bindTenantAccess(
   return { withTenant, actor };
 }
 
+/** Process-wide things a context carries that are not derived from the request. */
+export interface TrpcContextDependencies {
+  readonly realtime?: RealtimeBus;
+}
+
+/**
+ * Build the context factory, closing over the process-wide dependencies.
+ *
+ * A factory rather than a second parameter on `createTrpcContext` because
+ * `fastifyTRPCPlugin` calls `createContext` itself and passes only the
+ * request. Added in Phase E wave 5, Task 1 for the realtime bus, which is one
+ * object per server and must be closed with it — reading it off
+ * `req.server` instead would make every test context depend on a decorated
+ * Fastify instance, and `__tests__/fixtures.ts`'s `contextFor` passes
+ * `{} as never` for `req` precisely so it does not have to build one.
+ */
+export function createTrpcContextFactory(
+  deps: TrpcContextDependencies = {},
+): (opts: CreateFastifyContextOptions) => TrpcContext {
+  return ({ req, res }: CreateFastifyContextOptions): TrpcContext => {
+    const tenant = req.tenant;
+    const rawWithTenant = req.withTenant;
+
+    const bound = tenant && rawWithTenant ? bindTenantAccess(rawWithTenant, tenant) : undefined;
+
+    return {
+      req,
+      res,
+      authUser: req.authUser,
+      tenant,
+      withTenant: bound?.withTenant,
+      actor: bound?.actor,
+      realtime: deps.realtime,
+    };
+  };
+}
+
 /**
  * Build the context from a Fastify request the tenant gate has already
  * processed.
@@ -223,19 +337,9 @@ export function bindTenantAccess(
  * therefore never authenticates anything; it copies forward what the one
  * authentication point decided. Adding a second check here is the shape Task
  * G1 spent its budget removing.
+ *
+ * The no-dependencies form. It carries no realtime bus, so a subscription
+ * reached through it refuses with a wiring error — which is what a caller that
+ * did not build one should get. `server.ts` uses `createTrpcContextFactory`.
  */
-export function createTrpcContext({ req, res }: CreateFastifyContextOptions): TrpcContext {
-  const tenant = req.tenant;
-  const rawWithTenant = req.withTenant;
-
-  const bound = tenant && rawWithTenant ? bindTenantAccess(rawWithTenant, tenant) : undefined;
-
-  return {
-    req,
-    res,
-    authUser: req.authUser,
-    tenant,
-    withTenant: bound?.withTenant,
-    actor: bound?.actor,
-  };
-}
+export const createTrpcContext = createTrpcContextFactory();

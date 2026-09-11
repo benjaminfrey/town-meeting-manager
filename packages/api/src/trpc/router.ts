@@ -29,6 +29,7 @@ import { agendaItemRouter } from "./routers/agenda-item.js";
 import { exhibitRouter } from "./routers/exhibit.js";
 import { minutesDocumentRouter } from "./routers/minutes-document.js";
 import { meetingAttendanceRouter } from "./routers/meeting-attendance.js";
+import { realtimeRouter } from "./routers/realtime.js";
 
 export const appRouter = router({
   /**
@@ -126,6 +127,14 @@ export const appRouter = router({
    * router. See `routers/meeting-attendance.ts`.
    */
   meetingAttendance: meetingAttendanceRouter,
+
+  /**
+   * The SSE transport, replacing Supabase Realtime. One subscription today
+   * (`onMeetingChange`), which is the whole of `live.tsx`'s eight channels —
+   * see `routers/realtime.ts` for why eight streams would not work in a
+   * browser. Phase E wave 5, Task 1.
+   */
+  realtime: realtimeRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

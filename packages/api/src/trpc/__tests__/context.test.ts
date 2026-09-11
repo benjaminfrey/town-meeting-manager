@@ -184,6 +184,63 @@ describe("bindTenantAccess's reentrancy guard", () => {
     });
   });
 
+  // ─── Phase E wave 5, Task 1: the flag is per CONTEXT, not per pool ──────
+  //
+  // A subscription's context lives for the whole stream — minutes or hours,
+  // where every other context lives for milliseconds. That makes "is this flag
+  // shared with anything else" a question worth an assertion rather than a
+  // comment: if it were, a browser holding an SSE stream open would have its
+  // own ordinary queries refused for the life of that stream, and the symptom
+  // would be intermittent 500s on unrelated screens whenever the live meeting
+  // was open in another tab.
+  //
+  // `bindTenantAccess`'s own comment already says "per-request … not
+  // per-connection and not module-level". This is that claim, measured, with
+  // both contexts on the same pooled connection.
+  //
+  // The inner call is deliberately NOT awaited from inside the outer
+  // transaction, and the first version of this test that did await it hung to
+  // vitest's 30-second timeout rather than failing — for a reason that is
+  // about the harness and not about the guard. `connectAsAppRole` is a
+  // single-connection pool on purpose, so a second transaction genuinely
+  // cannot start until the first commits; awaiting it from inside is a real
+  // deadlock whatever the flag says. What is being asserted here is narrower
+  // and is the whole question: the second context's call is not REFUSED. It
+  // queues, and completes once the first releases the connection.
+  it("does not share its inTransaction flag between two contexts on the same connection", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const seeded = await seedActor(db, town, { role: "admin" });
+
+        // Two contexts, exactly as two concurrent requests from one browser
+        // get — one of which might be an open subscription.
+        const streamLike = bound(contextFor(db, town, seeded));
+        const requestLike = bound(contextFor(db, town, seeded));
+
+        let queued: Promise<string> | undefined;
+        await streamLike.withTenant(async () => {
+          queued = requestLike.withTenant(async () => "the other context");
+          // A handler so a rejection inside the window below is not reported
+          // as unhandled. `queued` itself still rejects, which is what the
+          // assertion after this transaction reads.
+          void queued.catch(() => {});
+          // Long enough that a synchronous refusal would have landed.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return "outer";
+        });
+
+        // If the flag were shared, this would reject with the reentrancy
+        // message rather than resolve.
+        expect(await queued).toBe("the other context");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("refuses a nested ctx.withTenant() call made from inside another one's callback", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);

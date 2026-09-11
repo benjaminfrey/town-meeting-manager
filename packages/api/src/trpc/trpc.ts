@@ -19,6 +19,13 @@
  * `/api/trpc` is itself an authenticated route, so the Fastify gate runs
  * first; `publicProcedure` exists for procedures under a mount that is marked
  * public, not as a way to slip past the gate.
+ *
+ * ─── And a third, since Phase E wave 5: `subscriptionProcedure` ───────────
+ *
+ * `protectedProcedure` plus a realtime bus. See `requireRealtimeBus` below,
+ * and `routers/realtime.ts` for the authorization discipline a subscription
+ * follows — which is the same one a mutation follows, for the same reason,
+ * with one addition about the first `yield`.
  */
 
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -30,8 +37,52 @@ import type { Actor } from "./authorization/actor.js";
 import { AuthorizationError, type PermissionCode } from "./authorization/permission.js";
 import { assertPermission } from "./authorization/permission.js";
 import type { BoardScope } from "./authorization/rules.js";
+import type { RealtimeBus } from "../realtime/bus.js";
 
-const t = initTRPC.context<TrpcContext>().create();
+/**
+ * How long the server lets one SSE subscription run before ending it.
+ *
+ * This is the authorization-staleness bound for every subscription in this
+ * API, not a resource knob — see `context.ts`'s "How long a context lives"
+ * section for the full statement and the measurement behind it. At the
+ * deadline tRPC aborts the subscription's signal; `httpSubscriptionLink`
+ * reconnects transparently carrying `lastEventId`, and the new request re-runs
+ * `auth/fastify.ts`'s gate (session, account, tenant, origin) and every
+ * middleware on the procedure.
+ *
+ * Five minutes: a live meeting runs for hours, so "the life of the stream" is
+ * not an acceptable answer; and the cost of the bound is one extra request per
+ * subscriber per five minutes, which at any plausible number of clerks in a
+ * meeting room is nothing. Shortening it tightens the window and costs more
+ * reconnects; lengthening it does the reverse. There is no failure mode at
+ * either end — only the trade.
+ *
+ * A reconnect also resyncs: `routers/realtime.ts` treats a `lastEventId` as
+ * "you may have missed something" and marks every topic stale, because the
+ * gap between abort and reconnect is a gap in delivery. So this bound costs a
+ * refetch of the live meeting's eight reads per subscriber per five minutes
+ * too, which is the honest price and is why it is not thirty seconds.
+ */
+export const SSE_MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
+
+/**
+ * How often the server sends an SSE keep-alive comment.
+ *
+ * A subscription can legitimately be silent for a long time — a meeting in
+ * recess produces no events — and an idle TCP connection is what intermediate
+ * proxies, load balancers and mobile carriers reap without telling either end.
+ * `infrastructure/nginx/nginx.conf` is configured not to (`proxy_read_timeout`
+ * on the `/api/trpc/` block), but the hops this project does not control are
+ * the point.
+ */
+export const SSE_PING_INTERVAL_MS = 15 * 1000;
+
+const t = initTRPC.context<TrpcContext>().create({
+  sse: {
+    ping: { enabled: true, intervalMs: SSE_PING_INTERVAL_MS },
+    maxDurationMs: SSE_MAX_STREAM_DURATION_MS,
+  },
+});
 
 export const router = t.router;
 export const middleware = t.middleware;
@@ -136,6 +187,62 @@ const requireTenant = t.middleware(async ({ ctx, next }) => {
 });
 
 export const protectedProcedure = t.procedure.use(translateAuthorizationErrors).use(requireTenant);
+
+/** The context a subscription resolver sees: `AuthenticatedContext` plus the bus. */
+export interface SubscriptionContext extends AuthenticatedContext {
+  readonly realtime: RealtimeBus;
+}
+
+/**
+ * Refuse a subscription on a server that has no realtime bus.
+ *
+ * Throws INTERNAL_SERVER_ERROR, not FORBIDDEN, and the distinction is
+ * deliberate: there is nothing about this CALLER to refuse. A missing bus
+ * means `server.ts` did not build one and did not pass it to
+ * `createTrpcContextFactory` — the same category as
+ * `assertMatchesAuthorizedBoard`'s plain `Error` for a procedure with no
+ * `authorizedBoardId`. The alternative, a subscription that attaches to
+ * nothing and simply never yields, is the failure this codebase keeps
+ * finding: it looks exactly like a quiet meeting.
+ */
+const requireRealtimeBus = t.middleware(async (opts) => {
+  const ctx = opts.ctx;
+  // Re-asserted here rather than relied on from `requireTenant` upstream: a
+  // spread does not carry an earlier middleware's narrowing into what `next()`
+  // reports downstream — the same TS2722 every other `next({ctx: …})` in this
+  // file re-lists its fields to avoid, reproduced here the first time this was
+  // written without it.
+  assertTenantContext(ctx);
+  if (!ctx.realtime) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        "This subscription needs a realtime bus and the context carries none. Build one with " +
+        "createRealtimeBus() and pass it to createTrpcContextFactory({ realtime }) — see " +
+        "server.ts. A context built by the dependency-free createTrpcContext export has none " +
+        "by design.",
+    });
+  }
+  return opts.next({
+    ctx: {
+      ...ctx,
+      tenant: ctx.tenant,
+      withTenant: ctx.withTenant,
+      actor: ctx.actor,
+      realtime: ctx.realtime,
+    } satisfies SubscriptionContext,
+  });
+});
+
+/**
+ * The base every subscription is built on.
+ *
+ * `protectedProcedure` first, so a subscription inherits the session and
+ * tenant requirements unchanged: the `/api/trpc` mount is an authenticated
+ * route and an SSE request goes through `auth/fastify.ts`'s gate like any
+ * other.
+ */
+export const subscriptionProcedure = protectedProcedure.use(requireRealtimeBus);
 
 /**
  * Codes whose rules are board-scoped, so a GLOBAL check on one of them is a

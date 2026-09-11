@@ -43,6 +43,7 @@ import { withTenant, type TenantTx } from "../../db/with-tenant.js";
 import { loadActor, type Actor } from "../authorization/actor.js";
 import type { PermissionCode } from "../authorization/permission.js";
 import { bindTenantAccess, type TrpcContext } from "../context.js";
+import type { RealtimeBus } from "../../realtime/bus.js";
 
 export type TestDb = ReturnType<typeof drizzle>;
 
@@ -229,6 +230,17 @@ export function contextFor(
   db: TestDb,
   town: TownFixture,
   seeded: { personId: string; userAccountId: string },
+  /**
+   * The realtime bus a subscription attaches to (Phase E wave 5, Task 1).
+   *
+   * Optional, and absent for every test that does not exercise one — which
+   * mirrors production, where `createTrpcContext` (the dependency-free export)
+   * carries none and `server.ts` uses `createTrpcContextFactory({ realtime })`.
+   * A subscription reached through a context without one gets
+   * `requireRealtimeBus`'s wiring error, which is pinned rather than avoided;
+   * see `routers/__tests__/realtime.test.ts`.
+   */
+  realtime?: RealtimeBus,
 ): TrpcContext {
   const tenant = {
     townId: town.townId,
@@ -246,6 +258,7 @@ export function contextFor(
     tenant,
     withTenant: bound.withTenant,
     actor: bound.actor,
+    realtime,
   };
 }
 

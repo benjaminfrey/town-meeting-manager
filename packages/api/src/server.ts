@@ -26,7 +26,9 @@ import { listJobTenants, tenantJob } from "./jobs/tenant-job.js";
 import { sql } from "drizzle-orm";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { appRouter } from "./trpc/router.js";
-import { createTrpcContext } from "./trpc/context.js";
+import { createTrpcContextFactory } from "./trpc/context.js";
+import { createRealtimeBus } from "./realtime/bus.js";
+import postgres from "postgres";
 
 export interface BuildServerOptions {
   /**
@@ -202,11 +204,50 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // The context is built from the request the gate has already processed —
   // see `trpc/context.ts`. It carries `withTenant` and nothing else that can
   // reach the database.
+  // ─── The realtime bus (Phase E wave 5, Task 1) ───────────────────
+  //
+  // One `LISTEN` connection for the whole process, on its OWN postgres.js
+  // handle rather than a slot borrowed from the application pool: a listening
+  // connection is occupied for the life of the process, so taking one from the
+  // pool would permanently shrink it, and `sql.listen`'s automatic reconnect
+  // is easier to reason about on a handle nothing else uses.
+  //
+  // Same `DATABASE_URL`, therefore the same non-owner `tmm_app` role as every
+  // query — `LISTEN` needs no privilege, so this is not an elevated handle.
+  // See `realtime/bus.ts` for why the tenancy filter it feeds is application
+  // code and cannot be row level security.
+  //
+  // Closed with the server, ahead of the application pool, so no subscription
+  // is left parked on a promise nothing will resolve.
+  //
+  // `createAppDb()` above has already refused to boot without `DATABASE_URL`,
+  // so this cannot be unset here — but it is re-checked rather than asserted
+  // away, because `postgres(undefined)` does not throw: it falls back to
+  // libpq's own environment defaults and connects somewhere plausible-looking
+  // as whatever role the process happens to run as, which is the silent
+  // misconfiguration `auth/db.ts`'s own guard exists to prevent.
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required for the realtime LISTEN connection.");
+  }
+  const realtime = await createRealtimeBus({
+    sql: postgres(databaseUrl, { max: 1, onnotice: () => {} }),
+    log: app.log,
+  });
+  app.addHook("onClose", async () => realtime.close());
+
   await app.register(fastifyTRPCPlugin, {
     prefix: "/api/trpc",
+    // SSE, not WebSockets — `docs/advisory-resolutions/5.1-realtime-transport.md`
+    // resolves the transport and verified reconnect-resume against a real
+    // process kill and through real nginx. Stated explicitly rather than left
+    // to the default so that a future reader finds the decision here, next to
+    // the mount, instead of inferring it from the absence of
+    // `@fastify/websocket`.
+    useWSS: false,
     trpcOptions: {
       router: appRouter,
-      createContext: createTrpcContext,
+      createContext: createTrpcContextFactory({ realtime }),
       onError({ path, error }: { path?: string; error: Error }) {
         app.log.error({ err: error, path }, "tRPC procedure failed");
       },

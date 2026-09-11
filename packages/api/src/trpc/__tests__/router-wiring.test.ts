@@ -79,6 +79,12 @@ describe("router wiring", () => {
         "agendaItem.markComplete",
         "minutesDocument.byMeeting",
         "meetingAttendance.countByMeeting",
+        // Phase E wave 5, Task 1 — the SSE transport. Unwired client-side
+        // until Task 4, pinned here for the same reason the two agendaItem
+        // procedures above are: this name is what `useRealtimeSubscription`'s
+        // replacement will call, and a rename in the meantime should be caught
+        // here rather than in that task's first client change.
+        "realtime.onMeetingChange",
         "whoami",
       ]),
     );
@@ -116,6 +122,10 @@ describe("router wiring", () => {
       "exhibit.byMeeting",
       "minutesDocument.byMeeting",
       "meetingAttendance.countByMeeting",
+      // A subscription's input is parsed the same way a query's is — the
+      // procedure TYPE differs, the input schema does not. `meetingId` is a
+      // uuid here too, so the shared bad value below exercises it.
+      "realtime.onMeetingChange",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
