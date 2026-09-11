@@ -129,7 +129,7 @@ export function eventMatchesSubscriber(
 export interface RealtimeBus {
   /**
    * Yield the topics that have gone stale for `subscriber`, until `signal`
-   * aborts.
+   * aborts or the bus is closed.
    *
    * Yields a bare topic: the event's `townId` and `meetingId` are filter
    * inputs and stop here. See `events.ts` for why nothing else travels.
@@ -140,6 +140,15 @@ export interface RealtimeBus {
   ): AsyncGenerator<LiveMeetingTopic, void, void>;
   /** How many streams are currently attached. For tests and for logging. */
   readonly subscriberCount: number;
+  /**
+   * End the `LISTEN` connection, and every stream attached to this bus.
+   *
+   * Ending the streams is not a courtesy: a parked `subscribe` is waiting on
+   * a promise only this bus resolves, so a `close()` that merely ended the
+   * connection would leave every generator suspended forever with its
+   * `finally` unrun. Server shutdown (`server.ts`'s `onClose` hook) is the
+   * caller.
+   */
   close(): Promise<void>;
 }
 
@@ -172,6 +181,17 @@ export interface CreateRealtimeBusOptions {
 export async function createRealtimeBus(opts: CreateRealtimeBusOptions): Promise<RealtimeBus> {
   const registrations = new Set<Registration>();
   let listenCount = 0;
+  /**
+   * Set by `close()`, and read by every parked `subscribe` when it wakes.
+   *
+   * Waking a parked generator is NOT on its own enough to end it: `subscribe`
+   * wakes, finds nothing pending and an un-aborted signal, and parks again on
+   * a fresh promise — which, once `sql.end()` has run, nothing will ever
+   * resolve. That is the shape this flag exists to prevent, and it reproduced
+   * before it was added (one `close()`, no abort: `subscriberCount` stayed at
+   * 1 and the generator never reached its `finally`).
+   */
+  let closed = false;
 
   const deliver = (event: RealtimeEvent): void => {
     for (const registration of registrations) {
@@ -230,13 +250,15 @@ export async function createRealtimeBus(opts: CreateRealtimeBusOptions): Promise
     };
     registrations.add(registration);
     try {
-      while (!signal.aborted) {
+      while (!signal.aborted && !closed) {
         if (registration.pending.size === 0) {
           await waitForWake(registration, signal);
-          // Re-checked rather than assumed: `waitForWake` resolves for EITHER
-          // reason, and an aborted stream must not yield whatever the abort
-          // raced with.
-          if (signal.aborted) return;
+          // Re-checked rather than assumed: `waitForWake` resolves for ANY of
+          // three reasons — an event, an abort, or `close()` — and only the
+          // first is a reason to continue. An aborted stream must not yield
+          // whatever the abort raced with, and a closed bus must not park
+          // again on a promise whose only waker has already fired.
+          if (signal.aborted || closed) return;
         }
         // Drained into a local array before yielding: a `yield` suspends this
         // generator, and `deliver` can add to `pending` while it is suspended.
@@ -265,8 +287,19 @@ export async function createRealtimeBus(opts: CreateRealtimeBusOptions): Promise
       return registrations.size;
     },
     async close() {
-      // Wakes every suspended `subscribe` so its `finally` runs, rather than
-      // leaving generators parked on a promise nothing will ever resolve.
+      // Two steps, and the first is what makes the second mean anything: set
+      // the flag, THEN wake. A wake alone leaves the generator to look for a
+      // reason to stop, find none, and re-park on a promise nothing will ever
+      // resolve; the flag is that reason. Ordering matters for the same
+      // reason — a wake before the flag is set is a wake the generator
+      // sleeps through.
+      //
+      // `subscribe`'s `finally` runs on a microtask after its wake, so the
+      // registrations are not necessarily gone when this returns; awaiting
+      // each generator would mean holding references to them, and nothing
+      // here needs that. A caller that wants `subscriberCount === 0` should
+      // await the streams it started. `bus.test.ts` does.
+      closed = true;
       for (const registration of registrations) registration.wake?.();
       await opts.sql.end();
     },

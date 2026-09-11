@@ -149,6 +149,14 @@
  * an event is: a topic name, for a meeting in the town their session resolved
  * to. Every refetch it prompts is an ordinary request with its own fresh
  * context, its own fresh actor and its own RLS.
+ *
+ * That statement is only true while the bound is actually configured, and the
+ * bound lives in one object literal on `initTRPC.create()` — the shape a
+ * tidying pass simplifies away without noticing it has just removed the only
+ * limit on authorization staleness in the API. `trpc/__tests__/sse-bounds.test.ts`
+ * is what goes red when that happens: it asserts `appRouter` carries the
+ * option, and separately drives a real HTTP stream to the deadline to pin that
+ * the deadline ends it in the way that makes a client reconnect.
  */
 
 import type { FastifyRequest, FastifyReply } from "fastify";

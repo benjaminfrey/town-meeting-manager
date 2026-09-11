@@ -245,10 +245,16 @@ describe("the realtime bus", () => {
     });
   });
 
-  it("wakes every parked subscriber on close, rather than leaving generators on a promise nothing resolves", async () => {
+  it("ends every parked subscriber on close, with NO abort, rather than leaving generators on a promise nothing resolves", async () => {
     await withTestDb(async (owner) => {
       const listener = await connectAsAppRole(owner);
       const bus = await createRealtimeBus({ sql: listener });
+      // Deliberately never aborted. `close()` alone has to end the stream —
+      // an abort anywhere in this test would be the thing that ended it, and
+      // the assertion would hold with `close()`'s wake deleted. The first
+      // version of this test did exactly that (`close()` then `abort()` then
+      // `await done`) and stayed green with the subject removed; it was
+      // measured and replaced.
       const controller = new AbortController();
       const { done } = collect(
         bus,
@@ -256,15 +262,23 @@ describe("the realtime bus", () => {
         controller.signal,
       );
       await delay(100);
+      expect(bus.subscriberCount, "the subscriber never parked, so nothing is being tested").toBe(
+        1,
+      );
 
-      // No abort first. If `close()` did not wake it, this test would hang to
-      // vitest's timeout rather than fail — which is why the abort comes
-      // after, purely so the generator can finish once `close` has woken it.
       await bus.close();
-      controller.abort();
-      await done;
 
+      // Raced rather than awaited outright: a `close()` that does not end its
+      // subscribers leaves `done` permanently unsettled, and a bare `await`
+      // would surface that as a 30-second vitest timeout on a file that runs
+      // in a couple of seconds. This fails in one, and says what happened.
+      const outcome = await Promise.race([
+        done.then(() => "the stream ended" as const),
+        delay(1000).then(() => "the stream is still parked" as const),
+      ]);
+      expect(outcome).toBe("the stream ended");
       expect(bus.subscriberCount).toBe(0);
+      expect(controller.signal.aborted).toBe(false);
     });
   });
 });

@@ -78,12 +78,25 @@
  * 60-second notification sweep and every background `TenantJob`, waking every
  * connected client for rows no live screen reads.
  *
- * The mitigation is a marker, not a hope: Task 3 must leave
- * `TODO(phase-e-wave-5-publish)` discharged, and `router-wiring.test.ts` is
- * where "every live-meeting mutation publishes" becomes checkable. If Task 3
- * finds the per-mutation call unwieldy across its thirty-five write sites,
- * the trigger is the documented escalation and this paragraph is the reason
- * it would be chosen.
+ * The mitigation is therefore a test, and it exists:
+ * `trpc/__tests__/router-wiring.test.ts`'s "the live-meeting publish
+ * inventory" reads every router as text, finds each `.mutation(` that writes
+ * one of the eight tables below — directly or through a helper it calls — and
+ * requires it to either call `publishRealtimeEvent` or sit on that file's
+ * `AWAITING_PUBLISH` ledger, marked `TODO(phase-e-wave-5-publish)`. Task 3
+ * discharges the ledger; a live-meeting mutation Task 3 adds without a publish
+ * fails that test by name rather than shipping silently. The check's limits
+ * are stated there rather than here — it is a floor under an otherwise
+ * invisible failure, not a proof.
+ *
+ * (This paragraph previously described that check in the present tense while
+ * the only occurrence of `phase-e-wave-5-publish` in the repository was the
+ * sentence itself. It was written before the check and is now written after
+ * it.)
+ *
+ * If Task 3 finds the per-mutation call unwieldy across its thirty-five write
+ * sites, the trigger is the documented escalation and this paragraph is the
+ * reason it would be chosen.
  */
 
 import { sql } from "drizzle-orm";

@@ -62,6 +62,9 @@ import type { RealtimeBus } from "../realtime/bus.js";
  * gap between abort and reconnect is a gap in delivery. So this bound costs a
  * refetch of the live meeting's eight reads per subscriber per five minutes
  * too, which is the honest price and is why it is not thirty seconds.
+ *
+ * Pinned — including that the `create()` call below still carries it at all —
+ * by `__tests__/sse-bounds.test.ts`.
  */
 export const SSE_MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
 
@@ -74,6 +77,9 @@ export const SSE_MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
  * `infrastructure/nginx/nginx.conf` is configured not to (`proxy_read_timeout`
  * on the `/api/trpc/` block), but the hops this project does not control are
  * the point.
+ *
+ * Also pinned by `__tests__/sse-bounds.test.ts`, which reads the raw `event:
+ * ping` frames off a real stream.
  */
 export const SSE_PING_INTERVAL_MS = 15 * 1000;
 
