@@ -25,14 +25,21 @@
  *    global check.
  *
  *    Most of the guards are board-scoped, not the two that were obviously
- *    so — quote the grep, not the number (conventions item 11), because this
- *    count has moved in three of the last four waves:
+ *    so. This paragraph used to say SIXTEEN, and stayed at sixteen through
+ *    three waves that changed it — quote the grep, not the number
+ *    (conventions item 11). The grep is the one in `trpc.ts`'s
+ *    `requireBoardActor` doc comment: it counts the `BoardScope`-taking
+ *    signatures in THIS file, and answered 16 at Stage 1 Task D1d, 18 at
+ *    `860a469`, 19 at `5d11393` and 29 after Phase E wave 5 Task 2 added
+ *    rules 2a, 6a and 21b–21e below.
  *
- *        $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
- *        16   # Stage 1, Task D1d, when this paragraph was written
- *        18   # at 860a469, Phase E wave 4 Task 1's close-out
- *        19   # at 5d11393, after wave 4 Task 2 added `assertCanPublishAgenda`
- *        29   # Phase E wave 5 Task 2 — rules 2a, 6a and 21b–21e below
+ *    **The command itself is deliberately not reproduced here**, and that is
+ *    not squeamishness: its pattern is a substring of every signature it
+ *    counts, so writing it in this file makes the file match itself and the
+ *    command answers one MORE than the number of rules. That happened — a
+ *    draft of this very paragraph pasted the command and turned 29 into 30,
+ *    caught by re-running it rather than by reading. Quote it from `trpc.ts`,
+ *    the conventions, or `board-scope.test.ts`; never from here.
  *
  *    Every code the two `designated_boards` permission templates grant —
  *    `TEMPLATE_BOARD_SPECIFIC_STAFF` (A1 A2 A3 A5 A6 M1–M7 R1–R6) and

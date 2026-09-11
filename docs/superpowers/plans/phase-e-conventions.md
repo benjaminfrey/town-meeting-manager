@@ -357,9 +357,18 @@ $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
 ```
 
 `rules.ts`'s own header said **SIXTEEN** from Stage 1 until that commit, three counts out of date —
-it now quotes this same grep with its history instead, as do `trpc.ts`'s `requireBoardActor` doc
-comment and `board-scope.test.ts`'s header. Those four places plus this one are the whole set; if a
-sixth ever starts quoting it, add it here.
+it now carries this history too, as do `trpc.ts`'s `requireBoardActor` doc comment and
+`board-scope.test.ts`'s header. Those four places plus this one are the whole set; if a sixth ever
+starts quoting it, add it here.
+
+**One trap this grep has that item 11's `TODO(phase-e-wave-` grep does not, found by re-running
+rather than by reading: `rules.ts` must not contain the command.** The pattern `: BoardScope` is a
+substring of every signature it counts, so pasting the command INTO the file it greps makes the file
+match itself and the answer comes back one too high. Wave 5 Task 2's first attempt at fixing
+`rules.ts`'s stale SIXTEEN did exactly that and turned 29 into 30. The header there now states the
+counts and points at the command rather than reproducing it. This is the self-referential form of
+the markers-versus-mentions problem item 11 already records — a grep whose pattern appears in its own
+documentation is a grep that counts its own documentation.
 
 The extra rule the old "nineteen" was reaching for — a DIFFERENT nineteenth from the real one the
 grep now counts — was `assertCanInsertVoteRecord` (M3 OR the caller's own active seat), which takes no
