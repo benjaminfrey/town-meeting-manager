@@ -1498,6 +1498,17 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # `agenda_item` writes (its delete was three unwrapped round trips), so
      # item 11's sweep had been reading it as done — the exact hole this
      # item exists to close, found by a task brief rather than by the grep.
+ 6   # at cd10b54, the close of Phase E wave 4, Task 4 — DOWN six from
+     # Task 3's 12, and now with ZERO `phase-e-wave-4` markers left in the
+     # tree (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-4\)" packages/web/src`
+     # answers empty; the 6 that remain are all wave-5/6). The six removed
+     # are exactly the six on this task's own two files:
+     # `CreateMeetingDialog.tsx` carried FOUR (a header line plus three
+     # inline) for three gaps, and `routes/templates.tsx` TWO (header plus
+     # inline) for one. No marker was added: both files reach zero raw
+     # Supabase calls, and `lib/meeting-helpers.ts` — which never carried a
+     # marker at all despite being the live create-from-template writer — is
+     # deleted rather than marked.
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -1810,6 +1821,20 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `pathfilter-pin-coverage.test.ts`'s own `stripComments` over the same file list, exactly as the
   check itself does; walked that way at `8cbf749` it answers **39**, unchanged from the whole-branch
   round's own last figure, because the one new mention this task added is comment-only.
+  **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
+  not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
+  file's new header explains that the four template writers' existing `trpc.agendaTemplate.pathFilter()`
+  calls now reach this screen's key, in prose, while the screen itself writes nothing and calls no
+  `pathFilter()`. So the roster of comment-only false positives is `routes/people.tsx`,
+  `test/trpc.ts`, `routes/boards.$boardId.tsx` and now `routes/templates.tsx`. The stripped count
+  does not move: Task 4's one genuinely new call is `trpc.agendaItem.pathFilter()` inside
+  `components/meetings/CreateMeetingDialog.tsx`, a file already counted for its
+  `trpc.meeting.pathFilter()` call — which is exactly the per-file credit bleed item 8 describes, so
+  that task swept all three of that file's `invalidateQueries` lines by deletion rather than
+  trusting the check: each turned exactly one named test red, and each was restored byte-identical.
+  Task 4 also added a comment-only false positive to item 11's OTHER grep: `CreateMeetingDialog.tsx`'s
+  new header cites `lib/supabase.ts` in prose while importing nothing from it, so
+  `grep -rl "lib/supabase\|useSupabase"` counts 34 non-test files where 33 really reach the client.
   **Re-measured at `24bfcd4` (wave 4, Task 3): raw 44, stripped 41.** The two new comment-stripped
   writers are `components/meetings/ExhibitUploader.tsx` and `components/meetings/ExhibitRow.tsx`,
   both of which gained `trpc.exhibit.pathFilter()` when the agenda builder's exhibit read moved;
@@ -2235,10 +2260,14 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
 
 - **Wave 4, Task 3's own open items.** Three, none of them a defect this task introduced, and the
   first two are scoping rather than gaps:
-  1. **`agendaItem.instantiateFromTemplate` still has no caller.** Task 1 shipped it for
+  1. ~~**`agendaItem.instantiateFromTemplate` still has no caller.** Task 1 shipped it for
      `CreateMeetingDialog.tsx`'s `instantiateAgendaFromTemplate` helper, which is **Task 4**'s file
      and carries its own `TODO(phase-e-wave-4)` marker naming it. Task 3's file list is the agenda
-     BUILDER, and that screen never instantiates a template.
+     BUILDER, and that screen never instantiates a template.~~ — **closed in Task 4**, and with the
+     two halves of evidence item 1 of Task 2's own list says to demand: the procedure has a real
+     caller (`CreateMeetingDialog.tsx`'s `instantiateMutation`) AND the raw write is gone rather
+     than bypassed — `packages/web/src/lib/meeting-helpers.ts` is DELETED, this dialog having been
+     its only caller.
   2. **`agendaItem.setOperatorNotes` and `markComplete` still have no caller**, as Task 1 said —
      `AgendaItemDetailPanel.tsx` is reached only from `routes/meetings.$meetingId.live.tsx`, wave 5's
      file. Wave 5 also inherits Task 1's undecided A2-versus-M1 question for those two.
@@ -2246,6 +2275,32 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      last legacy reader does": `routes/meetings.$meetingId.review.tsx` still reads
      `[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and that file is wave
      6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.
+
+- **Wave 4, Task 4 — a client flow that spans TWO guarded procedures, which item 2 does not cover
+  and waves 5 and 6 both inherit.** Every write this document discusses is one procedure with one
+  guard. `CreateMeetingDialog`'s "create from template" is two: `meeting.insert` (A1,
+  `schedule_meeting`) then `agendaItem.instantiateFromTemplate` (A2, `edit_agenda`), and the second
+  runs after the first has committed. Three things follow that a wave-5 author writing a
+  multi-step live-meeting flow should not re-derive:
+  - **Do not fold them to get atomicity.** One procedure spanning two codes needs a rule that does
+    not exist in `rules.ts`, and inventing one silently answers a product question: a clerk holding
+    A1 and not A2 can schedule a meeting today, and a folded procedure either refuses them outright
+    or drops the agenda without saying so. Conventions item 1's "the query you are replacing is a
+    specification" covers the authorization shape as much as the columns.
+  - **A refusal on the SECOND call is a different message from a refusal on the first, and
+    `refusalMessage` fits only the first.** Both of that helper's sentences say the action did not
+    happen; after step one commits, half of it did. The honest message names what exists ("The
+    meeting was created, but …").
+  - **The footer is part of the refusal.** Leaving the primary button armed after a partial success
+    invites a DUPLICATE of step one — a second meeting, from a button the user has every reason to
+    press again. `CreateMeetingDialog` swaps "Create Meeting" for "Open agenda" in exactly that
+    state. This is the same family as the `AlertDialog` `aria-hidden` finding above (a refusal
+    rendered where it cannot be acted on), one layer further out: there the message was invisible,
+    here the message is visible and the only offered ACTION is wrong.
+
+  Worth recording because the pre-migration code had all three wrong at once, and only one of them
+  was a transport bug: the raw helper's throw was caught by a single `try` wrapping both steps, so
+  a failed agenda write was reported as "Couldn't create this meeting" — while the meeting existed.
 
   And one claim this task probed and found does NOT reproduce, recorded so a later wave does not
   spend a round on the same phantom: **`agenda-item.ts`'s `scheduled_date::text` comment said the

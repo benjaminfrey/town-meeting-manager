@@ -40,7 +40,8 @@ const received: { insert?: unknown; instantiate?: unknown } = {};
 /** Mutable so a test can make the next call refuse, or change the template list. */
 const server = {
   insertRejects: false,
-  instantiateRejects: false,
+  /** "forbidden" and "broken" take DIFFERENT branches of the message ternary. */
+  instantiateFails: null as null | "forbidden" | "broken",
   hasTemplate: true,
 };
 
@@ -85,7 +86,8 @@ const stub = installTRPCFetchStub({
   },
   "agendaItem.instantiateFromTemplate": (input) => {
     received.instantiate = input;
-    if (server.instantiateRejects) trpcTestError("FORBIDDEN");
+    if (server.instantiateFails === "forbidden") trpcTestError("FORBIDDEN");
+    if (server.instantiateFails === "broken") trpcTestError("INTERNAL_SERVER_ERROR");
     return { count: 4 };
   },
 });
@@ -148,7 +150,7 @@ async function create(onOpenChange: (open: boolean) => void = () => {}) {
 describe("CreateMeetingDialog", () => {
   beforeEach(() => {
     server.insertRejects = false;
-    server.instantiateRejects = false;
+    server.instantiateFails = null;
     server.hasTemplate = true;
     received.insert = undefined;
     received.instantiate = undefined;
@@ -219,7 +221,7 @@ describe("CreateMeetingDialog", () => {
     // The second refusal path. `meeting.insert` has already committed by the
     // time this runs, so a message blaming the create would be false and a
     // still-armed "Create Meeting" button would produce a duplicate meeting.
-    server.instantiateRejects = true;
+    server.instantiateFails = "forbidden";
     const onOpenChange = vi.fn();
     const { user } = renderDialog(onOpenChange);
     await waitForTemplates();
@@ -234,5 +236,25 @@ describe("CreateMeetingDialog", () => {
     expect(await screen.findByRole("button", { name: /open agenda/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create meeting/i })).not.toBeInTheDocument();
     expect(stub.countFor("meeting.insert")).toBe(1);
+  });
+
+  it("still says the meeting WAS created when the instantiation fails for a reason that is NOT a refusal", async () => {
+    // The other arm of the same message ternary. Found by running item 2's
+    // branch-coverage step over this component
+    // (`BRDA:311,14,1,0` in `coverage/lcov.info` named it as zero-hit while
+    // the FORBIDDEN arm above was covered) — the generic arm is the one a
+    // clerk actually hits when the write fails for any reason other than
+    // permissions, and it carries the same load-bearing "was created" clause.
+    server.instantiateFails = "broken";
+    const { user } = renderDialog();
+    await waitForTemplates();
+    await submit(user);
+
+    expect(
+      await screen.findByText(
+        "The meeting was created, but its agenda couldn't be filled in from the template. Open the agenda to add items by hand.",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /open agenda/i })).toBeInTheDocument();
   });
 });
