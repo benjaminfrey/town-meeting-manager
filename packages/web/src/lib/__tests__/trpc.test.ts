@@ -4,7 +4,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { queryClient } from "../queryClient";
-import { trpc, trpcClient } from "../trpc";
+import { TRPCClientError } from "@trpc/client";
+import {
+  categorizeMutationError,
+  getMutationErrorMessage,
+  refusalMessage,
+  trpc,
+  trpcClient,
+} from "../trpc";
 
 const originalFetch = globalThis.fetch;
 const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource;
@@ -174,5 +181,123 @@ describe("the link split", () => {
 
     expect(calls.length).toBe(1);
     expect(FakeEventSource.urls).toEqual([]);
+  });
+});
+
+/**
+ * The mutation-error taxonomy, against the errors this client actually
+ * produces.
+ *
+ * Phase E, wave 5, Task 6. The function this replaces lived in
+ * `lib/connection-error-handler.ts` and was PostgREST-shaped: `PGRST301`, a
+ * `{code, message, details, hint}` envelope, SQLSTATE class `23*`, and the
+ * substrings "row-level security" and "permission denied". None of that shape
+ * reaches a browser any more, so as written it answered `"unknown"` for every
+ * error this application can now produce — including every refusal.
+ *
+ * Every error below is built the way the real client builds it, not by hand:
+ * `TRPCClientError.from({ error: shape })` is literally what `httpBatchLink`
+ * calls on an RPC error response, and `TRPCClientError.from(cause)` is what it
+ * calls when `fetch` rejects. A test that constructed `{ data: { code } }`
+ * object literals would pin this function against a shape nobody produces.
+ */
+describe("categorizeMutationError", () => {
+  /** An RPC error response, exactly as the API's default formatter shapes it. */
+  function rpcError(code: string, httpStatus: number, message = "nope") {
+    return TRPCClientError.from({
+      error: {
+        code: -32600,
+        message,
+        data: { code, httpStatus, stack: undefined, path: "x.y" },
+      },
+    } as never);
+  }
+
+  it("reads a refusal as a permission problem", () => {
+    expect(categorizeMutationError(rpcError("FORBIDDEN", 403))).toBe("permission");
+    // UNAUTHORIZED joins it: both mean "not you", and the session-expiry half
+    // is already handled structurally by AuthProvider / ProtectedRoute.
+    expect(categorizeMutationError(rpcError("UNAUTHORIZED", 401))).toBe("permission");
+  });
+
+  it("reads a collision as a conflict and a bad request as validation", () => {
+    expect(categorizeMutationError(rpcError("CONFLICT", 409))).toBe("conflict");
+    expect(categorizeMutationError(rpcError("BAD_REQUEST", 400))).toBe("validation");
+    // A zod failure on the server arrives as BAD_REQUEST; a malformed body
+    // never reaches the parser and arrives as PARSE_ERROR. Both are "fix the
+    // data", and neither is a server fault to apologise for.
+    expect(categorizeMutationError(rpcError("PARSE_ERROR", 400))).toBe("validation");
+    expect(categorizeMutationError(rpcError("UNPROCESSABLE_CONTENT", 422))).toBe("validation");
+  });
+
+  it("reads the server's own give-up codes as network failures", () => {
+    // Neither is a fault the user can fix by changing their input, and both
+    // mean "try that again" rather than "something is broken".
+    expect(categorizeMutationError(rpcError("TIMEOUT", 408))).toBe("network");
+    expect(categorizeMutationError(rpcError("CLIENT_CLOSED_REQUEST", 499))).toBe("network");
+  });
+
+  it("does NOT dress a NOT_FOUND up as a refusal", () => {
+    // Conventions item 3: a row in another town answers NOT_FOUND precisely so
+    // a caller cannot tell "does not exist" from "not yours". Mapping it to
+    // `permission` here would undo that at the last hop and tell the caller
+    // exactly what the code was chosen to hide.
+    expect(categorizeMutationError(rpcError("NOT_FOUND", 404))).toBe("unknown");
+  });
+
+  it("reads a request that never reached a resolver as a network failure", () => {
+    // THE case the old implementation could not express, and the one the new
+    // offline pill is about. `TRPCClientError.data` is populated only from an
+    // RPC error envelope, so a link that could not complete the request at all
+    // produces a tRPC error with NO code — not a degenerate `unknown`, but the
+    // only transport-failure signal this client gets.
+    const transportFailure = TRPCClientError.from(new TypeError("Failed to fetch"));
+    expect(transportFailure.data, "the premise of this test").toBeUndefined();
+    expect(categorizeMutationError(transportFailure)).toBe("network");
+  });
+
+  it("still recognises a raw fetch failure, for the writes that are not tRPC", () => {
+    // The exhibit upload and delete endpoints are multipart Fastify routes
+    // called with a bare `fetch` (conventions item 2, "where a table has TWO
+    // creation paths"), so this shape has not gone away.
+    expect(categorizeMutationError(new TypeError("Failed to fetch"))).toBe("network");
+  });
+
+  it("admits it does not know, rather than guessing", () => {
+    expect(categorizeMutationError(rpcError("INTERNAL_SERVER_ERROR", 500))).toBe("unknown");
+    expect(categorizeMutationError(new Error("boom"))).toBe("unknown");
+    expect(categorizeMutationError(null)).toBe("unknown");
+  });
+
+  it("is what refusalMessage's copy branches on — it is not dead code", () => {
+    // The function had ZERO call sites from the day it was written until this
+    // task (audit finding C4, 2026-08-25). `refusalMessage` is its first real
+    // consumer, at 19 files' worth of call sites, and these two assertions are
+    // what would go red if it were quietly bypassed again.
+    expect(refusalMessage(rpcError("FORBIDDEN", 403), "cancel this meeting")).toBe(
+      "You don't have permission to cancel this meeting.",
+    );
+    expect(
+      refusalMessage(TRPCClientError.from(new TypeError("Failed to fetch")), "save this motion"),
+    ).toContain("can't reach the server");
+    // Unchanged for everything else — the network branch is additive.
+    expect(refusalMessage(new Error("boom"), "save this motion")).toBe(
+      "Couldn't save this motion. Try again.",
+    );
+  });
+
+  it("gives a caller with no verb phrase a sentence anyway — one per category", () => {
+    expect(getMutationErrorMessage(rpcError("CONFLICT", 409))).toContain("someone else");
+    expect(getMutationErrorMessage(rpcError("FORBIDDEN", 403))).toContain("permission");
+    expect(getMutationErrorMessage(rpcError("BAD_REQUEST", 400))).toContain("check the form");
+    expect(getMutationErrorMessage(new TypeError("Failed to fetch"))).toContain(
+      "can't reach the server",
+    );
+    // The `unknown` arm is the one worth pinning explicitly: it is what an
+    // unmapped code falls through to, and "could not save" must not quietly
+    // become a more confident claim than the categoriser can support.
+    expect(getMutationErrorMessage(rpcError("INTERNAL_SERVER_ERROR", 500))).toBe(
+      "Could not save your changes. Please try again.",
+    );
   });
 });

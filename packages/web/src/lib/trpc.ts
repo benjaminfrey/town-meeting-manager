@@ -128,8 +128,136 @@ export function errorMessage(err: unknown, fallback: string): string {
  * section"), so it reads correctly in both sentences.
  */
 export function refusalMessage(err: unknown, action: string): string {
-  if (isTRPCClientError(err) && err.data?.code === "FORBIDDEN") {
+  const kind = categorizeMutationError(err);
+  if (kind === "permission") {
     return `You don't have permission to ${action}.`;
   }
+  // ADDED in wave 5, Task 6, and stated because conventions item 1 asks for an
+  // added clause to be stated: a transport failure used to answer
+  // "Couldn't <action>. Try again." — advice that is wrong in the one case the
+  // user can actually act on. Everything else still falls through unchanged.
+  if (kind === "network") {
+    return `Couldn't ${action} — this device can't reach the server. Check your connection and try again.`;
+  }
   return `Couldn't ${action}. Try again.`;
+}
+
+/**
+ * What went wrong with a write, in the five categories a caller can act on
+ * differently.
+ *
+ * ─── Wave 5, Task 6: this was Supabase-shaped, and had no callers ─────────
+ *
+ * It lived in `lib/connection-error-handler.ts` (deleted in the same commit)
+ * and matched `PGRST301`, the PostgREST `{code, message, details, hint}`
+ * envelope, PG SQLSTATE class `23*`, and the strings `"row-level security"`
+ * and `"permission denied"`. None of that shape survives the move to tRPC:
+ * every refusal now arrives as a `TRPCClientError` whose `data.code` is one of
+ * tRPC's own keys. As written it would have answered `"unknown"` for every
+ * error this application can now produce.
+ *
+ * **The brief for this task said its categories were "consumed elsewhere —
+ * check who before changing the shape". They were not, and the check is the
+ * reason this now lives here.** `grep -rn "categorizeMutationError\|
+ * getMutationErrorMessage\|MutationErrorKind" packages` at `a357d59` returned
+ * hits in that one file and nowhere else — zero call sites, which
+ * `docs/audit/2026-08-25-revival-audit.md`'s finding C4 had already recorded
+ * ("defines `categorizeMutationError` and `getMutationErrorMessage` with
+ * exactly the right taxonomy ... and has **zero call sites**"). So there was
+ * no shape to preserve, and rewriting it in place would have produced a
+ * correct, current-looking, still-dead second vocabulary sitting beside the
+ * live one — `errorMessage` and `refusalMessage` above, which together have
+ * call sites in 24 files. That is the "four copies of three lines" hazard
+ * `errorMessage`'s own doc comment warns about, one level up: two taxonomies
+ * for one question, with nothing keeping them in agreement. It is here, in the
+ * module that already owns how this client reads a tRPC error, and
+ * `refusalMessage` is its first real consumer.
+ *
+ * ─── The mapping, and why the uncoded branch is `network` ─────────────────
+ *
+ * `TRPCClientError.data` is populated only from a real RPC error envelope
+ * (`TRPCClientError.from` fills it from `result.error.data`). A link that
+ * could not complete the request at all — DNS, a dropped connection, nginx
+ * refusing, `fetch` rejecting — produces a `TRPCClientError` with `data`
+ * UNDEFINED and the original `TypeError` as its `cause`. So "a tRPC error
+ * carrying no code" is not a degenerate case to lump into `unknown`; it is
+ * precisely the transport-failure signal, and it is the only one this client
+ * gets.
+ *
+ * `UNAUTHORIZED` joins `FORBIDDEN` under `permission` rather than getting its
+ * own category: both mean "not you", the difference is whether the session
+ * expired, and an expired session is already handled structurally —
+ * `AuthProvider`'s Better Auth session goes null and `ProtectedRoute` sends
+ * the user to `/login`. A category here would duplicate that.
+ *
+ * `NOT_FOUND` is deliberately NOT `permission`, even though conventions item 3
+ * means a row in another town answers `NOT_FOUND` precisely so a caller cannot
+ * tell the two apart. Mapping it back to "you don't have permission" would
+ * undo that at the last hop and tell the caller exactly what the code was
+ * chosen to hide.
+ */
+export type MutationErrorKind =
+  | "network" // Could not reach the server — retrying may work
+  | "permission" // FORBIDDEN / UNAUTHORIZED — user action required
+  | "validation" // The request was malformed — fix the data
+  | "conflict" // Someone else got there first, or a uniqueness collision
+  | "unknown";
+
+export function categorizeMutationError(error: unknown): MutationErrorKind {
+  if (!error) return "unknown";
+
+  if (isTRPCClientError(error)) {
+    const code = error.data?.code;
+    // No envelope at all: the request never reached a resolver. See above.
+    if (code === undefined) return "network";
+
+    switch (code) {
+      case "FORBIDDEN":
+      case "UNAUTHORIZED":
+        return "permission";
+      case "CONFLICT":
+        return "conflict";
+      case "BAD_REQUEST":
+      case "PARSE_ERROR":
+      case "UNPROCESSABLE_CONTENT":
+        return "validation";
+      case "TIMEOUT":
+      case "CLIENT_CLOSED_REQUEST":
+        return "network";
+      default:
+        return "unknown";
+    }
+  }
+
+  // Not every write in this app goes through tRPC. The exhibit upload and
+  // delete endpoints are multipart Fastify routes called with a bare `fetch`
+  // (`storage/documents.ts`'s pair — see conventions item 2's "where a table
+  // has TWO creation paths"), so a raw `TypeError: Failed to fetch` is a shape
+  // this function still has to recognise.
+  if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
+    return "network";
+  }
+
+  return "unknown";
+}
+
+/**
+ * A user-facing sentence for a write that has no action-specific copy.
+ *
+ * Prefer `refusalMessage(err, action)` above, which names what failed. This is
+ * the shape for a caller that has no verb phrase to offer.
+ */
+export function getMutationErrorMessage(error: unknown): string {
+  switch (categorizeMutationError(error)) {
+    case "network":
+      return "This device can't reach the server. Check your connection and try again.";
+    case "permission":
+      return "You don't have permission to make this change.";
+    case "validation":
+      return "The data could not be saved. Please check the form and try again.";
+    case "conflict":
+      return "This record was changed by someone else. Reload and try again.";
+    default:
+      return "Could not save your changes. Please try again.";
+  }
 }
