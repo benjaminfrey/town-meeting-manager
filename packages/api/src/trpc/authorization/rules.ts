@@ -746,8 +746,14 @@ export function assertCanPublishAgenda(actor: Actor, scope: BoardScope): void {
 // Phase E wave 5, Task 2. Same shape of hole as rule 21a's A5 and closed for
 // the same reason, one wave on: the product defines a code, a screen acts on
 // it, and nothing in `packages/api` stands in between. Before this commit the
-// strings "M6" and "M7" did not occur in `packages/api` at ALL — not even as
-// a test fixture, which is how A5 at least showed up — and `executive_session`,
+// strings "M6" and "M7" occurred in `packages/api/src` in exactly ONE place —
+// `require-permission.test.ts`'s `BOARD_SCOPED_CODES` roster, a test fixture —
+// which is the SAME footprint A5 had before rule 21a (two fixtures) and the
+// same reason a completeness sweep reads past it: a code named only by a
+// roster is named by nothing that runs. (An earlier draft of this comment said
+// "did not occur at ALL," which does not reproduce — `git grep -n -E "M6|M7"
+// d796f29 -- packages/api` also finds the seed JSONB in `0000_baseline.sql`
+// and this file's own `M1–M7` range on line 29.) And `executive_session`,
 // `guest_speaker`, `agenda_item_transition` and `future_item_queue` were
 // written by `routes/meetings.$meetingId.live.tsx`,
 // `components/meeting/GuestSpeakerEntry.tsx`,

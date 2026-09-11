@@ -200,9 +200,10 @@ const FAMILIES: ReadonlyArray<{
     allowed: (actor, boardId) => !throws(() => rules.assertCanPublishAgenda(actor, { boardId })),
   },
   // Phase E wave 5, Task 2. M6, M7 and M1 are all in `BOARD_SCOPED_CODES` and
-  // in `TEMPLATE_BOARD_SPECIFIC_STAFF`, and before that task the strings "M6"
-  // and "M7" did not occur in `packages/api` at all — not even as a fixture,
-  // which is how A5 above at least showed up. M1 occurred only inside
+  // in `TEMPLATE_BOARD_SPECIFIC_STAFF`, and before that task M6 and M7 had no
+  // rule and no guard anywhere — they appeared in `packages/api/src` only in
+  // `require-permission.test.ts`'s `BOARD_SCOPED_CODES` roster, the same
+  // fixture-only footprint A5 above had. M1 occurred only inside
   // `assertCanUpdateMeeting`'s third branch, where this table could not reach
   // it: that rule's FIRST branch is A1, so a `global: ["M1"]` actor and a
   // `global: []` actor answer identically through it and the revoking-override

@@ -880,8 +880,14 @@ plan alone:
   in the code; closed in wave 5, Task 2 for all four.** `executive_session` and `guest_speaker` had
   no rule either — the plan did not say so because both have an obvious code (M6
   `trigger_executive_session`, M7 `manage_speaker_queue`) and "a code exists" reads as "a rule
-  exists" until someone greps: before `09f7e88` the strings "M6" and "M7" did not occur anywhere in
-  `packages/api`, not even as a test fixture, which is how A5 at least showed up in wave 4. Both
+  exists" until someone greps: before `09f7e88` M6 and M7 had no rule and no guard anywhere, and
+  occurred in `packages/api/src` in exactly one place — `require-permission.test.ts`'s
+  `BOARD_SCOPED_CODES` roster, a test fixture, which is the same footprint A5 had before wave 4's
+  Task 2 and the same reason a sweep reads past it: a code named only by a roster is named by
+  nothing that runs. (`09f7e88`'s own commit message says the strings "did not occur anywhere in
+  `packages/api`"; that overstates it and does not reproduce —
+  `git grep -n -E "M6|M7" d796f29 -- packages/api` also finds the seed JSONB in `0000_baseline.sql`.
+  Corrected here and in `rules.ts` rather than left standing.) Both
   bookkeeping tables took **M1** (`start_run_meeting`), the code of the action that causes them,
   rather than a new code of their own — the reasoning is stated next to each rule in `rules.ts`
   (21d, 21e) and summarised in "Wave 5, Task 2" below. A fifth gap the plan also did not name:
