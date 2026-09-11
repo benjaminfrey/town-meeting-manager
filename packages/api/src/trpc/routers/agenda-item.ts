@@ -62,10 +62,16 @@
  * to reach for FIRST for a single-code rule. The count moved in wave 5,
  * Task 2 — quote the grep, not the number:
  *
- *     $ grep -c 'requireBoardPermission("A2"' packages/api/src/trpc/routers/agenda-item.ts
+ *     $ grep -cE '^\s+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
  *     7   # at fb3a5cd, wave 5 Task 0's carry-over check
  *     5   # after wave 5 Task 2 moved setOperatorNotes and markComplete to
  *         # requireBoardActor(assertCanUpdateAgendaItemProgress)
+ *
+ * Anchored to leading whitespace so it counts GUARDS, not the mentions of one
+ * in this comment. Unanchored the same command answers 9 at both commits, and
+ * `phase-e-conventions.md`'s wave 5 Task 0 carry-over bullet quoted it in that
+ * form against a hand-trimmed 7-line listing — the markers-versus-mentions
+ * confusion item 11 records for `TODO(phase-e-wave-`, in a second place.
  *
  * **The delete rule, decided rather than left implicit.** There is no
  * `assertCanDeleteAgendaItem` in `rules.ts` and no delete-specific

@@ -322,16 +322,21 @@ subject-carrying rule like `assertCanUpdateUserAccount`. The FIRST version of th
 `cancel` a local, one-off middleware (`requireCanUpdateMeeting`) for exactly this — but the review
 round that found this item's own count inconsistency also asked why it should stay local: a full
 audit of `rules.ts`'s `BoardScope` rules — **eighteen** at the time, nineteen since wave 4's Task 2
-added `assertCanPublishAgenda`; quote the grep below, not either number — found
+added `assertCanPublishAgenda`, twenty-nine since wave 5's Task 2 added ten more; quote the grep
+below, not any of the three numbers — found
 `assertCanUpdateMeeting` is not alone.
-All but two ARE exactly one `assertPermission` call — use `requireBoardPermission` for those, and reach
-for it FIRST; this shape is for the rest. The one other that is not is `assertCanInsertExhibit`
+~~All but two~~ **All but THREE, as of wave 5** ARE exactly one `assertPermission` call — use
+`requireBoardPermission` for those, and reach
+for it FIRST; this shape is for the rest. The second is `assertCanInsertExhibit`
 (A3 OR `isBoardMember(actor)`, a ROLE branch rather than a second code — ~~this one DOES fit the shape
 below, structurally; it is named here because it is the other multi-branch example the audit found,
 not because it cannot be wired~~ — **wired in wave 4, Task 2: `exhibit.link` is
 `requireBoardActor`'s second real call site, and the first on a rule whose second branch is a role.
 See "Wave 4, Task 2" below for what that first use found, which is not what a reader of this
-paragraph would predict**).
+paragraph would predict**). The third is wave 5 Task 2's `assertCanUpdateAgendaItemProgress` (A2 OR
+M1@board), and it is the first of the three whose SECOND branch is a second delegable code rather
+than a role or the admin short-circuit — see "Wave 5, Task 2" below. The ten OTHER rules that task
+added are all single-code and belong behind `requireBoardPermission`, not here.
 
 **Corrected in the whole-branch fix round: this count shipped as "nineteen" here and again in
 `trpc.ts`'s own `requireBoardActor` doc comment, and it does not reproduce.** Quote the grep, not
@@ -340,11 +345,21 @@ very rule the miscount was reaching for:
 
 ```
 $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
+16   # Stage 1, Task D1d, where rules.ts's own header first stated a number
 18   # at 860a469, wave 4 Task 1's close-out
 19   # at 5d11393, after wave 4 Task 2 added `assertCanPublishAgenda` — A5,
      # `publish_agenda`, one of the 18 BOARD_SCOPED_CODES and the only one
      # with no rule in this codebase at all until that task
+29   # at 09f7e88, after wave 5 Task 2 added ten: the four live-meeting tables
+     # that had no rule at all (executive_session M6, guest_speaker M7,
+     # agenda_item_transition M1, future_item_queue M1), the missing
+     # vote_record DELETE (M3), and assertCanUpdateAgendaItemProgress
 ```
+
+`rules.ts`'s own header said **SIXTEEN** from Stage 1 until that commit, three counts out of date —
+it now quotes this same grep with its history instead, as do `trpc.ts`'s `requireBoardActor` doc
+comment and `board-scope.test.ts`'s header. Those four places plus this one are the whole set; if a
+sixth ever starts quoting it, add it here.
 
 The extra rule the old "nineteen" was reaching for — a DIFFERENT nineteenth from the real one the
 grep now counts — was `assertCanInsertVoteRecord` (M3 OR the caller's own active seat), which takes no
@@ -412,7 +427,8 @@ src/trpc/__probe.ts(3,54): error TS2345: Argument of type '(actor: Actor, scope:
 ```
 
 Every `BoardScope` rule takes a REQUIRED second parameter (`scope: BoardScope`; none is optional —
-same grep as above, re-checked when Task 2 added the nineteenth), so the mistake is not expressible without an explicit cast, which is the
+same grep as above, re-checked when wave 4 Task 2 added the nineteenth and again when wave 5 Task 2
+added ten more — all ten take a required `scope: BoardScope`), so the mistake is not expressible without an explicit cast, which is the
 already-documented "parked, not closed" structural-typing hole above rather than a second one. What
 genuinely remains open is only the narrower claim: there is no `BOARD_SCOPED_CODES`-style set of RULE
 FUNCTIONS, so if a future rule were ever given an OPTIONAL scope parameter, `requireActor` would
@@ -514,9 +530,33 @@ CREATE POLICY exhibit_tenant_isolation ON public.exhibit
 ```
 
 No board predicate, no role predicate — so the mismatch defence is load-bearing for `exhibit.link`,
-two joins out. **`motion`, `vote_record` and `minutes_section` remain unchecked** — that check
-belongs to whichever wave writes each one's router, and "the other four turned out tenancy-only" is
-not evidence about these three.
+two joins out. ~~**`motion`, `vote_record` and `minutes_section` remain unchecked**~~ — **all three
+checked in wave 5, Task 2 while ruling the tables that wave writes; all seven are now confirmed
+tenancy-only**, so the mismatch defence is load-bearing for every one of them:
+
+```
+$ grep -nE "CREATE POLICY (motion|vote_record|minutes_section)_tenant_isolation" -A 3 \
+    packages/api/drizzle/0000_baseline.sql
+4069:CREATE POLICY minutes_section_tenant_isolation ON public.minutes_section
+4070-  FOR ALL
+4071-  USING (town_id = get_current_town_id())
+4072-  WITH CHECK (town_id = get_current_town_id());
+--
+4074:CREATE POLICY motion_tenant_isolation ON public.motion
+4075-  FOR ALL
+4076-  USING (town_id = get_current_town_id())
+4077-  WITH CHECK (town_id = get_current_town_id());
+--
+4136:CREATE POLICY vote_record_tenant_isolation ON public.vote_record
+4137-  FOR ALL
+4138-  USING (town_id = get_current_town_id())
+4139-  WITH CHECK (town_id = get_current_town_id());
+```
+
+The same task checked the four tables item 2's list never named — `executive_session`,
+`guest_speaker`, `agenda_item_transition`, `future_item_queue` — and found the identical shape. That
+is eleven for eleven; the caution "the other four turned out tenancy-only is not evidence about
+these three" was the right discipline and the answer came out the same every time.
 
 **Wave 4, Task 2 — the fourth guard shape's second call site, and two things it found.**
 `exhibit.link` is `.use(requireBoardActor(assertCanInsertExhibit))`, the first use of that shape on a
@@ -776,8 +816,9 @@ input), not about SHAPE (a column vs. a join vs. a join of a join). Five of the 
 names now have that RLS finding checked against `0000_baseline.sql` directly — `meeting`,
 `agenda_item`, `meeting_attendance`, `minutes_document`, and `exhibit` as of this wave — all five
 tenancy-only, no board predicate, no role predicate, so the mismatch defence is load-bearing for
-all five the moment a row-targeted board-scoped WRITE touches them. `motion`, `vote_record` and
-`minutes_section` remain the only three of the original seven still unchecked.
+all five the moment a row-targeted board-scoped WRITE touches them. ~~`motion`, `vote_record` and
+`minutes_section` remain the only three of the original seven still unchecked.~~ — **checked in
+wave 5, Task 2; all seven are tenancy-only. See the grep in the Task 2 paragraph above.**
 
 **What finding 3 (rule 14/15's board-blind `isBoardMember` branch) changed: nothing in the
 mechanism, and one thing in how this document records a decision.** The finding itself is not a
@@ -832,10 +873,19 @@ plan alone:
   motivated them needed a `TenantTx` of their own. Whichever wave wires it should record why it
   stays resolver-side next to the rule itself, the way `assertMatchesAuthorizedBoard`'s own doc
   comment does, rather than re-deriving the reasoning silently.
-- **Two tables have no rule at all today**, per wave 5's own plan: `agenda_item_transition` and
+- ~~**Two tables have no rule at all today**, per wave 5's own plan: `agenda_item_transition` and
   `future_item_queue`. Deciding what code authorizes them (or minting a new one) is a wave-5
   decision this item does not make for them — named here only so "no rule exists yet" is not
-  mistaken for an oversight this item failed to flag.
+  mistaken for an oversight this item failed to flag.~~ — **the count was TWO in the plan and FOUR
+  in the code; closed in wave 5, Task 2 for all four.** `executive_session` and `guest_speaker` had
+  no rule either — the plan did not say so because both have an obvious code (M6
+  `trigger_executive_session`, M7 `manage_speaker_queue`) and "a code exists" reads as "a rule
+  exists" until someone greps: before `09f7e88` the strings "M6" and "M7" did not occur anywhere in
+  `packages/api`, not even as a test fixture, which is how A5 at least showed up in wave 4. Both
+  bookkeeping tables took **M1** (`start_run_meeting`), the code of the action that causes them,
+  rather than a new code of their own — the reasoning is stated next to each rule in `rules.ts`
+  (21d, 21e) and summarised in "Wave 5, Task 2" below. A fifth gap the plan also did not name:
+  `vote_record` had INSERT and UPDATE rules and no DELETE, while `VotePanel.tsx:207` deletes.
 
 **`future_item_queue`'s own board column, re-verified at wave 5 Task 0 rather than taken on the
 plan's word.** The bullet above states it from wave 5's own plan; Task 0 checked it directly against
@@ -877,6 +927,26 @@ re-recorded rather than carried forward silently a second wave.**
    665:      requireBoardPermission("A2", boardIdFrom(), {
    696:      requireBoardPermission("A2", boardIdFrom(), {
    ```
+   **Superseded in part by wave 5, Task 2 — re-run rather than trusted, and it answers FIVE now,
+   not seven:** `setOperatorNotes` and `markComplete` no longer carry that guard at all. They are
+   `.use(requireBoardActor(assertCanUpdateAgendaItemProgress))` — A2 OR M1, the settled answer to
+   the A2-versus-M1 question `agenda-item.ts`'s header had left open (see "Wave 5, Task 2" below).
+   Both DO now carry a dedicated M1-only test, which is not the REVOKING-override shape this bullet
+   asks for but does exercise the board-override mechanism on each (`boardOverrides: [{ boardId,
+   permissions: { M1: true } }]`, global all-false — the `designated_boards` shape). So the gap
+   below is now **three** of seven with no override-specific pin (`reorder`, `delete`,
+   `instantiateFromTemplate`), not five.
+   ```
+   $ grep -cE '^\s+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
+   7   # at fb3a5cd
+   5   # at 18bad5f
+   ```
+   Anchored to leading whitespace, deliberately: the unanchored
+   `grep -c 'requireBoardPermission("A2"'` this bullet originally ran answers **9** at `fb3a5cd`,
+   not 7 — the two extra are prose mentions in the file's own header, the same
+   markers-versus-mentions confusion item 11 records for `TODO(phase-e-wave-`. The seven line
+   numbers listed above were the real guards; the count beside them was not what that command
+   prints.
    Only `insert` and `update` carry a dedicated "honours a REVOKING board override" test
    (`agenda-item.test.ts:417`, `:752`); `reorder`, `delete`, `instantiateFromTemplate`,
    `setOperatorNotes` and `markComplete` are protected by the identical guard code but have no
@@ -925,6 +995,83 @@ re-recorded rather than carried forward silently a second wave.**
    (`exhibit.link`'s and `byMeeting`'s board-blind `isBoardMember` branches) — verified directly rather
    than assumed. Recorded here only so a reader of this specific carry-over list sees all four
    accounted for in one place; the decision itself is not duplicated a third time.
+
+**Wave 5, Task 2 — closing the rules gap BEFORE the routers that need it, and the one question
+wave 4 handed forward.**
+
+Ten rules, all `BoardScope`, all in `rules.ts` (the grep above moves 19 -> 29). Four tables this
+wave writes had no rule at all; a fifth had an operation with none; and one existing pair of
+procedures was guarded by the wrong code.
+
+| table                    | writes the product performs | code     | rule                                              |
+| ------------------------ | --------------------------- | -------- | ------------------------------------------------- |
+| `executive_session`      | INSERT / UPDATE / DELETE    | M6       | `assertCan{Insert,Update,Delete}ExecutiveSession` |
+| `guest_speaker`          | INSERT / DELETE             | M7       | `assertCan{Insert,Delete}GuestSpeaker`            |
+| `agenda_item_transition` | INSERT / UPDATE             | M1       | `assertCan{Insert,Update}AgendaItemTransition`    |
+| `future_item_queue`      | INSERT                      | M1       | `assertCanInsertFutureItem`                       |
+| `vote_record`            | DELETE                      | M3       | `assertCanDeleteVoteRecord`                       |
+| `agenda_item` (live-run) | UPDATE                      | A2 OR M1 | `assertCanUpdateAgendaItemProgress`               |
+
+**One function per write the product performs, which is a DIFFERENT answer from rules 1/2's
+`assertCanDeleteAgendaItem` decision, and the difference is the point.** Wave 4 declined to add an
+agenda-item DELETE rule because A2 was already stated twice in that file, so the rule was findable
+and a third identical body would have been a name with no caller. None of these codes was stated
+_once_: a reader auditing `rules.ts` for "what governs deleting a guest speaker" found nothing, and
+"nothing" reads as "nothing governs it" — which was in fact true. The operations also differ in what
+a refusal has to tell the caller, which this file's header makes load-bearing ("the message is part
+of the rule"). Operations the product does NOT perform get no function.
+
+**`agenda_item_transition` and `future_item_queue` had no obvious code and took M1 rather than a new
+one.** Both are bookkeeping written as a side effect, never acted on directly, so "the code of the
+causing action" is the only non-arbitrary answer available — and the causing action for both is
+running the meeting. Two checks rather than one, because "the causing action" alone would be a
+guess: a transition row is written in the same user action as `meeting.current_agenda_item_id`,
+which `assertCanUpdateMeeting` already governs with an M1 branch, so any other code would put an
+authorization boundary through the middle of one action; and a future-queue row is written only by
+adjourning, alongside three other M1 writes, so under A2 an M1 presiding officer would adjourn and
+silently lose the deferred items — a lost row, not a refusal the user can see. **Minting a new
+`PermissionCode` was considered and rejected**: a code no template grants and no screen exposes
+refuses everyone, in a system where unset means false.
+
+**`vote_record` DELETE is M3, and deliberately NOT rule 5's self-vote branch.** It is the only one of
+the six above where a plausible wrong answer already existed in the file: rule 5 (INSERT) allows a
+board member to record their OWN vote (M8), rule 6 (UPDATE) does not. DELETE resembles UPDATE.
+`VotePanel.tsx:207`'s re-vote is `.delete().eq("motion_id", motionId)` — every member's vote on that
+motion, not one seat's — so a self-vote branch there would be a licence to delete other people's
+votes, since the statement is not keyed by seat at all.
+
+**The A2-versus-M1 verdict: A2 OR M1, for the live-run columns only, and it is the fourth guard
+shape.** `routers/agenda-item.ts`'s header predicted "a second code, hence `requireBoardActor`" and
+that is exactly what it is. `agendaItem.setOperatorNotes` and `agendaItem.markComplete` are now
+`.use(requireBoardActor(assertCanUpdateAgendaItemProgress))`; the other seven writes in that file
+keep `requireBoardPermission("A2", …)`. The line between them is CONTENT versus LIVE-RUN state —
+`status` and `operator_notes` are what the meeting did to the agenda, not what the agenda says.
+**It is a WIDENING, so nothing that worked before stops working:** dropping A2 for M1 alone would
+refuse a hand-built matrix holding A2 without M1, and keeping both costs nothing because every
+shipped template granting A2 also grants M1. **What this means for Task 4's wiring:** nothing
+changes on the client — the input shape, the `boardId` prop and the mismatch defence are all
+identical; what changes is who gets through, and the two procedures were re-guarded in Task 2 rather
+than left for Task 4, because a decided rule that is not applied is the same silent hole as an
+undecided one.
+
+**Why this had to land before Task 3, not alongside Task 4.** `handleMeetingEnd` — which Task 3
+moves whole into one procedure — writes `agenda_item.status = 'deferred'`, `future_item_queue`,
+`agenda_item_transition` and `meeting.status` in one act. Three of the four are M1. Had the fourth
+stayed A2-only, an M1 presiding officer's adjournment would have been refused halfway through, which
+is a partial adjournment and worse than either answer. The rules had to be coherent as a SET before
+the procedure that spans them was written.
+
+**Every one of the ten verified by mutation, per item 13** — blank the rule's body, confirm a NAMED
+test goes red, restore from a copy and confirm the checksum. Each also verified by a SECOND mutation
+this file had not used before: swap the code the rule resolves (M6 -> M7, M1 -> A2, M3 -> M2) and
+confirm the same named test still goes red. That second one is the reason
+`board-scope.test.ts`'s new per-rule block seeds an actor holding **every code except the one under
+test**: the existing FAMILIES table cannot distinguish a deleted guard from a guard keyed to the
+wrong code, because the actors it seeds hold and lose the two codes together. The guard SWAPS in
+`agenda-item.ts` were mutated the same way — deleting either `.use()` turns all 5 of that
+procedure's tests red (the `ctx.authorizedBoardId` wiring-bug shape `agenda-item.test.ts`'s header
+already records), and moving one after `.input()` turns exactly ONE red, the reorder pin, with
+`expected 'BAD_REQUEST' to be 'FORBIDDEN'`.
 
 ### Subscriptions follow item 2's rule unchanged, plus one
 
