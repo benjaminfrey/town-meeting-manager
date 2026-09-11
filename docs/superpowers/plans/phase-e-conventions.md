@@ -815,6 +815,95 @@ plan alone:
   decision this item does not make for them — named here only so "no rule exists yet" is not
   mistaken for an oversight this item failed to flag.
 
+**`future_item_queue`'s own board column, re-verified at wave 5 Task 0 rather than taken on the
+plan's word.** The bullet above states it from wave 5's own plan; Task 0 checked it directly against
+`packages/api/drizzle/0000_baseline.sql` and it holds exactly as stated:
+
+```
+$ grep -n "CREATE TABLE public.future_item_queue" -A 13 packages/api/drizzle/0000_baseline.sql
+CREATE TABLE public.future_item_queue (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    board_id uuid NOT NULL,
+    town_id uuid NOT NULL,
+    source_meeting_id uuid,
+    ...
+```
+
+`board_id uuid NOT NULL` is a direct column; `source_meeting_id` carries no `NOT NULL` at all. Its RLS
+(`future_item_queue_tenant_isolation`) is the identical tenancy-only shape as the other eight —
+`FOR ALL USING (town_id = get_current_town_id())`, no board predicate. So the mismatch defence for a
+row-targeted write on this table is the `meeting`-shaped case (compare `board_id` directly, no join),
+not the eight-table `meeting_id`-join shape — exactly as the paragraph above already said, and now
+checked rather than trusted.
+
+**Wave 5, Task 0 — four items wave 4 left as recorded decisions, checked against HEAD and closed or
+re-recorded rather than carried forward silently a second wave.**
+
+1. ~~The revoking-board-override proof covers 2 of 7 `agendaItem` writes.~~ — **checked against HEAD
+   (`fb3a5cd`) and confirmed still true; re-recorded here rather than fixed, since closing it is a
+   wave-6-sized cost this task's scope does not buy.** All seven writes (`insert`, `update`, `reorder`,
+   `delete`, `instantiateFromTemplate`, `setOperatorNotes`, `markComplete`) carry the byte-identical
+   guard, differing only in the `action` string passed to `requireBoardPermission("A2", boardIdFrom(),
+   {action})` — verified directly:
+   ```
+   $ grep -n 'requireBoardPermission("A2"' packages/api/src/trpc/routers/agenda-item.ts
+   387:      requireBoardPermission("A2", boardIdFrom(), {
+   449:      requireBoardPermission("A2", boardIdFrom(), {
+   502:      requireBoardPermission("A2", boardIdFrom(), {
+   546:      requireBoardPermission("A2", boardIdFrom(), {
+   595:      requireBoardPermission("A2", boardIdFrom(), {
+   665:      requireBoardPermission("A2", boardIdFrom(), {
+   696:      requireBoardPermission("A2", boardIdFrom(), {
+   ```
+   Only `insert` and `update` carry a dedicated "honours a REVOKING board override" test
+   (`agenda-item.test.ts:417`, `:752`); `reorder`, `delete`, `instantiateFromTemplate`,
+   `setOperatorNotes` and `markComplete` are protected by the identical guard code but have no
+   override-specific pin of their own — each does carry a plain board-mismatch refusal test, which is
+   a different claim (item 2's "the board-MISMATCH case" versus "the board OVERRIDE case" are two
+   different things a `BoardScope` guard has to get right, and only the override half is
+   under-covered here). **This is a test-coverage gap, not a live authorization hole**: every write is
+   guarded, and the override-resolution logic itself lives in `requirePermission`'s own board branch,
+   exercised generically in `require-permission.test.ts` and concretely on two of seven real
+   `agendaItem` writes plus `meeting.insert`/`cancel`/`updateStatus`. Left open for whichever wave next
+   touches this file: add the same "honours a REVOKING board override" shape to the remaining five,
+   each verified by mutation the way `insert`'s and `update`'s already are.
+2. ~~`refusalMessage` in `lib/trpc.ts` is a fourth implementation, not a consolidation.~~ — **partially
+   closed in this task.** At `fb3a5cd` five inline `err.data?.code === "FORBIDDEN"` branches existed
+   outside `refusalMessage` itself: `CreateTemplateDialog.tsx:105`, `CancelMeetingDialog.tsx:83`,
+   `boards.$boardId.templates.tsx:120` (inside its own local `describeActionError`),
+   `routes/meetings.tsx:257`, and `CreateMeetingDialog.tsx:312`. Two matched `refusalMessage`'s exact
+   message shape byte-for-byte and are now folded into it
+   (`CancelMeetingDialog.tsx`, `routes/meetings.tsx` — see this task's own commit). `CreateMeetingDialog.tsx:312`
+   is deliberately NOT one of them, exactly as the carry-over note said: its own comment already states
+   why ("Not `refusalMessage`: both of its sentences say the action did not happen, and half of this
+   one did"). **Still open:** `CreateTemplateDialog.tsx:105` and `boards.$boardId.templates.tsx:120`'s
+   `describeActionError` share a DIFFERENT message shape from `refusalMessage`
+   ("Ask a town administrator to `<action>`." / "Something went wrong. Please try again.") — an
+   admin-gated-write phrasing, not a permission-refusal phrasing — duplicated between exactly those two
+   files. Folding them needs a second exported helper (or `describeActionError` promoted out of
+   `boards.$boardId.templates.tsx` and into `lib/trpc.ts` alongside `refusalMessage`/`errorMessage`),
+   not a call to `refusalMessage` itself; left for whichever wave next touches either file, since
+   promoting a page-local function is a slightly bigger and different change than the two straight
+   swaps this task made.
+3. ~~`agendaItem.update`'s web-side refusal message string is unpinned.~~ — **closed in this task.**
+   `InlineItemForm.tsx`'s `updateItem` mutation already called
+   `refusalMessage(err, "edit this agenda item")` on `FORBIDDEN` — the wiring was correct — but
+   `InlineItemForm.test.tsx`'s own stub already defined `server.updateRefuses` and no test ever set it,
+   the identical shape as the sibling insert/delete refusals it sits beside. Added the missing test and
+   verified by mutation (blanking `updateItem`'s `onError`, confirming only the new test goes red,
+   restoring byte-identical). The API-side pin this carry-over note pointed at
+   (`agenda-item.test.ts:692`, "refuses a caller with no A2 on this board, and changes nothing") is
+   unchanged and was never the gap — it was always the web side that had none.
+4. **The rule 14 `board_only` town-wide visibility decision — checked against HEAD and already
+   correctly recorded, no change needed.** The owner's 2026-09-10 decision ("leave rule 14's town-wide
+   `board_only` visibility AS-IS for now... Do not narrow it in wave 5, wave 6, or later without a
+   fresh decision") is stated in full, as a decision rather than an open question, in this item's own
+   "Wave 4, Task 2's own open items" list (finding 3) and referenced from the "Wave 4, Task 5"
+   close-out paragraph above. `exhibit.test.ts` still pins both cross-board reads as PASSING tests
+   (`exhibit.link`'s and `byMeeting`'s board-blind `isBoardMember` branches) — verified directly rather
+   than assumed. Recorded here only so a reader of this specific carry-over list sees all four
+   accounted for in one place; the decision itself is not duplicated a third time.
+
 ---
 
 ## 3. NOT_FOUND, not FORBIDDEN, for a row in another town
@@ -1591,6 +1680,13 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Supabase calls, and `lib/meeting-helpers.ts` — which never carried a
      # marker at all despite being the live create-from-template writer — is
      # deleted rather than marked.
+ 6   # unchanged at fb3a5cd (wave 5's own base) and at 1ef127a (wave 5,
+     # Task 0's own commit) — re-run per item 14's close-out, and neither
+     # wave 4's fix round nor the wave-5 plan commit nor Task 0's own two
+     # files touched a Supabase read/write this item tracks. The 6 lines:
+     # MeetingStartFlow.tsx and meetings.$meetingId.live.tsx (both
+     # wave-5), home.tsx, meetings.tsx (x2) and
+     # meetings.$meetingId.minutes.tsx (all wave-6).
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -1755,6 +1851,44 @@ own countdown grep already does the analogous job for `TODO(phase-e-wave-*)` mar
 CODEBASE; this step is the same discipline applied to the PLAN DOCUMENT's own claims about that
 codebase, which no automated check can verify because "is this bullet's prose still true" is not a
 grep-able property.
+
+**Wave 5, Task 0 — run now, before any wave-5 code, per this task's own brief ("now, not at the
+end").** Method: walked every Known-gaps bullet and every present-tense status claim in items 2, 9
+and 11 for the specific ASSERTION it makes (not for whether it names a file this task touched — the
+mistake this step exists to catch), and re-ran the grep or read the code each assertion depends on,
+anchored to `fb3a5cd` (this task's base) and, where a fix landed in this task, to `1ef127a`. Checked
+and held, unchanged:
+
+- Item 11's marker countdown — `grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l`
+  answers **6** at `fb3a5cd`, the same 6 lines recorded at the end of wave 4 (`cd10b54`) and unchanged
+  since — see item 11's own re-run below for the full list.
+- Item 2's board-scoped guard census — `requireBoardPermission` **9**, `requireBoardActor` **3**,
+  `: BoardScope` in `rules.ts` **19** — all three unchanged from their `5d11393` figures; no wave-4
+  fix round or the wave-5 plan commit added a new board-scoped write or rule.
+- Item 9's "`useMockAuth` has zero callers outside its own module" and "`MockAuthProvider` is
+  directly named in 4 files" — both re-grepped and both hold exactly (the 4 files are still
+  `test/render.ts`, `test/mocks/auth-mock.ts`, `PermissionGate.test.tsx`,
+  `boards.$boardId.test.tsx`). The RAW counts feeding this item's own table (35 `renderWithProviders`
+  callers / 12 `useCurrentUser` mocks / 3 that also mock `AuthProvider`) have moved to 58 / 20 / 3 at
+  `fb3a5cd` — expected drift the item's own text already disclaims ("nothing pins them to stay that
+  way — the commands are what stay true"), not a false claim; the one figure that IS a substantive
+  claim rather than a point-in-time count ("that count has not moved," about the 3-files figure) still
+  holds, so left as-is rather than rewritten for a number the item already tells the reader not to
+  trust.
+- "Wave 4, Task 3's own open items," #2 (`agendaItem.setOperatorNotes`/`markComplete` still have no
+  caller) and #3 (the legacy `queryKeys.exhibits.*` line stays in `meetings.$meetingId.review.tsx`) —
+  both re-checked directly against the files and both still hold, exactly as worded; #1 in that same
+  list was already struck through as closed in Task 4, also re-checked and still accurate.
+- The `future_item_queue` fact in item 2's "what waves 5 and 6 need" section — re-verified directly
+  against `0000_baseline.sql` rather than trusted; see that item's own new paragraph for the query and
+  result. It was already correct; nothing here needed correcting.
+
+**No false claim found in this pass.** The four items this task's own brief named as wave 4's
+carry-over (immediately above, in item 2) were the ones actually stale in the sense that mattered —
+not wrong prose, but decisions recorded outside this document (in the task's own brief) that had
+never landed here at all, which is the same failure this step's own root-cause paragraph describes
+("a decision reached but never landed in this document") one level up: a decision made in a
+conversation rather than a diff. They are recorded above rather than left for a sixth carry-over.
 
 ---
 
