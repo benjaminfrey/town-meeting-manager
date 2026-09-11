@@ -14,19 +14,25 @@
  * one present member who is both chair (auto-selects presiding officer) and
  * the default recording secretary (auto-selects that too), and
  * `firstItemId: null` so the mutation's optional agenda_item/transition
- * writes are skipped entirely.
+ * writes are skipped entirely — with ONE exception, added in wave 5, Task 4:
+ * the `agendaItemTransition` pin has to pass a real `firstItemId`, because
+ * that is the only branch in which a transition row is written at all.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 
 vi.mock("@/hooks/useSupabase", () => ({
   useSupabase: () => ({
     from: () => {
       const chain = {
         update: () => chain,
+        // `insert` is reached only by the `agendaItemTransition` test below,
+        // which is the one case that passes a real `firstItemId` — see the
+        // header note.
+        insert: () => Promise.resolve({ error: null }),
         eq: () => Promise.resolve({ error: null }),
       };
       return chain;
@@ -48,15 +54,24 @@ const members = [
   },
 ];
 
+/**
+ * `satisfies` rather than a bare literal (conventions item 8's "the floor"):
+ * this fixture stands in for `meetingAttendance.byMeeting`'s output, and the
+ * prop now takes that procedure's real type, so a column the procedure gains
+ * or loses shows up here at `tsc` time. `is_recording_secretary` was `0` in
+ * this fixture and the prop was typed `number`; the column is `boolean`.
+ */
 const attendance = [
   {
     id: "att1",
     board_member_id: "bm1",
     person_id: "p1",
     status: "present",
-    is_recording_secretary: 0,
+    is_recording_secretary: false,
+    arrived_at: null,
+    departed_at: null,
   },
-];
+] satisfies RouterOutputs["meetingAttendance"]["byMeeting"];
 
 describe("MeetingStartFlow cache invalidation", () => {
   it("invalidates trpc.meeting.pathFilter() — the key boards.$boardId.meetings.tsx reads under", async () => {
@@ -141,6 +156,44 @@ describe("MeetingStartFlow cache invalidation", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(attendanceKey)?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates trpc.agendaItemTransition.pathFilter() on start — wave 5, Task 4", async () => {
+    // `startMeetingMutation` also opens the meeting's FIRST
+    // `agenda_item_transition` row, and the live screen reads those through
+    // `trpc.agendaItemTransition.byMeeting` as of wave 5, Task 4 — a fourth
+    // `pathFilter()` line in the same handler, pinned on its own.
+    const transitionKey = trpc.agendaItemTransition.byMeeting.queryOptions({
+      meetingId: "m1",
+    }).queryKey;
+    queryClient.setQueryData(transitionKey, []);
+    expect(queryClient.getQueryState(transitionKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderWithProviders(
+      <MeetingStartFlow
+        meetingId="m1"
+        townId="town-1"
+        boardId="b1"
+        members={members}
+        attendance={attendance}
+        quorumRequired={1}
+        quorumPresent={1}
+        quorumTotal={1}
+        hasQuorum
+        firstItemId="item-1"
+      />,
+      { queryClient },
+    );
+
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    const startButton = await screen.findByRole("button", { name: /start meeting/i });
+    await waitFor(() => expect(startButton).not.toBeDisabled());
+    await user.click(startButton);
+
+    await waitFor(() => expect(queryClient.getQueryState(transitionKey)?.isInvalidated).toBe(true));
   });
 
   it("invalidates trpc.meetingAttendance.pathFilter() when a member is toggled — the OTHER call site", async () => {

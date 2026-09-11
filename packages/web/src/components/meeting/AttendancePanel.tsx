@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { Check, X, Clock, LogOut, Crown, BookOpen, ShieldOff } from "lucide-react";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MeetingTimer } from "./MeetingTimer";
@@ -24,15 +24,17 @@ interface MemberInfo {
   seatTitle: string | null;
 }
 
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-  arrived_at: string | null;
-  departed_at: string | null;
-  is_recording_secretary: number;
-}
+/**
+ * One `meeting_attendance` row, as the procedure returns it.
+ *
+ * Phase E, wave 5, Task 4 — was a hand-written interface with
+ * `is_recording_secretary: number`, which the column has never been (it is
+ * `boolean`), reached from `live.tsx` through a
+ * `ComponentProps<typeof X>["attendance"]` cast that made the disagreement
+ * invisible. Conventions item 10: a child taking a tRPC payload takes the
+ * procedure's own output type, never a bag or a restatement.
+ */
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface AttendancePanelProps {
   meetingId: string;

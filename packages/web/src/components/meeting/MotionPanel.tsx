@@ -13,6 +13,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc } from "@/lib/trpc";
 import { Gavel, Vote, Pencil, XCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -58,7 +59,13 @@ interface MotionData {
   secondedBy: string | null;
   status: string;
   parentMotionId: string | null;
-  voteSummary: string | null; // JSON string
+  /**
+   * JSONB, so `unknown` — see the reader below, which has said so in a comment
+   * since it was written and already handles a string or an object. Widened in
+   * Phase E wave 5, Task 4, when `motion.byMeeting` became the source and
+   * declared the column as what it is.
+   */
+  voteSummary: unknown;
 }
 
 interface VoteRecordData {
@@ -184,6 +191,9 @@ export function MotionPanel({
     onSuccess: (_data, motionId) => {
       setVotingMotionId(motionId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+      // Moves `motion.status` to `in_vote`, which the live screen renders from
+      // `trpc.motion.byMeeting` as of wave 5, Task 4.
+      void queryClient.invalidateQueries(trpc.motion.pathFilter());
     },
   });
 
@@ -198,6 +208,8 @@ export function MotionPanel({
     onSuccess: () => {
       setWithdrawConfirmId(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+      // Its own call site — see `callVoteMutation` above.
+      void queryClient.invalidateQueries(trpc.motion.pathFilter());
     },
   });
 

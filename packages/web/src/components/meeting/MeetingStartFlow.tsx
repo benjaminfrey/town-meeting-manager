@@ -25,7 +25,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { Check, X, AlertTriangle, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,13 +40,17 @@ interface MemberInfo {
   isDefaultRecSec: boolean;
 }
 
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-  is_recording_secretary: number;
-}
+/**
+ * One `meeting_attendance` row, as the procedure returns it.
+ *
+ * Phase E, wave 5, Task 4 — was a hand-written interface with
+ * `is_recording_secretary: number`, which the column has never been (it is
+ * `boolean`), reached from `live.tsx` through a
+ * `ComponentProps<typeof X>["attendance"]` cast that made the disagreement
+ * invisible. Conventions item 10: a child taking a tRPC payload takes the
+ * procedure's own output type, never a bag or a restatement.
+ */
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface MeetingStartFlowProps {
   meetingId: string;
@@ -242,6 +246,10 @@ export function MeetingStartFlow({
       // conventions item 7.
       void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
       void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      // And the first `agenda_item_transition` row this mutation opens — the
+      // read behind the live screen's per-item timer, moved onto
+      // `trpc.agendaItemTransition.byMeeting` in wave 5, Task 4.
+      void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
       toast.success("Meeting called to order");
     },
     onError: (err) => {
