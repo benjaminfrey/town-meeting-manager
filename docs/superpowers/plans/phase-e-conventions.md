@@ -1228,6 +1228,65 @@ work is the only shape in this codebase that could produce them. Events carry no
 is nothing per event to read. `routers/__tests__/realtime.test.ts` counts the transactions and the
 actor resolutions, so adding either goes red rather than being discovered under load.
 
+### The client half of one stream (wave 5, Task 4)
+
+Task 1 built the subscription; Task 4 gave it a caller, and three things it
+found belong here rather than only in one hook's header.
+
+**The ADR is wrong about `splitLink`, and the correction is one line of code.**
+`docs/advisory-resolutions/5.1-realtime-transport.md` says "no `wsLink`/`splitLink`
+client wiring is needed". That is true of the WebSocket fallback it was
+contrasting against and false of the SSE path it chose: `httpBatchLink` refuses a
+subscription outright ("Subscriptions are unsupported by `httpLink`"), so a
+single-link client cannot carry both. `packages/web/src/lib/trpc.ts` splits by
+operation TYPE; everything that is not a subscription still batches over POST
+exactly as before. `EventSource`'s `withCredentials` is passed but buys nothing
+here — it governs CORS requests, and `/api/trpc` is same-origin through the Vite
+proxy in development and nginx in production, so the session cookie is sent
+either way.
+
+**The topic → query-key mapping is the client's, and the coupling needs TWO
+mechanisms, not one.** A topic with no client mapping is received, matched by
+nothing and dropped: a panel that stops updating on other devices, with no error
+anywhere. `hooks/useLiveMeetingEvents.ts` closes it twice over, and neither half
+is redundant — the type is derived from the PROCEDURE'S OUTPUT and cannot see
+`LIVE_MEETING_TOPICS` the array, while the test reads
+`packages/api/src/realtime/events.ts` as TEXT and cannot see whether a mapping's
+VALUE is right:
+
+- `Record<LiveMeetingTopic, …>`, so a topic added server-side fails
+  `npx turbo run typecheck --force` by name;
+- `hooks/__tests__/useLiveMeetingEvents.test.ts` parses the
+  `LIVE_MEETING_TOPICS` array out of the API source and compares it to the
+  mapping's keys — a NAMED failing test rather than a compiler error, which is
+  what a brief can ask for. Reading the source as text rather than importing it
+  is deliberate: `@town-meeting/api`'s `exports` map publishes types only, and
+  `events.ts` imports `drizzle-orm`. Same technique as
+  `router-wiring.test.ts`'s publish inventory.
+
+Only the per-site deletion sweep can tell you a mapping invalidates the WRONG
+router. It was run.
+
+**One topic is not one-to-one with its table, and that is behaviour preservation
+rather than a design choice.** `agenda_item` invalidates `trpc.agendaItem` AND
+`trpc.exhibit`, because the Supabase channel it replaces invalidated a single
+`select("*, exhibit(*)")` key — so an `agenda_item` change refetched the
+meeting's exhibits as a side effect of them being embedded. Two procedures back
+that one read now. There is no `exhibit` topic and there was no `exhibit`
+Supabase channel either; giving it one would be a feature.
+
+**A read the screen OBSERVES cannot be pinned with `isInvalidated`.** New in this
+task and general: `invalidateQueries` on a key with a live observer triggers an
+immediate refetch, which clears `isInvalidated` again — so the assertion every
+writer test in this repo uses is a RACE for any key the screen under test also
+reads. Item 8's existing examples all seed keys only the SHELL reads
+(`agendaItem.countByMeeting`, `meeting.byBoard`), which have no observer, and
+that is why the problem had not surfaced. Two answers, both used here: assert the
+REFETCH instead (`stub.countFor("motion.byMeeting")` grew), or seed a key under
+the same ROUTER that this screen does not observe (the same procedure for a
+different meeting id) — `pathFilter()` matches it, nothing refetches it, and the
+flag stays set.
+
 ### Realtime events are invalidation signals, and the tenancy filter is application code
 
 A `LISTEN` connection **cannot** carry tenant context: `LISTEN` is session-scoped, `app.town_id` is
@@ -2029,6 +2088,19 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Supabase calls, and `lib/meeting-helpers.ts` — which never carried a
      # marker at all despite being the live create-from-template writer — is
      # deleted rather than marked.
+ 6   # unchanged again at dcb12e4 (wave 5, Task 4's close-out) — the same six
+     # lines. Task 4 REWROTE `meetings.$meetingId.live.tsx`'s marker rather
+     # than discharging it (its reads are all tRPC now; its WRITES are Task
+     # 5's, and the marker names them), and left MeetingStartFlow.tsx's
+     # alone for the same reason. A marker whose claim changes without its
+     # count moving is exactly the case item 14's "the unit of staleness is a
+     # CLAIM, not a file" covers, so it is recorded here rather than passed
+     # over as "no change". The other two greps this item tracks DID move, in
+     # the direction the phase wants:
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l      -> 15   (24 at wave 1's close)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 32  (59 then)
  6   # unchanged at fb3a5cd (wave 5's own base) and at 1ef127a (wave 5,
      # Task 0's own commit) — re-run per item 14's close-out, and neither
      # wave 4's fix round nor the wave-5 plan commit nor Task 0's own two
@@ -2284,6 +2356,42 @@ item 2's "The cost, stated rather than left to be discovered" paragraph); no thi
 found — see the fix round's own report for the full method and negative result on the remainder of
 the document.
 
+**Wave 5, Task 4 — run at the close of the task, per the widened scope above
+(every Known-gaps bullet AND every numbered item's own prose).** Method: walked
+the bullets and the prose of items 1, 2, 7, 8, 9, 10 and 11 for the ASSERTIONS
+they make, and re-ran the grep or read the code behind each. What moved:
+
+- **"Wave 4, Task 3's own open items" #2 — `agendaItem.setOperatorNotes` and
+  `markComplete` still have no caller — is now FALSE** and is struck through
+  above. This is the bullet this task's own work falsified, and the one a
+  file-based sweep would have found; recording it here because the other three
+  below are the kind it would not.
+- **Item 8's raw `pathFilter()` file count moved 45 → 53** and is re-run above,
+  anchored to `dcb12e4`. Eight new writer files, all live-meeting.
+- **Item 11's marker count did NOT move (6), and that is a claim in its own
+  right** — `meetings.$meetingId.live.tsx`'s marker was REWRITTEN rather than
+  discharged (its reads are migrated; its writes are Task 5's), which is a
+  changed claim behind an unchanged count. Recorded above rather than passed
+  over as "no change".
+- \*\*Item 2's "Wave 5, Task 2" paragraph says "nothing changes on the client —
+  the input shape, the `boardId` prop and the mismatch defence are all
+  identical". True as written (the A2 and the A2-OR-M1 forms take the same
+  input), and worth one sentence it does not say: `AgendaItemDetailPanel.tsx`
+  had no `boardId` prop at all, so "identical to the other seven writes" still
+  meant threading a new prop from `live.tsx`. That is item 2's own already-named
+  cost ("every such write inherits a client-supplied field whose only job is
+  feeding the guard"), paid again, not a new one.
+
+Checked and still true, unchanged: item 9's `useMockAuth`/`MockAuthProvider`
+claims (this task added seven test files and none reaches either); "Wave 4, Task
+3's own open items" #3 (the legacy `queryKeys.exhibits.*` lines stay —
+`meetings.$meetingId.review.tsx` still reads them, and that file is wave 6's);
+item 7's `initConnectionErrorHandler` carve-out (still the one bare
+`invalidateQueries()` in the tree, still after a REALTIME reconnect — note for
+wave 5, Task 6, which owns replacing it: Task 1's report already says the server
+tells the client which topics to resync, so that branch should end up doing
+nothing rather than doing less).
+
 ---
 
 ## Files to copy from
@@ -2422,10 +2530,12 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   adds `routes/boards.$boardId.tsx`'s comment-only mention (no real writer), taking the raw count to
   **42** while the comment-stripped count stays **39** — verified at `8cbf749` (Task 0's own
   close-out commit, this fix round's parent):
+
   ```
   $ grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
   42
   ```
+
   The comment-stripped figure has no equivalent one-line grep (stripping `/* */` and `//` first is
   what makes it differ from the raw count at all) — reproduce it by running
   `pathfilter-pin-coverage.test.ts`'s own `stripComments` over the same file list, exactly as the
@@ -2438,6 +2548,15 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `RouterOutputs`-derived types in prose. Zero violations — the check passes at that commit, so the
   five writer files this task added or changed each have at least one test importing them and
   asserting an invalidation.
+  **Re-measured at `dcb12e4` (wave 5, Task 4): raw 53.** Eight more non-test files call
+  `pathFilter()` than at `cd10b54`, and every one of the eight is a live-meeting writer that gained
+  its first call when this task moved the live screen's nine reads onto tRPC — `MotionPanel.tsx`,
+  `MotionCaptureDialog.tsx`, `VotePanel.tsx`, `RecusalDialog.tsx`, `GuestSpeakerEntry.tsx`,
+  `ExitExecutiveSessionDialog.tsx`, plus `hooks/useLiveMeetingEvents.ts` (the SSE topic mapping,
+  which is a writer in the sense that matters here: another device's write arriving) and
+  `hooks/useQuorumCheck.ts`. Reproduce with the same command:
+  `grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l`.
+
   **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
   not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
   file's new header explains that the four template writers' existing `trpc.agendaTemplate.pathFilter()`
@@ -2468,6 +2587,7 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   even for a totally unrelated procedure — this reaches item 8's "a writer is tested at all", not the
   harder claim "the RIGHT procedure is tested". See the next bullet for why that harder claim is not
   worth chasing with a static check, and what to do instead.
+
 - **The per-mutation half — "is the RIGHT procedure being pinned, not just A procedure" — is not
   statically mechanisable, and this wave's review tried before concluding that.** Task 3's real
   failure (three of nine invalidations shipped unpinned, INSIDE files that already had other pins —
@@ -2896,9 +3016,17 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      caller (`CreateMeetingDialog.tsx`'s `instantiateMutation`) AND the raw write is gone rather
      than bypassed — `packages/web/src/lib/meeting-helpers.ts` is DELETED, this dialog having been
      its only caller.
-  2. **`agendaItem.setOperatorNotes` and `markComplete` still have no caller**, as Task 1 said —
+  2. ~~**`agendaItem.setOperatorNotes` and `markComplete` still have no caller**, as Task 1 said —
      `AgendaItemDetailPanel.tsx` is reached only from `routes/meetings.$meetingId.live.tsx`, wave 5's
-     file. Wave 5 also inherits Task 1's undecided A2-versus-M1 question for those two.
+     file. Wave 5 also inherits Task 1's undecided A2-versus-M1 question for those two.~~ —
+     **both halves closed, in different tasks.** The A2-versus-M1 question was answered in wave 5,
+     Task 2 (A2 OR M1, live-run columns only, `requireBoardActor(assertCanUpdateAgendaItemProgress)`),
+     and wave 5, Task 4 wired both procedures into `AgendaItemDetailPanel.tsx` with the two halves of
+     evidence this list's own item 1 says to demand: the procedures have a real caller AND the raw
+     Supabase writes are gone rather than bypassed (that file no longer imports `useSupabase` at all).
+     Both were unauthorized before — `agenda_item_tenant_isolation` is tenancy-only — so FORBIDDEN
+     became newly reachable and each write now renders an inline `role="alert"` refusal beside its own
+     control, pinned per item 13.
   3. **The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
      last legacy reader does": `routes/meetings.$meetingId.review.tsx` still reads
      `[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and that file is wave
@@ -2960,3 +3088,42 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   than the real path (`minutes-generation.test.ts:151, 947, 1474` — two pass `adjourned_by: null`,
   one passes a pre-resolved `"Alice Johnson"`), so nothing in this codebase's test suite currently
   pins this bug or its fix.
+
+- **Wave 5, Task 4's own open items.** Four, none of them a defect this task
+  introduced:
+  1. **`routes/meetings.$meetingId.live.tsx`'s writes are all still raw
+     Supabase** — the adjournment handler, `navigateToItem`, and the three
+     reactive effects (`executive_session` ×3, `minutes_document`,
+     `notification_event`). Task 5 owns them, and the procedures already exist
+     and are tested: `meeting.adjourn`, `meeting.navigateToAgendaItem`, the
+     five `executiveSession.*` writes. The file's marker names them. The
+     `meeting` write still has no authorization check of any kind, exactly as
+     that marker has said since wave 3.
+  2. **`ConnectionStatusBar` is still on a Supabase Realtime heartbeat
+     channel**, and this screen still renders it. It is wave 5, Task 6's, and
+     it now reports the health of a transport this screen no longer uses. The
+     honest source is `useSubscription`'s own result, which
+     `useLiveMeetingEvents` deliberately returns nothing from rather than
+     inventing a second vocabulary for — see that hook's header. Note that
+     `SSE_MAX_STREAM_DURATION_MS` means a HEALTHY client reconnects every five
+     minutes; whatever that bar becomes must not render it as a disruption.
+  3. **`AttendancePanel.tsx` and `MeetingStartFlow.tsx` write
+     `is_recording_secretary: 0` / `: 1` to a `boolean` column.** Found while
+     retyping their props onto `RouterOutputs` (the hand-written interfaces
+     said `number`; the column is `boolean`, and the procedure says so). The
+     PROP types are fixed; the two integer literals in those files' raw insert
+     and update payloads are not, because they are Task 5's writes and
+     `meeting_attendance.setRollCall`/`setStatus` already take the column
+     correctly. Named here so whoever wires those two does not read the
+     literals as intentional.
+  4. **The SSE path has no end-to-end test through the WEB client.** The server
+     half is driven over real HTTP by `packages/api`'s `sse-bounds.test.ts`; the
+     web half mocks `useSubscription`, because jsdom has no `EventSource`. What
+     that leaves untested is the seam itself — that `splitLink` routes a
+     subscription to `httpSubscriptionLink` and that the yielded envelope
+     reaches `onData` in the `{ id, data }` shape the mapping expects. The
+     SHAPE half is type-checked (the mapping's parameter is the procedure's own
+     `~types.output`); the ROUTING half is not, and would fail as "the live
+     meeting never updates", silently, in a browser. Cheapest real coverage is
+     a manual check against a running dev server, which is wave 5, Task 6 or 7
+     territory.
