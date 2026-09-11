@@ -29,16 +29,17 @@
 
 import path from "node:path";
 import fs from "node:fs";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { TRPCClientError } from "@trpc/client";
 import { trpc } from "@/lib/trpc";
 import {
   LIVE_MEETING_TOPIC_ROUTERS,
   LIVE_STREAM_ERROR_TOAST_ID,
+  LIVE_STREAM_RECONNECT_GRACE_MS,
   liveMeetingPathFilter,
   useLiveMeetingEvents,
 } from "@/hooks/useLiveMeetingEvents";
@@ -54,7 +55,16 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
  */
 const subscription: {
   options: { onData?: (e: unknown) => void; onError?: (e: unknown) => void } | null;
-} = { options: null };
+  /**
+   * What the transport is currently reporting.
+   *
+   * Mutable, because wave 5 Task 6's grace window is a function of how the
+   * transport's `status` MOVES over time — a fixed `"pending"` can express
+   * "the hook opened a subscription" and nothing about a reconnect. Set it,
+   * then `rerender()`, exactly as a real status change would.
+   */
+  status: "idle" | "connecting" | "pending" | "error";
+} = { options: null, status: "pending" };
 
 vi.mock("@trpc/tanstack-react-query", async () => {
   const actual = await vi.importActual<typeof import("@trpc/tanstack-react-query")>(
@@ -64,7 +74,7 @@ vi.mock("@trpc/tanstack-react-query", async () => {
     ...actual,
     useSubscription: vi.fn((opts: { onData?: (e: unknown) => void }) => {
       subscription.options = opts;
-      return { status: "pending", data: undefined, error: null, reset: () => {} };
+      return { status: subscription.status, data: undefined, error: null, reset: () => {} };
     }),
   };
 });
@@ -172,6 +182,7 @@ describe("live meeting topic mapping", () => {
 describe("a refusal on the stream", () => {
   beforeEach(() => {
     subscription.options = null;
+    subscription.status = "pending";
     vi.mocked(toast.error).mockClear();
   });
 
@@ -222,5 +233,128 @@ describe("a refusal on the stream", () => {
     expect((options as { description?: string }).description).toContain(
       "will not appear here until you reload",
     );
+  });
+});
+
+/**
+ * **A healthy client reconnects every five minutes, and this is what stops it
+ * from looking like an outage.**
+ *
+ * Added in wave 5, Task 6. `SSE_MAX_STREAM_DURATION_MS` bounds authorization
+ * staleness by ending every stream at five minutes, and
+ * `packages/api/src/trpc/__tests__/sse-bounds.test.ts` pins that the deadline
+ * ends the response WITHOUT `event: return` — which is exactly what makes
+ * `httpSubscriptionLink` resume with `Last-Event-ID` instead of stopping. The
+ * client-side trace of that, read off `@trpc/client`'s own SSE state machine,
+ * is `pending → connecting → pending`: a real transition through `connecting`,
+ * twelve times an hour, on a stream that is working perfectly.
+ *
+ * So an indicator wired straight to `status === "connecting"` would flash
+ * amber over a clerk's controls twelve times an hour during a public meeting.
+ * That is worse than no indicator — the one time it means something is the one
+ * time nobody looks — and it is the failure this suite exists to prevent.
+ *
+ * The transport is driven through the same mocked `useSubscription` the rest
+ * of this file uses; the thing under test is the hook's own state machine, not
+ * the transport, and jsdom has no stream either way.
+ */
+describe("a routine five-minute reconnect versus a real outage", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    subscription.status = "pending";
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderTheHook() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    return renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+  }
+
+  it("stays silent through a bounded reconnect that resolves inside the grace window", () => {
+    const { result, rerender } = renderTheHook();
+    expect(result.current).toBe("healthy");
+
+    // The deadline fires: tRPC aborts the stream, the EventSource reconnects.
+    subscription.status = "connecting";
+    rerender();
+    expect(result.current, "a routine reconnect must not be announced").toBe("healthy");
+
+    // Still inside the window — a fresh same-origin request takes well under a
+    // second, so this is the whole of a normal bounce.
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS - 1);
+    });
+    expect(result.current).toBe("healthy");
+
+    subscription.status = "pending";
+    rerender();
+    expect(result.current).toBe("healthy");
+
+    // And the pending timer was CLEARED, not merely outrun: without the
+    // effect's cleanup this fires long after the stream is back and turns a
+    // healthy meeting amber for no reason.
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(result.current, "a reconnect that already succeeded still announced itself").toBe(
+      "healthy",
+    );
+  });
+
+  it("reports an outage once the disconnection outlives the grace window", () => {
+    const { result, rerender } = renderTheHook();
+
+    subscription.status = "connecting";
+    rerender();
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS);
+    });
+    expect(result.current).toBe("reconnecting");
+  });
+
+  it("does not strobe while a bad connection flaps", () => {
+    // `connecting → connecting` is a real sequence (the SSE link re-emits it
+    // with an error attached). Resetting to healthy on each one would blink
+    // the banner on and off over the operator's controls.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "connecting";
+    rerender();
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS);
+    });
+    expect(result.current).toBe("reconnecting");
+
+    rerender();
+    expect(result.current).toBe("reconnecting");
+  });
+
+  it("reports a stopped stream IMMEDIATELY, with no grace at all", () => {
+    // A `TRPCError` makes this client stop rather than resume, so there is
+    // nothing to wait for — waiting would only delay the one message that
+    // needs a human. The grace window must not apply here.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "error";
+    rerender();
+    expect(result.current).toBe("stopped");
+  });
+
+  it("treats a completed stream as stopped too", () => {
+    // `idle` means the subscription completed — over SSE, that the server sent
+    // `event: return`. `realtime.onMeetingChange` never returns and the
+    // five-minute deadline specifically does not emit that frame, so this is
+    // unreachable today; it is mapped to the loud answer rather than the
+    // silent one precisely because reaching it would mean a stream ended and
+    // is not coming back.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "idle";
+    rerender();
+    expect(result.current).toBe("stopped");
   });
 });

@@ -110,7 +110,7 @@ import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useQuorumCheck } from "@/hooks/useQuorumCheck";
 import { useLiveMeetingEvents } from "@/hooks/useLiveMeetingEvents";
-import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
+import { LiveStreamStatusBar } from "@/components/ConnectionStatusBar";
 import { ConnectionStatusBarErrorBoundary } from "@/components/FeatureErrorBoundaries";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
@@ -309,7 +309,10 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   // One SSE subscription in place of eight Supabase Realtime channels. The
   // topic → query-key mapping lives in the hook, not here, because the server
   // publishes topics and knows nothing about this screen's cache.
-  useLiveMeetingEvents(meetingId);
+  // Its connection state is rendered below, by `LiveStreamStatusBar`, in the
+  // three-panel branch only. The hook's own `onError` toast covers every
+  // other branch this component can return from — see its comment there.
+  const liveStreamStatus = useLiveMeetingEvents(meetingId);
 
   // ─── Data merging ─────────────────────────────────────────────
 
@@ -970,10 +973,13 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      {/* Connection status banner (prominent in live meeting context)
-          Wrapped in error boundary — must never crash and take the whole meeting view */}
+      {/* The SSE stream's own health — the transport this screen actually
+          uses, not the app-global one. Silent while healthy, and silent
+          through the routine five-minute reconnect (`useLiveMeetingEvents`).
+          Wrapped in an error boundary — must never crash and take the whole
+          meeting view. */}
       <ConnectionStatusBarErrorBoundary>
-        <ConnectionStatusBar prominent={true} />
+        <LiveStreamStatusBar status={liveStreamStatus} />
       </ConnectionStatusBarErrorBoundary>
 
       {/* Header bar */}

@@ -8,11 +8,16 @@
  * anywhere in the repo. Every one of those eight callbacks was a
  * `queryClient.invalidateQueries(...)` body and nothing else, and the `status`
  * the hook returned was never destructured at a single call site — so the
- * replacement returns `void` rather than carrying a value forward that nothing
- * has ever read. Whoever rebuilds `ConnectionStatusBar` (wave 5, Task 6) will
- * want a connection state; the honest place to take it from is
- * `useSubscription`'s own result, which this hook deliberately does not
- * pre-empt by inventing a second vocabulary for it.
+ * replacement returned `void` rather than carrying a value forward that
+ * nothing had ever read, leaving the connection vocabulary to whoever rebuilt
+ * `ConnectionStatusBar`.
+ *
+ * ~~Returns nothing.~~ **Wave 5, Task 6 is that rebuild, and it took the
+ * offer.** The hook now returns a `LiveStreamStatus`, derived from
+ * `useSubscription`'s own result — the "honest place to take it from" this
+ * header named — and `live.tsx` renders it through `LiveStreamStatusBar`. See
+ * "A healthy client reconnects every five minutes" below for the one piece of
+ * logic that could not be a straight rename of the transport's own vocabulary.
  *
  * That argument covers the `status` and NOT the `error`, which the first
  * version of this hook discarded along with it — a refusal on the stream left
@@ -73,7 +78,7 @@
  * "invalidate everything" shape conventions item 7 bans, one size down.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
 import { useSubscription } from "@trpc/tanstack-react-query";
@@ -189,6 +194,48 @@ export function liveMeetingPathFilter(name: LiveMeetingRouterName) {
 export const LIVE_STREAM_ERROR_TOAST_ID = "live-meeting-stream-error";
 
 /**
+ * What the live meeting screen may say about its own stream.
+ *
+ * Three values, not `useSubscription`'s four, and the mapping is not a rename
+ * — see `useLiveMeetingEvents` below.
+ */
+export type LiveStreamStatus =
+  | "healthy" // Connected, or bouncing so briefly it is not worth saying.
+  | "reconnecting" // Not connected for longer than a routine bounce takes.
+  | "stopped"; // The client gave up. Nothing comes back without a reload.
+
+/**
+ * How long the stream may be disconnected before the screen says so.
+ *
+ * **This constant exists because a HEALTHY client reconnects every five
+ * minutes, by design, and a naive indicator would cry wolf every time.**
+ * `SSE_MAX_STREAM_DURATION_MS` (`packages/api/src/trpc/trpc.ts`) bounds how
+ * stale a subscription's authorization may get by ending every stream at five
+ * minutes; `__tests__/sse-bounds.test.ts` measured that the deadline ends the
+ * response WITHOUT `event: return`, which is precisely what makes
+ * `httpSubscriptionLink` treat it as a dropped connection and resume with
+ * `Last-Event-ID` rather than stop. The client-side trace of that, measured
+ * from `@trpc/client`'s own SSE state machine, is
+ * `pending → connecting → pending` — a real transition through `connecting`,
+ * twelve times an hour, on a stream that is working perfectly.
+ *
+ * An indicator wired straight to `status === "connecting"` would therefore
+ * flash amber over a clerk's controls twelve times an hour during a public
+ * meeting, which is worse than no indicator: the one time it means something
+ * is the one time nobody looks. Five seconds is the discriminator. A
+ * reconnect that is going to succeed is a fresh HTTP request to the same
+ * origin and completes in well under a second; one that is still unresolved
+ * after five is an outage, and stays one.
+ *
+ * Note what this does NOT do: it delays the SAYING, never the invalidation.
+ * `onData` fires the moment the resumed stream delivers its catch-up topics
+ * (`realtime.ts` re-yields every topic when a `lastEventId` is present), so
+ * the screen's data is refreshed on the transport's schedule regardless of
+ * what the banner is doing.
+ */
+export const LIVE_STREAM_RECONNECT_GRACE_MS = 5_000;
+
+/**
  * Subscribe to one meeting's change stream and invalidate what it names.
  *
  * Called unconditionally by `routes/meetings.$meetingId.live.tsx`, exactly as
@@ -196,11 +243,11 @@ export const LIVE_STREAM_ERROR_TOAST_ID = "live-meeting-stream-error";
  * that component's status routing too, so a `noticed` meeting waiting in
  * `MeetingStartFlow` has been subscribed the whole time and still is.
  *
- * Returns nothing. See this file's header for why the `status` is not carried
- * forward — and `onError` below for the half of that argument that did NOT
- * hold.
+ * Returns the screen's connection state. `live.tsx` renders it through
+ * `LiveStreamStatusBar`; the `MeetingStartFlow` branch does not, which is why
+ * `onError` below still raises a toast — see that comment.
  */
-export function useLiveMeetingEvents(meetingId: string): void {
+export function useLiveMeetingEvents(meetingId: string): LiveStreamStatus {
   const queryClient = useQueryClient();
 
   const onData = useCallback(
@@ -229,7 +276,7 @@ export function useLiveMeetingEvents(meetingId: string): void {
    * resume) it STOPS. So the failure mode was a live meeting whose panels
    * quietly stop reflecting other devices, permanently, for the rest of the
    * session, with nothing red anywhere on the screen — and, until Task 6
-   * rebuilds it, a `ConnectionStatusBar` still reporting a Supabase heartbeat
+   * rebuilt it, a `ConnectionStatusBar` still reporting a Supabase heartbeat
    * this screen no longer uses, i.e. an indicator showing healthy while the
    * transport that matters is dead.
    *
@@ -242,6 +289,23 @@ export function useLiveMeetingEvents(meetingId: string): void {
    * read", as `AgendaItemDetailPanel`'s refusals argue) applies in full to a
    * condition that persists, and dismissing it is the operator's choice rather
    * than a timer's.
+   *
+   * **Task 6 added a banner and KEPT this, which is two surfaces for one
+   * condition — on purpose, and on the same reasoning conventions item 12
+   * gives for `RouteErrorBoundary` versus an in-component `role="alert"`.**
+   * They answer different questions at different moments. The toast is the
+   * EVENT: raised once, by the hook, the instant the stream dies, and
+   * guaranteed regardless of what the caller renders — including the
+   * `MeetingStartFlow` branch and the loading branches, where `live.tsx`
+   * renders no banner at all, and including any future second caller of this
+   * hook that forgets to render one. The banner is the STATE: a standing
+   * sentence for whoever walks up to the clerk's laptop ten minutes later,
+   * long after a toast has been dismissed, and it is the only surface for
+   * `"reconnecting"`, which is not an event and has no moment to fire at.
+   * Deleting either one loses a case the other does not cover. The
+   * `Toaster` that makes this work is mounted in `root.tsx`, above `Outlet` —
+   * app-global, not `live.tsx`'s — so it is above every branch this hook can
+   * fire from.
    */
   const onError = useCallback((error: unknown) => {
     toast.error("Live updates have stopped", {
@@ -253,7 +317,50 @@ export function useLiveMeetingEvents(meetingId: string): void {
     });
   }, []);
 
-  useSubscription(
+  const transport = useSubscription(
     trpc.realtime.onMeetingChange.subscriptionOptions({ meetingId }, { onData, onError }),
-  );
+  ).status;
+
+  /**
+   * Transport state → what the screen may say, with the grace window that
+   * keeps a routine five-minute reconnect silent.
+   *
+   * The three non-obvious mappings:
+   *
+   * - **`"connecting"` does not immediately mean trouble.** It is the state a
+   *   healthy stream passes through twelve times an hour (see
+   *   `LIVE_STREAM_RECONNECT_GRACE_MS`), so it starts a timer instead of
+   *   setting anything. If the stream comes back first the cleanup clears it
+   *   and nothing was ever said. If the previous state was already
+   *   `"reconnecting"`, it is left alone rather than reset to healthy — a
+   *   flapping connection must not strobe the banner.
+   * - **`"error"` is immediate, with no grace at all.** The transport ADR's
+   *   addendum measured that a `TRPCError` makes this client STOP rather than
+   *   resume, so there is nothing to wait for; waiting five seconds to say so
+   *   would only delay the one message that needs a human.
+   * - **`"idle"` is also `"stopped"`, and is not reachable today.**
+   *   `useSubscription` reports `idle` when the subscription completes, which
+   *   over SSE means the server sent `event: return`. `realtime.onMeetingChange`
+   *   never returns — it throws, or loops until its signal aborts — and
+   *   `sse-bounds.test.ts` pins that the five-minute deadline specifically does
+   *   NOT emit that frame. Mapping it to `"stopped"` is the fail-loud answer
+   *   for a stream that ended and is not coming back; mapping it to healthy
+   *   would be the silent one.
+   */
+  const [status, setStatus] = useState<LiveStreamStatus>("healthy");
+
+  useEffect(() => {
+    if (transport === "pending") {
+      setStatus("healthy");
+      return;
+    }
+    if (transport === "error" || transport === "idle") {
+      setStatus("stopped");
+      return;
+    }
+    const timer = setTimeout(() => setStatus("reconnecting"), LIVE_STREAM_RECONNECT_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [transport]);
+
+  return status;
 }

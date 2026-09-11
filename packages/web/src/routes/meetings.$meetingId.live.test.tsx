@@ -55,9 +55,11 @@ vi.mock("@trpc/tanstack-react-query", async () => {
 // `@/hooks/useSupabase`, and every write it performs goes through the stubbed
 // `fetch` below.
 
-vi.mock("@/components/ConnectionStatusBar", () => ({
-  ConnectionStatusBar: () => null,
-}));
+// No `ConnectionStatusBar` mock since wave 5, Task 6: that module no longer
+// opens a Supabase channel (the reason it was mocked), and `live.tsx` now
+// renders `LiveStreamStatusBar` from it, driven by `useLiveMeetingEvents`'s
+// return value. Letting the real one render is what makes the assertions below
+// about the stream's banner mean anything.
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");

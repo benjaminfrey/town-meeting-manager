@@ -1,5 +1,6 @@
 import React from "react";
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { onlineManager } from "@tanstack/react-query";
 import { renderWithProviders, screen } from "@/test/render";
 import { createAdminUser } from "@/test/mocks/auth-mock";
 import { APP_NAME } from "@town-meeting/shared";
@@ -32,7 +33,10 @@ vi.mock("@/components/ProtectedRoute", () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock("@/components/CommandPalette", () => ({ CommandPalette: () => null }));
-vi.mock("@/components/ConnectionStatusBar", () => ({ ConnectionStatusBar: () => null }));
+// NOT mocked, since wave 5 Task 6: `ConnectionStatusBar` no longer opens a
+// Supabase Realtime channel (the reason it was stubbed), and it is the app
+// shell's only connection signal — stubbing it out means the shell's own half
+// of this task is pinned nowhere.
 vi.mock("@/components/NavigationProgress", () => ({ NavigationProgress: () => null }));
 vi.mock("@/components/LogoutDialog", () => ({
   LogoutDialog: ({ trigger }: { trigger: React.ReactNode }) => trigger,
@@ -43,6 +47,12 @@ import AppShell from "@/layouts/AppShell";
 describe("AppShell", () => {
   beforeEach(() => {
     userRef.value = createAdminUser();
+  });
+
+  afterEach(() => {
+    // Shared module singleton — leaving it offline would stop every later
+    // suite in this worker from running a query.
+    onlineManager.setOnline(true);
   });
 
   it("renders the wordmark and the primary navigation", () => {
@@ -57,6 +67,23 @@ describe("AppShell", () => {
   it("hides the live-meeting indicator when no meeting is in progress", () => {
     renderWithProviders(<AppShell />, { route: "/" });
     expect(screen.queryByText("Meeting live")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about the connection while the device is online", () => {
+    // The shell's header is on every authenticated screen; a permanent badge
+    // there would be noise. Silence-while-healthy is the requirement.
+    onlineManager.setOnline(true);
+    renderWithProviders(<AppShell />, { route: "/" });
+    expect(screen.queryByText("Offline")).not.toBeInTheDocument();
+  });
+
+  it("surfaces an offline device in the top bar", () => {
+    // The app-GLOBAL half of wave 5, Task 6. While offline, TanStack Query
+    // pauses mutations rather than failing them, so without this the user gets
+    // a Save button that appears to do nothing, with no error, indefinitely.
+    onlineManager.setOnline(false);
+    renderWithProviders(<AppShell />, { route: "/" });
+    expect(screen.getByRole("status")).toHaveTextContent("Offline");
   });
 
   it("exposes a command-palette search trigger", () => {
