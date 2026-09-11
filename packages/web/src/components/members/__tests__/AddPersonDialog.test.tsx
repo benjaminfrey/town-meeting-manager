@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 
 // ─── Mock the form to be valid with fixed values ──────────────────────
@@ -68,17 +68,35 @@ vi.mock("../StaffAccountFlow", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { toast } from "sonner";
 import { AddPersonDialog } from "../AddPersonDialog";
 
 const queryClient = setupAppQueryClient();
 
+/**
+ * Mutable so a test can make a given call FORBIDDEN without a fresh stub.
+ * Phase E wave 4 fix round (LOW-3): before this, neither `person.insert`
+ * (directory-only path, `AddPersonDialog.tsx:105`'s `onError`) nor
+ * `person.insertStaffAccount`/`invitation.insert` (staff path, `:153`'s
+ * `onError`) could ever answer FORBIDDEN — the pre-migration code raw-inserted
+ * with no check at all. Both are real tRPC procedures with real admin gates
+ * now, so both refusals are reachable, and neither had a test.
+ */
+const server = { personInsertRejects: false, staffAccountRejects: false };
+
 const stub = installTRPCFetchStub({
-  "person.insert": (input) => ({ id: "new-person", name: input.name, email: input.email }),
-  "person.insertStaffAccount": (input) => ({
-    id: "new-account",
-    person_id: input.personId,
-    gov_title: input.govTitle ?? null,
-  }),
+  "person.insert": (input) => {
+    if (server.personInsertRejects) trpcTestError("FORBIDDEN");
+    return { id: "new-person", name: input.name, email: input.email };
+  },
+  "person.insertStaffAccount": (input) => {
+    if (server.staffAccountRejects) trpcTestError("FORBIDDEN");
+    return {
+      id: "new-account",
+      person_id: input.personId,
+      gov_title: input.govTitle ?? null,
+    };
+  },
   "invitation.insert": () => ({ id: "new-invitation" }),
 });
 
@@ -155,5 +173,51 @@ describe("AddPersonDialog", () => {
     await user.click(screen.getByText("finish-staff"));
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  /**
+   * Regression pin for LOW-3 (whole-branch review, wave 4): `person.insert`
+   * was newly reachable through a real admin gate with no test asserting
+   * `AddPersonDialog.tsx:105`'s `onError` toast fires. Deleting that
+   * `onError` handler (or its `toast.error` call) turns this test red alone.
+   */
+  it("shows a refusal toast when person.insert answers FORBIDDEN (directory-only path)", async () => {
+    server.personInsertRejects = true;
+    try {
+      const { user } = renderDialog();
+      await user.click(screen.getByText("Continue"));
+      await user.click(screen.getByText("Directory only"));
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("Couldn't add the person — please try again."),
+      );
+    } finally {
+      server.personInsertRejects = false;
+    }
+  });
+
+  /**
+   * Regression pin for LOW-3, the staff-path twin: `person.insertStaffAccount`
+   * (and `invitation.insert` alongside it) fall under `AddPersonDialog.tsx:153`'s
+   * `onError`, also newly reachable and also untested before this. Deleting
+   * that `onError` handler (or its `toast.error` call) turns this test red
+   * alone.
+   */
+  it("shows a refusal toast when person.insertStaffAccount answers FORBIDDEN (staff path)", async () => {
+    server.staffAccountRejects = true;
+    try {
+      const { user } = renderDialog();
+      await user.click(screen.getByText("Continue"));
+      await user.click(screen.getByText("Staff account"));
+      await user.click(screen.getByText("finish-staff"));
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "Couldn't create the staff account — please try again.",
+        ),
+      );
+    } finally {
+      server.staffAccountRejects = false;
+    }
   });
 });

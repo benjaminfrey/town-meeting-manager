@@ -154,7 +154,10 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
     enabled: activeTab === "meetings",
   });
 
-  const { data: town } = useQuery({ ...trpc.town.detail.queryOptions(), enabled: !!townId });
+  const { data: town, isError: isTownError } = useQuery({
+    ...trpc.town.detail.queryOptions(),
+    enabled: !!townId,
+  });
 
   const { data: templateCount } = useQuery(
     trpc.agendaTemplate.countForBoard.queryOptions({ boardId }),
@@ -297,6 +300,33 @@ export default function BoardDetailPage({ loaderData }: Route.ComponentProps) {
               })}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* `town.detail` failed — this board still renders, so say which half is
+          missing rather than silently showing wrong data (conventions item
+          5). Without this, `effective` above goes null (Overview's
+          Formality/Minutes-style rows just vanish) and the Settings tab's
+          `townDefaults` falls back to hardcoded values (`retain_30_days`,
+          `auto_publish: false`) while `MinutesWorkflowEditor` still labels
+          them "Town default" — a wrong value shown as authoritative, worse
+          than a blank screen for a governance setting. */}
+      {isTownError && (
+        <div
+          className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30"
+          role="alert"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+              This board's information is complete, but the town's settings could not be loaded.
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            Any "town default" values below (Overview's Formality/Minutes style, and the Settings
+            tab's minutes-workflow defaults) may not reflect this town's actual settings. Try
+            reloading before relying on them.
+          </p>
         </div>
       )}
 

@@ -78,7 +78,9 @@ export default function PeoplePage() {
     error: peopleError,
   } = useQuery(trpc.person.list.queryOptions());
 
-  const { data: memberships = [] } = useQuery(trpc.boardMember.listByTown.queryOptions());
+  const { data: memberships = [], isError: isMembershipsError } = useQuery(
+    trpc.boardMember.listByTown.queryOptions(),
+  );
 
   const rows = useMemo(() => {
     const boardsByPerson = new Map<string, string[]>();
@@ -152,6 +154,25 @@ export default function PeoplePage() {
           </Button>
         )}
       </div>
+
+      {/* `boardMember.listByTown` failed — the people list itself still
+          rendered, so say which half is missing rather than silently
+          showing everyone with no board memberships (conventions item 5).
+          Without this banner, `memberships` defaults to `[]` above and every
+          row's "Boards" column reads "—" indistinguishably from a person who
+          genuinely holds no seat. */}
+      {isMembershipsError && (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+          role="alert"
+        >
+          <p className="font-medium">Board memberships could not be loaded.</p>
+          <p className="text-xs">
+            The people below are complete, but their "Boards" column may be missing seats they
+            actually hold. Try reloading.
+          </p>
+        </div>
+      )}
 
       {isLoading ? (
         <MeetingListSkeleton rows={5} />

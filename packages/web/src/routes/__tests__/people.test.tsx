@@ -58,6 +58,7 @@ const peopleServer = {
 /** Mutable so a test can change what `boardMember.listByTown` returns. */
 const membershipServer = {
   memberships: [] as RouterOutputs["boardMember"]["listByTown"],
+  rejects: false,
 };
 
 const stub = installTRPCFetchStub({
@@ -65,7 +66,10 @@ const stub = installTRPCFetchStub({
     if (peopleServer.rejects) trpcTestError("INTERNAL_SERVER_ERROR");
     return peopleServer.people;
   },
-  "boardMember.listByTown": () => membershipServer.memberships,
+  "boardMember.listByTown": () => {
+    if (membershipServer.rejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return membershipServer.memberships;
+  },
 });
 
 function renderPage() {
@@ -78,6 +82,7 @@ describe("PeoplePage", () => {
     peopleServer.people = [];
     peopleServer.rejects = false;
     membershipServer.memberships = [];
+    membershipServer.rejects = false;
   });
 
   it("lists board members, staff, and account-less people with the right role", async () => {
@@ -213,5 +218,25 @@ describe("PeoplePage", () => {
 
     await waitFor(() => expect(stub.countFor("boardMember.listByTown")).toBeGreaterThan(before));
     expect(await screen.findByText("Select Board")).toBeInTheDocument();
+  });
+
+  /**
+   * Regression pin for LOW-4 (whole-branch review, wave 4): before this,
+   * `boardMember.listByTown` had no `isError` branch, so a failed read
+   * silently defaulted `memberships` to `[]` and every person rendered as
+   * holding no board seats — plausible-looking wrong data, not a visible
+   * failure. The people list itself must still render (this is degradation,
+   * not a blank page), alongside a banner naming which half is missing.
+   */
+  it("shows a banner (not a blank Boards column) when boardMember.listByTown rejects", async () => {
+    peopleServer.people = [
+      { id: "p1", name: "Alice Board", email: "a@t.gov", role: null, gov_title: null },
+    ];
+    membershipServer.rejects = true;
+    renderPage();
+
+    expect(await screen.findByText("Alice Board")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(await screen.findByText("Board memberships could not be loaded.")).toBeInTheDocument();
   });
 });

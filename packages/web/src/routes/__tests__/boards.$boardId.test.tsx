@@ -53,6 +53,7 @@ const server = {
   detailRejects: false,
   townName: "Newcastle",
   townMeetingFormality: "semi_formal" as MeetingFormality,
+  townRejects: false,
 };
 
 // Collection scope, once per file — see `installTRPCFetchStub`'s doc comment.
@@ -88,27 +89,30 @@ const stub = installTRPCFetchStub({
   "board.stats": () => ({ active_members: 3, meetings: 7 }),
   "board.recentMeetings": () => [],
   "agendaTemplate.countForBoard": () => 2,
-  "town.detail": () => ({
-    id: "town-1",
-    name: server.townName,
-    state: "ME",
-    municipality_type: "town",
-    population_range: "under_1000",
-    contact_name: "Jamie Clerk",
-    contact_role: "Town Clerk",
-    meeting_formality: server.townMeetingFormality,
-    minutes_style: "summary",
-    presiding_officer_default: null,
-    minutes_recorder_default: null,
-    staff_roles_present: null,
-    subdomain: "newcastle",
-    seal_url: null,
-    retention_policy_acknowledged_at: null,
-    minutes_workflow_configured_at: null,
-    audio_retention_policy: "retain_30_days",
-    auto_publish_on_approval: false,
-    minutes_review_window_days: 7,
-  }),
+  "town.detail": () => {
+    if (server.townRejects) trpcTestError("INTERNAL_SERVER_ERROR");
+    return {
+      id: "town-1",
+      name: server.townName,
+      state: "ME",
+      municipality_type: "town",
+      population_range: "under_1000",
+      contact_name: "Jamie Clerk",
+      contact_role: "Town Clerk",
+      meeting_formality: server.townMeetingFormality,
+      minutes_style: "summary",
+      presiding_officer_default: null,
+      minutes_recorder_default: null,
+      staff_roles_present: null,
+      subdomain: "newcastle",
+      seal_url: null,
+      retention_policy_acknowledged_at: null,
+      minutes_workflow_configured_at: null,
+      audio_retention_policy: "retain_30_days",
+      auto_publish_on_approval: false,
+      minutes_review_window_days: 7,
+    };
+  },
 });
 
 function renderRoute(boardId: string) {
@@ -127,6 +131,7 @@ describe("board detail", () => {
     server.detailRejects = false;
     server.townName = "Newcastle";
     server.townMeetingFormality = "semi_formal";
+    server.townRejects = false;
   });
 
   it("shows the board's name and its member and meeting counts", async () => {
@@ -181,5 +186,32 @@ describe("board detail", () => {
       expect(stub.countFor("board.detail")).toBeGreaterThan(before);
     });
     expect((await screen.findAllByText("Renamed Board")).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Regression pin for LOW-4 (whole-branch review, wave 4): before this,
+   * `town.detail` had no `isError` branch, so a failed read silently fell
+   * through to hardcoded defaults (Overview's formality/minutes-style rows
+   * just vanish; the Settings tab's `townDefaults` becomes
+   * `retain_30_days`/`auto_publish: false`) while the UI kept labeling those
+   * values "town default" — a wrong value shown as authoritative for a
+   * governance setting. The board itself must still render (this is
+   * degradation, not a blank page), alongside a banner naming what may be
+   * stale.
+   */
+  it("shows a banner (not silently-wrong town defaults) when town.detail rejects", async () => {
+    server.townRejects = true;
+    renderRoute("b1");
+
+    expect((await screen.findAllByText("Select Board")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "This board's information is complete, but the town's settings could not be loaded.",
+      ),
+    ).toBeInTheDocument();
+    // The town-sourced rows do not silently fall back and relabel themselves
+    // "town default" — they are simply absent, since `effective` is null.
+    expect(screen.queryByText("— town default")).not.toBeInTheDocument();
   });
 });

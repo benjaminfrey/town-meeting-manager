@@ -178,7 +178,11 @@
  * an unfiltered count DISCLOSES THE CARDINALITY of exactly the attachments
  * this rule hides, which is a smaller version of the same leak for any future
  * consumer to pick up. `grep -rn 'exhibit_count' packages/api/src
- * packages/web/src` answers empty.
+ * packages/web/src` answers **9 lines, not empty** — every hit is a comment
+ * or test assertion documenting the column's absence (this comment's own two
+ * lines included), none a source line that reads or writes it. The
+ * substantive claim — no code path produces or consumes the column — holds;
+ * see `phase-e-conventions.md`'s item 14 entry for the full accounting.
  */
 
 import { sql } from "drizzle-orm";

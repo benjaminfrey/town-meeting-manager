@@ -587,9 +587,14 @@ source.
 **Mechanisation for the rule above: a documented procedure, not a gate — measured, not assumed.**
 V8 branch coverage (already configured in `packages/web/vitest.config.ts`, never run with
 thresholds) DOES catch this specific bug mechanically: reverting `AgendaSection.test.tsx` to its
-pre-fix-round-1 state and running
+pre-fix-round-1 state and running, **from `packages/web`** (the command resolves `@/test/render`
+etc. through that package's own `vitest.config.ts` `resolve.alias`; run verbatim from the repo root
+instead and it fails outright — `Test Files 1 failed | Tests no tests`, an `@/test/render`
+alias-resolution error, no coverage report at all — reproduced during the wave 4 fix round that
+added this parenthetical):
 
 ```
+cd packages/web
 npx vitest run --coverage --coverage.include='src/components/meetings/AgendaSection.tsx' \
   --coverage.reporter=lcov --coverage.reporter=text \
   src/components/meetings/__tests__/AgendaSection.test.tsx
@@ -616,8 +621,9 @@ suite's own numbers make the case: `routes/home.tsx` sits at 24% branch coverage
 single threshold either sits low enough to catch nothing or high enough to fail immediately on
 unrelated, pre-existing gaps.
 
-**What lands instead: the exact command above, for a wave 5/6 author to run on the files they
-touched, in the task's own verification step — not a CI gate.** Scope `--coverage.include` to the
+**What lands instead: the exact command above, run from `packages/web`, for a wave 5/6 author to
+run on the files they touched, in the task's own verification step — not a CI gate.** Scope
+`--coverage.include` to the
 component(s) a task's destructive writes live in, run only that component's own test file, and
 read the `% Branch` column plus — if it is not 100 and the reason is not obvious — the
 `coverage/lcov.info` `BRDA` lines for the specific refusal conditional; a `0` in the second-to-last
@@ -2306,8 +2312,17 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      unfiltered `count(*)` still DISCLOSES THE CARDINALITY of exactly the attachments rule 14 hides,
      so leaving the column in the API surface would have left a smaller version of the same leak for
      any future consumer to pick up. `grep -rn 'exhibit_count' packages/api/src packages/web/src`
-     answers empty. **The general lesson for a wave that finds a filtered read and an unfiltered
-     count over the same rows: the count is part of the disclosure, not a rendering detail.**
+     answers **9 lines, not empty** (corrected in the wave 4 fix round, after review reproduced the
+     command verbatim) — every hit is a comment or test assertion documenting the column's absence,
+     none a source line that reads or writes it: this doc comment's own two lines quoting the
+     command (`exhibit.ts:172,180`), `agenda-item.ts:316`'s twin doc comment, `agenda-item.test.ts`'s
+     two comments plus its two `not.toHaveProperty("exhibit_count")` assertions
+     (`agenda-item.test.ts:285,290,319,320`), and `meetings.$meetingId.agenda.tsx:55`'s comment with
+     its test's echo (`meetings.$meetingId.agenda.test.tsx:326`). The substantive claim — no code
+     path produces or consumes the column — holds; only the quoted grep result was wrong, the exact
+     comment-vs-code false positive this document warns about elsewhere. **The general lesson for a
+     wave that finds a filtered read and an unfiltered count over the same rows: the count is part of
+     the disclosure, not a rendering detail.**
   3. **Rule 15's board-member branch ignores the board — and rule 14's `board_only` branch has the
      exact same hole** (see item 2's "Wave 4, Task 2" section for the full statement). `isBoardMember`
      is a town-level fact in both rules, so `exhibit.link` lets any board member attach material to
