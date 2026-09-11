@@ -1189,6 +1189,79 @@ multi-table mutation needs one; the inventory will not ask for it.**
 | re-indent `guest-speaker.ts`'s procedure keys                    | the per-file canary fails naming `guest-speaker.ts`                                                                                        |
 | drop `meeting.adjourn`'s already-adjourned early return          | exactly 1 red, the two-device race test                                                                                                    |
 
+**Wave 5, Task 5 — a fifth answer to "where does a write go", and it is not a
+guard shape.** The four shapes this item catalogues all answer "which rule
+authorizes this procedure". Task 5's central problem was a different question
+the item had never had to ask: **which ACTOR performs a write that nobody
+requested.**
+
+`routes/meetings.$meetingId.live.tsx` carried four `useEffect`s that fired when
+a motion row arrived over the realtime subscription carrying a new `status`.
+They wrote `executive_session` (twice), `minutes_document` +
+`notification_event`, and the whole adjournment. Every connected device ran all
+four; the only thing between two clerks and two writes was an in-memory
+`useRef<Set>` of processed motion ids, which dies on reload and is shared with
+nobody. None of the four had an authorization check of any kind.
+
+**The answer that generalises: a write that is a CONSEQUENCE of a transition
+belongs in the transaction that performs the transition, not in a procedure the
+observers call.** `motion.ts`'s header already established the fact this rests
+on — an outcome status is reachable only through `voteRecord.recordForMotion` —
+so the transition has exactly one origin and its consequences went there. The
+alternative the task's brief also offered (idempotent procedures each client
+calls) was measured against two costs and rejected: it leaves N−1 devices
+performing a write they did not author, and it surfaces a FORBIDDEN on every
+device whose operator merely watched. **The test for which answer applies is
+whether the trigger is OBSERVED DATA or LOCAL UI STATE.** One of the five
+reactive writes stayed client-side for exactly that reason: the
+post-executive-session tracking effect is triggered by `isPostExecSession`, set
+when one device's operator answers a dialog, which no server can observe. It
+calls an idempotent procedure instead.
+
+**The authorization cost is the composite-procedure decision this item already
+records for `callToOrder`, one act further out.** `recordForMotion` is M3, and
+it now performs acts whose own rules are 21b (M6, executive session) and 21
+(admin/A1/M1, the meeting's status). Requiring those in addition would refuse
+the recording secretary mid-roll-call, which is rule 2a's stated failure. The
+rule applied is the one governing the act's primary write; it is a NARROWING
+either way, because all four writes were authorized by nothing before.
+
+**"Prove the dedup with two concurrent callers" needs two CONNECTIONS, and the
+proof is worth copying.** `routers/__tests__/vote-record.test.ts`'s
+`concurrently` helper opens two `connectAsAppRole` handles, builds a caller on
+each, and `Promise.allSettled`s them — so they really are two backends
+contending for the same rows rather than two awaits on one. Each assertion is
+on the COUNT of what landed, and each guard is a WHERE clause rather than a
+check-then-write, because READ COMMITTED re-evaluates a blocked statement's
+predicate against the committed row:
+
+| mutation                                         | result                                                               |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| drop `entered_at IS NULL` from the stamp         | 1 red — `expected [ 'entered', 'entered' ] to have a length of 1`    |
+| drop `status <> 'approved'` from the approval    | 1 red — two `notification_event` rows for one approval               |
+| drop `meeting.status = 'open'` before adjourning | 1 red — `expected [ true, true ] to have a length of 1`              |
+| drop `FOR UPDATE` from the motion lock           | all 3 red, `23505 vote_record_unique_per_motion` — the roll collides |
+
+The last row is the one a copier should read twice: **serializing the procedure
+on its own subject row is what makes the consequence guards reachable at all.**
+Without it the two callers' delete-and-reinsert of the roll collided before any
+consequence ran, and the loser got an INTERNAL_SERVER_ERROR — which is what
+concurrent "Record Vote" presses did in production, undetected, because nothing
+ever ran two.
+
+**A write two procedures perform is one body, and the publish must stay
+visible to the inventory.** Adjournment has two origins now (the "without
+objection" declaration and a passed motion), so `meeting.adjourn`'s SQL is
+extracted as `performAdjournment` and both call it. `performAdjournment` does
+NOT publish, deliberately: `router-wiring.test.ts`'s inventory attributes a
+helper's writes to the mutations that NAME it but reads `publishes` only ONE
+level deep, so a publish buried inside a helper-of-a-helper is invisible to it
+and the inventory starts failing for the wrong reason. For the same reason
+`voteRecord.recordForMotion` calls `publishRealtimeEvent` in a loop in its own
+file rather than reaching for `meeting.ts`'s `publishLiveMeetingTopics` — the
+scan reads THIS file's text. **The inventory is blind across a module boundary;
+a cross-module helper's writes are yours to announce.**
+
 ### Subscriptions follow item 2's rule unchanged, plus one
 
 Added in **wave 5, Task 1**, which shipped the first `.subscription(` in this codebase
@@ -2158,6 +2231,26 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # MeetingStartFlow.tsx and meetings.$meetingId.live.tsx (both
      # wave-5), home.tsx, meetings.tsx (x2) and
      # meetings.$meetingId.minutes.tsx (all wave-6).
+ 4   # at 01ff3ab, the close of Phase E wave 5, Task 5 — DOWN two, and now
+     # with ZERO `phase-e-wave-5` markers left in the tree
+     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
+     # answers empty; all 4 that remain are wave-6). The two removed are
+     # exactly the two this task's own files carried,
+     # `MeetingStartFlow.tsx` and `meetings.$meetingId.live.tsx`, and both
+     # are removed for the same reason: every write in each is a procedure
+     # now and neither file imports `@/hooks/useSupabase` any more. Each
+     # marker survives as STRUCK-THROUGH prose in its file's header, which
+     # the anchored grep correctly does not count — the comment's first word
+     # is `~~TODO(`, not `TODO(`, and that is the distinction the anchor
+     # exists to make. No marker was added: the eight component files this
+     # task also converted reach zero raw Supabase calls, so none needed one.
+     # The other two greps this item tracks:
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l      -> 15   (unchanged at 59d8f91:
+     #     not one file in this wave imported that module directly; they all
+     #     reached the same client through `useSupabase`)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 25  (32 then)
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -2449,6 +2542,94 @@ wave 5, Task 6, which owns replacing it: Task 1's report already says the server
 tells the client which topics to resync, so that branch should end up doing
 nothing rather than doing less).
 
+**Wave 5, Task 5 — run at the close of the task, per the widened scope (every
+Known-gaps bullet AND every numbered item's own prose).** Method: walked the
+bullets and the prose of items 1, 2, 7, 8, 9, 10, 11 and 12 for the ASSERTIONS
+they make, and re-ran the grep or read the code behind each. Deliberately NOT
+selected by "which files did this task touch" — the two most interesting
+findings below name files this task never opened. What moved:
+
+- **"Wave 5, Task 4's own open items" #1 and #3 are both FALSE** and are struck
+  through above. #1 (`live.tsx`'s writes are all still raw Supabase) and #3
+  (the `is_recording_secretary: 0` / `: 1` integer literals) are the two this
+  task's own work falsified, and #1 was also **one short**: it counted four
+  reactive WRITES and filed the adjourn-on-motion effect's under
+  `handleMeetingEnd` because the same handler served a button. Five reactive
+  writes across FOUR triggers is the honest statement, and the correction is
+  recorded at the bullet rather than only here.
+- **"Wave 5, Task 4's own open items" #4 contradicted a section of this same
+  document, written above it.** It said the SSE routing half "is not"
+  tested and that the cheapest coverage is a manual dev-server check; "The
+  client half of one stream" says the split IS pinned, in jsdom, in about forty
+  lines, by a reviewer in this same wave. Neither bullet nor section names a
+  file this task touched, and no close-out had caught it. Corrected, and
+  narrowed to what genuinely remains (no test drives a real `EventSource` from
+  the web client). **This is the third instance of the exact shape wave 5, Task
+  0's fix round found in item 2's prose** — a claim made true when written and
+  falsified by a fix landing elsewhere, surviving because every sweep looked at
+  the bullets whose FILES it had touched.
+- **The `adjournment.adjourned_by` bullet's writer moved** and its prose said
+  `live.tsx` writes it. The value and the defect are unchanged; the writer is
+  `meeting.ts`'s `performAdjournment`, and `ctx.tenant.personId` is a source
+  the client cannot choose where `currentUser?.personId` was not. Corrected in
+  place, because wave 6 is told to read that bullet before touching either
+  minutes file and would otherwise open the wrong one.
+- **Item 11's marker countdown moved 6 → 4**, and there are now ZERO
+  `phase-e-wave-5` markers in the tree. Re-run above, anchored to `01ff3ab`.
+- **Item 8's raw `pathFilter()` FILE count did not move (53), and that is the
+  wrong unit for this task** — what grew is the CALL count, 88 at this commit,
+  28 of them this task's, all 28 swept RED. Recorded above, with the command.
+
+Checked and still true, unchanged: item 2's board-scoped census moved for the
+ordinary reason and is quoted rather than counted
+(`grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l`
+answers **20**, `grep -rnE "^\s+\.use\(requireBoardActor\(" …` answers **9**,
+`grep -cE ": BoardScope" rules.ts` answers **29** — the first two grew in wave
+5 Task 3 and this task added no rule and no guard, only callers); item 9's
+`useMockAuth`/`MockAuthProvider` claims (this task rewrote eleven test files
+and added none that reaches either); item 7's `initConnectionErrorHandler`
+carve-out (still the one bare `invalidateQueries()` in the tree, still Task 6's);
+"Wave 4, Task 3's own open items" #3 (the legacy `queryKeys.exhibits.*` lines
+stay — `meetings.$meetingId.review.tsx` still reads them, and that file is wave
+6's); and every legacy `queryKeys.*` line in the nine files this task
+converted, each re-checked against item 7's rule that the legacy line goes when
+the last legacy reader does — `SourceDataPanel.tsx` and
+`meetings.$meetingId.review.tsx` still read all nine namespaces, so all of them
+stay.
+
+**Wave 5, Task 5's own open items.** Three, none of them a defect this task
+introduced:
+
+1. **`executiveSession.markEntered` and `executiveSession.discard` have no
+   caller**, deliberately — the two reactive effects they were built for are
+   gone, and the live path writes `executive_session` from
+   `voteRecord.recordForMotion` with statements keyed by `entry_motion_id`
+   rather than by session id (which is what makes `entered_at IS NULL`
+   available as the idempotency guard). Both are kept, with tests: each is a
+   real M6 action, `discard` carries a precondition the folded path also
+   relies on, and wave 6's minutes surface may want a manual path into both.
+   Recorded in `executive-session.ts`'s own header as a decision. What they
+   must not become is a second way for a client to race the same write.
+2. **The minutes re-render still names the wrong meeting.** `live.tsx` followed
+   the minutes-approval write with
+   `POST /api/meetings/${meetingId}/minutes/render` using the id of the LIVE
+   meeting, while the document approved belongs to an EARLIER one (it is
+   reached through `agenda_item.source_minutes_document_id`). So the
+   un-watermarked re-render has always been requested for the wrong meeting,
+   and the live meeting usually has no minutes document, so the call 404s into
+   the `.catch(() => {})` that swallows it — the DRAFT watermark is never
+   removed. Reproduced rather than repaired: the render endpoint is a Fastify
+   Puppeteer route that cannot join the approval's transaction, and which
+   document should be re-rendered is a minutes-surface question. It now sits in
+   `VotePanel.tsx` with the defect named beside it and in
+   `routers/minutes-document.ts`'s helper. **Wave 6 should fix it with the
+   `adjourned_by` misattribution, not separately** — both are the same class
+   (a live defect in what a generated legal record says) and both have the same
+   two readers.
+3. **`ConnectionStatusBar` is still on a Supabase Realtime heartbeat channel**,
+   and this screen still renders it — wave 5, Task 6's, carried forward from
+   Task 4's list unchanged.
+
 ---
 
 ## Files to copy from
@@ -2613,6 +2794,22 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   which is a writer in the sense that matters here: another device's write arriving) and
   `hooks/useQuorumCheck.ts`. Reproduce with the same command:
   `grep -rl "\.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l`.
+
+  **Re-measured at `01ff3ab` (wave 5, Task 5): raw 53, unchanged — and the FILE count is the wrong
+  unit for what this task did.** Every one of the eight files above was already counted; what grew
+  is the number of CALLS inside them, which is the unit the deletion sweep works in and the unit
+  item 8's per-file credit bleed is about:
+
+  ```
+  $ grep -rn "invalidateQueries(trpc\..*\.pathFilter())" packages/web/src \
+      | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  88     # at 01ff3ab; one is a doc-comment false positive (test/trpc.ts), so 87 real calls
+  ```
+
+  Twenty-eight of those are this task's, across nine files, and all 28 were swept by deletion —
+  **28 sites, 28 RED**, each naming a test, each restored from a copy. The sweep was run in two
+  passes, one per commit, scoped to the touched directory rather than the whole web suite (~10s a
+  site rather than ~12s), which is what makes it affordable per-task rather than per-wave.
 
   **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
   not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
@@ -3127,8 +3324,10 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   says so" is the reason nobody had.**
 
 - **Wave 5, Task 3 — `adjournment.adjourned_by` is a misattribution, not a blank field, and wave 6
-  should read the fix here before touching either minutes file.** `live.tsx` writes
-  `adjourned_by: currentUser?.personId` (a `person.id`); `services/minutes-assembler.ts`'s
+  should read the fix here before touching either minutes file.** The adjournment writes
+  `adjourned_by` as a `person.id` — `live.tsx` sent `currentUser?.personId` until wave 5, Task 5
+  moved the write into `meeting.ts`'s `performAdjournment`, which writes `ctx.tenant.personId`: the
+  same value, from a source the client cannot choose, and the same defect. `services/minutes-assembler.ts`'s
   `buildAdjournment` resolves it with `memberName(...)`, whose lookup is a `board_member.id` map, so
   it always resolves to `null`. The first report of this (Task 3's own fix round) said the generated
   minutes have "no adjourner" — that does NOT reproduce. `minutes-formatters.ts:629-636`'s
