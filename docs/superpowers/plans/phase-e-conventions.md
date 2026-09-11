@@ -733,6 +733,82 @@ clerk is wrongly refused) and one that revokes is ignored too (a barred clerk is
 module import time if you hand it a board-scoped code with no board, so the mistake never reaches
 a request.
 
+**Wave 4, Task 5 — close-out: what the board-mismatch mechanism got right across the whole wave,
+what the rule-14/15 finding turned into, and what waves 5 and 6 need that the paragraphs above do
+not yet say.**
+
+**What survived, unchanged, across every table this wave touched.** The mechanism above was
+designed against `meeting`, where the board is a column, and every subsequent table this wave
+reached (`agenda_item`, `exhibit`, two joins out) needed zero changes to `assertMatchesAuthorizedBoard`
+itself — only to what gets read before calling it. That is the property worth naming at close-out:
+`requireBoardActor`/`requireBoardPermission` authorizing a CLAIMED board pre-`.input()`, and a
+resolver-side re-derivation of the REAL board from inside the same `ctx.withTenant` transaction, is
+a mechanism about PROVENANCE (read fresh, inside the write's own transaction, never from client
+input), not about SHAPE (a column vs. a join vs. a join of a join). Five of the seven tables item 2
+names now have that RLS finding checked against `0000_baseline.sql` directly — `meeting`,
+`agenda_item`, `meeting_attendance`, `minutes_document`, and `exhibit` as of this wave — all five
+tenancy-only, no board predicate, no role predicate, so the mismatch defence is load-bearing for
+all five the moment a row-targeted board-scoped WRITE touches them. `motion`, `vote_record` and
+`minutes_section` remain the only three of the original seven still unchecked.
+
+**What finding 3 (rule 14/15's board-blind `isBoardMember` branch) changed: nothing in the
+mechanism, and one thing in how this document records a decision.** The finding itself is not a
+flaw in `requireBoardActor` — the guard did exactly what it promises, authorizing the real board
+correctly two joins out; the rule it guards simply has a branch that does not consult the board it
+was handed. The general lesson recorded in the Task 2 section above ("`requireBoardActor` guarantees
+that the board a rule is asked about is the board the write is really about. It cannot guarantee
+that the rule looks at it.") stands as written. What this close-out changed is procedural: the
+owner's decision on it (leave rule 14's town-wide `board_only` visibility as-is, 2026-09-10) had
+been reached but never landed in this document — it lived only in the plan's own progress ledger,
+which is exactly the kind of loss item 14 exists to catch when a decision is made outside a task's
+own diff. See the "Known gaps" bullet on this ("Wave 4, Task 2's own open items", finding 3) for
+the recorded decision itself; it is stated once there rather than duplicated here.
+
+**What waves 5 and 6 need that this item does not yet say.** Wave 5's own plan
+(`docs/superpowers/plans/2026-09-10-phase-e-wave-5-live-and-sse.md`) names nine tables it writes to
+— `motion`, `vote_record`, `meeting_attendance`, `executive_session`, `guest_speaker`,
+`agenda_item_transition`, `future_item_queue`, `meeting`, `agenda_item` — and reports all nine as
+`FOR ALL USING (town_id = get_current_town_id())`, tenancy-only, verified against
+`0000_baseline.sql` directly, the identical shape this item has been finding table after table.
+Two things worth stating here rather than leaving a wave-5/6 author to re-derive them from that
+plan alone:
+
+- **The join is uniform across eight of the nine, and it is one hop, not two — but not all nine,
+  and wave 5's own plan overstates this by one table.** `motion`, `vote_record`,
+  `meeting_attendance`, `executive_session`, `guest_speaker` and `agenda_item_transition` each
+  carry a `meeting_id uuid NOT NULL` column and no `board_id` column at all (verified directly
+  against `0000_baseline.sql`'s `CREATE TABLE` statements, not taken on the plan's word), so the
+  board is `meeting.board_id`, one join — a SIMPLER shape than `exhibit`'s two-join derivation this
+  wave solved; reuse `agenda-item.ts`'s `assertMeetingOnAuthorizedBoard`-style per-row derivation
+  directly rather than re-deriving a two-join query for a one-join table. **`future_item_queue` is
+  the exception, checked the same way and found different: it carries `board_id uuid NOT NULL`
+  directly, and its `source_meeting_id` column is NULLABLE** (a queued item can exist with no
+  meeting behind it, e.g. one dismissed and re-queued). So `future_item_queue` needs NO join at
+  all — the board-mismatch defence there is the `meeting`-shaped case (compare a column, not a
+  join result), simpler than the other eight, not the same as them. Wave 5's own plan states "every
+  table this wave writes" derives its board via `meeting_id` — true for eight, not for this one;
+  worth catching here since a copier who trusts that sentence for `future_item_queue` specifically
+  would write a join the schema does not need and does not support (there is no `meeting_id` column
+  on this table to join from when `source_meeting_id` is null).
+- **`assertCanInsertVoteRecord` needs a FIFTH guard shape this item has not yet named.** It is
+  `(actor: Actor, tx: TenantTx, subject: VoteRecordSubject) => Promise<void>` — `async`, and it
+  takes a `TenantTx` as its SECOND argument (corrected earlier in this item, in the "Corrected in
+  the whole-branch fix round" paragraph above, after two places first said "a THIRD argument"). It
+  cannot go behind `requireBoardPermission` OR `requireBoardActor` unchanged, for the same reason
+  neither can express `assertCanUpdateUserAccount`'s subject-carrying shape: those two guards run
+  BEFORE `.input()`, with no `TenantTx`, and this rule's self-vote branch (M8, a live `board_member`
+  lookup for the caller's own active seat) genuinely needs one. It stays resolver-side, the same
+  category as the row-level "these minutes are still a draft" rules above — not a gap in the guard
+  catalogue, but a fifth shape this item's four-shape count (Actor-only, board-scoped-by-code,
+  board-scoped-by-rule, subject-carrying) does not cover, because none of the first four rules that
+  motivated them needed a `TenantTx` of their own. Whichever wave wires it should record why it
+  stays resolver-side next to the rule itself, the way `assertMatchesAuthorizedBoard`'s own doc
+  comment does, rather than re-deriving the reasoning silently.
+- **Two tables have no rule at all today**, per wave 5's own plan: `agenda_item_transition` and
+  `future_item_queue`. Deciding what code authorizes them (or minting a new one) is a wave-5
+  decision this item does not make for them — named here only so "no rule exists yet" is not
+  mistaken for an oversight this item failed to flag.
+
 ---
 
 ## 3. NOT_FOUND, not FORBIDDEN, for a row in another town
@@ -2237,11 +2313,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      is a town-level fact in both rules, so `exhibit.link` lets any board member attach material to
      ANY board's agenda item, and `exhibit.byMeeting` lets any board member read ANY board's
      `board_only` exhibit titles. Both are pinned as PASSING tests in `exhibit.test.ts` so narrowing
-     either is a deliberate change with a failing test to greet it; genuinely open as a product
-     question, and the same at the D1e upload endpoint (the write) and download endpoint (the bytes),
-     where it has been open since Stage 1/D1e. **Whether a board member seeing every other board's
-     `board_only` material is intended or a latent defect is for the owner to decide — see this
-     task's report for the fix round's explicit judgement on it.**
+     either is a deliberate change with a failing test to greet it; the same is true at the D1e
+     upload endpoint (the write) and download endpoint (the bytes), where it has been true since
+     Stage 1/D1e. **This is an OWNER DECISION, not an open question — record it here so it is not
+     re-raised.** The implementer's own judgement (see fix round 1) was that this reads as a latent
+     defect, not an intent: `board_only`'s own naming and refusal message imply per-board scoping,
+     and a read-exposure hole is a materially different risk from rule 15's write-side one. The
+     owner was asked and decided (2026-09-10): **leave rule 14's town-wide `board_only` visibility
+     AS-IS for now.** Do not narrow it in wave 5, wave 6, or later without a fresh decision — the two
+     passing tests above are the tripwire for that decision changing, not evidence of a bug nobody
+     has weighed in on. Two separate agents (this task's implementer and the whole-branch closer)
+     independently flagged this as worth a decision in the same wave, which is itself evidence a
+     bullet stating only "open" invites re-litigation — stating the decision, not just the fact
+     pattern, is what stops a third.
   4. ~~**The read's tightening is bigger than "admin_only" alone (fix round 1 correction).** …
      once Task 3 wires this read into the agenda builder the visible change is materially larger than
      the original statement implied.~~ — **shipped in Task 3, and the prediction held.** The A2-only
