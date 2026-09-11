@@ -9,7 +9,13 @@
  * that the API reads itself; without this every procedure answers UNAUTHORIZED,
  * and the symptom reads as an authorization bug rather than a transport one.
  */
-import { createTRPCClient, httpBatchLink, isTRPCClientError } from "@trpc/client";
+import {
+  createTRPCClient,
+  httpBatchLink,
+  httpSubscriptionLink,
+  isTRPCClientError,
+  splitLink,
+} from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
@@ -28,13 +34,39 @@ import { queryClient } from "./queryClient";
  */
 export type RouterOutputs = inferRouterOutputs<AppRouter>;
 
+/**
+ * `splitLink`, added in Phase E wave 5, Task 4, and it corrects the ADR.
+ *
+ * `docs/advisory-resolutions/5.1-realtime-transport.md` says "no
+ * `wsLink`/`splitLink` client wiring is needed" — true of the WebSocket
+ * fallback it was contrasting against, and false of the SSE path it chose.
+ * `httpBatchLink` refuses a subscription outright ("Subscriptions are
+ * unsupported by `httpLink` - use `httpSubscriptionLink` or `wsLink`"), so a
+ * single-link client cannot carry both. The split is by operation TYPE, which
+ * is the only thing that distinguishes them: everything else still batches
+ * over POST exactly as before.
+ *
+ * `credentials: "include"` has no counterpart on the subscription branch and
+ * needs none. `EventSource`'s `withCredentials` governs CORS requests only,
+ * and this url is same-origin (`/api/trpc`, relative — the Vite proxy in dev,
+ * nginx in production), so the session cookie is sent either way. It is passed
+ * anyway, so that the two branches state the same intent rather than leaving a
+ * reader to reconstruct why only one of them mentions credentials.
+ */
 export const trpcClient = createTRPCClient<AppRouter>({
   links: [
-    httpBatchLink({
-      url: "/api/trpc",
-      fetch(url, options) {
-        return fetch(url, { ...options, credentials: "include" });
-      },
+    splitLink({
+      condition: (op) => op.type === "subscription",
+      true: httpSubscriptionLink({
+        url: "/api/trpc",
+        eventSourceOptions: () => ({ withCredentials: true }),
+      }),
+      false: httpBatchLink({
+        url: "/api/trpc",
+        fetch(url, options) {
+          return fetch(url, { ...options, credentials: "include" });
+        },
+      }),
     }),
   ],
 });
