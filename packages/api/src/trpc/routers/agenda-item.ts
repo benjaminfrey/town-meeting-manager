@@ -326,8 +326,19 @@ export const agendaItemRouter = router({
    * `PublishAgendaDialog.tsx` — the five files that read an item. NOT
    * selected, each deliberately: `town_id` (RLS scopes this; conventions item
    * 2's "no redundant WHERE town_id"), `meeting_id` (every row is this
-   * meeting's — it is the argument) and `source_minutes_document_id`,
-   * `created_at`/`updated_at`, `search_vector`.
+   * meeting's — it is the argument), `created_at`/`updated_at` and
+   * `search_vector`.
+   *
+   * **`source_minutes_document_id` was on that not-selected list and is now
+   * selected — wave 5, Task 4.** Same rule as the two columns below, one task
+   * later: `routes/meetings.$meetingId.live.tsx`'s minutes-approval effect
+   * reads it to decide which agenda items are "approve the minutes of <date>"
+   * items, and which `minutes_document` a passed motion on one of them
+   * approves. That effect is the only reader in the repo
+   * (`grep -rn "source_minutes_document_id" packages/web/src`), and it was on
+   * raw Supabase until Task 4 moved this screen's reads here. Conventions item
+   * 1's "add it back the day something does" — the agenda builder still
+   * ignores it.
    *
    * **`status` and `operator_notes` were on that not-selected list and are
    * now selected — wave 5, Task 3.** The entry above used to read "nothing on
@@ -380,12 +391,13 @@ export const agendaItemRouter = router({
           suggested_motion: string | null;
           status: string;
           operator_notes: string | null;
+          source_minutes_document_id: string | null;
         }>(
           await tx.execute(sql`
             SELECT ai.id, ai.section_type, ai.sort_order, ai.title, ai.description,
                    ai.presenter, ai.estimated_duration, ai.parent_item_id,
                    ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion,
-                   ai.status, ai.operator_notes
+                   ai.status, ai.operator_notes, ai.source_minutes_document_id
             FROM agenda_item ai
             WHERE ai.meeting_id = ${input.meetingId}
             ORDER BY ai.sort_order ASC, ai.id

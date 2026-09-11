@@ -1748,6 +1748,56 @@ describe("agendaItem.byMeeting — the live-run columns", () => {
   });
 });
 
+/**
+ * ─── Phase E, wave 5, Task 4 — `source_minutes_document_id` ────────────────
+ *
+ * Added to `byMeeting`'s column list when `routes/meetings.$meetingId.live.tsx`
+ * moved its reads onto this procedure. That screen's minutes-approval effect
+ * is the column's only reader in the repo, and without it the effect silently
+ * matched nothing: `item.source_minutes_document_id` on a payload that does
+ * not carry it is `undefined`, every item filters out, and minutes approved by
+ * motion during a meeting quietly never move to `approved`.
+ */
+describe("agendaItem.byMeeting — the minutes-approval link", () => {
+  it("returns source_minutes_document_id, and null when there is no link", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const linkedId = await seedAgendaItem(db, town, meetingId, {
+          title: "Approve the minutes of February 10",
+          sortOrder: 0,
+        });
+        const plainId = await seedAgendaItem(db, town, meetingId, {
+          title: "Budget",
+          sortOrder: 1,
+        });
+        const docId = randomUUID();
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO minutes_document (id, meeting_id, town_id, board_id, status)
+            VALUES (${docId}, ${meetingId}, ${town.townId}, ${town.boardId}, 'review')
+          `);
+          await tx.execute(sql`
+            UPDATE agenda_item SET source_minutes_document_id = ${docId} WHERE id = ${linkedId}
+          `);
+        });
+
+        const reader = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, reader));
+        const rows = await caller.agendaItem.byMeeting({ meetingId });
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        expect(byId.get(linkedId)?.source_minutes_document_id).toBe(docId);
+        expect(byId.get(plainId)?.source_minutes_document_id).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
 describe("agendaItem writes announce themselves", () => {
   it("publishes the agenda_item topic for this meeting on insert", async () => {
     await withTestDb(async (client) => {

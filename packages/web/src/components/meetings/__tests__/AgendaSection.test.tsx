@@ -101,6 +101,7 @@ function item(overrides: Partial<AgendaItem> & { id: string }): AgendaItem {
     sort_order: 0,
     status: "pending",
     operator_notes: null,
+    source_minutes_document_id: null,
     title: "Item",
     description: null,
     presenter: null,

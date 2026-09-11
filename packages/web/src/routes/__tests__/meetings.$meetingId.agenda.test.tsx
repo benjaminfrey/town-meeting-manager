@@ -143,6 +143,7 @@ function item(overrides: Partial<Item> & { id: string }): Item {
     sort_order: 0,
     status: "pending",
     operator_notes: null,
+    source_minutes_document_id: null,
     title: "Call to Order",
     description: null,
     presenter: null,
