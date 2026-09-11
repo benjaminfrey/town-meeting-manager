@@ -2364,6 +2364,31 @@ test) goes red, restore.
 If your mutation does not go red, you have not written a test. You have written a comment that
 runs.
 
+**A red gate run leaks a scratch database, invisibly, and this is a standing property of the
+harness — not a wave-5 anecdote.** `npx turbo run test --force` runs the web and api packages as
+sibling turbo tasks. When the web task fails, turbo **kills** the still-running api task rather
+than waiting for it to finish; every api test opens its Postgres scratch database inside
+`withTestDb`, whose teardown runs in a `finally`, and a kill means that `finally` never executes.
+This is a different mechanism from the vitest-force-kills-a-timed-out-test leak documented in item
+2's reentrancy-guard discussion above — that one kills a single hung test from inside the same
+process; this one is turbo killing an entire sibling task from outside it — and the ordinary "check
+for a stray connection" instinct finds nothing here: no backend survives the kill, so
+`pg_stat_activity` shows **zero** rows on the leaked database whether or not it leaked. The check
+that actually sees it is
+
+```
+SELECT datname FROM pg_database WHERE datname LIKE 'tmm_test%';
+```
+
+run after **any** red `npx turbo run test`, not only once the suite finally goes green. Wave 5,
+Task 5's fix round reproduced it directly: a forced-red web task left the api task's output
+stopped mid-run with not one test result printed, one scratch database with zero
+`pg_stat_activity` backends on it; the task itself had accumulated 27 the same way across two
+earlier red runs before this was known to check for. Leak size scales with how far the api task got
+before the kill, so the count itself is not diagnostic — the query is. Every future red
+`turbo run test`, in wave 6 and beyond, leaks the same way; check `pg_database`, not the backend
+count, every time.
+
 ---
 
 ## 14. The close-out step: re-check every Known-gaps bullet against HEAD
