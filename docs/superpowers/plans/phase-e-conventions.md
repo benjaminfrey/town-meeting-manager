@@ -61,8 +61,17 @@ detail: protectedProcedure
 
 An explicit list means a schema change that drops a column this screen depends on fails at the
 query, not as `undefined` deep inside a settings form. It also makes omissions deliberate and
-documented — `board.detail` leaves out `board_type` because nothing on that screen reads it, and
-says so. Add it back the day something does.
+documented — ~~`board.detail` leaves out `board_type` because nothing on that screen reads it, and
+says so. Add it back the day something does.~~ **True when this item was written; false since wave
+2, Task 2 (`1939f57`), which added `board_type` back.** `boards.$boardId.templates.tsx`'s
+auto-create effect needs it to pick which of `getDefaultTemplateSections`'s four fixed outputs to
+seed a new board with, and that screen now reads its board row through this procedure rather than
+its own separate `select("id, name, board_type")` — `board.detail`'s own doc comment
+(`board.ts:109-115`) already states the addition in full, exactly the promise this paragraph used
+to make ("add it back the day something does"). This paragraph itself kept describing the
+pre-`1939f57` exclusion as current fact for three further waves; found in wave 5, Task 0's fix
+round, by the same widened read of item 1's prose (not a Known-gaps bullet) that also caught item
+2's `CancelMeetingDialog.tsx` claim below — see item 14's close-out for both.
 
 **Do not cite a line range.** `board.detail` and `board.recentMeetings` both did, at
 `boards.$boardId.tsx:215-228`/`:603-616` and `:163-167`. By the time this was reviewed, Task 4 had
@@ -195,7 +204,7 @@ next wave's author is the one who needs to find them.
 `requireActor`'s `(actor: Actor) => R` shape — it takes a second argument,
 `subject: { userAccountId, columns }`, because its self-branch authorizes the ROW ("is this the
 caller's own account?"), not the actor alone. `packages/api/src/trpc/routers/person.ts`'s
-`updateGovTitle` (~line 186) handles this with `requireOwnAccountColumns`, a one-off local
+`updateGovTitle` handles this with `requireOwnAccountColumns`, a one-off local
 middleware — not a new export on `trpc.ts`; nothing else in the app needs this exact shape yet, and
 that file's own header warns that being wrong there is "wrong 70 times over." Declared before
 `.input()`, it reads `userAccountId` off the UNVALIDATED body via `getRawInput()` — the identical
@@ -647,10 +656,23 @@ wild.
 **The cost, stated rather than left to be discovered:** the board id `requireBoardActor` needs is not
 needed by the WRITE itself for a row-targeted procedure — it exists purely so a guard declared before
 `.input()` has something to authorize on. Every such write inherits a client-supplied field whose only
-job is feeding the guard, and the client-side plumbing to supply it — `CancelMeetingDialog.tsx` will
-need a `boardId` prop it does not have today (see that component's own `TODO(phase-e-wave-3)` marker).
-Worth it for FORBIDDEN-before-BAD_REQUEST (item 13's rule), but a documented cost, not a discovery a
-future wave should have to make again.
+job is feeding the guard, and the client-side plumbing to supply it was a real cost, paid rather than
+merely predicted: ~~the client-side plumbing to supply it — `CancelMeetingDialog.tsx` will need a
+`boardId` prop it does not have today (see that component's own `TODO(phase-e-wave-3)` marker).~~
+**True only when this paragraph was written, in wave 3, Task 1. Closed in wave 3, Task 2 (`c34b987`)**,
+which added the required `boardId` prop — threaded from the component's only caller,
+`boards.$boardId.meetings.tsx` — and discharged the marker; see item 11's re-run above ("11 # at
+`c34b987` — Task 2 closed `CancelMeetingDialog.tsx`'s ... raw-write authorization holes"). At HEAD,
+`CancelMeetingDialog.tsx` has carried a required `boardId` prop since that commit and no
+`TODO(phase-e-wave-*)` marker remains in the file — verified directly (`grep -n "boardId"` and
+`grep -n "TODO(phase-e-wave"` against the file, both re-run at wave 5, Task 0's fix round). This
+paragraph itself kept describing the pre-`c34b987` state as current fact for two further waves and
+three prior close-outs, even though this same document's item 11 re-run and item 2's own "Wave 5,
+Task 0" carry-over section both already narrate the fix correctly elsewhere — found by a reviewer
+reading this item's prose paragraph-by-paragraph rather than by its Known-gaps bullets; see item 14's
+close-out below for why the standing sweep had been missing exactly this shape. Worth it for
+FORBIDDEN-before-BAD_REQUEST (item 13's rule) — a cost that was, in fact, paid, not merely documented
+and then left unpaid.
 
 **A separate finding, orthogonal to authorization but found by exactly the same "verify by mutation"
 discipline item 13 requires, and now closed STRUCTURALLY rather than by a convention to remember:
@@ -1846,11 +1868,27 @@ the screen), **"nothing is wired to it"** (grep for the procedure name across `p
 you never opened is exactly the one this step exists for; "my diff does not touch that file" is the
 reasoning that produced four stale bullets in wave 2 and a fifth here.
 
-This is intentionally scoped to Known-gaps, not "audit the whole document every time" — item 11's
-own countdown grep already does the analogous job for `TODO(phase-e-wave-*)` markers in the
-CODEBASE; this step is the same discipline applied to the PLAN DOCUMENT's own claims about that
-codebase, which no automated check can verify because "is this bullet's prose still true" is not a
-grep-able property.
+**This was scoped to Known-gaps bullets only, and that scope was too narrow — widened at wave 5,
+Task 0's fix round; see that fix round's own paragraph below for the incident that found it.** The
+reasoning for not auditing the whole document every time still holds: item 11's own countdown grep
+already does the analogous job for `TODO(phase-e-wave-*)` markers in the CODEBASE; this step is the
+same discipline applied to the PLAN DOCUMENT's own claims about that codebase, which no automated
+check can verify because "is this prose still true" is not a grep-able property. But "Known-gaps
+bullets" was the wrong boundary to draw the exemption around — a present-tense status claim can sit
+in a numbered item's ORDINARY PROSE just as easily as in one of its bullets, and nothing about the
+method above (walk the bullets, check each assertion) ever looked there.
+
+**The scope is now: every Known-gaps bullet, AND every numbered item's own prose body — not only
+its Known-gaps sub-bullets.** This does not become "audit the whole document": the "Files to copy
+from" table, the "Session History"-style narration of what a past commit did, and a fix round's own
+retrospective paragraphs (the "what the item got right / got wrong" sections, once resolved) are
+historical record, not present-tense claims about the CURRENT tree, and stay out of scope the same
+way they always have. What changed is which part of a NUMBERED ITEM counts: read the item
+paragraph-by-paragraph, not bullet-by-bullet, and treat any sentence asserting a component's current
+shape ("`board.detail` leaves out `board_type`"), a marker's existence ("see that component's own
+`TODO(phase-e-wave-3)` marker"), or a file's current state (including an approximate line-number
+citation, which item 1 already tells you not to write for the identical reason) as a claim to verify
+against HEAD — the same standard a Known-gaps bullet has been held to since wave 2.
 
 **Wave 5, Task 0 — run now, before any wave-5 code, per this task's own brief ("now, not at the
 end").** Method: walked every Known-gaps bullet and every present-tense status claim in items 2, 9
@@ -1889,6 +1927,35 @@ not wrong prose, but decisions recorded outside this document (in the task's own
 never landed here at all, which is the same failure this step's own root-cause paragraph describes
 ("a decision reached but never landed in this document") one level up: a decision made in a
 conversation rather than a diff. They are recorded above rather than left for a sixth carry-over.
+**This verdict was itself wrong, found by the fix round immediately below — read that paragraph
+before trusting "no false claim found" at any future close-out.**
+
+**Sharpened again in wave 5, Task 0's fix round, because a false present-tense claim sat in item 2's
+ORDINARY PROSE — not a Known-gaps bullet — and survived the pass immediately above along with three
+prior close-outs.** A reviewer, verifying this task by execution, found that item 2's "The cost,
+stated rather than left to be discovered" paragraph asserted `CancelMeetingDialog.tsx` "will need a
+`boardId` prop it does not have today" and pointed at "that component's own `TODO(phase-e-wave-3)`
+marker" — true when written, in wave 3, Task 1; false since wave 3, Task 2 (`c34b987`) added the
+prop and discharged the marker, two waves and three close-outs before this one. The claim's falsity
+was not hidden: this same document's own item 11 re-run at `c34b987` ("Task 2 closed
+`CancelMeetingDialog.tsx`'s ... raw-write authorization holes") and item 2's "Wave 5, Task 0"
+carry-over section (item 2 of the four, a few hundred lines below the stale paragraph) both
+independently narrate the fix correctly — the document contradicted itself for two waves and no
+close-out noticed. It survived the wave-3 sweep ("the unit of staleness is a CLAIM, not a file"),
+the wave-4 sweeps, and this task's OWN sweep immediately above ("walked every Known-gaps bullet and
+every present-tense status claim in items 2, 9 and 11") for the identical reason each time: every
+one of those passes, in practice, walked BULLETS. The wave-5 pass's "every present-tense status
+claim" language described an intention its own execution did not match — it re-checked the
+Known-gaps list and a handful of named census lines, and never opened this paragraph. A reviewer
+caught it by reading item 2 paragraph-by-paragraph instead of bullet-by-bullet, which is exactly the
+method the scope-widening two sections above now requires. **The widened sweep, run against every
+numbered item's prose (not only items 2, 9 and 11, and not only their bullets) as part of this same
+fix round, found one further instance of the identical shape: item 1's "`board.detail` leaves out
+`board_type`" claim, false since wave 2, Task 2 (`1939f57`) and never corrected anywhere in this
+document until now.** Both are fixed in place at their own paragraphs (item 1's "documented —" line;
+item 2's "The cost, stated rather than left to be discovered" paragraph); no third instance was
+found — see the fix round's own report for the full method and negative result on the remainder of
+the document.
 
 ---
 
