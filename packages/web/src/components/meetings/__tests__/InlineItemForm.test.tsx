@@ -57,6 +57,8 @@ const existing: AgendaItem = {
   id: "item-1",
   section_type: "new_business",
   sort_order: 0,
+  status: "pending",
+  operator_notes: null,
   title: "Site Plan Review",
   description: null,
   presenter: null,

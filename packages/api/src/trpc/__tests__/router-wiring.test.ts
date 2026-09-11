@@ -83,6 +83,35 @@ describe("router wiring", () => {
         "agendaItem.markComplete",
         "minutesDocument.byMeeting",
         "meetingAttendance.countByMeeting",
+        // Phase E wave 5, Task 3 — the live-meeting routers. Every one of
+        // these is UNWIRED client-side until Tasks 4 and 5; pinned here for
+        // the reason the two `agendaItem` procedures above are, and with more
+        // at stake: these are the names `live.tsx`'s fifteen raw Supabase
+        // writes become, so a rename before that wiring lands should be caught
+        // here rather than in the first task that calls one.
+        "meetingAttendance.byMeeting",
+        "meetingAttendance.setRollCall",
+        "meetingAttendance.setStatus",
+        "agendaItemTransition.byMeeting",
+        "motion.byMeeting",
+        "motion.insert",
+        "motion.callVote",
+        "motion.withdraw",
+        "voteRecord.byMeeting",
+        "voteRecord.insert",
+        "voteRecord.recordForMotion",
+        "executiveSession.byMeeting",
+        "executiveSession.insert",
+        "executiveSession.markEntered",
+        "executiveSession.markExited",
+        "executiveSession.discard",
+        "executiveSession.appendPostSessionActionMotions",
+        "guestSpeaker.byMeeting",
+        "guestSpeaker.insert",
+        "guestSpeaker.delete",
+        "meeting.callToOrder",
+        "meeting.navigateToAgendaItem",
+        "meeting.adjourn",
         // Phase E wave 5, Task 1 — the SSE transport. Unwired client-side
         // until Task 4, pinned here for the same reason the two agendaItem
         // procedures above are: this name is what `useRealtimeSubscription`'s
@@ -130,6 +159,12 @@ describe("router wiring", () => {
       // procedure TYPE differs, the input schema does not. `meetingId` is a
       // uuid here too, so the shared bad value below exercises it.
       "realtime.onMeetingChange",
+      "meetingAttendance.byMeeting",
+      "agendaItemTransition.byMeeting",
+      "motion.byMeeting",
+      "voteRecord.byMeeting",
+      "executiveSession.byMeeting",
+      "guestSpeaker.byMeeting",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
@@ -177,6 +212,23 @@ describe("router wiring", () => {
       "agendaTemplate.setDefault",
       "agendaTemplate.delete",
       "notificationPreference.setMine",
+      "meetingAttendance.setRollCall",
+      "meetingAttendance.setStatus",
+      "motion.insert",
+      "motion.callVote",
+      "motion.withdraw",
+      "voteRecord.insert",
+      "voteRecord.recordForMotion",
+      "executiveSession.insert",
+      "executiveSession.markEntered",
+      "executiveSession.markExited",
+      "executiveSession.discard",
+      "executiveSession.appendPostSessionActionMotions",
+      "guestSpeaker.insert",
+      "guestSpeaker.delete",
+      "meeting.callToOrder",
+      "meeting.navigateToAgendaItem",
+      "meeting.adjourn",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
@@ -211,10 +263,23 @@ describe("router wiring", () => {
  * publishing must LEAVE the ledger, and a new one that does not publish must
  * enter it deliberately.
  *
- * Task 3 adds the motion, vote, attendance and executive-session mutations.
- * When it does, each new write either publishes or fails this test with its
- * own name in the message — which is the whole point, and is why the ledger
- * is a literal list rather than "every mutation currently found".
+ * Task 3 adds the motion, vote, attendance, executive-session, guest-speaker
+ * and composite-meeting mutations. Each new write either publishes or fails
+ * this test with its own name in the message — which is the whole point, and
+ * is why the ledger is a literal list rather than "every mutation currently
+ * found".
+ *
+ * **The limit that matters most for Task 3's own procedures, restated because
+ * it is easy to read this check as stronger than it is:** `publishes` is a
+ * BOOLEAN per mutation, not a set compared against `topics`. Three of Task 3's
+ * mutations write FOUR live-meeting tables in one transaction
+ * (`meeting.callToOrder`, `meeting.adjourn`,
+ * `meeting.navigateToAgendaItem`), and this check is satisfied by any ONE
+ * `publishRealtimeEvent` call in them. A mutation that announces `meeting` and
+ * forgets `agenda_item` passes here and leaves the agenda panel stale on every
+ * other device. Only the per-procedure tests in
+ * `routers/__tests__/meeting.test.ts` cover that, by asserting the exact set of
+ * topics each composite publishes.
  *
  * ─── What it does not do ──────────────────────────────────────────────────
  *
@@ -267,28 +332,31 @@ const ROUTERS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "routers
  * Mutations that write a live-meeting table and do NOT publish, on purpose,
  * for now.
  *
- * TODO(phase-e-wave-5-publish): Task 3 discharges this list. Every entry is a
- * screen that a second device will not see update until it refetches for some
- * other reason. They pre-date the transport (waves 3 and 4 shipped them
- * against the Supabase Realtime client that wave 5 removes), which is why
- * they are a ledger rather than a failure.
+ * **Empty, as of Phase E wave 5, Task 3 — the ledger is discharged.** It held
+ * eleven entries when Task 1 created it: the seven `agendaItem` writes and the
+ * four `meeting` writes, all shipped in waves 3 and 4 against the Supabase
+ * Realtime client wave 5 removes. Each now calls `publishRealtimeEvent` inside
+ * its own transaction, and the "every live-meeting write mutation either
+ * publishes or is on the ledger" test's SECOND direction is what forced the
+ * entries out as they did: a mutation that publishes while still listed here
+ * fails, by name.
  *
- * An entry removed from here without the mutation publishing fails the test.
- * A mutation that publishes while still listed here fails it too.
+ * **An empty ledger is not a weaker check, and that is worth stating because
+ * it looks like one.** Direction 1 below is the assertion that matters, and it
+ * has more teeth now than at any point before: with nothing declared, EVERY
+ * live-meeting mutation must publish, so the next silent write fails
+ * immediately rather than being compared against a list that already excuses
+ * eleven others. Direction 2 is dormant, by construction, until someone adds
+ * an entry.
+ *
+ * **Adding an entry is still the right move for a deliberate exception** — a
+ * write to one of the eight tables that genuinely should wake nobody. Say why,
+ * in a comment on the entry, and mark it `TODO(phase-e-wave-5-publish)` if it
+ * is a deferral rather than a decision. An entry removed from here without the
+ * mutation publishing fails the test; a mutation that publishes while still
+ * listed here fails it too.
  */
-const AWAITING_PUBLISH: readonly string[] = [
-  "agendaItem.delete",
-  "agendaItem.insert",
-  "agendaItem.instantiateFromTemplate",
-  "agendaItem.markComplete",
-  "agendaItem.reorder",
-  "agendaItem.setOperatorNotes",
-  "agendaItem.update",
-  "meeting.cancel",
-  "meeting.insert",
-  "meeting.publishAgenda",
-  "meeting.updateStatus",
-];
+const AWAITING_PUBLISH: readonly string[] = [];
 
 /** A `.mutation(` found by the scan, with what it writes and whether it announces it. */
 interface ScannedMutation {
@@ -388,6 +456,19 @@ describe("the live-meeting publish inventory", () => {
     const paths = scanned.map((mutation) => mutation.path);
     expect(paths).toContain("agendaItem.insert");
     expect(paths).toContain("meeting.updateStatus");
+
+    // And the `publishes` half of a scanned mutation is really being read off
+    // the source. Added in wave 5, Task 3, when the ledger emptied: with
+    // `AWAITING_PUBLISH` at zero entries, direction 1 below passes for every
+    // mutation the scan believes publishes — so a `publishes` that had
+    // silently become "always true" (a loosened substring, a helper match
+    // that fires on any name) would make the whole inventory green while
+    // proving nothing. These two are the same canaries named above, asserted
+    // on the other field.
+    for (const path of ["agendaItem.insert", "meeting.updateStatus"]) {
+      const mutation = scanned.find((m) => m.path === path);
+      expect(mutation?.publishes, `${path} should be seen to publish`).toBe(true);
+    }
 
     // And every path the scan produced is a real procedure. A scan that
     // drifted from the router — a helper misread as a resolver, a stale

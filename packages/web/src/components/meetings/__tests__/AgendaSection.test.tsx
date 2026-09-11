@@ -99,6 +99,8 @@ function item(overrides: Partial<AgendaItem> & { id: string }): AgendaItem {
   return {
     section_type: "new_business",
     sort_order: 0,
+    status: "pending",
+    operator_notes: null,
     title: "Item",
     description: null,
     presenter: null,

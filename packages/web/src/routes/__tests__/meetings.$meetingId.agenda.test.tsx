@@ -141,6 +141,8 @@ function item(overrides: Partial<Item> & { id: string }): Item {
   return {
     section_type: "procedural",
     sort_order: 0,
+    status: "pending",
+    operator_notes: null,
     title: "Call to Order",
     description: null,
     presenter: null,
@@ -180,6 +182,7 @@ const meetingDetail = {
   location: "Town Hall",
   presiding_officer_id: null,
   recording_secretary_id: null,
+  current_agenda_item_id: null,
   started_at: null,
   ended_at: null,
   agenda_packet_url: null,

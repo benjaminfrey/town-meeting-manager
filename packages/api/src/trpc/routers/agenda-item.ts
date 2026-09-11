@@ -47,7 +47,31 @@
  * router's greppable form of "did this procedure re-check the row's true
  * board" — `grep -n "OnAuthorizedBoard(" packages/api/src/trpc/routers/agenda-item.ts`
  * answers it for all seven writes; `assertMatchesAuthorizedBoard(` itself
- * appears twice, once inside each helper.
+ * appears ONCE now, inside `assertItemsOnAuthorizedBoard`.
+ *
+ * **`assertMeetingOnAuthorizedBoard` moved OUT of this file in wave 5, Task 3**
+ * — to `trpc/board-derivation.ts`, unchanged in body, because six more tables
+ * (`motion`, `vote_record`, `meeting_attendance`, `executive_session`,
+ * `guest_speaker`, `agenda_item_transition`) derive their board the identical
+ * way and wave 5's plan says to reuse it rather than reinvent it. The only
+ * visible difference here is the import and the error prefix inside the
+ * helper. `assertItemsOnAuthorizedBoard` stayed: it additionally returns the
+ * distinct meeting ids `reorder` needs, and two ways to ask one question is
+ * one too many.
+ *
+ * ─── Every write here publishes, as of wave 5, Task 3 ─────────────────────
+ *
+ * `agenda_item` is one of the eight `LIVE_MEETING_TOPICS`
+ * (`realtime/events.ts`), and all seven writes below sat on
+ * `router-wiring.test.ts`'s `AWAITING_PUBLISH` ledger from the moment wave 5
+ * Task 1 created it — seven of its eleven entries. They now call
+ * `publishRealtimeEvent(tx, …)` as the last statement inside the write's own
+ * transaction, so a second device watching this meeting refetches when the
+ * write COMMITS and not before. The meeting id comes from
+ * `input.meetingId` where the procedure takes one and from
+ * `assertItemsOnAuthorizedBoard`'s returned `meetingIds` where it does not —
+ * never from a second query, and never from client input the guard did not
+ * check.
  *
  * ─── Authorization: A2 for every write, including the delete ──────────────
  *
@@ -168,44 +192,14 @@ import {
   boardIdFrom,
 } from "../trpc.js";
 import { assertCanUpdateAgendaItemProgress } from "../authorization/rules.js";
+import {
+  assertMeetingOnAuthorizedBoard,
+  type BoardAuthorizedContext,
+} from "../board-derivation.js";
+import { publishRealtimeEvent } from "../../realtime/events.js";
 import { assertMeetingExists } from "./meeting.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
-
-/**
- * The context shape the two defence helpers need — the board
- * `requireBoardPermission` authorized, carried on the request context.
- */
-interface BoardAuthorizedContext {
-  authorizedBoardId?: string;
-}
-
-/**
- * Resolve a meeting's real board inside the caller's own tenant transaction
- * and refuse unless it is the board the guard authorized.
- *
- * This IS `meeting.ts`'s exported `assertMeetingExists` — the same
- * `WHERE id = $1` against `meeting` under the same RLS, answering the same
- * NOT_FOUND for a foreign or nonexistent id (conventions item 3, and the FK
- * hazard item 3's second half describes) — with the row's `board_id`
- * returned as well, because the mismatch defence needs it and a second query
- * for the same row would be two round trips for one question. Not a
- * weakening of that check: it is that check, plus a column.
- */
-async function assertMeetingOnAuthorizedBoard(
-  ctx: BoardAuthorizedContext,
-  tx: TenantTx,
-  meetingId: string,
-): Promise<string> {
-  const rows = toRows<{ board_id: string }>(
-    await tx.execute(sql`SELECT board_id FROM meeting WHERE id = ${meetingId}`),
-    (message) => new Error(`agendaItem.assertMeetingOnAuthorizedBoard: ${message}`),
-  );
-  const row = rows[0];
-  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-  assertMatchesAuthorizedBoard(ctx, row.board_id);
-  return row.board_id;
-}
 
 /**
  * The many-row form: derive the DISTINCT set of boards a list of agenda item
@@ -332,10 +326,19 @@ export const agendaItemRouter = router({
    * `PublishAgendaDialog.tsx` — the five files that read an item. NOT
    * selected, each deliberately: `town_id` (RLS scopes this; conventions item
    * 2's "no redundant WHERE town_id"), `meeting_id` (every row is this
-   * meeting's — it is the argument), `status`, `operator_notes` and
-   * `source_minutes_document_id` (nothing on the builder reads them; wave 5's
-   * live screen does read `status`, and adds it the day it needs it),
+   * meeting's — it is the argument) and `source_minutes_document_id`,
    * `created_at`/`updated_at`, `search_vector`.
+   *
+   * **`status` and `operator_notes` were on that not-selected list and are
+   * now selected — wave 5, Task 3.** The entry above used to read "nothing on
+   * the builder reads them; wave 5's live screen does read `status`, and adds
+   * it the day it needs it." This is that day: `AgendaNavigationPanel` renders
+   * a per-item status and `AgendaItemDetailPanel` renders and edits
+   * `operator_notes`, both of them `routes/meetings.$meetingId.live.tsx`'s
+   * children, and both of them wave 5, Task 4's wiring. Conventions item 1's
+   * "add it back the day something does", not a widening — the builder still
+   * ignores both, and `source_minutes_document_id` is still absent because
+   * nothing reads it through this procedure yet.
    *
    * **`exhibit_count` was here and is GONE — removed in wave 4, Task 3, and
    * the removal is the point rather than a tidy-up.** Task 1 added it as a
@@ -375,11 +378,14 @@ export const agendaItemRouter = router({
           background: string | null;
           recommendation: string | null;
           suggested_motion: string | null;
+          status: string;
+          operator_notes: string | null;
         }>(
           await tx.execute(sql`
             SELECT ai.id, ai.section_type, ai.sort_order, ai.title, ai.description,
                    ai.presenter, ai.estimated_duration, ai.parent_item_id,
-                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion
+                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion,
+                   ai.status, ai.operator_notes
             FROM agenda_item ai
             WHERE ai.meeting_id = ${input.meetingId}
             ORDER BY ai.sort_order ASC, ai.id
@@ -458,6 +464,11 @@ export const agendaItemRouter = router({
           `),
           (message) => new Error(`agendaItem.insert: ${message}`),
         );
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "agenda_item",
+        });
         return { id: rows[0]!.id };
       });
     }),
@@ -483,7 +494,7 @@ export const agendaItemRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET
             title = ${input.title},
@@ -497,6 +508,11 @@ export const agendaItemRouter = router({
             updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
@@ -555,6 +571,11 @@ export const agendaItemRouter = router({
             WHERE id = ${itemId}
           `);
         }
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { count: input.itemIds.length };
       });
     }),
@@ -574,8 +595,13 @@ export const agendaItemRouter = router({
     .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`DELETE FROM agenda_item WHERE id = ${input.itemId}`);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
@@ -673,6 +699,11 @@ export const agendaItemRouter = router({
             created += 1;
           }
         }
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "agenda_item",
+        });
         return { count: created };
       });
     }),
@@ -702,11 +733,16 @@ export const agendaItemRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET operator_notes = ${input.operatorNotes}, updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
@@ -734,11 +770,16 @@ export const agendaItemRouter = router({
     .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET status = 'completed'::agenda_item_status, updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
