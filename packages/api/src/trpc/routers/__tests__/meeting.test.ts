@@ -343,6 +343,20 @@ describe("meeting.detail", () => {
         expect(after.meeting_notice_url).toBe("https://example.test/notice.pdf");
         expect(after.agenda_packet_generated_at).not.toBeNull();
         expect(after.meeting_notice_generated_at).not.toBeNull();
+        // Pins the property this router's own doc comment depends on: the
+        // drizzle path hands back raw postgres text for `timestamptz`, not a
+        // `Date` and not ISO-8601 — a bare `not.toBeNull()` holds even if a
+        // future change made this column come back as an actual `Date`
+        // object, which is exactly the shape gap the doc comment's first
+        // draft got wrong without a test catching it.
+        expect(typeof after.agenda_packet_generated_at).toBe("string");
+        expect(typeof after.meeting_notice_generated_at).toBe("string");
+        expect(after.agenda_packet_generated_at).toMatch(
+          /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?[+-]\d{2}(:\d{2})?$/,
+        );
+        // The shape every consumer actually depends on: V8 parses this raw
+        // postgres text even though it is not ISO-8601.
+        expect(new Date(after.agenda_packet_generated_at!).getTime()).not.toBeNaN();
       } finally {
         await app.end();
       }

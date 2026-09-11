@@ -231,6 +231,25 @@ describe("AgendaSection", () => {
     );
   });
 
+  it("shows a refusal INSIDE the confirmation dialog when a non-empty section's delete is FORBIDDEN", async () => {
+    // The sibling site to the test above. A section with children opens the
+    // AlertDialog first (see the component's `itemCount > 0` branch) and the
+    // refusal must render INSIDE it — Radix marks everything outside an open
+    // `AlertDialog` `aria-hidden`, so an error rendered beside the dialog is
+    // invisible for exactly the case it exists for (conventions item 2, "the
+    // aria-hidden refusal"). The test above only exercises the OTHER branch
+    // (an empty section, no dialog), so it cannot catch a regression here.
+    server.deleteRefuses = true;
+    const { user } = renderSection([item({ id: "item-1" })]);
+
+    await user.click(screen.getByRole("button", { name: /remove section/i }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You don't have permission to remove this section.",
+    );
+  });
+
   it("shows a refusal when the reorder is FORBIDDEN", async () => {
     server.reorderRefuses = true;
     const { user } = renderSection([

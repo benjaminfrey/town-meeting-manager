@@ -87,7 +87,14 @@ export function ExhibitRow({ exhibit, index, readOnly }: ExhibitRowProps) {
               <AlertDialogTitle>Delete Exhibit</AlertDialogTitle>
               <AlertDialogDescription>
                 Delete "{title}"? This cannot be undone.
-                {deleteError && <span className="mt-2 block text-destructive">{deleteError}</span>}
+                {/* Inside the dialog already — this is not the aria-hidden
+                    bug (conventions item 2) — but had no `role="alert"` and
+                    no pin until wave 4, Task 3's fix round 1. */}
+                {deleteError && (
+                  <span className="mt-2 block text-destructive" role="alert">
+                    {deleteError}
+                  </span>
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

@@ -256,7 +256,11 @@ export function ExhibitUploader({
                     onChange={(e) => void handleFileSelect(e)}
                     className="text-sm"
                   />
-                  {fileError && <p className="text-xs text-destructive">{fileError}</p>}
+                  {fileError && (
+                    <p className="text-xs text-destructive" role="alert">
+                      {fileError}
+                    </p>
+                  )}
                 </div>
               )}
 

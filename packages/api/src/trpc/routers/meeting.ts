@@ -431,10 +431,26 @@ export const meetingRouter = router({
    *
    * The two `generated_at` columns are `timestamp with time zone` and are
    * NOT cast to `::text`, matching `started_at`/`ended_at` immediately above
-   * them: postgres.js hands back a `Date`, and with no tRPC transformer
-   * configured (`trpc.ts` / `web/src/lib/trpc.ts` set none) it reaches the
-   * browser as the ISO string this row type declares. An API test calling
-   * the caller directly sees the `Date` — assert on that side accordingly.
+   * them — but NOT for the reason a first draft of this comment gave.
+   * Probed the same way `scheduled_date` was above, because "postgres.js
+   * hands back a `Date`" is a claim about a BARE `postgres()` client, and
+   * every procedure in this file reads through `drizzle(postgres())`:
+   *
+   *     drizzle(postgres()) SELECT now()::timestamptz  →  "2026-09-10 19:53:56.526853-04"
+   *
+   * — raw postgres text, not a `Date`, and not the ISO-8601 string this row
+   * type's declared `string | null` would suggest. `toRows` does no
+   * conversion (`packages/api/src/db/rows.ts`) and no tRPC transformer is
+   * configured (`trpc.ts` / `web/src/lib/trpc.ts` set none), so that raw text
+   * is what actually reaches the browser and what an API test calling the
+   * caller directly sees too — there is no `Date` on either side of this
+   * boundary. `new Date(agendaPacketGeneratedAt).toLocaleString()` still
+   * works today because V8 happens to parse a space-separated timestamp with
+   * a 6-digit fraction and a 2-digit offset, not because the value is
+   * ISO-8601 — a stricter engine is not obligated to accept it. See
+   * `meeting.test.ts`'s "returns the agenda-packet and meeting-notice
+   * document columns" for the `typeof`/shape assertion pinning this, the
+   * same treatment `scheduled_date` gets above.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))

@@ -59,4 +59,26 @@ describe("ExhibitRow", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(exhibitKey)?.isInvalidated).toBe(true));
   });
+
+  // Wave 4, Task 3's fix round 1. Rule 16 (A3 for this board, not rule 15's
+  // wider "A3 or a board seat") makes this the strictest-guarded write on the
+  // agenda builder screen, so a refusal here is the most likely of the
+  // refusal surfaces this task shipped — and it had no test at all. The
+  // dialog stays open on a refused delete (the close lives after a
+  // successful `apiJson` call), so the error must render, and be findable,
+  // inside it.
+  it("shows the refusal inside the dialog when the delete is refused", async () => {
+    mockApiJson.mockRejectedValue(new Error("You don't have permission to delete this exhibit."));
+    const { user } = renderWithProviders(
+      <ExhibitRow exhibit={exhibit} index={0} readOnly={false} />,
+      { queryClient },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete Draft ordinance" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You don't have permission to delete this exhibit.",
+    );
+  });
 });
