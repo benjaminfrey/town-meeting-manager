@@ -228,6 +228,17 @@ describe("InlineItemForm", () => {
     );
   });
 
+  it("shows a refusal when the update is FORBIDDEN, rather than a Save that does nothing", async () => {
+    server.updateRefuses = true;
+    const { user } = renderForm(existing);
+
+    await typeTitleAndSubmit(user, "Site Plan Review (revised)", "Save");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You don't have permission to edit this agenda item.",
+    );
+  });
+
   it("shows a refusal when the delete is FORBIDDEN", async () => {
     server.deleteRefuses = true;
     const { user } = renderForm(existing);
