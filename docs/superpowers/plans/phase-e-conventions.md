@@ -844,7 +844,7 @@ re-recorded rather than carried forward silently a second wave.**
    wave-6-sized cost this task's scope does not buy.** All seven writes (`insert`, `update`, `reorder`,
    `delete`, `instantiateFromTemplate`, `setOperatorNotes`, `markComplete`) carry the byte-identical
    guard, differing only in the `action` string passed to `requireBoardPermission("A2", boardIdFrom(),
-   {action})` — verified directly:
+{action})` — verified directly:
    ```
    $ grep -n 'requireBoardPermission("A2"' packages/api/src/trpc/routers/agenda-item.ts
    387:      requireBoardPermission("A2", boardIdFrom(), {
