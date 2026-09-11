@@ -31,6 +31,7 @@ import {
   seedActor,
   contextFor,
   testDb,
+  inTown,
   expectTrpcError,
   type TestDb,
   type TownFixture,
@@ -41,6 +42,8 @@ import {
   seedAgendaItem,
   seedSeat,
   seedMotion,
+  seedExecutiveSession,
+  seedMinutesDocument,
   readRows,
   captureRealtimeEvents,
 } from "./live-fixtures.js";
@@ -716,6 +719,537 @@ describe("voteRecord.recordForMotion", () => {
         );
         expect(err.code).toBe("BAD_REQUEST");
         expect(await readVotes(db, town, motionId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * The consequences of a motion's outcome — Phase E, wave 5, Task 5.
+ *
+ * These are `routes/meetings.$meetingId.live.tsx`'s four reactive `useEffect`s,
+ * moved into the transaction that decides the outcome. See
+ * `recordForMotion`'s doc comment for why they moved rather than becoming
+ * idempotent procedures the clients each call.
+ *
+ * **Every one of them is proved with TWO CONCURRENT CALLERS, on two separate
+ * database connections, not one.** A single-caller test says nothing about the
+ * race this task exists to close: the harm was never "the write happens", it
+ * was "the write happens once per connected device". `concurrently` below runs
+ * both calls with `Promise.all` against two `connectAsAppRole` handles, so they
+ * really are two backends contending for the same rows, and each assertion is
+ * on the COUNT of what landed.
+ */
+
+/** Two callers, two connections, one `Promise.all`. */
+async function concurrently<T>(
+  client: Parameters<typeof connectAsAppRole>[0],
+  town: TownFixture,
+  seeded: { personId: string; userAccountId: string },
+  call: (caller: ReturnType<typeof appRouter.createCaller>) => Promise<T>,
+): Promise<PromiseSettledResult<T>[]> {
+  const [one, two] = await Promise.all([connectAsAppRole(client), connectAsAppRole(client)]);
+  try {
+    return await Promise.allSettled([
+      call(appRouter.createCaller(contextFor(testDb(one), town, seeded))),
+      call(appRouter.createCaller(contextFor(testDb(two), town, seeded))),
+    ]);
+  } finally {
+    await Promise.all([one.end(), two.end()]);
+  }
+}
+
+function fulfilled<T>(results: PromiseSettledResult<T>[]): T[] {
+  for (const r of results) {
+    if (r.status === "rejected") throw r.reason as Error;
+  }
+  return results.map((r) => (r as PromiseFulfilledResult<T>).value);
+}
+
+describe("voteRecord.recordForMotion — the executive-session consequence", () => {
+  it("stamps entered_at when the entry motion carries, and announces executive_session", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const motionId = await seedMotion(db, town, meetingId, itemId, {
+          text: "to enter Executive Session",
+        });
+        const sessionId = await seedExecutiveSession(db, town, meetingId, {
+          agendaItemId: itemId,
+          entryMotionId: motionId,
+        });
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const { result, topics } = await captureRealtimeEvents(client, 3, () =>
+          caller.voteRecord.recordForMotion({
+            boardId: town.boardId,
+            motionId,
+            votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+          }),
+        );
+
+        expect(result.executiveSession).toBe("entered");
+        expect(topics).toEqual(["executive_session", "motion", "vote_record"]);
+        const rows = await readRows<{ entered_at: string | null }>(
+          db,
+          town,
+          sql`SELECT entered_at FROM executive_session WHERE id = ${sessionId}`,
+        );
+        expect(rows[0]?.entered_at).not.toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("discards the pending session when the entry motion fails", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const motionId = await seedMotion(db, town, meetingId, itemId);
+        const sessionId = await seedExecutiveSession(db, town, meetingId, {
+          agendaItemId: itemId,
+          entryMotionId: motionId,
+        });
+        const a = await seedSeat(db, town, town.boardId);
+        const b = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [
+            { boardMemberId: a.boardMemberId, vote: "no", recusalReason: null },
+            { boardMemberId: b.boardMemberId, vote: "no", recusalReason: null },
+          ],
+        });
+
+        expect(result.status).toBe("failed");
+        expect(result.executiveSession).toBe("discarded");
+        const rows = await readRows<{ id: string }>(
+          db,
+          town,
+          sql`SELECT id FROM executive_session WHERE id = ${sessionId}`,
+        );
+        expect(rows).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("leaves a session that has ALREADY BEGUN alone when a later motion fails", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const motionId = await seedMotion(db, town, meetingId, itemId);
+        // Entered already — the minute of a closed session the board really
+        // held. `executiveSession.discard`'s own CONFLICT precondition says
+        // this row must never be removed; the folded path says the same thing
+        // with `entered_at IS NULL` in its WHERE.
+        const sessionId = await seedExecutiveSession(db, town, meetingId, {
+          agendaItemId: itemId,
+          entryMotionId: motionId,
+          enteredAt: true,
+        });
+        const a = await seedSeat(db, town, town.boardId);
+        const b = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [
+            { boardMemberId: a.boardMemberId, vote: "no", recusalReason: null },
+            { boardMemberId: b.boardMemberId, vote: "no", recusalReason: null },
+          ],
+        });
+
+        expect(result.executiveSession).toBeNull();
+        const rows = await readRows<{ id: string }>(
+          db,
+          town,
+          sql`SELECT id FROM executive_session WHERE id = ${sessionId}`,
+        );
+        expect(rows).toHaveLength(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("stamps entered_at ONCE under two concurrent callers", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      const db = testDb(app);
+      const town = await seedTown(db);
+      const meetingId = await seedMeeting(db, town, town.boardId);
+      const itemId = await seedAgendaItem(db, town, meetingId);
+      const motionId = await seedMotion(db, town, meetingId, itemId);
+      await seedExecutiveSession(db, town, meetingId, {
+        agendaItemId: itemId,
+        entryMotionId: motionId,
+      });
+      const seat = await seedSeat(db, town, town.boardId);
+      const clerk = await seedActor(db, town, clerkSpec(town));
+
+      try {
+        const results = await concurrently(client, town, clerk, (caller) =>
+          caller.voteRecord.recordForMotion({
+            boardId: town.boardId,
+            motionId,
+            votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+          }),
+        );
+
+        // Both calls succeed — recording the roll twice is legitimate. Only
+        // ONE of them reports having moved the board into closed session.
+        const outcomes = fulfilled(results).map((r) => r.executiveSession);
+        expect(outcomes.filter((o) => o === "entered")).toHaveLength(1);
+        expect(outcomes.filter((o) => o === null)).toHaveLength(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("voteRecord.recordForMotion — the minutes-approval consequence", () => {
+  it("approves the minutes the motion was about, as amended, and queues the notification", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        // The document belongs to an EARLIER meeting; the live meeting's
+        // agenda item merely points at it.
+        const earlier = await seedMeeting(db, town, town.boardId, { status: "adjourned" });
+        const documentId = await seedMinutesDocument(db, town, earlier);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId, {
+          sourceMinutesDocumentId: documentId,
+        });
+        const motionId = await seedMotion(db, town, meetingId, itemId, {
+          text: "to approve the minutes of October 6 AS AMENDED",
+        });
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+        });
+
+        expect(result.minutesApproved).toBe(documentId);
+        const docs = await readRows<{
+          status: string;
+          approved_by_motion_id: string | null;
+          approved_as_amended: boolean;
+          approved_at: string | null;
+        }>(
+          db,
+          town,
+          sql`SELECT status::text AS status, approved_by_motion_id, approved_as_amended, approved_at
+              FROM minutes_document WHERE id = ${documentId}`,
+        );
+        expect(docs[0]).toMatchObject({
+          status: "approved",
+          approved_by_motion_id: motionId,
+          approved_as_amended: true,
+        });
+        expect(docs[0]?.approved_at).not.toBeNull();
+
+        const events = await readRows<{ event_type: string; payload: Record<string, unknown> }>(
+          db,
+          town,
+          sql`SELECT event_type, payload FROM notification_event`,
+        );
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          event_type: "minutes_approved",
+          payload: {
+            minutes_document_id: documentId,
+            meeting_id: meetingId,
+            approved_by_motion_id: motionId,
+          },
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("records approved_as_amended false for a plain approval motion", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const earlier = await seedMeeting(db, town, town.boardId, { status: "adjourned" });
+        const documentId = await seedMinutesDocument(db, town, earlier);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId, {
+          sourceMinutesDocumentId: documentId,
+        });
+        const motionId = await seedMotion(db, town, meetingId, itemId, {
+          text: "to approve the minutes of October 6",
+        });
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+        });
+
+        const docs = await readRows<{ approved_as_amended: boolean }>(
+          db,
+          town,
+          sql`SELECT approved_as_amended FROM minutes_document WHERE id = ${documentId}`,
+        );
+        expect(docs[0]?.approved_as_amended).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("touches nothing when the motion's item is not a minutes-approval item", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const motionId = await seedMotion(db, town, meetingId, itemId);
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+        });
+
+        expect(result.minutesApproved).toBeNull();
+        expect(await readRows(db, town, sql`SELECT id FROM notification_event`)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("queues exactly ONE notification under two concurrent callers", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      const db = testDb(app);
+      const town = await seedTown(db);
+      const earlier = await seedMeeting(db, town, town.boardId, { status: "adjourned" });
+      const documentId = await seedMinutesDocument(db, town, earlier);
+      const meetingId = await seedMeeting(db, town, town.boardId);
+      const itemId = await seedAgendaItem(db, town, meetingId, {
+        sourceMinutesDocumentId: documentId,
+      });
+      const motionId = await seedMotion(db, town, meetingId, itemId, {
+        text: "to approve the minutes of October 6",
+      });
+      const seat = await seedSeat(db, town, town.boardId);
+      const clerk = await seedActor(db, town, clerkSpec(town));
+
+      try {
+        const results = await concurrently(client, town, clerk, (caller) =>
+          caller.voteRecord.recordForMotion({
+            boardId: town.boardId,
+            motionId,
+            votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+          }),
+        );
+
+        // This is the harm the `useRef<Set>` was the only thing standing
+        // against: two clerks with the screen open, two "minutes approved"
+        // emails queued to every subscriber in the town.
+        const approved = fulfilled(results).map((r) => r.minutesApproved);
+        expect(approved.filter((d) => d === documentId)).toHaveLength(1);
+        expect(approved.filter((d) => d === null)).toHaveLength(1);
+        expect(await readRows(db, town, sql`SELECT id FROM notification_event`)).toHaveLength(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("voteRecord.recordForMotion — the adjournment consequence", () => {
+  it("adjourns the meeting when a motion to adjourn carries, deferring the unreached items", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const sectionId = await seedAgendaItem(db, town, meetingId, { title: "New Business" });
+        const currentId = await seedAgendaItem(db, town, meetingId, {
+          parentItemId: sectionId,
+          status: "active",
+          title: "The item under discussion",
+        });
+        const unreachedId = await seedAgendaItem(db, town, meetingId, {
+          parentItemId: sectionId,
+          status: "pending",
+          title: "The item nobody got to",
+        });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE meeting SET current_agenda_item_id = ${currentId} WHERE id = ${meetingId}`,
+          ),
+        );
+        const motionId = await seedMotion(db, town, meetingId, currentId, {
+          motionType: "adjourn",
+          text: "to adjourn the meeting",
+        });
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const { result, topics } = await captureRealtimeEvents(client, 5, () =>
+          caller.voteRecord.recordForMotion({
+            boardId: town.boardId,
+            motionId,
+            votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+          }),
+        );
+
+        expect(result.adjourned).toBe(true);
+        expect(topics).toEqual([
+          "agenda_item",
+          "agenda_item_transition",
+          "meeting",
+          "motion",
+          "vote_record",
+        ]);
+
+        const meetings = await readRows<{ status: string; ended_at: string | null }>(
+          db,
+          town,
+          sql`SELECT status::text AS status, ended_at FROM meeting WHERE id = ${meetingId}`,
+        );
+        expect(meetings[0]?.status).toBe("adjourned");
+        expect(meetings[0]?.ended_at).not.toBeNull();
+
+        const deferred = await readRows<{ id: string; status: string }>(
+          db,
+          town,
+          sql`SELECT id, status::text AS status FROM agenda_item WHERE id = ${unreachedId}`,
+        );
+        expect(deferred[0]?.status).toBe("deferred");
+        const queued = await readRows<{ source_agenda_item_id: string; source: string }>(
+          db,
+          town,
+          sql`SELECT source_agenda_item_id, source::text AS source FROM future_item_queue
+              WHERE source_meeting_id = ${meetingId}`,
+        );
+        expect(queued).toEqual([{ source_agenda_item_id: unreachedId, source: "deferred" }]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not adjourn on a motion of any other type", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const motionId = await seedMotion(db, town, meetingId, itemId, { motionType: "main" });
+        const seat = await seedSeat(db, town, town.boardId);
+        const clerk = await seedActor(db, town, clerkSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const result = await caller.voteRecord.recordForMotion({
+          boardId: town.boardId,
+          motionId,
+          votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+        });
+
+        expect(result.adjourned).toBe(false);
+        const meetings = await readRows<{ status: string }>(
+          db,
+          town,
+          sql`SELECT status::text AS status FROM meeting WHERE id = ${meetingId}`,
+        );
+        expect(meetings[0]?.status).toBe("open");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("adjourns ONCE under two concurrent callers, with one set of queue rows", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      const db = testDb(app);
+      const town = await seedTown(db);
+      const meetingId = await seedMeeting(db, town, town.boardId);
+      const sectionId = await seedAgendaItem(db, town, meetingId, { title: "New Business" });
+      const unreachedId = await seedAgendaItem(db, town, meetingId, {
+        parentItemId: sectionId,
+        status: "pending",
+      });
+      const motionId = await seedMotion(db, town, meetingId, unreachedId, {
+        motionType: "adjourn",
+        text: "to adjourn the meeting",
+      });
+      const seat = await seedSeat(db, town, town.boardId);
+      const clerk = await seedActor(db, town, clerkSpec(town));
+
+      try {
+        const results = await concurrently(client, town, clerk, (caller) =>
+          caller.voteRecord.recordForMotion({
+            boardId: town.boardId,
+            motionId,
+            votes: [{ boardMemberId: seat.boardMemberId, vote: "yes", recusalReason: null }],
+          }),
+        );
+
+        const adjourned = fulfilled(results).map((r) => r.adjourned);
+        expect(adjourned.filter(Boolean)).toHaveLength(1);
+        // The duplicate the old client-side race produced: a second
+        // adjournment with a later `ended_at` and a second copy of every
+        // deferred item in the board's future queue.
+        const queued = await readRows<{ source_agenda_item_id: string }>(
+          db,
+          town,
+          sql`SELECT source_agenda_item_id FROM future_item_queue
+              WHERE source_meeting_id = ${meetingId}`,
+        );
+        expect(queued).toEqual([{ source_agenda_item_id: unreachedId }]);
       } finally {
         await app.end();
       }

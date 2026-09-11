@@ -128,9 +128,15 @@ import {
 } from "../authorization/permission.js";
 import { assertCanInsertVoteRecord, type BoardScope } from "../authorization/rules.js";
 import { assertLiveRowOnAuthorizedBoard, assertBoardMembersOnBoard } from "../board-derivation.js";
-import { publishRealtimeEvent } from "../../realtime/events.js";
-import { assertMeetingExists } from "./meeting.js";
+import { publishRealtimeEvent, type LiveMeetingTopic } from "../../realtime/events.js";
+import {
+  assertMeetingExists,
+  lockMeetingOnAuthorizedBoard,
+  performAdjournment,
+} from "./meeting.js";
+import { approveMinutesForPassedMotion } from "./minutes-document.js";
 import { toRows } from "../../db/rows.js";
+import type { TenantTx } from "../../db/with-tenant.js";
 
 /** The full `vote_type` enum (`0000_baseline.sql:278`). */
 const VOTE_TYPES = ["yes", "no", "abstain", "recusal", "absent"] as const;
@@ -335,6 +341,66 @@ export const voteRecordRouter = router({
    * Duplicate `boardMemberId`s are refused at the schema rather than left to
    * `vote_record_unique_per_motion`: the constraint would abort the whole
    * transaction with a driver error, and the caller can be told what is wrong.
+   *
+   * ─── Phase E wave 5, Task 5: the consequences of the transition ──────────
+   *
+   * **This is where `live.tsx`'s reactive `useEffect`s went, and why they went
+   * here rather than becoming procedures the client calls more carefully.**
+   *
+   * Four writes in that screen were not user actions. They fired when a motion
+   * row arrived over the realtime subscription carrying a new `status`, on
+   * EVERY connected device, deduplicated only by an in-memory `useRef<Set>`
+   * that dies on reload and is shared with nobody:
+   *
+   *   | the observed transition                        | what every client then wrote        |
+   *   | ---------------------------------------------- | ----------------------------------- |
+   *   | an executive-session entry motion PASSES        | `executive_session.entered_at`      |
+   *   | the same motion FAILS                           | DELETE that pending session         |
+   *   | a motion on a minutes-approval item PASSES      | `minutes_document` + `notification_event` |
+   *   | a motion to adjourn PASSES                      | the whole adjournment               |
+   *
+   * `motion.ts`'s header states the fact this design rests on: **an outcome
+   * status is reachable only through this procedure.** So the transition has
+   * exactly one origin, in one transaction, and its consequences belong in
+   * that transaction — decided once by the server rather than N times by
+   * whoever happened to have the screen open. The alternative the brief offers
+   * (idempotent procedures the clients each call) was rejected for two
+   * reasons: it leaves N-1 devices making a write they are not the author of,
+   * and it surfaces a FORBIDDEN on every device whose operator merely watched
+   * — a board member with the screen open would be told they lack permission
+   * for something they did not do.
+   *
+   * **The authorization cost, stated as `callToOrder`'s doc comment states its
+   * own.** This is M3 (`capture_motions_votes`) performing acts whose own
+   * rules are 21b (M6, executive session) and 21 (admin/A1/M1, the meeting's
+   * status). Requiring those in addition would refuse the recording secretary
+   * mid-roll-call, which is `rules.ts` rule 2a's stated failure — "a partial
+   * adjournment, worse than either answer" — and it is not what the act is:
+   * the board decided, and M3 is the code for recording what the board
+   * decided. It is a NARROWING either way, since all four writes were
+   * authorized by nothing at all before. Revisit it with rule 21, not here.
+   *
+   * **Every branch is a no-op for a second concurrent caller**, and none of
+   * them uses a check-then-write:
+   *
+   *   - `entered_at IS NULL` / the DELETE's own `RETURNING` — a blocked
+   *     statement re-evaluates its WHERE against the committed row under READ
+   *     COMMITTED, so the second caller matches zero rows.
+   *   - `status <> 'approved'` in `approveMinutesForPassedMotion`, which gates
+   *     the `notification_event` INSERT on its own `RETURNING` — so two clerks
+   *     cannot queue two "minutes approved" emails.
+   *   - `meeting.status = 'open'` read off a row held `FOR UPDATE`.
+   *
+   * And the motion itself is locked (`lockMotion` below), which serializes the
+   * whole procedure per motion rather than letting two roll calls interleave.
+   *
+   * The return value grew three fields — `executiveSession`, `minutesApproved`
+   * and `adjourned` — so the ONE client that made the call can do the three
+   * things a server transaction cannot: invalidate the right caches, raise the
+   * right toast, and issue the (pre-existing, and misdirected — see
+   * `approveMinutesForPassedMotion`) PDF re-render. Other devices learn the
+   * same facts the way they learn everything else, from the topics published
+   * below.
    */
   recordForMotion: protectedProcedure
     .use(
@@ -368,6 +434,7 @@ export const voteRecordRouter = router({
           "motion",
           input.motionId,
         );
+        const motion = await lockMotion(tx, input.motionId);
         await assertBoardMembersOnBoard(
           tx,
           boardId,
@@ -414,21 +481,125 @@ export const voteRecordRouter = router({
           WHERE id = ${input.motionId}
         `);
 
-        await publishRealtimeEvent(tx, {
-          townId: ctx.tenant.townId,
-          meetingId,
-          topic: "vote_record",
-        });
-        await publishRealtimeEvent(tx, {
-          townId: ctx.tenant.townId,
-          meetingId,
-          topic: "motion",
-        });
+        // ─── The consequences of the transition ───────────────────────────
+        //
+        // See this procedure's doc comment. Each of these was a `useEffect` in
+        // `live.tsx` firing on the row above arriving over the subscription,
+        // on every connected device at once.
+
+        let executiveSession: "entered" | "discarded" | null = null;
+        if (result.result === "passed") {
+          const entered = toRows<{ id: string }>(
+            await tx.execute(sql`
+              UPDATE executive_session SET entered_at = now()
+              WHERE entry_motion_id = ${input.motionId}
+                AND entered_at IS NULL AND exited_at IS NULL
+              RETURNING id
+            `),
+            (message) => new Error(`voteRecord.recordForMotion: ${message}`),
+          );
+          if (entered[0]) executiveSession = "entered";
+        } else {
+          const discarded = toRows<{ id: string }>(
+            await tx.execute(sql`
+              DELETE FROM executive_session
+              WHERE entry_motion_id = ${input.motionId}
+                AND entered_at IS NULL AND exited_at IS NULL
+              RETURNING id
+            `),
+            (message) => new Error(`voteRecord.recordForMotion: ${message}`),
+          );
+          if (discarded[0]) executiveSession = "discarded";
+        }
+
+        const minutesApproved =
+          result.result === "passed"
+            ? await approveMinutesForPassedMotion(tx, {
+                townId: ctx.tenant.townId,
+                meetingId,
+                motionId: input.motionId,
+                motionText: motion.motion_text,
+              })
+            : null;
+
+        let adjourned = false;
+        if (result.result === "passed" && motion.motion_type === "adjourn") {
+          const meeting = await lockMeetingOnAuthorizedBoard(ctx, tx, meetingId, "recordForMotion");
+          // `status === "open"` is `live.tsx`'s own condition, carried over
+          // rather than replaced with `meeting.adjourn`'s "not already
+          // adjourned" — and it is what makes a second concurrent caller a
+          // no-op, because by the time it acquires the row lock the status is
+          // `adjourned`.
+          if (meeting.status === "open") {
+            await performAdjournment(tx, {
+              townId: ctx.tenant.townId,
+              personId: ctx.tenant.personId,
+              meetingId,
+              meeting,
+              method: "motion",
+              adjournMotionId: input.motionId,
+            });
+            adjourned = true;
+          }
+        }
+
+        // Sequential, and written out here rather than through `meeting.ts`'s
+        // `publishLiveMeetingTopics`: `router-wiring.test.ts`'s inventory reads
+        // this file's own text for the literal `publishRealtimeEvent(`, and a
+        // publish reached through an imported helper is invisible to it — the
+        // scan's own header says it is blind to writes and calls across a
+        // module boundary. Keeping the call here is what keeps this mutation
+        // inside the check rather than exempt from it by accident.
+        const topics: LiveMeetingTopic[] = ["vote_record", "motion"];
+        if (executiveSession !== null) topics.push("executive_session");
+        if (adjourned) topics.push("meeting", "agenda_item", "agenda_item_transition");
+        for (const topic of topics) {
+          await publishRealtimeEvent(tx, { townId: ctx.tenant.townId, meetingId, topic });
+        }
+
         return {
           motionId: input.motionId,
           status: result.result,
           recorded: input.votes.length,
+          executiveSession,
+          minutesApproved,
+          adjourned,
         };
       });
     }),
 });
+
+/**
+ * Read the motion's own columns and hold the row for the transaction.
+ *
+ * `FOR UPDATE` is new in Phase E wave 5, Task 5 and it is what makes the
+ * consequences above safe. Two clerks pressing "Record Vote" on the same
+ * motion used to run the delete/insert/stamp sequence concurrently, which
+ * collided on `vote_record_unique_per_motion` and answered the loser an
+ * INTERNAL_SERVER_ERROR; they now serialize here, and the second caller's
+ * consequences find the work already done. It is also the cheapest place to
+ * read `motion_type` and `motion_text`, which the adjournment and
+ * minutes-approval branches need and which `assertLiveRowOnAuthorizedBoard`
+ * (a join for the board) does not return.
+ *
+ * The row's existence and its board were established by the caller before this
+ * runs, so a missing row here is a row deleted between two statements of the
+ * same transaction — impossible under RLS for a caller who just read it — and
+ * NOT_FOUND is the honest answer rather than a thrown invariant.
+ */
+async function lockMotion(
+  tx: TenantTx,
+  motionId: string,
+): Promise<{ motion_type: string; motion_text: string }> {
+  const rows = toRows<{ motion_type: string; motion_text: string }>(
+    await tx.execute(sql`
+      SELECT motion_type::text AS motion_type, motion_text FROM motion
+      WHERE id = ${motionId}
+      FOR UPDATE
+    `),
+    (message) => new Error(`voteRecord.recordForMotion: ${message}`),
+  );
+  const row = rows[0];
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  return row;
+}

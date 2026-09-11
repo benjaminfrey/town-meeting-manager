@@ -25,6 +25,27 @@
  * could enter executive session but not unwind a failed entry motion would be
  * stuck.
  *
+ * ─── Two of the five have no caller as of wave 5, Task 5, deliberately ────
+ *
+ * `markEntered` and `discard` were built for `live.tsx`'s two reactive
+ * `useEffect` branches, and that task's own doc comment on `markEntered` said
+ * Task 5 "owns deciding who triggers it and how it is deduplicated across
+ * devices." It decided: **nobody triggers it, because nothing observes a
+ * transition any more.** Both branches are now consequences of the transaction
+ * that decides the motion's outcome — `voteRecord.recordForMotion`, which
+ * writes `executive_session` directly with statements keyed by
+ * `entry_motion_id` rather than by session id, and with the idempotency guard
+ * that keys makes possible (`entered_at IS NULL`). See that procedure's doc
+ * comment for the whole argument.
+ *
+ * They are kept rather than deleted, and that is a decision rather than an
+ * omission. Each is a real, correctly-guarded M6 action with tests — `discard`
+ * carries a precondition (`entered_at IS NULL`, CONFLICT otherwise) the folded
+ * path also relies on — and the minutes surface wave 6 builds may well want a
+ * manual path into both. What they must NOT become is a second way for a
+ * client to race the same write: neither has a caller, and adding one means
+ * answering the question this task just answered.
+ *
  * ─── Four writes, not one `update` ────────────────────────────────────────
  *
  * `markEntered`, `markExited`, `appendPostSessionActionMotions` and `discard`
@@ -174,10 +195,12 @@ export const executiveSessionRouter = router({
     }),
 
   /**
-   * The entry motion passed — the board is now in closed session. `live.tsx`
-   * does this from a `useEffect` that fires on the motion row arriving over
-   * the subscription; wave 5, Task 5 owns deciding who triggers it and how it
-   * is deduplicated across devices.
+   * The entry motion passed — the board is now in closed session.
+   *
+   * **No caller as of wave 5, Task 5** — see this file's header. The live path
+   * is inside `voteRecord.recordForMotion`, keyed by `entry_motion_id` and
+   * guarded by `entered_at IS NULL`; this stamps an arbitrary session
+   * unconditionally and is the manual form.
    */
   markEntered: protectedProcedure
     .use(
@@ -240,6 +263,8 @@ export const executiveSessionRouter = router({
   /**
    * The entry motion FAILED — discard the pending record. `live.tsx`'s
    * reactive `motionStatus === "failed"` branch.
+   *
+   * **No caller as of wave 5, Task 5** — see this file's header.
    *
    * Named `discard` rather than `delete` because of what it refuses to do:
    * it removes only a session that never began. A record with `entered_at`

@@ -60,19 +60,53 @@ export async function seedAgendaItem(
   db: TestDb,
   town: TownFixture,
   meetingId: string,
-  opts: { title?: string; parentItemId?: string | null; status?: string; sortOrder?: number } = {},
+  opts: {
+    title?: string;
+    parentItemId?: string | null;
+    status?: string;
+    sortOrder?: number;
+    /** Makes this a minutes-APPROVAL item, the shape `voteRecord.recordForMotion` acts on. */
+    sourceMinutesDocumentId?: string | null;
+  } = {},
 ): Promise<string> {
   const id = randomUUID();
   await inTown(db, town, async (tx) => {
     await tx.execute(sql`
       INSERT INTO agenda_item (
-        id, meeting_id, town_id, section_type, title, sort_order, parent_item_id, status
+        id, meeting_id, town_id, section_type, title, sort_order, parent_item_id, status,
+        source_minutes_document_id
       )
       VALUES (
         ${id}, ${meetingId}, ${town.townId}, 'new_business', ${opts.title ?? "Discuss the budget"},
         ${opts.sortOrder ?? 0}, ${opts.parentItemId ?? null},
-        ${opts.status ?? "pending"}::agenda_item_status
+        ${opts.status ?? "pending"}::agenda_item_status,
+        ${opts.sourceMinutesDocumentId ?? null}
       )
+    `);
+  });
+  return id;
+}
+
+/**
+ * A `minutes_document` for `meetingId`, in `draft` unless told otherwise.
+ *
+ * Added in Phase E wave 5, Task 5: `voteRecord.recordForMotion` approves one
+ * of these when a motion on a minutes-approval agenda item carries, so its
+ * tests need one that the `agenda_item.source_minutes_document_id` FK can
+ * point at. `meeting_id` is unique on this table, so a meeting gets at most
+ * one.
+ */
+export async function seedMinutesDocument(
+  db: TestDb,
+  town: TownFixture,
+  meetingId: string,
+  opts: { status?: string } = {},
+): Promise<string> {
+  const id = randomUUID();
+  await inTown(db, town, async (tx) => {
+    await tx.execute(sql`
+      INSERT INTO minutes_document (id, meeting_id, town_id, status)
+      VALUES (${id}, ${meetingId}, ${town.townId}, ${opts.status ?? "draft"}::minutes_document_status)
     `);
   });
   return id;

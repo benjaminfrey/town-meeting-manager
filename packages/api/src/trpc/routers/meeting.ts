@@ -962,14 +962,17 @@ export const meetingRouter = router({
    *
    * ─── Idempotent, because two devices race to call it ─────────────────────
    *
-   * The adjourn-on-motion path is a `useEffect` that fires on the motion row
+   * ~~The adjourn-on-motion path is a `useEffect` that fires on the motion row
    * arriving over the subscription, deduplicated only by an in-memory
-   * `useRef<Set>` that dies on reload and is not shared between devices — wave
-   * 5's plan calls this its scariest finding. `SELECT … FOR UPDATE` plus an
-   * early return for a meeting already `adjourned` makes the second caller a
-   * no-op instead of a second adjournment with a later `ended_at` and a
-   * duplicate set of queue rows. Task 5 still owns the client-side design;
-   * this is the server-side floor under it.
+   * `useRef<Set>`… Task 5 still owns the client-side design.~~ — **Task 5
+   * decided it, and the answer removed the effect rather than deduplicating
+   * it.** Adjournment has two origins now and neither observes anything: the
+   * "without objection" declaration calls THIS procedure, and a passed motion
+   * to adjourn is performed inside `voteRecord.recordForMotion`'s own
+   * transaction (`performAdjournment` below is the shared body, so the two can
+   * never diverge). `SELECT … FOR UPDATE` plus the early return for a meeting
+   * already `adjourned` is still the floor, and it is what makes two
+   * concurrent callers of either origin produce one adjournment.
    */
   adjourn: protectedProcedure
     .use(requireBoardActor(assertCanUpdateMeeting))
@@ -991,71 +994,14 @@ export const meetingRouter = router({
           await assertMotionsOnMeeting(tx, input.meetingId, [input.adjournMotionId]);
         }
 
-        await tx.execute(sql`
-          UPDATE agenda_item_transition SET ended_at = now()
-          WHERE meeting_id = ${input.meetingId} AND ended_at IS NULL
-        `);
-
-        const deferred = toRows<{ id: string }>(
-          await tx.execute(sql`
-            WITH unreached AS (
-              UPDATE agenda_item SET status = 'deferred'::agenda_item_status, updated_at = now()
-              WHERE meeting_id = ${input.meetingId}
-                AND parent_item_id IS NOT NULL
-                AND status IN ('pending', 'active')
-                AND id IS DISTINCT FROM ${meeting.current_agenda_item_id}
-              RETURNING id, title, description
-            )
-            INSERT INTO future_item_queue (
-              board_id, town_id, source_meeting_id, source_agenda_item_id,
-              title, description, source, status
-            )
-            SELECT ${meeting.board_id}, ${ctx.tenant.townId}, ${input.meetingId}, u.id,
-                   u.title, u.description, 'deferred', 'pending'
-            FROM unreached u
-            RETURNING id
-          `),
-          (message) => new Error(`meeting.adjourn: ${message}`),
-        );
-
-        const tabled = toRows<{ id: string }>(
-          await tx.execute(sql`
-            INSERT INTO future_item_queue (
-              board_id, town_id, source_meeting_id, source_agenda_item_id,
-              title, description, source, status
-            )
-            SELECT ${meeting.board_id}, ${ctx.tenant.townId}, ${input.meetingId}, ai.id,
-                   ai.title, ai.description, 'tabled', 'pending'
-            FROM agenda_item ai
-            WHERE ai.meeting_id = ${input.meetingId}
-              AND ai.parent_item_id IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM motion m
-                WHERE m.agenda_item_id = ai.id
-                  AND m.motion_type = 'table'
-                  AND m.status = 'passed'
-              )
-            RETURNING id
-          `),
-          (message) => new Error(`meeting.adjourn: ${message}`),
-        );
-
-        const adjournedByName = await presidingOfficerName(tx, meeting.presiding_officer_id);
-        await tx.execute(sql`
-          UPDATE meeting SET
-            status = 'adjourned'::meeting_status,
-            ended_at = now(),
-            current_agenda_item_id = NULL,
-            adjournment = jsonb_build_object(
-              'method', ${input.method}::text,
-              'adjourned_by', ${ctx.tenant.personId}::text,
-              'adjourned_by_name', ${adjournedByName}::text,
-              'motion_id', ${input.adjournMotionId}::text,
-              'timestamp', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-            ),
-            updated_at = now()
-          WHERE id = ${input.meetingId}
-        `);
+        const outcome = await performAdjournment(tx, {
+          townId: ctx.tenant.townId,
+          personId: ctx.tenant.personId,
+          meetingId: input.meetingId,
+          meeting,
+          method: input.method,
+          adjournMotionId: input.adjournMotionId,
+        });
 
         await publishLiveMeetingTopics(tx, ctx.tenant.townId, input.meetingId, [
           "meeting",
@@ -1065,12 +1011,127 @@ export const meetingRouter = router({
         return {
           id: input.meetingId,
           alreadyAdjourned: false as const,
-          deferred: deferred.length,
-          tabled: tabled.length,
+          deferred: outcome.deferred,
+          tabled: outcome.tabled,
         };
       });
     }),
 });
+
+/** The live-run columns `performAdjournment` needs off an already-locked meeting row. */
+export interface LockedMeetingRow {
+  board_id: string;
+  status: string;
+  current_agenda_item_id: string | null;
+  presiding_officer_id: string | null;
+}
+
+/**
+ * Every row-write an adjournment performs, on a meeting row the CALLER has
+ * already locked.
+ *
+ * Extracted in Phase E wave 5, Task 5 because adjournment has two origins and
+ * only one of them is a button. The other is a passed motion to adjourn, which
+ * `voteRecord.recordForMotion` now performs inside the transaction that
+ * decides the motion's outcome — see that procedure's doc comment for why the
+ * reactive `useEffect` in `live.tsx` could not stay where it was. Both callers
+ * must see the identical writes, and two copies of a data-modifying CTE is how
+ * they stop being identical.
+ *
+ * **The lock is the caller's, deliberately.** Both callers hold the meeting row
+ * `FOR UPDATE` before they get here — `adjourn` through
+ * `lockMeetingOnAuthorizedBoard`, `recordForMotion` through the same function —
+ * and both read `status` off that locked row to decide whether to call at all.
+ * Putting the lock inside would either take it twice or leave the caller's
+ * status check racing the write it guards.
+ *
+ * It does NOT publish. `meeting.adjourn`'s own resolver does, and so does
+ * `recordForMotion`, because `trpc/__tests__/router-wiring.test.ts`'s publish
+ * inventory attributes a helper's writes to the mutations that NAME it but
+ * reads `publishes` only one level deep — a publish buried here would be
+ * invisible to it and the inventory would start failing for the wrong reason.
+ */
+export async function performAdjournment(
+  tx: TenantTx,
+  args: {
+    townId: string;
+    personId: string;
+    meetingId: string;
+    meeting: LockedMeetingRow;
+    method: "motion" | "without_objection";
+    adjournMotionId: string | null;
+  },
+): Promise<{ deferred: number; tabled: number }> {
+  const { townId, personId, meetingId, meeting, method, adjournMotionId } = args;
+
+  await tx.execute(sql`
+    UPDATE agenda_item_transition SET ended_at = now()
+    WHERE meeting_id = ${meetingId} AND ended_at IS NULL
+  `);
+
+  const deferred = toRows<{ id: string }>(
+    await tx.execute(sql`
+      WITH unreached AS (
+        UPDATE agenda_item SET status = 'deferred'::agenda_item_status, updated_at = now()
+        WHERE meeting_id = ${meetingId}
+          AND parent_item_id IS NOT NULL
+          AND status IN ('pending', 'active')
+          AND id IS DISTINCT FROM ${meeting.current_agenda_item_id}
+        RETURNING id, title, description
+      )
+      INSERT INTO future_item_queue (
+        board_id, town_id, source_meeting_id, source_agenda_item_id,
+        title, description, source, status
+      )
+      SELECT ${meeting.board_id}, ${townId}, ${meetingId}, u.id,
+             u.title, u.description, 'deferred', 'pending'
+      FROM unreached u
+      RETURNING id
+    `),
+    (message) => new Error(`meeting.performAdjournment: ${message}`),
+  );
+
+  const tabled = toRows<{ id: string }>(
+    await tx.execute(sql`
+      INSERT INTO future_item_queue (
+        board_id, town_id, source_meeting_id, source_agenda_item_id,
+        title, description, source, status
+      )
+      SELECT ${meeting.board_id}, ${townId}, ${meetingId}, ai.id,
+             ai.title, ai.description, 'tabled', 'pending'
+      FROM agenda_item ai
+      WHERE ai.meeting_id = ${meetingId}
+        AND ai.parent_item_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM motion m
+          WHERE m.agenda_item_id = ai.id
+            AND m.motion_type = 'table'
+            AND m.status = 'passed'
+        )
+      RETURNING id
+    `),
+    (message) => new Error(`meeting.performAdjournment: ${message}`),
+  );
+
+  const adjournedByName = await presidingOfficerName(tx, meeting.presiding_officer_id);
+  await tx.execute(sql`
+    UPDATE meeting SET
+      status = 'adjourned'::meeting_status,
+      ended_at = now(),
+      current_agenda_item_id = NULL,
+      adjournment = jsonb_build_object(
+        'method', ${method}::text,
+        'adjourned_by', ${personId}::text,
+        'adjourned_by_name', ${adjournedByName}::text,
+        'motion_id', ${adjournMotionId}::text,
+        'timestamp', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      ),
+      updated_at = now()
+    WHERE id = ${meetingId}
+  `);
+
+  return { deferred: deferred.length, tabled: tabled.length };
+}
 
 /**
  * Read a meeting's live-run columns, LOCK the row, and refuse unless it sits
@@ -1086,23 +1147,13 @@ export const meetingRouter = router({
  * needs the board and nothing else. This is not a second copy of the mismatch
  * defence — both end in the same `assertMatchesAuthorizedBoard` call.
  */
-async function lockMeetingOnAuthorizedBoard(
+export async function lockMeetingOnAuthorizedBoard(
   ctx: { authorizedBoardId?: string },
   tx: TenantTx,
   meetingId: string,
   label: string,
-): Promise<{
-  board_id: string;
-  status: string;
-  current_agenda_item_id: string | null;
-  presiding_officer_id: string | null;
-}> {
-  const rows = toRows<{
-    board_id: string;
-    status: string;
-    current_agenda_item_id: string | null;
-    presiding_officer_id: string | null;
-  }>(
+): Promise<LockedMeetingRow> {
+  const rows = toRows<LockedMeetingRow>(
     await tx.execute(sql`
       SELECT board_id, status::text AS status, current_agenda_item_id, presiding_officer_id
       FROM meeting WHERE id = ${meetingId}
@@ -1176,7 +1227,7 @@ async function assertPersonInTown(tx: TenantTx, personId: string, label: string)
  * publishing would put a branch on the side of that trade where being wrong is
  * silent.
  */
-async function publishLiveMeetingTopics(
+export async function publishLiveMeetingTopics(
   tx: TenantTx,
   townId: string,
   meetingId: string,
