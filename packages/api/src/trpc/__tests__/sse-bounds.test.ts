@@ -77,7 +77,16 @@ const t = initTRPC.create({
 });
 
 const boundsRouter = t.router({
-  /** Yields nothing and ends only when tRPC aborts it. */
+  /**
+   * Yields nothing and ends only when tRPC aborts it.
+   *
+   * `require-yield` is disabled deliberately and not worked around: tRPC's
+   * `.subscription()` requires an async GENERATOR, and the whole claim this
+   * procedure supports is that a stream which never yields is still ended by
+   * the adapter's own deadline. Adding a `yield` to satisfy the rule would
+   * delete the case under test.
+   */
+  // eslint-disable-next-line require-yield
   neverEnds: t.procedure.subscription(async function* ({ signal }) {
     await new Promise<void>((resolve) => {
       signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -91,6 +100,9 @@ const boundsRouter = t.router({
    * circumstances, and the test would prove nothing about WHY a client
    * reconnects after a deadline.
    */
+  // See `neverEnds` above: an immediately-returning generator IS the control
+  // here, so it must not yield.
+  // eslint-disable-next-line require-yield
   endsCleanly: t.procedure.subscription(async function* () {
     return;
   }),
