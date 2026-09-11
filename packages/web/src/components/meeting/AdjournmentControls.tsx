@@ -23,12 +23,22 @@ interface AdjournmentControlsProps {
   onAdjournMotion: () => void;
   /** Runs meeting end flow with "without_objection" method */
   onAdjournWithoutObjection: () => void;
+  /** `meeting.adjourn`'s in-flight state, forwarded to the confirmation dialog. */
+  adjournPending?: boolean;
+  /**
+   * `meeting.adjourn`'s refusal, forwarded to the confirmation dialog so it
+   * renders inside the surface that stays open when the write is refused —
+   * see that dialog's own prop comment.
+   */
+  adjournError?: string | null;
 }
 
 export function AdjournmentControls({
   presidingOfficerName,
   onAdjournMotion,
   onAdjournWithoutObjection,
+  adjournPending,
+  adjournError,
 }: AdjournmentControlsProps) {
   const [woDialog, setWoDialog] = useState(false);
 
@@ -58,6 +68,8 @@ export function AdjournmentControls({
         onOpenChange={setWoDialog}
         presidingOfficerName={presidingOfficerName}
         onConfirm={onAdjournWithoutObjection}
+        isPending={adjournPending}
+        error={adjournError}
       />
     </>
   );

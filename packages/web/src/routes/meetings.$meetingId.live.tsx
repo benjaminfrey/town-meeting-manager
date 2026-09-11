@@ -45,23 +45,60 @@
  * that item exists to record — an empty string, compiling cleanly, silently
  * writing rows into no town at all.
  *
- * TODO(phase-e-wave-5): this file's WRITES are still raw Supabase — the
- * adjournment handler (`meeting` status 'adjourned', `agenda_item`,
- * `future_item_queue`), `navigateToItem` (`agenda_item`, `meeting`,
- * `agenda_item_transition`) and the three reactive effects
- * (`executive_session`, `minutes_document`, `notification_event`). NOT a
- * completeness gap alone for the `meeting` write: `meeting_tenant_isolation`
- * is tenancy-only, so this `.update({status: "adjourned", ...})` has no
- * authorization check of any kind today, the identical shape Phase E wave 3
- * Task 2 closed for `meeting.cancel`/`meeting.updateStatus` (see
- * `packages/api/src/trpc/routers/meeting.ts`). Task 5 owns all of them —
- * `meeting.adjourn`, `meeting.navigateToAgendaItem` and the
- * `executiveSession.*` procedures already exist and are tested, unwired.
+ * ─── Phase E, wave 5, Task 5: the writes, and the race ───────────────────
+ *
+ * ~~TODO(phase-e-wave-5): this file's WRITES are still raw Supabase … Task 5
+ * owns all of them.~~ — **discharged.** This file no longer imports
+ * `useSupabase`, and the adjournment write's total absence of any
+ * authorization check — the second of the two `meeting.status` holes wave 5's
+ * plan names, the other being call-to-order in `MeetingStartFlow` — is closed
+ * by `meeting.adjourn` having a real caller AND the raw writes being gone.
+ *
+ * **Four `useEffect`s are gone rather than fixed, and that is the task.** They
+ * fired on a motion row arriving over the subscription with a new `status`, on
+ * EVERY connected device, deduplicated only by `processedMotionIds`, a
+ * `useRef<Set>` that dies on reload and is shared with nobody. Two clerks with
+ * this screen open meant two writes:
+ *
+ *   | it watched for                       | and every client then wrote              |
+ *   | ------------------------------------ | ---------------------------------------- |
+ *   | an exec-session entry motion PASSING  | `executive_session.entered_at`           |
+ *   | the same motion FAILING               | DELETE that pending session              |
+ *   | a minutes-approval motion PASSING     | `minutes_document`, `notification_event` |
+ *   | a motion to adjourn PASSING           | the whole adjournment                    |
+ *
+ * All four are consequences of one transition, and `motion.ts`'s header states
+ * that the transition has exactly ONE origin: `voteRecord.recordForMotion`.
+ * They live in that transaction now — see its doc comment for the authorization
+ * cost and the two-concurrent-caller proofs. `VotePanel` is what learns what
+ * happened, from the three fields the call returns; this screen learns it the
+ * way every other device does, from the SSE topics that transaction publishes.
+ * The ref is deleted outright rather than kept as a cheap local filter: a guard
+ * that no longer guards anything is a guard the next reader has to reason about.
+ *
+ * **One reactive effect REMAINS, and it is a different animal.** The
+ * post-executive-session tracking effect is driven by `isPostExecSession` —
+ * LOCAL UI state, set when this device's operator answers "Yes — Record
+ * Actions" in the exit dialog. No server can know that, so the effect cannot
+ * move; it runs on one device by construction. It calls
+ * `executiveSession.appendPostSessionActionMotions`, which takes only the ids to
+ * ADD and unions them under `FOR UPDATE`, where the raw write read the array,
+ * merged in the browser and wrote the whole thing back — a read-modify-write
+ * across a round trip that silently dropped a concurrent append.
+ *
+ * **Adjournment now has two origins and the client performs only one of them.**
+ * "Adjourn Without Objection" calls `meeting.adjourn`; "Motion to Adjourn" opens
+ * `MotionCaptureDialog`, the board votes, and the server adjourns inside the
+ * vote's own transaction. So `handleMeetingEnd(method, motionId)` is gone and
+ * the procedure's `method: "motion"` branch is reached only from the server
+ * side. Every OTHER device, including one whose operator did nothing, sees
+ * `meeting.status` become `adjourned` over the stream and routes itself to the
+ * review page through the status routing this file already had.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
 import { toast } from "sonner";
 import { ErrorBoundary } from "react-error-boundary";
@@ -72,13 +109,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useQuorumCheck } from "@/hooks/useQuorumCheck";
-import { useSupabase } from "@/hooks/useSupabase";
 import { useLiveMeetingEvents } from "@/hooks/useLiveMeetingEvents";
 import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
 import { ConnectionStatusBarErrorBoundary } from "@/components/FeatureErrorBoundaries";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
-import { apiFetch } from "@/lib/api-client";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { queryClient as sharedQueryClient } from "@/lib/queryClient";
 import { MeetingTimer } from "@/components/meeting/MeetingTimer";
 import { MeetingStartFlow } from "@/components/meeting/MeetingStartFlow";
@@ -150,7 +185,6 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
   const navigate = useNavigate();
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const currentUser = useCurrentUser();
   const [agendaCollapsed, setAgendaCollapsed] = useState(false);
@@ -175,9 +209,6 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Adjournment state ──────────────────────────────────────────
   const [adjournMotionDialogOpen, setAdjournMotionDialogOpen] = useState(false);
-
-  // Track which motions we've already processed to avoid re-processing
-  const processedMotionIds = useRef<Set<string>>(new Set());
 
   // ─── Permission check ─────────────────────────────────────────
   // `role` is `null` for an identity that has signed in but has no town yet
@@ -525,129 +556,29 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     [execSessionRows],
   );
 
-  // Reactive: when entry motion for exec session passes → set entered_at
-  // When entry motion fails → delete the pending exec session record
-  useEffect(() => {
-    if (!pendingExecSession || !motionRows.length) return;
-    const entryMotionId = pendingExecSession.entry_motion_id;
-    const entryMotion = motionRows.find((m) => m.id === entryMotionId);
-    if (!entryMotion || entryMotionId === null) return;
-
-    const motionStatus = entryMotion.status;
-    const esId = pendingExecSession.id;
-
-    if (processedMotionIds.current.has(entryMotionId)) return;
-
-    if (motionStatus === "passed") {
-      processedMotionIds.current.add(entryMotionId);
-      const now = new Date().toISOString();
-      void (async () => {
-        await supabase.from("executive_session").update({ entered_at: now }).eq("id", esId);
+  /**
+   * The ONE reactive write that stays client-side — see this file's header.
+   *
+   * It cannot move: its trigger is `isPostExecSession`, local state set when
+   * THIS device's operator answers "Yes — Record Actions" in the exit dialog,
+   * which no server can observe. It runs on one device by construction rather
+   * than on every connected one, which is what made the other four dangerous.
+   *
+   * `executiveSession.appendPostSessionActionMotions` takes only the ids to ADD
+   * and unions them under `FOR UPDATE`, so the effect firing twice — on a
+   * re-render, or from a second device whose operator also answered yes —
+   * converges instead of overwriting.
+   */
+  const appendPostSessionMotions = useMutation(
+    trpc.executiveSession.appendPostSessionActionMotions.mutationOptions({
+      onSuccess: () => {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
         });
         void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
-      })();
-    } else if (motionStatus === "failed") {
-      processedMotionIds.current.add(entryMotionId);
-      void (async () => {
-        await supabase.from("executive_session").delete().eq("id", esId);
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
-        });
-        void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
-      })();
-    }
-  }, [pendingExecSession, motionRows, supabase, queryClient, meetingId]);
-
-  // Reactive: when adjourn motion passes → trigger meeting end
-  useEffect(() => {
-    if (!motionRows.length || status !== "open") return;
-    const adjournMotion = motionRows.find(
-      (m) => m.motion_type === "adjourn" && m.status === "passed",
-    );
-    if (!adjournMotion) return;
-    const motionId = adjournMotion.id;
-    if (processedMotionIds.current.has(`adjourn_${motionId}`)) return;
-    processedMotionIds.current.add(`adjourn_${motionId}`);
-    void handleMeetingEnd("motion", motionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [motionRows, status]);
-
-  // Reactive: when a minutes-approval motion passes → auto-approve minutes
-  useEffect(() => {
-    if (!motionRows.length || !itemRows.length) return;
-
-    const approvalItems = itemRows.filter((item) => item.source_minutes_document_id !== null);
-    if (approvalItems.length === 0) return;
-
-    for (const item of approvalItems) {
-      const itemMotions = motionRows.filter(
-        (m) => m.agenda_item_id === item.id && m.status === "passed",
-      );
-
-      for (const motion of itemMotions) {
-        const key = `minutes_approve_${motion.id}`;
-        if (processedMotionIds.current.has(key)) continue;
-        processedMotionIds.current.add(key);
-
-        const docId = item.source_minutes_document_id!;
-        const now = new Date().toISOString();
-        const motionText = motion.motion_text.toLowerCase();
-        const asAmended =
-          motionText.includes("as amended") || motionText.includes("with corrections");
-
-        void (async () => {
-          // Update minutes_document status to approved
-          await supabase
-            .from("minutes_document")
-            .update({
-              status: "approved",
-              approved_at: now,
-              approved_by_motion_id: motion.id,
-              approved_as_amended: asAmended,
-              updated_at: now,
-            })
-            .eq("id", docId);
-
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
-          });
-          // Moves `minutes_document.status` to `approved` — exactly the pill
-          // `routes/meetings.$meetingId.tsx`'s shell renders from
-          // `trpc.minutesDocument.byMeeting`. Note the legacy key above is
-          // keyed by the LIVE meeting's id while `docId` belongs to the
-          // EARLIER meeting whose minutes are being approved here (it comes
-          // off `item.source_minutes_document_id`), so that key never
-          // reaches the shell that actually shows this document. The
-          // router-level filter does — one more reason item 7 prefers it.
-          void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
-
-          // Fire notification event (fire-and-forget)
-          await supabase.from("notification_event").insert({
-            id: crypto.randomUUID(),
-            town_id: townId,
-            event_type: "minutes_approved",
-            payload: {
-              minutes_document_id: docId,
-              meeting_id: meetingId,
-              approved_by_motion_id: motion.id,
-            },
-            status: "pending",
-            created_at: now,
-          });
-
-          // Regenerate the PDF without the DRAFT watermark (fire-and-forget).
-          await apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
-            method: "POST",
-            json: { is_draft: false },
-          }).catch(() => {
-            // Non-critical — the minutes screen can re-render on demand.
-          });
-        })();
-      }
-    }
-  }, [motionRows, itemRows, supabase, queryClient, townId, meetingId]);
+      },
+    }),
+  );
 
   // Track post-session action motions: any motion created after returning
   // from exec session gets linked to the exec session record
@@ -671,26 +602,22 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     );
 
     if (postMotions.length > 0) {
-      const newIds = [...existingIds, ...postMotions.map((m) => m.id)];
-      void (async () => {
-        await supabase
-          .from("executive_session")
-          .update({ post_session_action_motion_ids: newIds })
-          .eq("id", postExecSessionId);
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
-        });
-        void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
-      })();
+      // Only the ids to ADD. The procedure unions them into the stored array
+      // under `FOR UPDATE`; the raw write sent `[...existingIds, ...newIds]`,
+      // computed from a copy of the row this browser read a round trip ago.
+      appendPostSessionMotions.mutate({
+        boardId,
+        executiveSessionId: postExecSessionId,
+        motionIds: postMotions.map((m) => m.id),
+      });
     }
   }, [
     isPostExecSession,
     postExecSessionId,
     motionRows,
     execSessionRows,
-    supabase,
-    queryClient,
-    meetingId,
+    boardId,
+    appendPostSessionMotions,
   ]);
 
   // Find the item that belongs to the executive session section (for lock icon)
@@ -708,83 +635,70 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Navigation ───────────────────────────────────────────────
 
+  /**
+   * Moving the meeting to an agenda item — `meeting.navigateToAgendaItem`.
+   *
+   * Four untransacted round trips become one, and two of the four had no
+   * authorization check of any kind (`meeting` and `agenda_item` are both
+   * tenancy-only). Two behaviour changes, both stated rather than left in the
+   * diff, and both the procedure's (see its own doc comment):
+   *
+   *   - **The transition close is WIDER.** The browser closed the one open
+   *     transition it happened to be holding (`currentTransition`) and only if
+   *     it had one; the procedure closes every still-open transition on the
+   *     meeting. In the normal case that is the same single row — in the case
+   *     where it is not (a client that missed one, a browser closed
+   *     mid-navigation) the old code leaked a transition that never ends and
+   *     an item timer that runs forever.
+   *   - **Every timestamp is the database's `now()`**, not this browser's
+   *     clock.
+   */
+  const navigateMutation = useMutation(
+    trpc.meeting.navigateToAgendaItem.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.meetings.detail(meetingId),
+        });
+        // Writes `meeting.current_agenda_item_id`, which THIS screen reads
+        // through `trpc.meeting.detail` and the kanban through
+        // `trpc.meeting.byTown`. The legacy key above reached neither once this
+        // screen's meeting read moved (wave 5, Task 4).
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // Sets the ARRIVED item to `active` — one `agenda_item` row,
+        // invalidated at the router. It does NOT mark the departed item
+        // `completed`; that is `agendaItem.markComplete`, a separate button,
+        // and the procedure pins the departed item staying `active`.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+        });
+        // Closes the open transition rows and opens one — the read behind this
+        // screen's per-item timer, now `trpc.agendaItemTransition.byMeeting`.
+        void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+      },
+    }),
+  );
+
   const navigateToItem = useCallback(
-    async (itemId: string) => {
-      const now = new Date().toISOString();
-
-      // End current transition
-      if (currentItemId && currentTransition) {
-        await supabase
-          .from("agenda_item_transition")
-          .update({ ended_at: now })
-          .eq("id", currentTransition.id);
-      }
-
-      // Set current item to active
-      await supabase
-        .from("agenda_item")
-        .update({ status: "active", updated_at: now })
-        .eq("id", itemId);
-
-      // Update meeting's current item
-      await supabase
-        .from("meeting")
-        .update({ current_agenda_item_id: itemId, updated_at: now })
-        .eq("id", meetingId);
-
-      // Create new transition
-      const transId = crypto.randomUUID();
-      await supabase.from("agenda_item_transition").insert({
-        id: transId,
-        meeting_id: meetingId,
-        agenda_item_id: itemId,
-        town_id: townId,
-        started_at: now,
-        ended_at: null,
-      });
-
-      // Invalidate affected queries
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.meetings.detail(meetingId),
-      });
-      // Writes `meeting.current_agenda_item_id`, which THIS screen reads
-      // through `trpc.meeting.detail` and the kanban through
-      // `trpc.meeting.byTown`. The legacy key above reached neither once this
-      // screen's meeting read moved (wave 5, Task 4).
-      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-      });
-      // Sets the ARRIVED item to `active` — one `agenda_item` row, invalidated
-      // at the router.
-      //
-      // This comment used to say it also set the DEPARTED item to
-      // `completed`. It does not, and never did: the only `agenda_item` write
-      // above is `.eq("id", itemId)` for the item being navigated TO. The
-      // departed item keeps whatever status it had — which is the behaviour
-      // `meeting.navigateToAgendaItem` (wave 5, Task 3) preserved deliberately
-      // and pinned with a test asserting the departed item stays `active`.
-      // Corrected rather than carried across this migration.
-      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
-      });
-      // Closes one transition row and opens another — the read behind this
-      // screen's per-item timer, now `trpc.agendaItemTransition.byMeeting`.
-      void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+    (itemId: string) => {
+      navigateMutation.reset();
+      navigateMutation.mutate({ meetingId, boardId, itemId });
     },
-    [currentItemId, currentTransition, meetingId, townId, supabase, queryClient],
+    [meetingId, boardId, navigateMutation],
   );
 
   const navigateNext = useCallback(() => {
     if (currentFlatIdx < flatItems.length - 1) {
-      void navigateToItem(flatItems[currentFlatIdx + 1]!.id);
+      navigateToItem(flatItems[currentFlatIdx + 1]!.id);
     }
   }, [currentFlatIdx, flatItems, navigateToItem]);
 
   const navigatePrev = useCallback(() => {
     if (currentFlatIdx > 0) {
-      void navigateToItem(flatItems[currentFlatIdx - 1]!.id);
+      navigateToItem(flatItems[currentFlatIdx - 1]!.id);
     }
   }, [currentFlatIdx, flatItems, navigateToItem]);
 
@@ -798,9 +712,30 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
     [],
   );
 
-  // Called after exec session entry motion is filed — create the pending
-  // exec session record linked to the motion
-  const handleExecMotionFiled = useCallback(async () => {
+  /**
+   * The PENDING executive-session record, filed the moment the entry motion is
+   * recorded and before the board has voted on it — `executiveSession.insert`.
+   *
+   * `entered_at`/`exited_at` are not sent at all: a null pair plus a non-null
+   * `entry_motion_id` is exactly how this screen recognises a pending session,
+   * and it is the shape `voteRecord.recordForMotion` looks for when the entry
+   * motion carries or fails. `town_id`, `id` and `created_at` are the server's,
+   * and the last of those matters — `created_at` is compared against
+   * `exited_at` below to decide what counts as a post-session action.
+   */
+  const filePendingExecSession = useMutation(
+    trpc.executiveSession.insert.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
+        });
+        void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
+        setPendingExecCitation(null);
+      },
+    }),
+  );
+
+  const handleExecMotionFiled = useCallback(() => {
     if (!pendingExecCitation || !currentItemId) return;
 
     const itemMotions = motionsByItem.get(currentItemId) ?? [];
@@ -810,34 +745,28 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
     if (!entryMotion) return;
 
-    const esId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    await supabase.from("executive_session").insert({
-      id: esId,
-      meeting_id: meetingId,
-      agenda_item_id: currentItemId,
-      town_id: townId,
-      statutory_basis: pendingExecCitation.citation,
-      entered_at: null,
-      exited_at: null,
-      entry_motion_id: entryMotion.id,
-      post_session_action_motion_ids: [],
-      created_at: now,
+    filePendingExecSession.reset();
+    filePendingExecSession.mutate({
+      boardId,
+      meetingId,
+      agendaItemId: currentItemId,
+      entryMotionId: entryMotion.id,
+      statutoryBasis: pendingExecCitation.citation,
     });
-
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
-    });
-    void queryClient.invalidateQueries(trpc.executiveSession.pathFilter());
-
-    setPendingExecCitation(null);
-  }, [pendingExecCitation, currentItemId, motionsByItem, meetingId, townId, supabase, queryClient]);
+  }, [
+    pendingExecCitation,
+    currentItemId,
+    motionsByItem,
+    meetingId,
+    boardId,
+    filePendingExecSession,
+  ]);
 
   const handleExecMotionDialogClose = useCallback(
     (open: boolean) => {
       setExecMotionDialogOpen(open);
       if (!open && pendingExecCitation) {
-        void handleExecMotionFiled();
+        handleExecMotionFiled();
       }
     },
     [pendingExecCitation, handleExecMotionFiled],
@@ -866,134 +795,58 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
 
   // ─── Meeting end flow ───────────────────────────────────────────
 
-  const handleMeetingEnd = useCallback(
-    async (method: "motion" | "without_objection", adjournMotionId?: string) => {
-      const now = new Date().toISOString();
-
-      // 1. End current transition
-      if (currentTransition) {
-        await supabase
-          .from("agenda_item_transition")
-          .update({ ended_at: now })
-          .eq("id", currentTransition.id);
-      }
-
-      // 2. Mark pending/active items as "deferred" and create future_item_queue entries
-      const unreachedItems = allItems.filter(
-        (item) =>
-          item.parent_item_id !== null &&
-          (item.status === "pending" || item.status === "active") &&
-          item.id !== currentItemId,
-      );
-
-      for (const item of unreachedItems) {
-        await supabase
-          .from("agenda_item")
-          .update({ status: "deferred", updated_at: now })
-          .eq("id", item.id);
-
-        await supabase.from("future_item_queue").insert({
-          id: crypto.randomUUID(),
-          board_id: boardId,
-          town_id: townId,
-          source_meeting_id: meetingId,
-          source_agenda_item_id: item.id,
-          title: item.title,
-          description: item.description,
-          source: "deferred",
-          status: "pending",
-          created_at: now,
+  /**
+   * "Adjourn Without Objection" — `meeting.adjourn`, the FIRST of this act's
+   * two origins. The second is a passed motion to adjourn, which the server
+   * performs inside `voteRecord.recordForMotion`'s own transaction; both run
+   * the same `performAdjournment` body, so they cannot diverge.
+   *
+   * What was here was: close the current transition; loop over every unreached
+   * item writing an `agenda_item` UPDATE **and** a `future_item_queue` INSERT
+   * per item, one round trip each; loop again over the tabled ones; then update
+   * `meeting`. Unbounded, sequential, untransacted — so a failure partway left
+   * items marked `deferred` with no queue row behind them, which is a silently
+   * lost agenda item rather than a visible error. And authorized by nothing at
+   * all. It is one statement per loop now (the deferred one a data-modifying
+   * CTE, so an item cannot be marked deferred without its queue row coming from
+   * the same rows), in one transaction, behind
+   * `requireBoardActor(assertCanUpdateMeeting)`.
+   *
+   * The `adjournment` JSONB's five keys are unchanged, INCLUDING the
+   * `adjourned_by` misattribution `meeting.ts` documents: it holds a
+   * `person.id` while the minutes assembler looks it up in a `board_member.id`
+   * map, so the generated record silently names the presiding officer. That is
+   * a legal-record semantics change and wave 6 owns both of its readers.
+   */
+  const adjournMutation = useMutation(
+    trpc.meeting.adjourn.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.meetings.detail(meetingId),
         });
-      }
-
-      // 3. Also add tabled items to future queue
-      const tabledItems = allItems.filter((item) => {
-        if (!item.parent_item_id) return false;
-        const itemMotions = motionsByItem.get(item.id) ?? [];
-        return itemMotions.some((m) => m.motion_type === "table" && m.status === "passed");
-      });
-
-      for (const item of tabledItems) {
-        await supabase.from("future_item_queue").insert({
-          id: crypto.randomUUID(),
-          board_id: boardId,
-          town_id: townId,
-          source_meeting_id: meetingId,
-          source_agenda_item_id: item.id,
-          title: item.title,
-          description: item.description,
-          source: "tabled",
-          status: "pending",
-          created_at: now,
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
         });
-      }
+        // Adjournment marks the unreached items `deferred` and copies both the
+        // unreached and the tabled ones into `future_item_queue` —
+        // `agenda_item` writes, invalidated at the router.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        // The kanban (routes/meetings.tsx) and board Meetings tab
+        // (routes/boards.$boardId.meetings.tsx) both read this meeting's
+        // status via trpc.meeting.byTown/byBoard — this write moves it open
+        // → adjourned, which both screens render. It is also what makes the
+        // OTHER devices' status routing send them to the review page.
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+        });
+        // Closes every still-open `agenda_item_transition` row.
+        void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
 
-      // 4. Build adjournment JSONB (Supabase handles native objects)
-      const adjournment = {
-        method,
-        adjourned_by: currentUser?.personId ?? null,
-        adjourned_by_name: presidingOfficerName,
-        motion_id: adjournMotionId ?? null,
-        timestamp: now,
-      };
-
-      // 5. Update meeting: status=adjourned, ended_at, adjournment, clear current item
-      await supabase
-        .from("meeting")
-        .update({
-          status: "adjourned",
-          ended_at: now,
-          adjournment,
-          current_agenda_item_id: null,
-          updated_at: now,
-        })
-        .eq("id", meetingId);
-
-      // Invalidate affected queries
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.meetings.detail(meetingId),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-      });
-      // Adjournment marks the unreached items `deferred` and copies both the
-      // unreached and the tabled ones into `future_item_queue` —
-      // `agenda_item` writes, invalidated at the router.
-      //
-      // This comment used to say `completed` and `future_agenda_item`. Both
-      // are wrong against the code directly above it: step 2 writes
-      // `status: "deferred"`, and the table is `future_item_queue` (there is
-      // no `future_agenda_item` table in this schema). Corrected here rather
-      // than carried across the migration; `meeting.adjourn` (wave 5, Task 3)
-      // writes exactly what this code does and names it correctly.
-      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-      // The kanban (routes/meetings.tsx) and board Meetings tab
-      // (routes/boards.$boardId.meetings.tsx) both read this meeting's
-      // status via trpc.meeting.byTown/byBoard — this write moves it open
-      // → adjourned, which both screens render.
-      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
-      // Step 1 closes the open `agenda_item_transition` row.
-      void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
-
-      toast.success("Meeting adjourned");
-
-      // 6. Navigate to review page
-      void navigate(`/meetings/${meetingId}/review`);
-    },
-    [
-      currentTransition,
-      allItems,
-      currentItemId,
-      motionsByItem,
-      boardId,
-      townId,
-      meetingId,
-      currentUser,
-      presidingOfficerName,
-      supabase,
-      queryClient,
-      navigate,
-    ],
+        toast.success("Meeting adjourned");
+        void navigate(`/meetings/${meetingId}/review`);
+      },
+    }),
   );
 
   const handleAdjournMotion = useCallback(() => {
@@ -1001,8 +854,14 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
   }, []);
 
   const handleAdjournWithoutObjection = useCallback(() => {
-    void handleMeetingEnd("without_objection");
-  }, [handleMeetingEnd]);
+    adjournMutation.reset();
+    adjournMutation.mutate({
+      meetingId,
+      boardId,
+      method: "without_objection",
+      adjournMotionId: null,
+    });
+  }, [meetingId, boardId, adjournMutation]);
 
   // ─── Keyboard shortcuts ───────────────────────────────────────
 
@@ -1150,10 +1009,46 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
               presidingOfficerName={presidingOfficerName}
               onAdjournMotion={handleAdjournMotion}
               onAdjournWithoutObjection={handleAdjournWithoutObjection}
+              adjournPending={adjournMutation.isPending}
+              adjournError={
+                adjournMutation.error
+                  ? refusalMessage(adjournMutation.error, "adjourn this meeting")
+                  : null
+              }
             />
           )}
         </div>
       </div>
+
+      {/*
+        The refusals for the two writes this screen performs that are NOT
+        behind a dialog of their own. `meeting.adjourn`'s refusal is not here —
+        it renders inside `AdjournWithoutObjectionDialog`, which stays open on a
+        refusal and `aria-hidden`s this region (conventions item 2). Both of
+        these were unauthorized writes before wave 5, so FORBIDDEN is newly
+        reachable on each.
+      */}
+      {(navigateMutation.error ||
+        filePendingExecSession.error ||
+        appendPostSessionMotions.error) && (
+        <p
+          className="border-b bg-destructive/5 px-4 py-2 text-sm text-destructive"
+          role="alert"
+          aria-live="assertive"
+        >
+          {navigateMutation.error
+            ? refusalMessage(navigateMutation.error, "move this meeting to another agenda item")
+            : filePendingExecSession.error
+              ? refusalMessage(
+                  filePendingExecSession.error,
+                  "move this meeting into executive session",
+                )
+              : refusalMessage(
+                  appendPostSessionMotions.error,
+                  "record a post-executive-session action",
+                )}
+        </p>
+      )}
 
       {/* Executive session banner */}
       {isInExecSession && activeExecSession && (
@@ -1188,7 +1083,7 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
           <AgendaNavigationPanel
             sections={sections}
             currentItemId={currentItemId}
-            onNavigate={(id) => void navigateToItem(id)}
+            onNavigate={(id) => navigateToItem(id)}
             readOnly={readOnly}
             collapsed={agendaCollapsed}
             onToggleCollapse={() => setAgendaCollapsed((c) => !c)}

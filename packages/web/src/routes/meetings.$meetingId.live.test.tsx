@@ -51,21 +51,9 @@ vi.mock("@trpc/tanstack-react-query", async () => {
   };
 });
 
-// The remaining raw Supabase writes (adjournment, navigation, the three
-// reactive effects) are Task 5's. They still go through this client.
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: vi.fn(() => ({
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockResolvedValue({ data: null, error: null }),
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-      single: vi.fn().mockResolvedValue({ data: null, error: null }),
-    })),
-    auth: { getSession: vi.fn().mockResolvedValue({ data: { session: null } }) },
-  })),
-}));
+// No Supabase mock: as of wave 5, Task 5 this route imports nothing from
+// `@/hooks/useSupabase`, and every write it performs goes through the stubbed
+// `fetch` below.
 
 vi.mock("@/components/ConnectionStatusBar", () => ({
   ConnectionStatusBar: () => null,
@@ -176,6 +164,11 @@ vi.mock("@/components/meeting/ExitExecutiveSessionDialog", () => ({
 }));
 
 vi.mock("@/components/meeting/AdjournmentControls", () => ({
+  // `adjournError` is rendered here because that is the whole of this route's
+  // responsibility for it: the real control forwards it into
+  // `AdjournWithoutObjectionDialog`, which renders it INSIDE the dialog that a
+  // refusal leaves open. That placement is pinned in `AdjournmentFlow.test.tsx`
+  // against the real components; this asserts the message reaches them.
   AdjournmentControls: (props: any) => (
     <div data-testid="adjournment-controls">
       <button data-testid="adjourn-motion" onClick={props.onAdjournMotion}>
@@ -184,6 +177,7 @@ vi.mock("@/components/meeting/AdjournmentControls", () => ({
       <button data-testid="adjourn-wo" onClick={props.onAdjournWithoutObjection}>
         WO
       </button>
+      {props.adjournError && <span data-testid="adjourn-error">{props.adjournError}</span>}
     </div>
   ),
 }));
@@ -257,6 +251,7 @@ function motion(overrides: {
   id?: string;
   agenda_item_id?: string;
   motion_text?: string;
+  motion_type?: string;
   status?: string;
   created_at?: string;
 }) {
@@ -391,6 +386,10 @@ const server: {
   motions: Motion[];
   exhibits: RouterOutputs["exhibit"]["byMeeting"];
   meetingRefuses: false | "NOT_FOUND" | "INTERNAL_SERVER_ERROR";
+  adjournRefuses: boolean;
+  navigateRefuses: boolean;
+  execInsertRefuses: boolean;
+  appendRefuses: boolean;
 } = {
   meeting: baseMeeting,
   items: defaultItems,
@@ -398,6 +397,10 @@ const server: {
   motions: [],
   exhibits: [],
   meetingRefuses: false,
+  adjournRefuses: false,
+  navigateRefuses: false,
+  execInsertRefuses: false,
+  appendRefuses: false,
 };
 
 const stub = installTRPCFetchStub({
@@ -452,6 +455,31 @@ const stub = installTRPCFetchStub({
   "guestSpeaker.byMeeting": () => [],
   "agendaItemTransition.byMeeting": () => [],
   "executiveSession.byMeeting": () => server.execSessions,
+
+  // ─── The writes this screen performs (wave 5, Task 5) ────────────
+  //
+  // Four, and that is the whole list. There is no handler for a
+  // `minutes_document` write, for `executiveSession.markEntered` or for
+  // `discard` — those are consequences of a motion's outcome and live inside
+  // `voteRecord.recordForMotion` now. The absence is load-bearing: if this
+  // screen ever starts writing them again, the stub answers "no handler" and
+  // the test that triggers it fails.
+  "meeting.adjourn": ({ meetingId }) => {
+    if (server.adjournRefuses) trpcTestError("FORBIDDEN");
+    return { id: meetingId, alreadyAdjourned: false as const, deferred: 0, tabled: 0 };
+  },
+  "meeting.navigateToAgendaItem": ({ meetingId, itemId }) => {
+    if (server.navigateRefuses) trpcTestError("FORBIDDEN");
+    return { id: meetingId, currentAgendaItemId: itemId };
+  },
+  "executiveSession.insert": () => {
+    if (server.execInsertRefuses) trpcTestError("FORBIDDEN");
+    return { id: "es-new" };
+  },
+  "executiveSession.appendPostSessionActionMotions": ({ executiveSessionId, motionIds }) => {
+    if (server.appendRefuses) trpcTestError("FORBIDDEN");
+    return { id: executiveSessionId, motionIds };
+  },
 });
 
 import LiveMeetingPage from "./meetings.$meetingId.live";
@@ -461,6 +489,19 @@ function renderLive() {
     <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
     { queryClient },
   );
+}
+
+/**
+ * The input of the LAST request that carried `path`.
+ *
+ * Not `stub.calls[stub.calls.length - 1]`: a mutation's `onSuccess`
+ * invalidates, the invalidation refetches, and the refetch is what ends up
+ * last. This looks the call up by the procedure it names.
+ */
+function lastInputFor(path: Parameters<typeof stub.countFor>[0]): Record<string, unknown> {
+  const call = [...stub.calls].reverse().find((c) => c.paths.includes(path));
+  expect(call, `no request named ${path}`).toBeDefined();
+  return Object.values(call!.inputs)[0] as Record<string, unknown>;
 }
 
 /** Deliver one realtime event through the route's real topic mapping. */
@@ -481,6 +522,10 @@ describe("LiveMeetingPage", () => {
     server.motions = [];
     server.exhibits = [];
     server.meetingRefuses = false;
+    server.adjournRefuses = false;
+    server.navigateRefuses = false;
+    server.execInsertRefuses = false;
+    server.appendRefuses = false;
   });
 
   it("renders meeting start flow when the meeting is noticed", async () => {
@@ -704,8 +749,19 @@ describe("LiveMeetingPage realtime", () => {
   });
 });
 
-// ─── The remaining raw writes' invalidations (Task 5 owns the writes) ──
+// ─── The four writes this screen performs, and the four it no longer does ──
 
+/**
+ * Phase E, wave 5, Task 5.
+ *
+ * The previous version of this block pinned SEVEN writes. Three of them were
+ * `useEffect`s that fired when a motion row arrived over the subscription
+ * carrying a new `status` — on every connected device at once, deduplicated
+ * only by an in-memory `useRef<Set>`. They are consequences of the transaction
+ * that decides the motion's outcome now (`voteRecord.recordForMotion`), so the
+ * tests that drove them from this screen are gone and one test that asserts
+ * they CANNOT happen from here has taken their place.
+ */
 describe("LiveMeetingPage cache invalidation", () => {
   beforeEach(() => {
     mockNavigate.mockReset();
@@ -716,6 +772,10 @@ describe("LiveMeetingPage cache invalidation", () => {
     server.motions = [];
     server.exhibits = [];
     server.meetingRefuses = false;
+    server.adjournRefuses = false;
+    server.navigateRefuses = false;
+    server.execInsertRefuses = false;
+    server.appendRefuses = false;
   });
 
   it("invalidates trpc.meeting.pathFilter() after adjourning without objection", async () => {
@@ -727,6 +787,19 @@ describe("LiveMeetingPage cache invalidation", () => {
     fireEvent.click(await screen.findByTestId("adjourn-wo"));
 
     await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
+  });
+
+  it("adjourns through meeting.adjourn, with no motion behind it", async () => {
+    const before = stub.countFor("meeting.adjourn");
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    await waitFor(() => expect(stub.countFor("meeting.adjourn")).toBe(before + 1));
+    const input = lastInputFor("meeting.adjourn");
+    // The "motion" method is reached only from inside
+    // `voteRecord.recordForMotion` now; this screen can only declare.
+    expect(input).toMatchObject({ method: "without_objection", adjournMotionId: null });
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review"));
   });
 
   it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {
@@ -761,6 +834,22 @@ describe("LiveMeetingPage cache invalidation", () => {
     );
   });
 
+  it("hands a refused adjournment to the confirmation dialog, not to the page", async () => {
+    // The refusal must reach `AdjournWithoutObjectionDialog`, which stays open
+    // on a refusal and `aria-hidden`s the rest of the page. This asserts the
+    // message is handed DOWN; `AdjournmentFlow.test.tsx` asserts the real
+    // dialog renders it inside itself with `role="alert"`.
+    server.adjournRefuses = true;
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    const message = await screen.findByTestId("adjourn-error");
+    expect(message).toHaveTextContent(/permission to adjourn this meeting/i);
+    // And the page-level alert region did NOT take it — that region is
+    // `aria-hidden` while the dialog is open.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("invalidates trpc.agendaItem.pathFilter() when navigating between items — the OTHER call site", async () => {
     const countKey = trpc.agendaItem.countByMeeting.queryOptions({
       meetingId: "meeting-1",
@@ -787,34 +876,31 @@ describe("LiveMeetingPage cache invalidation", () => {
     );
   });
 
-  it("invalidates trpc.minutesDocument.pathFilter() when a minutes-approval motion passes", async () => {
-    // The auto-approval effect: an agenda item carrying
-    // `source_minutes_document_id` plus a PASSED motion on that item moves the
-    // referenced `minutes_document` to `approved`. That column is read through
-    // `agendaItem.byMeeting`, which is why this task added it there.
-    server.items = [
-      agendaItem({
-        id: "item-minutes",
-        title: "Approve the minutes of February 10",
-        source_minutes_document_id: "md-1",
-      }),
-    ];
-    server.motions = [
-      motion({
-        agenda_item_id: "item-minutes",
-        motion_text: "to approve the minutes of February 10",
-      }),
-    ];
-
-    const minutesKey = trpc.minutesDocument.byMeeting.queryOptions({
-      meetingId: "meeting-1",
-    }).queryKey;
-    queryClient.setQueryData(minutesKey, { id: "md-1", status: "review" } as any);
-    expect(queryClient.getQueryState(minutesKey)?.isInvalidated).toBeFalsy();
+  it("invalidates trpc.meeting.pathFilter() when navigating between items", async () => {
+    // `meeting.navigateToAgendaItem` writes `meeting.current_agenda_item_id`,
+    // which THIS screen reads through `trpc.meeting.detail` and the kanban
+    // through `trpc.meeting.byTown` — the legacy `queryKeys.meetings.detail`
+    // line beside it reaches neither now.
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
 
     renderLive();
+    fireEvent.click(await screen.findByTestId("nav-to-item"));
 
-    await waitFor(() => expect(queryClient.getQueryState(minutesKey)?.isInvalidated).toBe(true));
+    await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
+  });
+
+  it("shows a refusal when navigating to another agenda item is FORBIDDEN", async () => {
+    // Navigation has no confirmation dialog of its own — it fires from the
+    // agenda panel, from the prev/next buttons and from the arrow keys — so
+    // its refusal renders in the page's own alert region.
+    server.navigateRefuses = true;
+    renderLive();
+    fireEvent.click(await screen.findByTestId("nav-to-item"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to move this meeting to another agenda item/i);
   });
 
   /**
@@ -835,62 +921,65 @@ describe("LiveMeetingPage cache invalidation", () => {
     return key;
   }
 
-  it("invalidates trpc.executiveSession.pathFilter() when the entry motion FAILS — the delete branch", async () => {
-    // The sibling of the test below: a failed entry motion DELETES the pending
-    // record rather than stamping `entered_at`, and carries its own
-    // invalidation.
-    const key = seedUnobservedExecKey();
-    server.execSessions = [execSession({ entered_at: null })];
-    server.motions = [
-      motion({ id: "motion-es-1", motion_text: "to enter Executive Session", status: "failed" }),
-    ];
-
-    renderLive();
-    await screen.findByTestId("agenda-nav-panel");
-
-    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
-  });
+  /** Proceed through the citation dialog and close the entry-motion dialog. */
+  async function fileThePendingSession() {
+    fireEvent.click(screen.getByTestId("exec-proceed"));
+    fireEvent.click(await screen.findByTestId("motion-dialog-close-main"));
+  }
 
   it("invalidates trpc.executiveSession.pathFilter() when the pending record is filed", async () => {
     // `handleExecMotionFiled`: the citation dialog proceeds, the entry motion
     // is captured, and CLOSING that motion dialog is what writes the pending
-    // `executive_session` row.
+    // `executive_session` row through `executiveSession.insert`.
     const key = seedUnobservedExecKey();
     server.motions = [motion({ id: "motion-es-1", motion_text: "to enter Executive Session" })];
 
     renderLive();
     await screen.findByTestId("agenda-nav-panel");
-
-    fireEvent.click(screen.getByTestId("exec-proceed"));
-    fireEvent.click(await screen.findByTestId("motion-dialog-close-main"));
+    await fileThePendingSession();
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
 
-  it("invalidates trpc.executiveSession.pathFilter() when post-session action motions are linked", async () => {
-    // The third `executive_session` writer: motions filed AFTER `exited_at`
-    // are appended to `post_session_action_motion_ids`.
-    //
-    // The ORDER here is what makes this a pin rather than a tautology.
-    // `deliverTopic("executive_session")` itself invalidates that router, so
-    // seeding the probe key before it would go green with the line under test
-    // deleted — which is how the deletion sweep caught the first version of
-    // this test. The probe is seeded AFTER every exec-session delivery, and
-    // the only thing that can invalidate it afterwards is the effect's own
-    // line: the last delivery names `motion`.
+  it("shows a refusal when filing the pending executive session is FORBIDDEN", async () => {
+    server.execInsertRefuses = true;
+    server.motions = [motion({ id: "motion-es-1", motion_text: "to enter Executive Session" })];
+
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    await fileThePendingSession();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to move this meeting into executive session/i);
+  });
+
+  /**
+   * Arm `isPostExecSession`, then deliver a motion filed after `exited_at`.
+   *
+   * The ORDER here is what makes the invalidation test a pin rather than a
+   * tautology. `deliverTopic("executive_session")` itself invalidates that
+   * router, so seeding the probe key before it would go green with the line
+   * under test deleted — which is how the deletion sweep caught the first
+   * version of this test. The probe is seeded AFTER every exec-session
+   * delivery, and the only thing that can invalidate it afterwards is the
+   * effect's own line: the last delivery names `motion`.
+   */
+  async function armPostSessionActions() {
     server.execSessions = [execSession()];
     server.motions = [];
 
     renderLive();
     await screen.findByTestId("agenda-nav-panel");
-
-    // Arms `isPostExecSession` / `postExecSessionId` for the session below.
     fireEvent.click(screen.getByTestId("exec-return-with-actions"));
 
     server.execSessions = [execSession({ exited_at: "2026-03-10T19:30:00Z" })];
     server.motions = [motion({ id: "motion-post", created_at: "2026-03-10T19:45:00Z" })];
     deliverTopic("executive_session");
     await waitFor(() => expect(stub.countFor("executiveSession.byMeeting")).toBeGreaterThan(1));
+  }
+
+  it("invalidates trpc.executiveSession.pathFilter() when post-session action motions are linked", async () => {
+    await armPostSessionActions();
 
     const key = seedUnobservedExecKey();
     deliverTopic("motion");
@@ -898,35 +987,84 @@ describe("LiveMeetingPage cache invalidation", () => {
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
 
-  it("invalidates trpc.meeting.pathFilter() when navigating between items", async () => {
-    // `navigateToItem` writes `meeting.current_agenda_item_id`, which THIS
-    // screen reads through `trpc.meeting.detail` and the kanban through
-    // `trpc.meeting.byTown` — the legacy `queryKeys.meetings.detail` line
-    // beside it reaches neither now.
-    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
-    queryClient.setQueryData(byBoardKey, []);
-    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+  it("sends only the ids to ADD when linking post-session action motions", async () => {
+    // The raw write read `post_session_action_motion_ids`, merged in the
+    // browser, and wrote the whole array back — losing a concurrent append.
+    // The procedure unions under `FOR UPDATE`, so the client must send the
+    // delta and nothing else.
+    const before = stub.countFor("executiveSession.appendPostSessionActionMotions");
+    await armPostSessionActions();
+    deliverTopic("motion");
 
-    renderLive();
-    fireEvent.click(await screen.findByTestId("nav-to-item"));
-
-    await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
+    await waitFor(() =>
+      expect(stub.countFor("executiveSession.appendPostSessionActionMotions")).toBe(before + 1),
+    );
+    expect(lastInputFor("executiveSession.appendPostSessionActionMotions")).toMatchObject({
+      executiveSessionId: "es-1",
+      motionIds: ["motion-post"],
+    });
   });
 
-  it("invalidates trpc.executiveSession.pathFilter() when the entry motion passes", async () => {
-    // The pending exec-session record's `entered_at` is stamped by this
-    // screen's own effect; the read it moves is `executiveSession.byMeeting`.
-    // A PENDING session: `entry_motion_id` set, `entered_at` null — which is
-    // exactly how the screen recognises one waiting on its entry vote.
+  it("shows a refusal when recording a post-executive-session action is FORBIDDEN", async () => {
+    server.appendRefuses = true;
+    await armPostSessionActions();
+    deliverTopic("motion");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to record a post-executive-session action/i);
+  });
+
+  /**
+   * **The regression pin for this whole task.**
+   *
+   * Three `useEffect`s used to fire from exactly this state — a pending
+   * executive session whose entry motion has PASSED, and a minutes-approval
+   * item whose motion has PASSED, on a meeting that is still `open` with a
+   * passed motion to adjourn on it. Every connected client ran all three.
+   *
+   * Nothing happens here now, and "nothing" is the assertion: no request of
+   * any kind leaves this screen, and in particular none of the three
+   * procedures those effects would have needed. Two of them
+   * (`executiveSession.markEntered`, `executiveSession.discard`) have no
+   * handler in the stub at all, so a re-introduced effect would fail the test
+   * by name rather than by a count.
+   */
+  it("performs NO write when motions arrive already passed — the four reactive effects are gone", async () => {
+    server.items = [
+      agendaItem({ id: "section-1", title: "New Business", parent_item_id: null }),
+      agendaItem({
+        id: "item-minutes",
+        title: "Approve the minutes of February 10",
+        source_minutes_document_id: "md-1",
+      }),
+    ];
     server.execSessions = [execSession({ entered_at: null })];
-    server.motions = [motion({ id: "motion-es-1", motion_text: "to enter Executive Session" })];
+    server.motions = [
+      motion({ id: "motion-es-1", motion_text: "to enter Executive Session", status: "passed" }),
+      motion({
+        id: "motion-minutes",
+        agenda_item_id: "item-minutes",
+        motion_text: "to approve the minutes of February 10",
+        status: "passed",
+      }),
+      motion({
+        id: "motion-adjourn",
+        motion_type: "adjourn",
+        motion_text: "to adjourn the meeting",
+        status: "passed",
+      }),
+    ];
 
     renderLive();
     await screen.findByTestId("agenda-nav-panel");
+    // Let every effect in the tree settle.
+    await waitFor(() => expect(stub.countFor("motion.byMeeting")).toBeGreaterThan(0));
 
-    // Same reason as the two transition tests above: the screen observes this
-    // read, so the refetch is the durable signal. One load, then the effect's
-    // own invalidation.
-    await waitFor(() => expect(stub.countFor("executiveSession.byMeeting")).toBeGreaterThan(1));
+    expect(stub.countFor("meeting.adjourn")).toBe(0);
+    expect(stub.countFor("executiveSession.insert")).toBe(0);
+    expect(stub.countFor("executiveSession.appendPostSessionActionMotions")).toBe(0);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    // Nothing rendered a refusal either — the screen made no request to refuse.
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
