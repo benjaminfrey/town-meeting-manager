@@ -1094,10 +1094,21 @@ already records), and moving one after `.input()` turns exactly ONE red, the reo
 **Wave 5, Task 3 — the routers those rules exist for, and the four things the wave found that this item
 did not already say.**
 
-Nineteen writes across seven routers (`motion`, `vote_record`, `meeting_attendance`,
-`executive_session`, `guest_speaker`, `meeting`'s three composites, `agenda_item`'s seven publishes),
-plus a read on each. Every guard shape this item catalogues worked as described, first try, with no
-change to `trpc.ts`. What follows is what it did NOT already say.
+**Twenty-three new procedures — 6 queries and 17 mutations**, across `motion`, `vote_record`,
+`meeting_attendance`, `executive_session`, `guest_speaker`, `agenda_item_transition` and `meeting`'s
+three composites; plus publishes added to the eleven writes already on `AWAITING_PUBLISH`. Counted
+from the router rather than by hand, because the first two places this task stated a number got it
+wrong — commit `7be58c8`'s own message says "six reads and thirteen writes" for a commit that adds
+fourteen, and an earlier draft of this paragraph said nineteen:
+
+```
+$ node -e '…Object.keys(appRouter._def.procedures)…'   # against packages/api/dist
+wave5 new procedures: 23 queries: 6 mutations: 17
+total procedures in appRouter: 92
+```
+
+Every guard shape this item catalogues worked as described, first try, with no change to `trpc.ts`.
+What follows is what it did NOT already say.
 
 **1. The FIFTH guard shape has a real call site now, and it is TWO guards, not one.**
 The bullet above ("`assertCanInsertVoteRecord` needs a FIFTH guard shape") said it "stays
