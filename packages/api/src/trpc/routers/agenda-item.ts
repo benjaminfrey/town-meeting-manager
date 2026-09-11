@@ -53,12 +53,19 @@
  *
  * `rules.ts`'s agenda_item section is "A2, BOARD-SCOPED" —
  * `assertCanInsertAgendaItem` and `assertCanUpdateAgendaItem` are each
- * exactly `assertPermission(actor, "A2", {boardId, action})`. Every write
- * here therefore uses `requireBoardPermission("A2", boardIdFrom(), {action})`,
+ * exactly `assertPermission(actor, "A2", {boardId, action})`. Every CONTENT
+ * write here therefore uses
+ * `requireBoardPermission("A2", boardIdFrom(), {action})`,
  * which IS that call (see `meeting.ts`'s header for the same reasoning about
  * `assertCanInsertMeeting`: going through the code form is the same check,
  * not a shortcut around the rule), and which conventions item 2 tells authors
- * to reach for FIRST for a single-code rule.
+ * to reach for FIRST for a single-code rule. The count moved in wave 5,
+ * Task 2 — quote the grep, not the number:
+ *
+ *     $ grep -c 'requireBoardPermission("A2"' packages/api/src/trpc/routers/agenda-item.ts
+ *     7   # at fb3a5cd, wave 5 Task 0's carry-over check
+ *     5   # after wave 5 Task 2 moved setOperatorNotes and markComplete to
+ *         # requireBoardActor(assertCanUpdateAgendaItemProgress)
  *
  * **The delete rule, decided rather than left implicit.** There is no
  * `assertCanDeleteAgendaItem` in `rules.ts` and no delete-specific
@@ -115,14 +122,23 @@
  * component is imported only by `routes/meetings.$meetingId.live.tsx`, which
  * is **wave 5**'s file — so the procedures land here (this wave's plan: "so
  * wave 5 extends this router rather than creating one") and **nothing calls
- * them yet**. They are tested exactly like the wired writes; what is missing
- * is only the client change. One question wave 5 owns and this task did not
- * decide for it: both use A2, matching every other `agenda_item` write, but a
- * live-meeting operator may hold M1/M2 and no A2 — if the product wants a
- * presiding officer with no agenda-editing rights to mark items complete,
- * that is a rules change (a second code, hence `requireBoardActor`), not a
- * wiring change, and it should be made deliberately rather than discovered
- * when a clerk is refused mid-meeting.
+ * them yet**; wave 5, Task 4 owns the client change.
+ *
+ * ~~One question wave 5 owns and this task did not decide for it: both use A2,
+ * matching every other `agenda_item` write, but a live-meeting operator may
+ * hold M1/M2 and no A2 — if the product wants a presiding officer with no
+ * agenda-editing rights to mark items complete, that is a rules change (a
+ * second code, hence `requireBoardActor`), not a wiring change, and it should
+ * be made deliberately rather than discovered when a clerk is refused
+ * mid-meeting.~~ — **decided in wave 5, Task 2, and the prediction held
+ * exactly: it is a second code and it is `requireBoardActor`.** Both
+ * procedures are now `.use(requireBoardActor(assertCanUpdateAgendaItemProgress))`
+ * — A2 OR M1 for the board, `rules.ts`'s rule 2a. They are the only two
+ * writes in this file NOT guarded by `requireBoardPermission("A2", …)`, and
+ * the line that separates them from the other seven is CONTENT versus
+ * LIVE-RUN state: `status` and `operator_notes` are what the meeting did to
+ * the agenda, not what the agenda says. Widening, not narrowing — every
+ * caller who could reach these under A2 still can.
  *
  * ─── No resolver-side `ctx.actor()` call anywhere in this file ────────────
  *
@@ -141,9 +157,11 @@ import {
   router,
   protectedProcedure,
   requireBoardPermission,
+  requireBoardActor,
   assertMatchesAuthorizedBoard,
   boardIdFrom,
 } from "../trpc.js";
+import { assertCanUpdateAgendaItemProgress } from "../authorization/rules.js";
 import { assertMeetingExists } from "./meeting.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
@@ -654,18 +672,21 @@ export const agendaItemRouter = router({
     }),
 
   /**
-   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * UNWIRED — wave 5, Task 4 owns the caller. `AgendaItemDetailPanel.tsx`'s
    * `saveNotesMutation`, which today writes `operator_notes` through the dead
    * Supabase client with no authorization check of any kind. See this file's
-   * header for why it lands here now and for the A2-versus-M1 question wave 5
-   * inherits.
+   * header for why it lands here.
+   *
+   * **A2 OR M1, settled in wave 5, Task 2** — the question this file's header
+   * left open. `operator_notes` is a live-run column, not agenda content, so
+   * the guard is `requireBoardActor(assertCanUpdateAgendaItemProgress)` rather
+   * than the `requireBoardPermission("A2", …)` every content write here uses.
+   * The full reasoning is in `rules.ts`'s rule 2a; the short form is that a
+   * presiding officer seated to run a board's meetings holds M1 and need not
+   * hold A2, and finding that out mid-meeting is the failure this closes.
    */
   setOperatorNotes: protectedProcedure
-    .use(
-      requireBoardPermission("A2", boardIdFrom(), {
-        action: "to record operator notes on an agenda item",
-      }),
-    )
+    .use(requireBoardActor(assertCanUpdateAgendaItemProgress))
     .input(
       z.object({
         boardId: z.string().uuid(),
@@ -685,18 +706,25 @@ export const agendaItemRouter = router({
     }),
 
   /**
-   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * UNWIRED — wave 5, Task 4 owns the caller. `AgendaItemDetailPanel.tsx`'s
    * `markCompleteMutation`. Sets `status` and nothing else, matching that
-   * write exactly; it does NOT record an `agenda_item_transition` row (that
-   * table exists and nothing in the product writes it today — adding it here
-   * would be a feature, not a migration).
+   * write exactly; it does NOT record an `agenda_item_transition` row.
+   *
+   * **A2 OR M1, settled in wave 5, Task 2** — see `setOperatorNotes` above and
+   * `rules.ts`'s rule 2a. `status` is the meeting's progress through the
+   * agenda, not the agenda's contents.
+   *
+   * **Corrected here too:** this comment used to say `agenda_item_transition`
+   * "exists and nothing in the product writes it today." That does not
+   * reproduce — `routes/meetings.$meetingId.live.tsx` (`navigateToItem`,
+   * `handleMeetingEnd`) and `components/meeting/MeetingStartFlow.tsx` all
+   * write it, raw, with no authorization check; wave 5, Task 2 gave it rules
+   * 21d (M1) and Task 3 owns the procedures. What remains true is the narrow
+   * claim this procedure needs: `markComplete` itself does not write one, and
+   * making it do so would be a feature rather than a migration.
    */
   markComplete: protectedProcedure
-    .use(
-      requireBoardPermission("A2", boardIdFrom(), {
-        action: "to mark an agenda item complete",
-      }),
-    )
+    .use(requireBoardActor(assertCanUpdateAgendaItemProgress))
     .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {

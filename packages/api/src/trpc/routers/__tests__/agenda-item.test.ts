@@ -1450,7 +1450,61 @@ describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
     });
   });
 
-  it("refuses a caller with no A2 on this board, and writes nothing", async () => {
+  /**
+   * The wave 5, Task 2 decision, as a test: `operator_notes` is a live-run
+   * column, so M1 (`start_run_meeting`) reaches it and A2 is not required.
+   * This caller holds M1 on one board and nothing else anywhere — the shape
+   * `TEMPLATE_BOARD_SPECIFIC_STAFF` produces — and would have been REFUSED by
+   * the `requireBoardPermission("A2", …)` this procedure shipped with.
+   */
+  it("lets a presiding officer holding M1 and NO A2 record operator notes", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const officer = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, officer));
+
+        await caller.agendaItem.setOperatorNotes({
+          boardId: town.boardId,
+          itemId,
+          operatorNotes: "Chair reads the letter",
+        });
+        expect((await readItems(db, town, meetingId))[0]?.operator_notes).toBe(
+          "Chair reads the letter",
+        );
+
+        // ...and that M1 does NOT leak into the agenda's contents: the same
+        // caller still cannot edit the item itself.
+        const err = await expectTrpcError(() =>
+          caller.agendaItem.update({
+            boardId: town.boardId,
+            itemId,
+            title: "Renamed",
+            description: null,
+            presenter: null,
+            estimatedDuration: null,
+            staffResource: null,
+            background: null,
+            recommendation: null,
+            suggestedMotion: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A2 nor M1 on this board, and writes nothing", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -1550,7 +1604,31 @@ describe("agendaItem.markComplete (unwired — wave 5)", () => {
     });
   });
 
-  it("refuses a caller with no A2 on this board, and leaves the status alone", async () => {
+  /** The other half of the wave 5, Task 2 decision — see `setOperatorNotes`. */
+  it("lets a presiding officer holding M1 and NO A2 mark an item complete", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const officer = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, officer));
+
+        await caller.agendaItem.markComplete({ boardId: town.boardId, itemId });
+        expect((await readItems(db, town, meetingId))[0]?.status).toBe("completed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A2 nor M1 on this board, and leaves the status alone", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
