@@ -1406,6 +1406,59 @@ the same ROUTER that this screen does not observe (the same procedure for a
 different meeting id) — `pathFilter()` matches it, nothing refetches it, and the
 flag stays set.
 
+### The app-global transport surface (wave 5, Task 6)
+
+Task 6 finished the transport by deleting the last two Supabase heartbeats — one in
+`components/ConnectionStatusBar.tsx`, one in `lib/connection-error-handler.ts`, both app-global —
+and three of its findings generalise past this wave.
+
+**Count the things that can be disconnected, not the indicators you inherited.** The obvious
+migration keeps one shared connection state, because the old world had one shared WebSocket. The
+SSE world has TWO disconnectable things and they live in different places: the live meeting's SSE
+stream, which exists on exactly one screen, and the browser's own reachability, which is app-global
+and governs every query and mutation everywhere. A single state cannot carry both — on `/boards`
+there is no stream, and on `live.tsx` a healthy browser says nothing about whether the stream is
+alive. Collapsing them is what made the old bar report a transport its own screen no longer used.
+The app-global half reads TanStack Query's `onlineManager` rather than `navigator.onLine`, so the
+indicator cannot disagree with the object the cache itself consults before pausing a mutation.
+
+**A bounded reconnect is not an outage, and any future subscription inherits this.**
+`SSE_MAX_STREAM_DURATION_MS` ends every stream at five minutes to bound authorization staleness,
+and `sse-bounds.test.ts` pins that the deadline emits no `event: return` — which is exactly what
+makes the client resume rather than stop. The client-side trace, read off `@trpc/client`'s own SSE
+state machine, is `pending → connecting → pending`: a real transition through `connecting`, twelve
+times an hour, on a stream that is working perfectly. **An indicator wired to
+`status === "connecting"` cries wolf twelve times an hour during a live public meeting, which is
+worse than no indicator — the one time it means something is the one time nobody looks.**
+`useLiveMeetingEvents` answers with a five-second grace window before it will say anything about a
+`connecting` stream, while `error` bypasses the window entirely (a `TRPCError` makes this client
+STOP, so there is nothing to wait for). The window delays the SAYING, never the invalidation.
+Pinned by `useLiveMeetingEvents.test.ts`'s "stays silent through a bounded reconnect that resolves
+inside the grace window", which is red under BOTH obvious regressions — an immediate
+`setStatus("reconnecting")`, and a timer with no `clearTimeout` cleanup (that one reddens on the
+last assertion, `expected 'reconnecting' to be 'healthy'`, which is the whole reason the test
+advances the clock again AFTER the stream is back).
+
+**Two surfaces for one condition can be right, and the discriminator is event-versus-state.**
+Task 6 added a rendered banner and KEPT Task 4's `duration: Infinity` toast rather than replacing
+it, on the same reasoning item 12 gives for `RouteErrorBoundary` versus an in-component
+`role="alert"`. The toast is the EVENT: raised once by the HOOK, so it is guaranteed regardless of
+what the caller renders — and `live.tsx` renders no banner in its `MeetingStartFlow` branch or any
+loading branch, both of which the hook is called above. The banner is the STATE: a standing
+sentence for whoever walks up to the laptop ten minutes later, and the only surface for
+"reconnecting", which is not an event and has no moment to fire at. **The `Toaster` a hook-raised
+toast needs is in `root.tsx`, above `Outlet` — app-global, not `live.tsx`'s.** A hook that toasts
+with no mounted `Toaster` above it is a silent no-op, so check the mount point before relocating
+either the hook or its caller.
+
+**And one correction to a brief, recorded because the same wrong intuition is easy to have twice:
+resuming from `lastEventId` does NOT mean a client missed nothing.** Resume is about id
+MONOTONICITY, not replay. `routers/realtime.ts` says so in its own comment — Postgres does not
+queue notifications for an absent listener, so anything published during the gap is gone — and it
+therefore re-yields EVERY topic when a `lastEventId` is present. A reconnect has almost certainly
+missed something; what makes the old whole-cache invalidation wrong is not that nothing went stale
+but that the server now says exactly WHAT did.
+
 ### Realtime events are invalidation signals, and the tenancy filter is application code
 
 A `LISTEN` connection **cannot** carry tenant context: `LISTEN` is session-scoped, `app.town_id` is
@@ -1653,13 +1706,31 @@ every query in the cache, which hides exactly the bug this item is about: a writ
 invalidates everything is indistinguishable from a writer that invalidates the right key, so the
 day someone narrows it, the missing key surfaces as a bug in a screen nobody touched.
 
-The one carve-out already in the tree, and it is a real one: `initConnectionErrorHandler` in
+~~The one carve-out already in the tree, and it is a real one: `initConnectionErrorHandler` in
 `packages/web/src/lib/connection-error-handler.ts` calls bare `invalidateQueries()` in its
 `status === "SUBSCRIBED"` reconnect branch, after a Realtime reconnect. That is not a writer —
 nothing local changed; the client has no idea WHAT went stale while the socket was down, and
 "everything" is the correct answer. A connection-level recovery may invalidate globally. A mutation
-may not. Do not "fix" that handler on a grep. (Cited by symbol, not line number — see item 1: a
-line number is correct only until the cited file's next edit.)
+may not. Do not "fix" that handler on a grep.~~ — **closed in wave 5, Task 6. THE BAN IS NOW
+ABSOLUTE: there is no sanctioned bare `invalidateQueries()` anywhere in `packages/web/src`, and a
+grep that finds one has found a bug.**
+
+That carve-out rested on "the client has no idea WHAT went stale," and under SSE the client is told.
+`routers/realtime.ts` treats a resumed stream as "you may have missed something" and re-yields every
+topic, so `useLiveMeetingEvents` invalidates the nine live-meeting routers BY NAME on exactly the
+reconnects that matter — strictly narrower and strictly more correct. The handler itself is gone
+along with its Supabase heartbeat: there is no app-global socket left whose re-SUBSCRIBE could be
+the trigger, and the one reconnect that does happen is the five-minute bounded one, so the old
+branch would now have fired a whole-cache invalidation twelve times an hour per clerk in the room.
+Quote the grep, and note it must be ANCHORED — the unanchored form matches this very paragraph and
+the three prose mentions in `providers/QueryProvider.tsx`'s header, the markers-versus-mentions
+hazard of item 11:
+
+```
+$ git grep -nE '^[[:space:]]*(void )?queryClient[.]invalidateQueries[(][)];' <ref> -- packages/web/src
+a357d59:packages/web/src/lib/connection-error-handler.ts:54:          void queryClient.invalidateQueries();
+                       # and nothing at HEAD
+```
 
 _Found the hard way in Task 4: four writers — `EditBoardDialog`, `ArchiveBoardDialog`,
 `NoticeTemplateEditor`, `MinutesWorkflowEditor` — invalidated `queryKeys.boards.detail(boardId)`
@@ -3380,14 +3451,15 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      five `executiveSession.*` writes. The file's marker names them. The
      `meeting` write still has no authorization check of any kind, exactly as
      that marker has said since wave 3.
-  2. **`ConnectionStatusBar` is still on a Supabase Realtime heartbeat
-     channel**, and this screen still renders it. It is wave 5, Task 6's, and
-     it now reports the health of a transport this screen no longer uses. The
-     honest source is `useSubscription`'s own result, which
-     `useLiveMeetingEvents` deliberately returns nothing from rather than
-     inventing a second vocabulary for — see that hook's header. Note that
-     `SSE_MAX_STREAM_DURATION_MS` means a HEALTHY client reconnects every five
-     minutes; whatever that bar becomes must not render it as a disruption.
+  2. ~~**`ConnectionStatusBar` is still on a Supabase Realtime heartbeat
+     channel**, and this screen still renders it. It is wave 5, Task 6's ...
+     whatever that bar becomes must not render it as a disruption.~~ —
+     **closed in wave 5, Task 6.** The component is two components now, on two
+     sources, neither Supabase: an `onlineManager` pill in the app shell and a
+     `LiveStreamStatusBar` fed by `useLiveMeetingEvents`'s return value (which
+     is no longer `void`). The five-minute warning this bullet ended on was
+     the right one and is answered by a grace window, pinned by a named test —
+     see "The app-global transport surface (wave 5, Task 6)" under item 2.
   3. **`AttendancePanel.tsx` and `MeetingStartFlow.tsx` write
      `is_recording_secretary: 0` / `: 1` to a `boolean` column.** Found while
      retyping their props onto `RouterOutputs` (the hand-written interfaces
@@ -3397,14 +3469,56 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      `meeting_attendance.setRollCall`/`setStatus` already take the column
      correctly. Named here so whoever wires those two does not read the
      literals as intentional.
-  4. **The SSE path has no end-to-end test through the WEB client.** The server
-     half is driven over real HTTP by `packages/api`'s `sse-bounds.test.ts`; the
-     web half mocks `useSubscription`, because jsdom has no `EventSource`. What
-     that leaves untested is the seam itself — that `splitLink` routes a
-     subscription to `httpSubscriptionLink` and that the yielded envelope
-     reaches `onData` in the `{ id, data }` shape the mapping expects. The
-     SHAPE half is type-checked (the mapping's parameter is the procedure's own
-     `~types.output`); the ROUTING half is not, and would fail as "the live
-     meeting never updates", silently, in a browser. Cheapest real coverage is
-     a manual check against a running dev server, which is wave 5, Task 6 or 7
-     territory.
+  4. ~~**The SSE path has no end-to-end test through the WEB client** ... the
+     ROUTING half is not ... Cheapest real coverage is a manual check against a
+     running dev server, which is wave 5, Task 6 or 7 territory.~~ —
+     **already false when this bullet shipped, and it survived one close-out
+     before Task 6 re-read it.** The reviewer who struck the "unautomatable"
+     claim wrote the test in the same round: `lib/__tests__/trpc.test.ts`'s
+     "the link split" pins the ROUTING half in jsdom by faking
+     `globalThis.EventSource`, in both directions, and this document's own
+     "The client half of one stream" section already narrates it ("the split
+     is PINNED, in jsdom, in about forty lines"). Two paragraphs of one
+     document disagreeing about the same test is exactly the drift item 14
+     exists to catch; the bullet was never updated because item 14's sweep
+     re-checks Known-gaps bullets against HEAD, and HEAD had not changed —
+     what had changed was another section of this file. **Re-check a bullet
+     against the rest of this document as well as against the code.** What
+     genuinely remains untested end-to-end is narrower than the bullet
+     claimed: no test drives a real `EventSource` against a real server from
+     the web package, so a browser-only transport fault would still present as
+     "the live meeting never updates".
+
+- **Wave 5, Task 6's own open items.** Four, none of them a defect this task
+  introduced:
+  1. **`getMutationErrorMessage` still has zero production call sites, and
+     three of the five categories still have no reader.** The taxonomy was
+     rewritten against `TRPCClientError` and rehomed into `lib/trpc.ts`, and
+     `refusalMessage` reads it — but only its `permission` and `network`
+     branches. `validation`, `conflict` and `unknown` are exercised by tests
+     and by nothing else, because wiring them would change user-visible copy at
+     24 files' worth of call sites, which is a UX decision a transport task has
+     no mandate to make. `errorMessage`'s CONFLICT-verbatim behaviour is the
+     obvious candidate to fold in next, and it is deliberately not folded in
+     here.
+  2. **An offline device pauses its mutations SILENTLY at the form.** The app
+     shell now says "Offline", which is the app-global fact; what it does not
+     say is that the Save the user just pressed is queued rather than failed.
+     TanStack Query's `networkMode: "online"` default leaves such a mutation
+     `isPaused` with no error and no success, so the button's own spinner is
+     the only local signal and it never resolves. Nothing in this repo renders
+     `isPaused`. Named because the fix is per-form, not global, and a reader of
+     the pill will reasonably assume it was covered.
+  3. **`layouts/AppShell.tsx`'s `useLiveMeetingId` is still a raw Supabase
+     read**, now carrying a `TODO(phase-e-wave-6)` marker it did not have
+     through four waves. `meeting.byTown` is not a drop-in — it selects no
+     `started_at`, which is that query's ordering column, and it returns every
+     non-cancelled meeting where this needs the single most recently started
+     `open`/`in_progress` one.
+  4. **The banner has never been seen in a browser.** Its states are pinned by
+     jsdom tests and its INPUT — the transport's own `status` — is driven by a
+     mock, so what is untested is the same seam bullet 4 above narrows to: a
+     real `EventSource` dropping and resuming against a real server. In
+     particular, nobody has watched the five-minute deadline pass with the
+     banner on screen. The grace window is the part of this task most worth one
+     manual look, and it did not get one.
