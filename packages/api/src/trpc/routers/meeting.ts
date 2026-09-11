@@ -929,19 +929,36 @@ export const meetingRouter = router({
    *     change what `routes/meetings.$meetingId.review.tsx` lists.
    *   - **The `adjournment` JSONB's five keys**, with their current meanings.
    *
-   * ─── One preserved defect, named rather than fixed ───────────────────────
+   * ─── One preserved defect, named rather than fixed — and it is a
+   * misattribution, not a blank field ─────────────────────────────────────
    *
    * `adjournment.adjourned_by` receives a **`person.id`** (the acting user's),
    * and `services/minutes-assembler.ts`'s `buildAdjournment` reads it with
    * `memberName(adjData.adjourned_by)`, whose lookup is
-   * `boardMemberById.get(...)` — a **`board_member.id`** map. So the name
-   * resolves to `null` and the adjournment line in generated minutes has no
-   * adjourner on it. That is live today, and it is reproduced here rather than
-   * repaired: the fix is a change to what a column of a legal record MEANS,
-   * its only reader is the minutes assembler, and the minutes surface is wave
-   * 6's. `adjourned_by_name` is written (the presiding officer's name, which
-   * is a different person from `adjourned_by` whenever the clerk is not the
-   * chair) and is read by nothing at all.
+   * `boardMemberById.get(...)` — a **`board_member.id`** map. So the lookup
+   * resolves to `null`, and `minutes-formatters.ts`'s `formatAdjournmentText`
+   * treats a null `adjourned_by` as "not recorded" and falls back to
+   * `attendance.presiding_officer` (`minutes-formatters.ts:629-636`) — it does
+   * **not** print a blank. So when the clerk adjourns and the chair presides,
+   * the generated legal record states that the chair adjourned the meeting,
+   * silently, with nothing anywhere flagging it as wrong. That is live today,
+   * and it is reproduced here rather than repaired: the fix is a change to
+   * what a column of a legal record MEANS, its only readers are the assembler
+   * and the formatter, and the minutes surface is wave 6's. `adjourned_by_name`
+   * is written (the presiding officer's name, which is a different person
+   * from `adjourned_by` whenever the clerk is not the chair) and is read by
+   * nothing at all — the formatter independently recomputes the same value as
+   * its own fallback instead.
+   *
+   * ─── A second cache comment that does not reproduce ──────────────────────
+   *
+   * `live.tsx`'s `handleMeetingEnd` cache comment (around line 1078) says
+   * adjournment "marks the remaining items `completed` and moves tabled ones
+   * to `future_agenda_item`." Neither half is what this procedure does: the
+   * unreached items are marked `deferred` (not `completed`), and both the
+   * deferred and the tabled rows are written to `future_item_queue` (not
+   * `future_agenda_item`) — see the two statements above. `live.tsx` is
+   * Task 5's file, not edited here; recorded per conventions item 1.
    *
    * ─── Idempotent, because two devices race to call it ─────────────────────
    *

@@ -216,6 +216,18 @@ export async function assertMotionsOnMeeting(
  * a vote, a mover or an attendance row on a meeting whose board that person
  * has never sat on.
  *
+ * **Every caller of this function, and what removing the check does to it —
+ * this is the ninth reproduction of FK-bypasses-RLS in this project and the
+ * first on `board_member`.** Six procedures depend on it: `meeting.callToOrder`
+ * (presiding officer's seat), `motion.insert` (mover/seconder), `voteRecord.insert`
+ * and `voteRecord.recordForMotion` (voter seat) succeed SILENTLY without it —
+ * no error, no refusal, a row written against a seat from another town's
+ * board; `meetingAttendance.setRollCall` and `setStatus` do not succeed
+ * silently, but only because `person_id` is `NOT NULL` and the removed check
+ * is also what resolves it — without it they throw `INTERNAL_SERVER_ERROR`
+ * rather than refuse, which is an accident of that column's constraint, not
+ * protection this function provides.
+ *
  * **Seat STATUS is deliberately not filtered here.** A member whose term ended
  * mid-year still has an `archived` `board_member` row, and the minutes of the
  * meetings they sat in must keep naming them; an attendance or vote row for an

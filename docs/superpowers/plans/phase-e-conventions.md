@@ -2940,3 +2940,23 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   along, and reverted the churn. Both comments now carry the probe. **The generalisable bit: a
   comment asserting driver behaviour is checkable in about ninety seconds, and "the codebase already
   says so" is the reason nobody had.**
+
+- **Wave 5, Task 3 — `adjournment.adjourned_by` is a misattribution, not a blank field, and wave 6
+  should read the fix here before touching either minutes file.** `live.tsx` writes
+  `adjourned_by: currentUser?.personId` (a `person.id`); `services/minutes-assembler.ts`'s
+  `buildAdjournment` resolves it with `memberName(...)`, whose lookup is a `board_member.id` map, so
+  it always resolves to `null`. The first report of this (Task 3's own fix round) said the generated
+  minutes have "no adjourner" — that does NOT reproduce. `minutes-formatters.ts:629-636`'s
+  `formatAdjournmentText` treats a null `adjourned_by` as "not recorded" and falls back to
+  `attendance.presiding_officer`, which IS populated. So the field is never blank: when the clerk
+  adjourns and the chair presides, the generated legal record silently states the chair adjourned
+  the meeting, and nothing anywhere flags it as wrong. `adjourned_by_name` (the presiding officer's
+  name, a different person from `adjourned_by` whenever the clerk is not the chair) is written and
+  read by nothing — the formatter independently recomputes the same value as its own fallback
+  instead. Not fixed here on purpose: it is a legal-record semantics change, its only readers are
+  the assembler and the formatter, and both are wave 6's files. The one-sentence pointer lives beside
+  the `memberName(adjData.adjourned_by)` call in `minutes-assembler.ts`; the full account is in
+  `meeting.ts`'s `adjourn` doc comment. Two of the assembler's own tests exercise a fixture rather
+  than the real path (`minutes-generation.test.ts:151, 947, 1474` — two pass `adjourned_by: null`,
+  one passes a pre-resolved `"Alice Johnson"`), so nothing in this codebase's test suite currently
+  pins this bug or its fix.

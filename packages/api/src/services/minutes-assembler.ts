@@ -700,6 +700,11 @@ export async function assembleMinutesJson(
     if (!adjData) return null;
 
     const method = (adjData.method as MinutesAdjournment["method"]) ?? "without_objection";
+    // KNOWN DEFECT (live, not fixed here — see meeting.ts's `adjourn` doc comment): `adjourned_by`
+    // is written as a `person.id` but `memberName` looks it up in a `board_member.id` map, so this
+    // always resolves to null; `minutes-formatters.ts`'s `formatAdjournmentText` then silently
+    // substitutes `attendance.presiding_officer`, misattributing adjournment when the clerk (not
+    // the chair) adjourned — not a blank field.
     const adjournedBy = adjData.adjourned_by ? memberName(adjData.adjourned_by as string) : null;
     const timestamp = (adjData.timestamp as string) ?? null;
 
