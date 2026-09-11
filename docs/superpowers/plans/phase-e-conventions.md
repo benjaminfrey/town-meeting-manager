@@ -563,6 +563,68 @@ dialog that triggered it** (`InlineItemForm.tsx` and `AgendaSection.tsx` both do
 outer branch suppressed while the dialog is open). Every wave 5/6 write behind a confirmation
 dialog inherits this.
 
+**Where the same write is reachable both WITH and WITHOUT a confirmation dialog, pin both paths,
+not one.** Task 3's fix round found the gap the paragraph above leaves open:
+`AgendaSection.tsx`'s delete runs `itemCount > 0 ? setConfirmDelete(true) : handleDeleteSection()`
+— a precondition (an `itemCount`/`count`-style branch) that skips the dialog entirely when the
+section is already empty. That makes ONE write have TWO runtime paths to its refusal — one that
+never opens the dialog described above, one that does — and a single refusal test written against
+whichever path happens to be convenient will pass while the OTHER path's `role="alert"` sits
+unpinned, because the same `error` state renders into two different JSX locations depending on a
+variable (`confirmDelete`) that has nothing to do with which mutation is in flight. The raw
+evidence: before the fix, `AgendaSection.tsx` had two `role="alert"` sites and its test file had
+two `findByRole("alert")` assertions — 2-and-2, matching — because both tests exercised the SAME
+(outer) site; the in-dialog site was unpinned the whole time and a raw site-count-vs-assertion-count
+check would not have caught it. **Any destructive write with an `itemCount`/`count`-style branch
+that skips the confirmation dialog needs two refusal tests, not one: one with the precondition set
+so the dialog is skipped, one with the precondition set so it opens** — named as distinctly as
+`AgendaSection.test.tsx`'s "shows a refusal when the delete is FORBIDDEN" (empty section, no
+dialog) and "shows a refusal INSIDE the confirmation dialog when a non-empty section's delete is
+FORBIDDEN" (non-empty section, dialog opened) now are, so a reviewer checking refusal coverage
+reads two rows for that one write instead of inferring reachability from the component's own
+source.
+
+**Mechanisation for the rule above: a documented procedure, not a gate — measured, not assumed.**
+V8 branch coverage (already configured in `packages/web/vitest.config.ts`, never run with
+thresholds) DOES catch this specific bug mechanically: reverting `AgendaSection.test.tsx` to its
+pre-fix-round-1 state and running
+
+```
+npx vitest run --coverage --coverage.include='src/components/meetings/AgendaSection.tsx' \
+  --coverage.reporter=lcov --coverage.reporter=text \
+  src/components/meetings/__tests__/AgendaSection.test.tsx
+```
+
+produces `BRDA:178,6,1,0` in `coverage/lcov.info` — the in-dialog `error &&` branch's truthy side,
+taken zero times, naming the exact unpinned line — while the outer branch at line 202 shows
+nonzero on every arm. That is a real, reproducible signal, not a guess. Whether it should become a
+STANDING gate was measured rather than assumed: scoping coverage to just the five files this task
+and its fix round touched (`AgendaSection.tsx`, `InlineItemForm.tsx`, `ExhibitRow.tsx`,
+`ExhibitUploader.tsx`, `PublishAgendaDialog.tsx`) — all five fully reviewed, all five gates green —
+still produces **60 zero-hit branches**, the overwhelming majority of them ordinary untested UI
+paths (loading spinners, `isPending` states, pluralization ternaries) with no relationship to
+refusal reachability. A bare "no zero-hit branches" gate on even this small, hand-picked,
+already-correct file set would fail on its first run for 59 unrelated reasons before it ever
+reached the one that matters — the "noisy mechanism erodes trust" failure this document already
+warns about elsewhere. Narrowing it to just the branches that matter means hand-curating a manifest
+of specific `file:line:branch` triples — unlike `cache-key-parity`'s `MIGRATED` map or
+`pathfilter-pin-coverage`'s grep, which key off TEXT that survives reformatting, a line-number-keyed
+manifest breaks on the next unrelated edit to the same file and needs re-curation on a cadence no
+author will remember to run. **A repo-wide branch-coverage threshold is worse still** — this
+suite's own numbers make the case: `routes/home.tsx` sits at 24% branch coverage and
+`routes/meetings.$meetingId.review.tsx` at 17%, against files in the 80s and 90s elsewhere; a
+single threshold either sits low enough to catch nothing or high enough to fail immediately on
+unrelated, pre-existing gaps.
+
+**What lands instead: the exact command above, for a wave 5/6 author to run on the files they
+touched, in the task's own verification step — not a CI gate.** Scope `--coverage.include` to the
+component(s) a task's destructive writes live in, run only that component's own test file, and
+read the `% Branch` column plus — if it is not 100 and the reason is not obvious — the
+`coverage/lcov.info` `BRDA` lines for the specific refusal conditional; a `0` in the second-to-last
+field names the untaken branch by line number directly. This costs one extra flag on a command
+already being run and reads output the author already knows how to interpret, without the
+manifest-maintenance or repo-wide-noise costs above.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`
