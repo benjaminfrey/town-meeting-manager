@@ -1,67 +1,58 @@
 /**
- * Tests for LiveMeetingPage — /meetings/:meetingId/live
+ * `LiveMeetingPage` — /meetings/:meetingId/live
  *
- * Mocks all child panels/dialogs to isolate page-level routing,
- * status transitions, and data wiring.
+ * Phase E, wave 5, Task 4. Rewritten, not adapted (conventions item 13: "a
+ * rewritten test is not a migrated test"). The version this replaces mocked
+ * `@tanstack/react-query`'s `useQuery` wholesale and routed on
+ * `queryKey[0]` — so the keys it exercised were invented by the test and
+ * matched nothing the app produces, which is the exact hole item 8 exists to
+ * close. `@/lib/trpc` is left alone here and `globalThis.fetch` is stubbed
+ * instead, so the query keys are real and an invalidation assertion means
+ * something.
  *
- * Uses TanStack Query + Supabase mocks (migrated in M.09–M.10).
+ * `@trpc/tanstack-react-query`'s `useSubscription` IS mocked, and that is the
+ * one deliberate exception. jsdom has no `EventSource`, and the thing worth
+ * pinning is not the transport (`packages/api`'s `sse-bounds.test.ts` drives a
+ * real one over real HTTP) — it is that this screen opens the subscription for
+ * THIS meeting and that a topic arriving on it invalidates the right cache.
+ * The mock captures the options object, so a test can deliver an event by hand
+ * and watch the real `useLiveMeetingEvents` mapping run.
+ *
+ * The child panels and dialogs are mocked to isolate page-level routing and
+ * data wiring; each has its own test file.
  */
 
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { renderWithProviders, screen, waitFor } from "@/test/render";
+import { renderWithProviders, setupAppQueryClient, screen, waitFor } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
-import { trpc } from "@/lib/trpc";
-import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
-import type { QueryClient } from "@tanstack/react-query";
-
-/** Build a mock useQuery return value with data and no loading/error state. */
-function mockQueryResult<T>(data: T[]) {
-  return { data, isLoading: false, isFetching: false, error: undefined };
-}
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 
 // ─── Module-level mocks ──────────────────────────────────────────
 
-const { mockUseQuery, queryClientRef } = vi.hoisted(() => {
-  return {
-    mockUseQuery: vi.fn(),
-    // Populated by the `@tanstack/react-query` mock factory below, once,
-    // before any test runs — a fake extra module export would not
-    // typecheck (the real module has no such member), so the factory's own
-    // closure hands it out through this hoisted container instead.
-    queryClientRef: { current: null as QueryClient | null },
-  };
-});
-
 const mockNavigate = vi.fn();
 
-// Mock TanStack Query hooks. `useQueryClient` returns a REAL `QueryClient`
-// instance (built from the same `actual` module, not a `vi.fn()` stand-in) —
-// this route calls `useQueryClient()` once and reuses the reference across
-// every handler, and the pin test below needs a real cache to seed a
-// `trpc.meeting.byBoard` entry into and genuinely observe
-// `trpc.meeting.pathFilter()` invalidate it (conventions item 13: "verify
-// by mutation" needs something a deleted invalidation call can actually
-// make false).
-vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-  const testQueryClient = new actual.QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClientRef.current = testQueryClient;
+/**
+ * The last options object `useSubscription` was handed — the seam a test uses
+ * to deliver a realtime event without a transport.
+ */
+const subscription: { options: { onData?: (e: unknown) => void } | null } = { options: null };
+
+vi.mock("@trpc/tanstack-react-query", async () => {
+  const actual = await vi.importActual<typeof import("@trpc/tanstack-react-query")>(
+    "@trpc/tanstack-react-query",
+  );
   return {
     ...actual,
-    useQuery: (...args: unknown[]) => mockUseQuery(...args),
-    useMutation: vi.fn(() => ({
-      mutateAsync: vi.fn().mockResolvedValue(undefined),
-      mutate: vi.fn(),
-      isPending: false,
-      isError: false,
-      error: null,
-    })),
-    useQueryClient: vi.fn(() => testQueryClient),
+    useSubscription: vi.fn((opts: { onData?: (e: unknown) => void }) => {
+      subscription.options = opts;
+      return { status: "pending", data: undefined, error: null, reset: () => {} };
+    }),
   };
 });
 
-// Mock Supabase hook (no real DB calls in tests)
+// The remaining raw Supabase writes (adjournment, navigation, the three
+// reactive effects) are Task 5's. They still go through this client.
 vi.mock("@/hooks/useSupabase", () => ({
   useSupabase: vi.fn(() => ({
     from: vi.fn(() => ({
@@ -69,24 +60,13 @@ vi.mock("@/hooks/useSupabase", () => ({
       insert: vi.fn().mockResolvedValue({ data: null, error: null }),
       update: vi.fn().mockReturnThis(),
       delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ data: null, error: null }),
       single: vi.fn().mockResolvedValue({ data: null, error: null }),
     })),
     auth: { getSession: vi.fn().mockResolvedValue({ data: { session: null } }) },
-    channel: vi.fn(() => ({
-      on: vi.fn().mockReturnThis(),
-      subscribe: vi.fn().mockReturnThis(),
-    })),
-    removeChannel: vi.fn(),
   })),
 }));
 
-// Mock Realtime subscription (no-op in tests)
-vi.mock("@/hooks/useRealtimeSubscription", () => ({
-  useRealtimeSubscription: vi.fn(() => ({ status: "connected" })),
-}));
-
-// Mock ConnectionStatusBar (silent in tests)
 vi.mock("@/components/ConnectionStatusBar", () => ({
   ConnectionStatusBar: () => null,
 }));
@@ -102,7 +82,6 @@ vi.mock("react-router", async () => {
 
 vi.mock("./+types/meetings.$meetingId.live", () => ({}));
 
-// Mock useCurrentUser to return an admin user with M1 permission
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: vi.fn(() => ({
     id: "user-1",
@@ -115,7 +94,6 @@ vi.mock("@/hooks/useCurrentUser", () => ({
   })),
 }));
 
-// Mock useQuorumCheck
 vi.mock("@/hooks/useQuorumCheck", () => ({
   useQuorumCheck: vi.fn(() => ({
     quorum: { required: 2, present: 2, total: 3, hasQuorum: true },
@@ -123,20 +101,19 @@ vi.mock("@/hooks/useQuorumCheck", () => ({
   })),
 }));
 
-// Mock hasPermission to return true (user can run meetings)
 vi.mock("@town-meeting/shared", async () => {
   const actual = await vi.importActual("@town-meeting/shared");
   return { ...actual, hasPermission: vi.fn(() => true) };
 });
 
-// Mock child components to isolate page logic
+// ─── Child components ────────────────────────────────────────────
+
 vi.mock("@/components/meeting/AgendaNavigationPanel", () => ({
   AgendaNavigationPanel: (props: any) => (
     <div data-testid="agenda-nav-panel">
       <span data-testid="nav-section-count">{props.sections?.length ?? 0}</span>
-      {/* Reaches `navigateToItem`, the route's OTHER `agenda_item` writer
-          (it sets the departed item `completed` and the arrived one
-          `active`) — pinned separately from the adjournment handler below. */}
+      {/* Reaches `navigateToItem`, the route's OTHER `agenda_item` writer —
+          pinned separately from the adjournment handler below. */}
       <button data-testid="nav-to-item" onClick={() => props.onNavigate?.("item-1")}>
         Go
       </button>
@@ -148,6 +125,8 @@ vi.mock("@/components/meeting/AgendaItemDetailPanel", () => ({
   AgendaItemDetailPanel: (props: any) => (
     <div data-testid="detail-panel">
       <span data-testid="detail-title">{props.item?.title ?? "none"}</span>
+      <span data-testid="detail-board-id">{props.boardId}</span>
+      <span data-testid="detail-exhibits">{props.item?.exhibits?.length ?? 0}</span>
     </div>
   ),
 }));
@@ -164,22 +143,36 @@ vi.mock("@/components/meeting/MeetingStartFlow", () => ({
   MeetingStartFlow: (props: any) => (
     <div data-testid="meeting-start-flow">
       <span data-testid="start-flow-meeting-id">{props.meetingId}</span>
-      <button data-testid="start-meeting" onClick={() => props.onComplete?.()}>
-        Start
-      </button>
     </div>
   ),
 }));
 
 vi.mock("@/components/meeting/ExecutiveSessionDialog", () => ({
-  ExecutiveSessionDialog: (props: any) =>
-    props.open ? <div data-testid="exec-session-dialog" /> : null,
+  // Always renders its proceed control, not only when `open`: the real dialog
+  // is opened from inside `AgendaItemDetailPanel` (mocked here), and the thing
+  // under test is what `onProceed` sets in motion, not the open/closed
+  // plumbing.
+  ExecutiveSessionDialog: (props: any) => (
+    <div data-testid="exec-session-dialog">
+      <button
+        data-testid="exec-proceed"
+        onClick={() => props.onProceed?.("1 M.R.S.A. 405(6)(A)", "A", "to enter Executive Session")}
+      >
+        Proceed
+      </button>
+    </div>
+  ),
   EXECUTIVE_SESSION_CITATIONS: [],
 }));
 
 vi.mock("@/components/meeting/ExitExecutiveSessionDialog", () => ({
-  ExitExecutiveSessionDialog: (props: any) =>
-    props.open ? <div data-testid="exit-exec-dialog" /> : null,
+  ExitExecutiveSessionDialog: (props: any) => (
+    <div data-testid="exit-exec-dialog">
+      <button data-testid="exec-return-with-actions" onClick={props.onReturnWithActions}>
+        Return with actions
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/meeting/AdjournmentControls", () => ({
@@ -204,7 +197,20 @@ vi.mock("@/components/meeting/ExecSessionBanner", () => ({
 }));
 
 vi.mock("@/components/meeting/MotionCaptureDialog", () => ({
-  MotionCaptureDialog: (props: any) => (props.open ? <div data-testid="motion-dialog" /> : null),
+  // Keyed by motion type, because this route renders TWO of these — the
+  // executive-session entry motion and the adjournment motion — and the
+  // exec-session flow is driven by CLOSING the first one
+  // (`handleExecMotionDialogClose`), which is what files the pending record.
+  MotionCaptureDialog: (props: any) => (
+    <div data-testid={`motion-dialog-${props.mode?.motionType}`}>
+      <button
+        data-testid={`motion-dialog-close-${props.mode?.motionType}`}
+        onClick={() => props.onOpenChange?.(false)}
+      >
+        Close
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/meeting/MeetingTimer", () => ({
@@ -215,504 +221,712 @@ vi.mock("@/components/RouteErrorBoundary", () => ({
   RouteErrorBoundary: () => <div>Error</div>,
 }));
 
-// ─── Mock data ───────────────────────────────────────────────────
+// ─── Harness ─────────────────────────────────────────────────────
 
-const mockBoard = {
-  id: "board-1",
-  name: "Planning Board",
-  board_type: "appointed",
-  quorum_type: "simple_majority",
-  quorum_value: null,
-  member_count: 5,
-  motion_display_format: "inline_narrative",
-};
+const queryClient = setupAppQueryClient();
 
-const mockMeeting = {
+type Meeting = RouterOutputs["meeting"]["detail"];
+type AgendaItem = RouterOutputs["agendaItem"]["byMeeting"][number];
+// `board`, `executive_session` and `motion` each carry a JSONB column, and
+// `RouterOutputs` types those as `unknown` — which `TestHandlers` (built from
+// `inferProcedureOutput`) treats as REQUIRED while `inferRouterOutputs` treats
+// as optional, so an explicitly-annotated fixture is rejected where the same
+// literal inferred is accepted. Inferred here on purpose; the handler map is
+// still what checks the shape against the real procedure.
+type Board = typeof baseBoard;
+type ExecSession = ReturnType<typeof execSession>;
+type Motion = ReturnType<typeof motion>;
+
+/** One `executive_session` row, with the fields a test varies. */
+function execSession(overrides: { entered_at?: string | null; exited_at?: string | null } = {}) {
+  return {
+    id: "es-1",
+    agenda_item_id: "item-1",
+    statutory_basis: "1 M.R.S.A. 405(6)(A)",
+    entered_at: "2026-03-10T19:00:00Z",
+    exited_at: null as string | null,
+    entry_motion_id: "motion-es-1" as string | null,
+    post_session_action_motion_ids: [] as unknown,
+    created_at: "2026-03-10T18:55:00Z",
+    ...overrides,
+  };
+}
+
+/** One `motion` row. */
+function motion(overrides: {
+  id?: string;
+  agenda_item_id?: string;
+  motion_text?: string;
+  status?: string;
+  created_at?: string;
+}) {
+  return {
+    id: "motion-1",
+    agenda_item_id: "item-1",
+    motion_text: "to approve the site plan",
+    motion_type: "main",
+    moved_by: null as string | null,
+    seconded_by: null as string | null,
+    status: "passed",
+    parent_motion_id: null as string | null,
+    vote_summary: null as unknown,
+    created_at: "2026-03-10T19:00:00Z",
+    ...overrides,
+  };
+}
+
+const baseMeeting: Meeting = {
   id: "meeting-1",
   board_id: "board-1",
-  town_id: "town-1",
   title: "Regular Meeting",
   status: "open",
+  meeting_type: "regular",
+  agenda_status: "published",
   scheduled_date: "2026-03-10",
   scheduled_time: "18:00",
   location: "Town Hall",
-  meeting_type: "regular",
-  started_at: "2026-03-10T18:00:00Z",
-  ended_at: null,
-  current_agenda_item_id: "item-1",
   presiding_officer_id: "bm-1",
   recording_secretary_id: "bm-2",
-  adjournment: null,
-  board: mockBoard,
+  current_agenda_item_id: "item-1",
+  started_at: "2026-03-10T18:00:00Z",
+  ended_at: null,
+  agenda_packet_url: null,
+  agenda_packet_generated_at: null,
+  meeting_notice_url: null,
+  meeting_notice_generated_at: null,
 };
 
-const mockMembers = [
-  {
-    id: "bm-1",
-    person_id: "p-1",
-    board_id: "board-1",
-    seat_title: "Chair",
-    status: "active",
-    is_default_rec_sec: false,
-    person: { id: "p-1", name: "Alice Smith" },
-  },
-  {
-    id: "bm-2",
-    person_id: "p-2",
+const baseBoard = {
+  id: "board-1",
+  name: "Planning Board",
+  board_type: "appointed",
+  elected_or_appointed: "appointed",
+  member_count: 5,
+  election_method: null,
+  officer_election_method: null,
+  is_governing_board: false,
+  meeting_formality_override: null,
+  minutes_style_override: null,
+  quorum_type: "simple_majority",
+  quorum_value: null,
+  motion_display_format: "inline_narrative",
+  archived_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  notice_template_blocks: null,
+  minutes_consent_agenda: false,
+  minutes_requires_second: true,
+  r4_board_member_default: false,
+  audio_retention_policy_override: null,
+  auto_publish_on_approval_override: null,
+};
+
+function seat(
+  id: string,
+  name: string,
+  overrides: Partial<RouterOutputs["boardMember"]["roster"][number]> = {},
+): RouterOutputs["boardMember"]["roster"][number] {
+  return {
+    id,
+    person_id: `p-${id}`,
     board_id: "board-1",
     seat_title: null,
-    status: "active",
-    is_default_rec_sec: true,
-    person: { id: "p-2", name: "Bob Jones" },
-  },
-  {
-    id: "bm-3",
-    person_id: "p-3",
-    board_id: "board-1",
-    seat_title: null,
+    term_start: null,
+    term_end: null,
     status: "active",
     is_default_rec_sec: false,
-    person: { id: "p-3", name: "Carol White" },
-  },
-];
+    name,
+    email: null,
+    user_account_id: null,
+    role: null,
+    gov_title: null,
+    user_account_archived_at: null,
+    invitation_id: null,
+    invitation_token: null,
+    invitation_status: null,
+    invitation_sent_at: null,
+    invitation_expires_at: null,
+    ...overrides,
+  };
+}
 
-const mockAttendance = [
-  {
-    id: "att-1",
-    meeting_id: "meeting-1",
-    board_member_id: "bm-1",
-    status: "present",
-    is_recording_secretary: false,
-    arrived_at: null,
-    departed_at: null,
-  },
-  {
-    id: "att-2",
-    meeting_id: "meeting-1",
-    board_member_id: "bm-2",
-    status: "present",
-    is_recording_secretary: true,
-    arrived_at: null,
-    departed_at: null,
-  },
-  {
-    id: "att-3",
-    meeting_id: "meeting-1",
-    board_member_id: "bm-3",
-    status: "absent",
-    is_recording_secretary: false,
-    arrived_at: null,
-    departed_at: null,
-  },
-];
-
-const mockAgendaItems = [
-  {
-    id: "section-1",
-    meeting_id: "meeting-1",
-    title: "Call to Order",
+function agendaItem(overrides: Partial<AgendaItem> & { id: string }): AgendaItem {
+  return {
     section_type: "procedural",
     sort_order: 0,
+    title: "Call to Order",
+    description: null,
+    presenter: null,
+    estimated_duration: null,
     parent_item_id: null,
-    status: "completed",
-    exhibit: [],
-  },
-  {
+    staff_resource: null,
+    background: null,
+    recommendation: null,
+    suggested_motion: null,
+    status: "pending",
+    operator_notes: null,
+    source_minutes_document_id: null,
+    ...overrides,
+  };
+}
+
+const defaultItems: AgendaItem[] = [
+  agendaItem({ id: "section-1", title: "Call to Order", status: "completed" }),
+  agendaItem({
     id: "item-1",
-    meeting_id: "meeting-1",
     title: "Site Plan Review",
-    section_type: null,
-    sort_order: 0,
+    section_type: "new_business",
     parent_item_id: "section-1",
-    status: "in_progress",
+    status: "active",
     description: "Review the site plan",
     suggested_motion: "to approve the site plan",
     estimated_duration: 15,
-    exhibit: [],
-  },
+  }),
 ];
 
-// ─── Query router ────────────────────────────────────────────────
+/** Everything a test can vary between renders. */
+const server: {
+  meeting: Meeting;
+  items: AgendaItem[];
+  execSessions: ExecSession[];
+  motions: Motion[];
+  exhibits: RouterOutputs["exhibit"]["byMeeting"];
+  meetingRefuses: false | "NOT_FOUND" | "INTERNAL_SERVER_ERROR";
+} = {
+  meeting: baseMeeting,
+  items: defaultItems,
+  execSessions: [],
+  motions: [],
+  exhibits: [],
+  meetingRefuses: false,
+};
 
-function setupLiveMeetingQueries(overrides: Record<string, any> = {}) {
-  mockUseQuery.mockImplementation(({ queryKey }: { queryKey: readonly unknown[] }) => {
-    const key = queryKey[0] as string;
-
-    if (key === "meetings") {
-      // meetings.detail — returns meeting with embedded board
-      const meetingOverride = overrides.meeting ?? overrides.meetings?.[0];
-      const data = meetingOverride ?? { ...mockMeeting, board: overrides.board ?? mockBoard };
-      return { data, isLoading: false, error: undefined };
-    }
-    if (key === "members") {
-      return mockQueryResult(overrides.members ?? mockMembers);
-    }
-    if (key === "attendance") {
-      return mockQueryResult(overrides.attendance ?? mockAttendance);
-    }
-    if (key === "agendaItems") {
-      return mockQueryResult(overrides.agendaItems ?? mockAgendaItems);
-    }
-    if (key === "motions") {
-      return mockQueryResult(overrides.motions ?? []);
-    }
-    if (key === "voteRecords") {
-      return mockQueryResult(overrides.voteRecords ?? []);
-    }
-    if (key === "executiveSessions") {
-      return mockQueryResult(overrides.execSessions ?? []);
-    }
-    if (key === "agendaItemTransitions") {
-      return mockQueryResult(overrides.transitions ?? []);
-    }
-    if (key === "guestSpeakers") {
-      return mockQueryResult(overrides.speakers ?? []);
-    }
-    return mockQueryResult([]);
-  });
-}
-
-// ─── Import SUT ──────────────────────────────────────────────────
+const stub = installTRPCFetchStub({
+  "meeting.detail": () => {
+    if (server.meetingRefuses) trpcTestError(server.meetingRefuses);
+    return server.meeting;
+  },
+  "board.detail": () => baseBoard,
+  "boardMember.roster": () => [
+    seat("bm-1", "Alice Smith", { seat_title: "Chair" }),
+    seat("bm-2", "Bob Jones", { is_default_rec_sec: true }),
+    seat("bm-3", "Carol White"),
+    // An ARCHIVED seat: the query this screen replaces filtered
+    // `.eq("status", "active")` server-side, and the filter moved client-side
+    // with the move to `boardMember.roster`. Without this row the member-count
+    // assertion below would pass either way.
+    seat("bm-4", "Dave Gone", { status: "archived" }),
+  ],
+  "meetingAttendance.byMeeting": () => [
+    {
+      id: "att-1",
+      board_member_id: "bm-1",
+      person_id: "p-bm-1",
+      status: "present",
+      is_recording_secretary: false,
+      arrived_at: null,
+      departed_at: null,
+    },
+    {
+      id: "att-2",
+      board_member_id: "bm-2",
+      person_id: "p-bm-2",
+      status: "present",
+      is_recording_secretary: true,
+      arrived_at: null,
+      departed_at: null,
+    },
+    {
+      id: "att-3",
+      board_member_id: "bm-3",
+      person_id: "p-bm-3",
+      status: "absent",
+      is_recording_secretary: false,
+      arrived_at: null,
+      departed_at: null,
+    },
+  ],
+  "agendaItem.byMeeting": () => server.items,
+  "exhibit.byMeeting": () => server.exhibits,
+  "motion.byMeeting": () => server.motions,
+  "voteRecord.byMeeting": () => [],
+  "guestSpeaker.byMeeting": () => [],
+  "agendaItemTransition.byMeeting": () => [],
+  "executiveSession.byMeeting": () => server.execSessions,
+});
 
 import LiveMeetingPage from "./meetings.$meetingId.live";
+
+function renderLive() {
+  return renderWithProviders(
+    <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    { queryClient },
+  );
+}
+
+/** Deliver one realtime event through the route's real topic mapping. */
+function deliverTopic(topic: string) {
+  expect(subscription.options, "the route no longer opens a subscription").not.toBeNull();
+  subscription.options!.onData!({ id: "1", data: { topic } });
+}
 
 // ─── Tests ───────────────────────────────────────────────────────
 
 describe("LiveMeetingPage", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockNavigate.mockReset();
+    subscription.options = null;
+    server.meeting = baseMeeting;
+    server.items = defaultItems;
+    server.execSessions = [];
+    server.motions = [];
+    server.exhibits = [];
+    server.meetingRefuses = false;
   });
 
-  it("renders meeting start flow when meeting not started", () => {
-    const noticedMeeting = {
-      ...mockMeeting,
+  it("renders meeting start flow when the meeting is noticed", async () => {
+    server.meeting = {
+      ...baseMeeting,
       status: "noticed",
       started_at: null,
       current_agenda_item_id: null,
     };
-    setupLiveMeetingQueries({ meeting: noticedMeeting });
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
 
-    expect(screen.getByTestId("meeting-start-flow")).toBeInTheDocument();
+    expect(await screen.findByTestId("meeting-start-flow")).toBeInTheDocument();
     expect(screen.getByTestId("start-flow-meeting-id")).toHaveTextContent("meeting-1");
     expect(screen.queryByTestId("agenda-nav-panel")).not.toBeInTheDocument();
   });
 
-  it("renders three-panel layout for in-progress meeting", () => {
-    setupLiveMeetingQueries();
+  it("renders the three-panel layout for an open meeting", async () => {
+    renderLive();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
+    expect(await screen.findByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
     expect(screen.getByTestId("attendance-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("meeting-start-flow")).not.toBeInTheDocument();
   });
 
-  it("displays meeting header with board name and status", () => {
-    setupLiveMeetingQueries();
+  it("displays the meeting header with the board name, from the SEPARATE board read", async () => {
+    renderLive();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
+    // `board.name` no longer arrives embedded in the meeting row; it is
+    // `trpc.board.detail`, fetched by the meeting's `board_id`.
+    expect(await screen.findByText("Planning Board")).toBeInTheDocument();
     expect(screen.getByText("Regular Meeting")).toBeInTheDocument();
-    expect(screen.getByText("Planning Board")).toBeInTheDocument();
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
-  it("shows attendance panel with member count", () => {
-    setupLiveMeetingQueries();
+  it("counts only ACTIVE seats from the roster", async () => {
+    renderLive();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    const memberCount = screen.getByTestId("member-count");
-    expect(memberCount).toHaveTextContent("3");
+    // Four seats come back; one is archived. The status filter moved from the
+    // Supabase query to the component when this read became `roster`.
+    await waitFor(() => expect(screen.getByTestId("member-count")).toHaveTextContent("3"));
   });
 
-  it("renders agenda navigation with correct sections", () => {
-    setupLiveMeetingQueries();
+  it("renders agenda navigation with the section tree", async () => {
+    renderLive();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    // mockAgendaItems has 1 section (section-1) with 1 child item
-    const sectionCount = screen.getByTestId("nav-section-count");
-    expect(sectionCount).toHaveTextContent("1");
+    expect(await screen.findByTestId("nav-section-count")).toHaveTextContent("1");
   });
 
-  it("renders detail panel for current agenda item", () => {
-    setupLiveMeetingQueries();
+  it("renders the detail panel for the current agenda item, with its board id", async () => {
+    renderLive();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    const detailTitle = screen.getByTestId("detail-title");
-    expect(detailTitle).toHaveTextContent("Site Plan Review");
+    expect(await screen.findByTestId("detail-title")).toHaveTextContent("Site Plan Review");
+    // `AgendaItemDetailPanel`'s two writes authorize on this prop.
+    expect(screen.getByTestId("detail-board-id")).toHaveTextContent("board-1");
   });
 
-  it("redirects adjourned meetings to review page", () => {
-    const adjournedMeeting = {
-      ...mockMeeting,
-      status: "adjourned",
-      ended_at: "2026-03-10T20:00:00Z",
-    };
-    setupLiveMeetingQueries({ meeting: adjournedMeeting });
+  it("attaches exhibits from the SEPARATE exhibit read", async () => {
+    server.exhibits = [
+      {
+        id: "ex-1",
+        agenda_item_id: "item-1",
+        title: "Site plan",
+        file_storage_path: "exhibits/site.pdf",
+        file_type: "application/pdf",
+        file_name: "site.pdf",
+        exhibit_type: "file",
+        visibility: "public",
+        sort_order: 0,
+      },
+    ];
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
 
-    expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", {
-      replace: true,
-    });
+    // They used to arrive embedded in `select("*, exhibit(*)")`; this pins
+    // that the split read still reaches the item it belongs to.
+    await waitFor(() => expect(screen.getByTestId("detail-exhibits")).toHaveTextContent("1"));
   });
 
-  it("shows executive session banner when in exec session", () => {
-    const activeExecSession = {
-      id: "es-1",
-      meeting_id: "meeting-1",
-      agenda_item_id: "item-1",
-      town_id: "town-1",
-      statutory_basis: "1 M.R.S.A. 405(6)(A)",
-      entered_at: "2026-03-10T19:00:00Z",
-      exited_at: null,
-      entry_motion_id: "motion-es-1",
-      post_session_action_motion_ids: [],
-      created_at: "2026-03-10T18:55:00Z",
-    };
-    setupLiveMeetingQueries({ execSessions: [activeExecSession] });
+  it("redirects adjourned meetings to the review page", async () => {
+    server.meeting = { ...baseMeeting, status: "adjourned", ended_at: "2026-03-10T20:00:00Z" };
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    renderLive();
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review", { replace: true }),
     );
+  });
 
-    expect(screen.getByTestId("exec-banner")).toBeInTheDocument();
+  it("shows the executive session banner when in exec session", async () => {
+    server.execSessions = [execSession()];
+
+    renderLive();
+
+    expect(await screen.findByTestId("exec-banner")).toBeInTheDocument();
     expect(screen.getByTestId("exec-citation")).toHaveTextContent("1 M.R.S.A. 405(6)(A)");
     expect(screen.queryByTestId("adjournment-controls")).not.toBeInTheDocument();
   });
 
-  it("renders adjournment controls", () => {
-    setupLiveMeetingQueries();
+  it("handles a meeting with no agenda items gracefully", async () => {
+    server.meeting = { ...baseMeeting, current_agenda_item_id: null };
+    server.items = [];
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
 
-    expect(screen.getByTestId("adjournment-controls")).toBeInTheDocument();
-    expect(screen.getByTestId("adjourn-motion")).toBeInTheDocument();
-    expect(screen.getByTestId("adjourn-wo")).toBeInTheDocument();
-  });
-
-  it("handles meeting with no agenda items gracefully", () => {
-    const meetingNoCurrentItem = {
-      ...mockMeeting,
-      current_agenda_item_id: null,
-    };
-    setupLiveMeetingQueries({
-      meeting: meetingNoCurrentItem,
-      agendaItems: [],
-    });
-
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    expect(screen.getByTestId("agenda-nav-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("attendance-panel")).toBeInTheDocument();
+    expect(await screen.findByTestId("agenda-nav-panel")).toBeInTheDocument();
     expect(screen.getByTestId("detail-title")).toHaveTextContent("none");
   });
+});
 
-  it("invalidates trpc.meeting.pathFilter() after adjourning without objection", async () => {
-    // Phase E wave 3 Task 2's fix round: this handler moves the meeting
-    // open → adjourned — a status both the kanban (routes/meetings.tsx) and
-    // the board Meetings tab (routes/boards.$boardId.meetings.tsx) render
-    // via trpc.meeting.byTown/byBoard. Before this fix, neither refreshed
-    // for up to 60s after a meeting was adjourned.
-    setupLiveMeetingQueries();
+describe("LiveMeetingPage error state", () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+    subscription.options = null;
+    server.meeting = baseMeeting;
+    server.items = defaultItems;
+    server.execSessions = [];
+    server.motions = [];
+    server.exhibits = [];
+    server.meetingRefuses = false;
+  });
 
-    const mockQueryClient = queryClientRef.current!;
-    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
-    mockQueryClient.setQueryData(byBoardKey, []);
-    expect(mockQueryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+  it("renders an alert, not an endless spinner, when the meeting read fails", async () => {
+    // Conventions item 5. `RouteErrorBoundary` covers a loader rejection
+    // before mount; this branch is the only thing that covers a failure after
+    // it, and without it the screen sat on "Loading meeting data..." forever.
+    server.meetingRefuses = "NOT_FOUND";
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
 
-    fireEvent.click(screen.getByTestId("adjourn-wo"));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This meeting could not be found.");
+    expect(screen.queryByText("Loading meeting data...")).not.toBeInTheDocument();
+  });
+});
+
+// ─── The SSE subscription ────────────────────────────────────────
+
+describe("LiveMeetingPage realtime", () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+    subscription.options = null;
+    server.meeting = baseMeeting;
+    server.items = defaultItems;
+    server.execSessions = [];
+    server.motions = [];
+    server.exhibits = [];
+    server.meetingRefuses = false;
+  });
+
+  it("opens ONE subscription, for this meeting", async () => {
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+
+    const { useSubscription } = await import("@trpc/tanstack-react-query");
+    const calls = vi.mocked(useSubscription).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    // Eight Supabase channels became one stream — see
+    // `packages/api/src/trpc/routers/realtime.ts` for why more than one would
+    // break in development and work in production.
+    const inputs = new Set(calls.map((c) => JSON.stringify((c[0] as any).queryKey)));
+    expect(inputs.size).toBe(1);
+    expect(JSON.stringify([...inputs][0])).toContain("meeting-1");
+  });
+
+  it("refetches the meeting read when the `meeting` topic arrives", async () => {
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    const before = stub.countFor("meeting.detail");
+
+    server.meeting = { ...baseMeeting, title: "Renamed Meeting" };
+    deliverTopic("meeting");
+
+    await waitFor(() => expect(stub.countFor("meeting.detail")).toBeGreaterThan(before));
+    expect(await screen.findByText("Renamed Meeting")).toBeInTheDocument();
+  });
+
+  it("refetches the motion read when the `motion` topic arrives, and nothing else's", async () => {
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    const motionsBefore = stub.countFor("motion.byMeeting");
+    const votesBefore = stub.countFor("voteRecord.byMeeting");
+
+    deliverTopic("motion");
+
+    await waitFor(() => expect(stub.countFor("motion.byMeeting")).toBeGreaterThan(motionsBefore));
+    expect(stub.countFor("voteRecord.byMeeting")).toBe(votesBefore);
+  });
+
+  it("refetches BOTH the agenda and the exhibit reads when the `agenda_item` topic arrives", async () => {
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    const itemsBefore = stub.countFor("agendaItem.byMeeting");
+    const exhibitsBefore = stub.countFor("exhibit.byMeeting");
+
+    deliverTopic("agenda_item");
 
     await waitFor(() => {
-      expect(mockQueryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true);
+      expect(stub.countFor("agendaItem.byMeeting")).toBeGreaterThan(itemsBefore);
+      expect(stub.countFor("exhibit.byMeeting")).toBeGreaterThan(exhibitsBefore);
     });
   });
 
-  // ─── Wave 3, Tasks 3+4 fix round: the three new routers ───────────
-  //
-  // `routes/meetings.$meetingId.tsx`'s shell reads
-  // `agendaItem.countByMeeting`, `meetingAttendance.countByMeeting` and
-  // `minutesDocument.byMeeting`. This route writes all three tables, so
-  // conventions item 7 owes each of those writes the matching
-  // `pathFilter()` call — and item 8 owes each call a pin that a deletion
-  // turns red. Each test below seeds the SHELL's own key, not a nearby one.
-
-  it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {
-    setupLiveMeetingQueries();
-
-    const mockQueryClient = queryClientRef.current!;
-    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
-      meetingId: "meeting-1",
-    }).queryKey;
-    mockQueryClient.setQueryData(countKey, 2);
-    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
-
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    fireEvent.click(screen.getByTestId("adjourn-wo"));
-
-    await waitFor(() => {
-      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
-    });
-  });
-
-  it("invalidates trpc.agendaItem.pathFilter() when navigating between items — the OTHER call site", async () => {
-    // `navigateToItem` carries its own `trpc.agendaItem.pathFilter()` line,
-    // separate from the adjournment handler's, so deleting either one is
-    // caught rather than only whichever the previous test happens to reach.
-    setupLiveMeetingQueries();
-
-    const mockQueryClient = queryClientRef.current!;
-    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
-      meetingId: "meeting-1",
-    }).queryKey;
-    mockQueryClient.setQueryData(countKey, 2);
-    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
-
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
-
-    fireEvent.click(screen.getByTestId("nav-to-item"));
-
-    await waitFor(() => {
-      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
-    });
-  });
-
-  it("invalidates trpc.meetingAttendance.pathFilter() from the meeting_attendance Realtime handler", async () => {
-    // The Realtime hook is mocked out (see the module mocks above), so the
-    // handler is reached by invoking the callback this route registered for
-    // the `meeting_attendance` table — the same thing the real subscription
-    // does when another device records attendance.
-    setupLiveMeetingQueries();
-
-    const mockQueryClient = queryClientRef.current!;
+  it("invalidates trpc.meetingAttendance.pathFilter() when the `meeting_attendance` topic arrives", async () => {
+    // The shell (`routes/meetings.$meetingId.tsx`) reads
+    // `meetingAttendance.countByMeeting`; this screen does not, so only a
+    // ROUTER-level filter reaches it.
     const countKey = trpc.meetingAttendance.countByMeeting.queryOptions({
       meetingId: "meeting-1",
     }).queryKey;
-    mockQueryClient.setQueryData(countKey, 2);
-    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+    queryClient.setQueryData(countKey, 2);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
 
-    const attendanceCall = vi
-      .mocked(useRealtimeSubscription)
-      .mock.calls.find((call) => call[1] === "meeting_attendance");
-    expect(attendanceCall, "the route no longer subscribes to meeting_attendance").toBeDefined();
-    attendanceCall![3]({});
+    deliverTopic("meeting_attendance");
 
-    await waitFor(() => {
-      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
-    });
+    await waitFor(() => expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true));
+  });
+});
+
+// ─── The remaining raw writes' invalidations (Task 5 owns the writes) ──
+
+describe("LiveMeetingPage cache invalidation", () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+    subscription.options = null;
+    server.meeting = baseMeeting;
+    server.items = defaultItems;
+    server.execSessions = [];
+    server.motions = [];
+    server.exhibits = [];
+    server.meetingRefuses = false;
   });
 
-  it("invalidates trpc.agendaItem.pathFilter() from the agenda_item Realtime handler", async () => {
-    // Whole-branch fix round. This route's `agenda_item` Realtime handler
-    // shipped its `trpc.agendaItem.pathFilter()` line with NO pin: a
-    // reviewer's deletion sweep commented it out and the whole web suite
-    // stayed green, because this FILE was already credited by the
-    // `meeting_attendance` Realtime pin below — the exact credit-bleed limit
-    // conventions item 8 records for `pathfilter-pin-coverage.test.ts`,
-    // demonstrated rather than hypothetical. Mirrors that test exactly: the
-    // Realtime hook is mocked out, so the handler is reached by invoking the
-    // callback this route registered for the `agenda_item` table.
-    setupLiveMeetingQueries();
+  it("invalidates trpc.meeting.pathFilter() after adjourning without objection", async () => {
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
 
-    const mockQueryClient = queryClientRef.current!;
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {
     const countKey = trpc.agendaItem.countByMeeting.queryOptions({
       meetingId: "meeting-1",
     }).queryKey;
-    mockQueryClient.setQueryData(countKey, 2);
-    expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
+    queryClient.setQueryData(countKey, 2);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    await waitFor(() => expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.agendaItemTransition.pathFilter() when adjourning", async () => {
+    // Asserted as a REFETCH rather than as `isInvalidated`, because this
+    // screen observes `agendaItemTransition.byMeeting` itself: an invalidation
+    // on a key with a live observer triggers an immediate refetch that clears
+    // the flag again, so the flag is a race and the refetch is not. The
+    // `isInvalidated` assertions elsewhere in this file are all on keys only
+    // the SHELL reads, which have no observer here.
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    await waitFor(() => expect(stub.countFor("agendaItemTransition.byMeeting")).toBe(1));
+    const before = stub.countFor("agendaItemTransition.byMeeting");
+
+    fireEvent.click(screen.getByTestId("adjourn-wo"));
+
+    await waitFor(() =>
+      expect(stub.countFor("agendaItemTransition.byMeeting")).toBeGreaterThan(before),
     );
+  });
 
-    const agendaCall = vi
-      .mocked(useRealtimeSubscription)
-      .mock.calls.find((call) => call[1] === "agenda_item");
-    expect(agendaCall, "the route no longer subscribes to agenda_item").toBeDefined();
-    agendaCall![3]({});
+  it("invalidates trpc.agendaItem.pathFilter() when navigating between items — the OTHER call site", async () => {
+    const countKey = trpc.agendaItem.countByMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(countKey, 2);
+    expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
 
-    await waitFor(() => {
-      expect(mockQueryClient.getQueryState(countKey)?.isInvalidated).toBe(true);
-    });
+    renderLive();
+    fireEvent.click(await screen.findByTestId("nav-to-item"));
+
+    await waitFor(() => expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.agendaItemTransition.pathFilter() when navigating between items", async () => {
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+    await waitFor(() => expect(stub.countFor("agendaItemTransition.byMeeting")).toBe(1));
+    const before = stub.countFor("agendaItemTransition.byMeeting");
+
+    fireEvent.click(screen.getByTestId("nav-to-item"));
+
+    await waitFor(() =>
+      expect(stub.countFor("agendaItemTransition.byMeeting")).toBeGreaterThan(before),
+    );
   });
 
   it("invalidates trpc.minutesDocument.pathFilter() when a minutes-approval motion passes", async () => {
     // The auto-approval effect: an agenda item carrying
-    // `source_minutes_document_id` plus a PASSED motion on that item moves
-    // the referenced `minutes_document` to `approved` — the exact status the
-    // shell's pill renders.
-    setupLiveMeetingQueries({
-      agendaItems: [
-        {
-          ...mockAgendaItems[0],
-          id: "item-minutes",
-          parent_item_id: null,
-          source_minutes_document_id: "md-1",
-        },
-      ],
-      motions: [
-        {
-          id: "motion-1",
-          agenda_item_id: "item-minutes",
-          motion_type: "main",
-          motion_text: "to approve the minutes of February 10",
-          status: "passed",
-        },
-      ],
-    });
+    // `source_minutes_document_id` plus a PASSED motion on that item moves the
+    // referenced `minutes_document` to `approved`. That column is read through
+    // `agendaItem.byMeeting`, which is why this task added it there.
+    server.items = [
+      agendaItem({
+        id: "item-minutes",
+        title: "Approve the minutes of February 10",
+        source_minutes_document_id: "md-1",
+      }),
+    ];
+    server.motions = [
+      motion({
+        agenda_item_id: "item-minutes",
+        motion_text: "to approve the minutes of February 10",
+      }),
+    ];
 
-    const mockQueryClient = queryClientRef.current!;
     const minutesKey = trpc.minutesDocument.byMeeting.queryOptions({
       meetingId: "meeting-1",
     }).queryKey;
-    mockQueryClient.setQueryData(minutesKey, { id: "md-1", status: "review" });
-    expect(mockQueryClient.getQueryState(minutesKey)?.isInvalidated).toBeFalsy();
+    queryClient.setQueryData(minutesKey, { id: "md-1", status: "review" } as any);
+    expect(queryClient.getQueryState(minutesKey)?.isInvalidated).toBeFalsy();
 
-    renderWithProviders(
-      <LiveMeetingPage {...({ loaderData: { meetingId: "meeting-1" } } as any)} />,
-    );
+    renderLive();
 
-    await waitFor(() => {
-      expect(mockQueryClient.getQueryState(minutesKey)?.isInvalidated).toBe(true);
-    });
+    await waitFor(() => expect(queryClient.getQueryState(minutesKey)?.isInvalidated).toBe(true));
+  });
+
+  /**
+   * A key under the same ROUTER that this screen does not observe.
+   *
+   * `trpc.executiveSession.pathFilter()` matches every key beneath that
+   * router, and an invalidation on a key WITH a live observer triggers an
+   * immediate refetch that clears `isInvalidated` again — a race. A key for a
+   * different meeting has no observer here, so the flag stays set and the
+   * assertion is not timing-dependent.
+   */
+  function seedUnobservedExecKey() {
+    const key = trpc.executiveSession.byMeeting.queryOptions({
+      meetingId: "some-other-meeting",
+    }).queryKey;
+    queryClient.setQueryData(key, []);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+    return key;
+  }
+
+  it("invalidates trpc.executiveSession.pathFilter() when the entry motion FAILS — the delete branch", async () => {
+    // The sibling of the test below: a failed entry motion DELETES the pending
+    // record rather than stamping `entered_at`, and carries its own
+    // invalidation.
+    const key = seedUnobservedExecKey();
+    server.execSessions = [execSession({ entered_at: null })];
+    server.motions = [
+      motion({ id: "motion-es-1", motion_text: "to enter Executive Session", status: "failed" }),
+    ];
+
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.executiveSession.pathFilter() when the pending record is filed", async () => {
+    // `handleExecMotionFiled`: the citation dialog proceeds, the entry motion
+    // is captured, and CLOSING that motion dialog is what writes the pending
+    // `executive_session` row.
+    const key = seedUnobservedExecKey();
+    server.motions = [motion({ id: "motion-es-1", motion_text: "to enter Executive Session" })];
+
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+
+    fireEvent.click(screen.getByTestId("exec-proceed"));
+    fireEvent.click(await screen.findByTestId("motion-dialog-close-main"));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.executiveSession.pathFilter() when post-session action motions are linked", async () => {
+    // The third `executive_session` writer: motions filed AFTER `exited_at`
+    // are appended to `post_session_action_motion_ids`.
+    //
+    // The ORDER here is what makes this a pin rather than a tautology.
+    // `deliverTopic("executive_session")` itself invalidates that router, so
+    // seeding the probe key before it would go green with the line under test
+    // deleted — which is how the deletion sweep caught the first version of
+    // this test. The probe is seeded AFTER every exec-session delivery, and
+    // the only thing that can invalidate it afterwards is the effect's own
+    // line: the last delivery names `motion`.
+    server.execSessions = [execSession()];
+    server.motions = [];
+
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+
+    // Arms `isPostExecSession` / `postExecSessionId` for the session below.
+    fireEvent.click(screen.getByTestId("exec-return-with-actions"));
+
+    server.execSessions = [execSession({ exited_at: "2026-03-10T19:30:00Z" })];
+    server.motions = [motion({ id: "motion-post", created_at: "2026-03-10T19:45:00Z" })];
+    deliverTopic("executive_session");
+    await waitFor(() => expect(stub.countFor("executiveSession.byMeeting")).toBeGreaterThan(1));
+
+    const key = seedUnobservedExecKey();
+    deliverTopic("motion");
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.meeting.pathFilter() when navigating between items", async () => {
+    // `navigateToItem` writes `meeting.current_agenda_item_id`, which THIS
+    // screen reads through `trpc.meeting.detail` and the kanban through
+    // `trpc.meeting.byTown` — the legacy `queryKeys.meetings.detail` line
+    // beside it reaches neither now.
+    const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey;
+    queryClient.setQueryData(byBoardKey, []);
+    expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
+
+    renderLive();
+    fireEvent.click(await screen.findByTestId("nav-to-item"));
+
+    await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
+  });
+
+  it("invalidates trpc.executiveSession.pathFilter() when the entry motion passes", async () => {
+    // The pending exec-session record's `entered_at` is stamped by this
+    // screen's own effect; the read it moves is `executiveSession.byMeeting`.
+    // A PENDING session: `entry_motion_id` set, `entered_at` null — which is
+    // exactly how the screen recognises one waiting on its entry vote.
+    server.execSessions = [execSession({ entered_at: null })];
+    server.motions = [motion({ id: "motion-es-1", motion_text: "to enter Executive Session" })];
+
+    renderLive();
+    await screen.findByTestId("agenda-nav-panel");
+
+    // Same reason as the two transition tests above: the screen observes this
+    // read, so the refetch is the durable signal. One load, then the effect's
+    // own invalidation.
+    await waitFor(() => expect(stub.countFor("executiveSession.byMeeting")).toBeGreaterThan(1));
   });
 });
