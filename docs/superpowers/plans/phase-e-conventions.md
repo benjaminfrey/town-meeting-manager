@@ -2322,6 +2322,30 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      #     reached the same client through `useSupabase`)
      #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
      #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 25  (32 then)
+ 5   # at 670d9df, the close of Phase E wave 5 (Task 7) — UP one from Task
+     # 5's 4, and legitimately so, by this item's own rule that a task may
+     # raise the count by NAMING a gap that was previously silent. The added
+     # line is `layouts/AppShell.tsx`'s `TODO(phase-e-wave-6): meeting.liveByTown`,
+     # for the `useLiveMeetingId` raw Supabase read that had sat unmarked
+     # through four waves; Task 6 added it while deleting that file's Supabase
+     # heartbeat. All 5 remaining lines are wave-6
+     # (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
+     # answers empty, as it has since 01ff3ab):
+     #   layouts/AppShell.tsx (meeting.liveByTown)
+     #   routes/home.tsx (minutesDocument.pendingByTown, board.listActive)
+     #   routes/meetings.tsx x2 (board.listActive)
+     #   routes/meetings.$meetingId.minutes.tsx (minutesDocument.detail)
+     # Note the grep is written with `[[:space:]]`, not `\s`: `git grep` is
+     # POSIX ERE and silently matches nothing for `\s`, which has produced
+     # eight wrong counts in this project. The other two greps BOTH moved,
+     # and Task 6 is the whole of the movement:
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l      -> 14  (15 at 01ff3ab)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 23  (25 then)
+     # Re-derived against `git archive 670d9df`, not against the working tree
+     # and not from any task report — which matters this time, because this
+     # task's Part 1 temporarily edited two tracked files and restored them.
 ```
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
@@ -2740,6 +2764,71 @@ introduced:
    along with the identically-worded Task 4 bullet it was carried forward
    from. `live.tsx` renders `LiveStreamStatusBar` now, fed by
    `useLiveMeetingEvents`'s return value.
+
+**Wave 5, Task 7 — the wave close-out, run over every Known-gaps bullet and
+every numbered item's prose, and NOT selected by which files this task touched
+(it touched two, both restored).** Method: walked items 1, 2, 7, 8, 9, 11, 12
+and 14 paragraph-by-paragraph plus the whole Known-gaps list, took each
+present-tense ASSERTION, and re-ran the grep or read the code behind it against
+`git archive 670d9df` rather than the working tree — which mattered here,
+because Part 1 of this task temporarily edited `packages/api/src/trpc/trpc.ts`
+and `packages/web/src/lib/trpc.ts` and a working-tree sweep would have measured
+the edits. Then, per the widening two sections above, grepped THIS FILE for the
+symbol each surviving claim turns on. What moved:
+
+- **Item 14's own Wave 5, Task 5 paragraph contained a false claim about this
+  document, and it is the fourth instance of the shape this item keeps
+  finding.** It states that "Wave 5, Task 4's own open items" #1 and #3 "are
+  both FALSE and are struck through above." The verdict was right; the
+  strikethrough was never applied. Both bullets still read as open, two tasks
+  later, in the list wave 6 is told to read. Found by checking the ASSERTION
+  ("is struck through above") against the document rather than by checking the
+  bullets against the tree — the tree agreed with the paragraph all along.
+  A claim that a document has been edited is a claim about the document, and
+  nothing before this sweep ever re-read one. Both strikethroughs are now
+  applied, with the corrections each needed (#1's reactive-write count was one
+  short; #3's integer-literal SHAPE survives in two wave-6 files).
+- **Item 11's marker countdown moved 4 → 5**, re-run above and anchored to
+  `670d9df`. Up, not down, and legitimately: Task 6 NAMED `AppShell.tsx`'s
+  four-wave-old raw Supabase read rather than creating a gap. Both of the other
+  greps this item tracks moved the right way (15 → 14, 25 → 23), and all of
+  that movement is Task 6's too.
+- **Item 7's `initConnectionErrorHandler` carve-out is genuinely gone**, and the
+  anchored grep it now carries answers empty at `670d9df`
+  (`git grep -nE '^[[:space:]]*(void )?queryClient[.]invalidateQueries[(][)];' HEAD -- packages/web/src`).
+  The three unanchored hits that remain are prose in `providers/QueryProvider.tsx`'s
+  header — exactly the markers-versus-mentions hazard item 11 names, and the
+  reason that paragraph's own grep is anchored.
+- **Task 6's open item #4 ("the banner has never been seen in a browser") is now
+  FALSE** and is struck through, with what the look found recorded as its own
+  Known-gaps entry.
+
+Checked and still true, unchanged: item 8's `pathFilter()` census — **53 files
+and 88 `invalidateQueries(trpc.….pathFilter())` calls at `670d9df`, both
+unchanged from `01ff3ab`, and the FILE LIST is identical** (Task 6 added no
+invalidation); item 2's board-scoped census (`requireBoardPermission` **20**,
+`.use(requireBoardActor(` **9**, `: BoardScope` in `rules.ts` **29** — all three
+unchanged from Task 5's figures, since Task 6 added no procedure); item 9's
+`useMockAuth` ("zero callers outside its own module") and `MockAuthProvider`
+("directly named in 4 files" — still `test/render.ts`, `test/mocks/auth-mock.ts`,
+`PermissionGate.test.tsx`, `boards.$boardId.test.tsx`), the raw counts feeding
+its table having drifted to 65/20 exactly as that item says they will; "Wave 4,
+Task 3's own open items" #3 (the legacy `queryKeys.exhibits.*` lines stay —
+`meetings.$meetingId.review.tsx` still reads
+`[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and still
+imports `@/lib/supabase` directly); and Task 6's open items #1
+(`getMutationErrorMessage` has no production call site — its only non-test
+mentions are its own definition and two prose lines in `lib/trpc.ts`), #2
+(`isPaused` appears **nowhere** in `packages/web/src`) and #3 (`useLiveMeetingId`
+is still raw Supabase in `AppShell.tsx`, now with the marker counted above).
+
+One imprecision, recorded rather than fixed: the `adjournment.adjourned_by`
+bullet cites `minutes-formatters.ts:629-636` for the presiding-officer fallback,
+which is at 630–634 at `670d9df`. Item 1 already says not to cite line numbers
+for this exact reason; the bullet's substance is correct and was re-verified
+(`meeting.ts:1124` writes `${personId}`, `minutes-assembler.ts:708` resolves it
+through a `board_member.id` map, `formatAdjournmentText` falls back to
+`attendance.presiding_officer`).
 
 ---
 
@@ -3458,14 +3547,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
 
 - **Wave 5, Task 4's own open items.** Four, none of them a defect this task
   introduced:
-  1. **`routes/meetings.$meetingId.live.tsx`'s writes are all still raw
+  1. ~~**`routes/meetings.$meetingId.live.tsx`'s writes are all still raw
      Supabase** — the adjournment handler, `navigateToItem`, and the three
      reactive effects (`executive_session` ×3, `minutes_document`,
      `notification_event`). Task 5 owns them, and the procedures already exist
      and are tested: `meeting.adjourn`, `meeting.navigateToAgendaItem`, the
      five `executiveSession.*` writes. The file's marker names them. The
      `meeting` write still has no authorization check of any kind, exactly as
-     that marker has said since wave 3.
+     that marker has said since wave 3.~~ — **closed in wave 5, Task 5**, and
+     the reactive-write count in the strikethrough is one short: it is FIVE
+     reactive writes across FOUR triggers, the adjourn-on-motion effect having
+     been filed under `handleMeetingEnd` because one handler served a button
+     too. Verified at `670d9df`: the file's only remaining mention of
+     `useSupabase` is a struck-through line in its own header comment.
   2. ~~**`ConnectionStatusBar` is still on a Supabase Realtime heartbeat
      channel**, and this screen still renders it. It is wave 5, Task 6's ...
      whatever that bar becomes must not render it as a disruption.~~ —
@@ -3475,7 +3569,7 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      is no longer `void`). The five-minute warning this bullet ended on was
      the right one and is answered by a grace window, pinned by a named test —
      see "The app-global transport surface (wave 5, Task 6)" under item 2.
-  3. **`AttendancePanel.tsx` and `MeetingStartFlow.tsx` write
+  3. ~~**`AttendancePanel.tsx` and `MeetingStartFlow.tsx` write
      `is_recording_secretary: 0` / `: 1` to a `boolean` column.** Found while
      retyping their props onto `RouterOutputs` (the hand-written interfaces
      said `number`; the column is `boolean`, and the procedure says so). The
@@ -3483,7 +3577,14 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      and update payloads are not, because they are Task 5's writes and
      `meeting_attendance.setRollCall`/`setStatus` already take the column
      correctly. Named here so whoever wires those two does not read the
-     literals as intentional.
+     literals as intentional.~~ — **closed in wave 5, Task 5**, with the raw
+     writes those literals sat in. Both files mention the literal only in
+     doc-comment prose now. The SHAPE survives elsewhere and is wave 6's, so
+     it is named rather than declared gone:
+     `lib/meeting/buildStructuredMeetingRecord.ts` still declares
+     `is_recording_secretary: number` and compares `=== 1`, and
+     `routes/meetings.$meetingId.review.tsx` still normalises `=== true ||
+(… as number) === 1` — both on raw Supabase, both wave-6 files.
   4. ~~**The SSE path has no end-to-end test through the WEB client** ... the
      ROUTING half is not ... Cheapest real coverage is a manual check against a
      running dev server, which is wave 5, Task 6 or 7 territory.~~ —
@@ -3530,10 +3631,257 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      `started_at`, which is that query's ordering column, and it returns every
      non-cancelled meeting where this needs the single most recently started
      `open`/`in_progress` one.
-  4. **The banner has never been seen in a browser.** Its states are pinned by
+  4. ~~**The banner has never been seen in a browser.** Its states are pinned by
      jsdom tests and its INPUT — the transport's own `status` — is driven by a
      mock, so what is untested is the same seam bullet 4 above narrows to: a
      real `EventSource` dropping and resuming against a real server. In
      particular, nobody has watched the five-minute deadline pass with the
      banner on screen. The grace window is the part of this task most worth one
-     manual look, and it did not get one.
+     manual look, and it did not get one.~~ — **closed in wave 5, Task 7**, and
+     the look was worth having: the grace window behaves exactly as designed and
+     the look found three defects nothing in the suite could have. See "Wave 5,
+     Task 7 — the browser check" below.
+
+- **Wave 5, Task 7 — the browser check. Three defects that no test in this repo
+  could have found, because all three live in a seam the suite does not span.**
+  The wave's own Task 6 bullet called the grace window "the part of this task
+  most worth one manual look"; the look was taken against the real stack (a real
+  Chromium, the Vite dev server, the Fastify API, local Postgres), with
+  `SSE_MAX_STREAM_DURATION_MS` temporarily lowered to 20s and restored
+  byte-identical afterwards (`git diff` empty at `670d9df`). What it found, in
+  the order it blocked:
+  1. **`bindTenantAccess`'s reentrancy guard false-positives on any tRPC HTTP
+     BATCH, which is every screen that issues two or more queries at once.**
+     `context.ts`'s `inTransaction` flag is per REQUEST, and `httpBatchLink`
+     puts N procedure calls on ONE request sharing ONE context; tRPC resolves
+     them concurrently, so the second `ctx.withTenant()` sees the first's flag
+     still set and throws `INTERNAL_SERVER_ERROR`. Reproduced with two curls
+     and no browser at all — a batch of two reads returns the first and refuses
+     the second:
+
+     ```
+     $ curl -b cookies 'localhost:3001/api/trpc/board.list,town.detail?batch=1&input=%7B%7D'
+     [{"result":{"data":[…]}},{"error":{"message":"ctx.withTenant() called while a
+       transaction from an EARLIER, still-open ctx.withTenant() call on this same
+       request has not finished. …"}}]
+     ```
+
+     The live meeting screen's own loader batches five
+     (`agendaItem.byMeeting,meetingAttendance.byMeeting,motion.byMeeting,board.detail,boardMember.roster`)
+     and got four refusals and a `207 Multi-Status`; the screen renders blank.
+     **This is not a wave-5 regression** — the guard predates the wave (Stage 1,
+     Task D1) and the flag has been per-request since. It is invisible to the
+     suite because every router test drives ONE procedure through
+     `createCaller`, never two concurrently on one context, and the web suite
+     stubs the transport (item 8) so it never builds a batch at all. The
+     hazard the guard exists for is NESTING — `withTenant` called from inside
+     another's callback — which is a dynamic-extent property, not a per-request
+     one; two concurrent `db.transaction()` calls take two pooled connections
+     and cannot deadlock each other. `0d91a05` already narrowed this guard once
+     for a different false positive (`ctx.actor()` on a warm memo); this is the
+     second, and the fix has to distinguish "nested" from "concurrent on the
+     same request" rather than narrow the condition again. Until it is fixed,
+     no migrated screen works in a browser, and **the remaining observations
+     below were only reachable by temporarily setting `maxItems: 1` on the
+     client's `httpBatchLink`** — disclosed rather than quietly worked around,
+     and restored byte-identical.
+
+  2. **The SSE resume catch-up never runs on a QUIET stream, so a write made
+     during the routine reconnect is lost silently and permanently.**
+     `routers/realtime.ts` gates its catch-up on `resuming = input.lastEventId != null`
+     and its comment states the intent correctly ("a reconnect means there was
+     a window with no connection … marking every topic stale is the only
+     correct answer"). But a browser `EventSource` sends `Last-Event-ID` only
+     after it has received at least one `id:` frame, and neither
+     `event: connected` nor `event: ping` carries one. So a stream that has
+     been connected quietly — a meeting in recess, which is most of a meeting —
+     reconnects at the deadline as a FRESH subscribe, and anything published in
+     the gap is gone. Measured three ways: the gap is **3000 ms**, every time
+     (`3000, 3002, 3002, 3003` across four deadlines — the `EventSource`
+     default retry, since the server sends no `retry:` field); a second tab's
+     write fired inside that gap never reached the first tab in 45 s, with
+     **zero** refetches; and the same write fired with the stream UP reached it
+     in **225 ms**, refetching `meetingAttendance.byMeeting` and nothing else.
+     The gating is provable without a browser:
+
+     ```
+     $ curl -N …/realtime.onMeetingChange?input=…            # no Last-Event-ID
+     event: connected / event: ping            — no catch-up
+     $ curl -N -H 'Last-Event-ID: 3' …                        # resuming
+     event: connected / 8 frames, ids 4..11, one per LIVE_MEETING_TOPICS entry
+     ```
+
+     Once the client HAS an id, resume works exactly as designed: a write made
+     in the gap was picked up on reconnect, with all nine live-meeting readers
+     refetching 3.0 s later. So the defect is narrow and nasty — it is
+     precisely the quiet meeting that loses the write. The cheapest fixes are
+     to give the keep-alive an id, or to treat "the client asked for a stream
+     it has been on before" some other way than `lastEventId != null`.
+     `useLiveMeetingEvents.ts`'s header claim — "`onData` fires the moment the
+     resumed stream delivers its catch-up topics" — is true only under that
+     condition, and does not say so.
+
+  3. **Killing the API does NOT break the browser's stream in the development
+     topology, so the amber banner cannot be demonstrated that way.** With the
+     API dead and confirmed dead, the banner stayed **silent for the full 30 s**
+     and the client made no reconnect attempt at all: Vite's dev proxy holds the
+     downstream socket open after the upstream dies. Isolated with two
+     simultaneous curls and the API then killed — `DIRECT TO API: ended`,
+     `THROUGH VITE PROXY: still connected`. Recorded because any future
+     instruction of the form "kill the API and watch the banner" is unrunnable
+     as written against `pnpm dev`, and because it is worth confirming that
+     `infrastructure/nginx/nginx.conf`'s `/api/trpc/` block does not do the same
+     thing in production — an intermediary that holds a dead stream open is
+     precisely the silent-stale-screen failure the banner exists to catch.
+
+  What the check CONFIRMED, and this is the part the wave asked for:
+  - **(a) The routine bounce is silent, watched rather than asserted.** Seven
+    server-forced reconnects at 23 s intervals (a 20 s deadline plus the 3.0 s
+    retry) over 142 s with the banner on screen, and **zero** banner
+    appearances — measured with a `MutationObserver`, not a timer, so a
+    throttled background tab could not hide one. Screenshot taken within 3 s of
+    a reconnect shows the meeting header flush against the top of the content
+    region, with no amber band. The design's premise holds in a real browser.
+  - **(b) A second tab's write lands, and lands narrowly.** 225 ms from click to
+    the first tab's quorum badge changing, and the only refetch the first tab
+    made was `meetingAttendance.byMeeting` — the topic → `pathFilter()` mapping
+    is doing exactly what item 7 asks and nothing wider. (During the gap, see
+    finding 2.)
+  - **(c) The banner goes amber when the stream actually breaks, after exactly
+    the grace window and not before.** Dropping the browser's connectivity while
+    a stream was up produced amber at **t+25 s** — the 20 s deadline the stream
+    was already riding, then the 5 s grace, then the banner — and it cleared
+    within **1 s** of connectivity returning. It never reaches red: `stopped`
+    needs a `TRPCError` or an `event: return`, and a server that is merely gone
+    produces neither, so the client retries every 3.0 s indefinitely and the
+    honest state stays "reconnecting". That is defensible, but it means **there
+    is no elapsed time after which the banner tells an operator to reload**, and
+    a wave-6 reader should decide whether that is the intended ceiling.
+
+- **Wave 5, Task 7 — `supabase/seed.sql`'s ids are not RFC-valid UUIDs, so the
+  seeded database cannot be used to exercise ANY migrated screen.** The
+  placeholders (`bbbb1111-bbbb-bbbb-bbbb-bbbbbbbbbbbb`,
+  `dddd1111-dddd-…`, `11111111-1111-1111-1111-111111111111`, `aaaa1111-…`) have
+  a version nibble outside 1–8 or a variant nibble outside 8–b, and every
+  procedure in this phase validates its ids with `z.string().uuid()`, which
+  Zod 4 enforces to the RFC. `meeting.detail` answers `400 Bad Request`,
+  `Invalid UUID`, for the seeded meeting. Only `town` (`a1b2c3d4-…-7890-abcd-…`,
+  a valid v7) survives. This is why the browser check had to build its own
+  fixture with `gen_random_uuid()`. Nothing is broken in production — the seed
+  is a development artefact — but "run the app against the seed" has been
+  impossible since the first `z.string().uuid()` landed, and nobody had tried.
+
+---
+
+## What wave 6 inherits from wave 5
+
+Written at the wave's close-out (Task 7) so that the next wave's first task reads
+one list rather than reconstructing it from seven task reports.
+
+### Carried forward, in priority order
+
+1. **The batch reentrancy false positive (Task 7 finding 1).** Blocking for the
+   whole phase, not for one screen: with `httpBatchLink` in front of it, every
+   migrated screen that fires two or more queries at once gets all but one
+   refused. Fix it before anything else in wave 6, and fix it by distinguishing
+   NESTED from CONCURRENT rather than by narrowing the flag a third time. The
+   test that would have caught it does not exist in any package: a router test
+   that drives two procedures on ONE context concurrently.
+2. **The two preserved minutes-surface defects, which are one job.** Wave 5,
+   Task 5 said so and it is worth repeating at the top level, because they have
+   the same two readers and the same class — a live defect in what a generated
+   legal record SAYS. `adjournment.adjourned_by` is written as a `person.id` and
+   read as a `board_member.id`, so the formatter's null-fallback makes the
+   generated minutes state that **the presiding officer adjourned the meeting**
+   whenever the clerk did; and `live.tsx`'s minutes re-render posts the LIVE
+   meeting's id rather than the earlier meeting whose minutes were approved, so
+   the request 404s into a swallowed `.catch(() => {})` and **the DRAFT
+   watermark is never removed**. Neither is pinned by any test today.
+3. **The quiet-stream resume gap (Task 7 finding 2).** A write made during the
+   3.0 s bounce is lost, silently, on exactly the streams that have been quiet.
+4. **`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
+   shell, now carrying its first marker. `meeting.byTown` is not a drop-in: it
+   selects no `started_at`, which is the ordering column, and returns every
+   non-cancelled meeting where this needs the single most recently started one.
+5. **`getMutationErrorMessage` has zero production call sites**, and three of
+   its five categories (`validation`, `conflict`, `unknown`) have no reader at
+   all. Wiring them is a UX decision about copy at 24 files' worth of call
+   sites, which is why the transport task did not make it. `errorMessage`'s
+   CONFLICT-verbatim behaviour is the obvious first fold-in.
+6. **An offline device pauses its mutations silently at the form.** The shell's
+   pill states the app-global fact; nothing anywhere renders `isPaused`, so the
+   Save the user just pressed shows a spinner that never resolves. The fix is
+   per-form, not global — which is why a reader of the pill will wrongly assume
+   it was covered.
+
+### For the merge notes: a production bug this wave fixed incidentally
+
+Two clerks pressing "Record Vote" at the same moment could collide on
+`vote_record_unique_per_motion`, and because the old client-side path was
+untransacted, the loser could leave a **partial vote roll** — some members'
+votes written, the rest abandoned, on a record that is the legal minute of the
+vote. `voteRecord.recordForMotion` is one transaction that clears and rewrites
+the roll and computes the outcome inside it, so the collision now aborts the
+whole attempt and the loser is told, instead of half-writing. Not the reason the
+procedure was built, and worth saying out loud in the merge notes because
+nothing in the diff looks like a bug fix.
+
+### What the transport taught that the ADR could not have known
+
+`docs/advisory-resolutions/5.1-realtime-transport.md` is thorough and its
+measurements hold. Four things are true of the SSE transport that it had no way
+to record, because three of them are about the CLIENT half and the fourth is
+about the development topology:
+
+- **The reconnect is not free of application meaning.** The ADR verified that
+  the client resumes with `Last-Event-ID` against a real process kill. What that
+  cannot show is the case where the client HAS no `Last-Event-ID` because the
+  stream delivered nothing — which is the normal state of a meeting in recess,
+  and which turns "resume" into "fresh subscribe" with a 3.0 s hole in it. A
+  resume protocol has to answer what "I have been here before" means for a
+  client that has received nothing, and neither the ADR nor `realtime.ts`'s
+  comment distinguishes the two.
+- **The number that matters to an operator is the GAP, not the deadline.** The
+  ADR sets `SSE_MAX_STREAM_DURATION_MS` from an authorization-staleness
+  argument, which is right. But the observable consequence is a 3000 ms window,
+  twelve times an hour, in which this client is not listening — a figure that
+  comes from `EventSource`'s default retry, not from anything in this codebase,
+  and that the server can change any time it likes by sending a `retry:` field.
+  Nothing currently does.
+- **"Connecting" and "broken" are indistinguishable to the client, forever.** A
+  server that is simply gone produces no `TRPCError` and no `event: return`, so
+  `useSubscription` never leaves `connecting` and the banner never leaves amber.
+  The three-state vocabulary is honest but has no terminal state for the most
+  likely real outage, and no elapsed time at which it tells an operator to
+  reload.
+- **An intermediary can keep a dead stream looking alive.** Measured: with the
+  API killed, a stream direct to it ends at once and a stream through the Vite
+  dev proxy stays open indefinitely. Whatever sits between the browser and the
+  API is part of this transport's failure model, and the ADR — which tested
+  through real nginx, and correctly — does not say that the answer is a property
+  of the proxy rather than of the protocol.
+
+### What item 2 still does not say
+
+Item 2 settles where a rule goes, which guard shape carries it, and that
+board-scoped rules take a required `BoardScope`. Three things it does not
+address, all of which wave 5 hit and worked around locally:
+
+- **It is written one procedure at a time, and the client is not.** Wave 4, Task
+  4 already named a flow spanning two guarded procedures; wave 5 found the
+  transport-level version of the same gap — N procedures on ONE request, sharing
+  ONE context, resolved CONCURRENTLY. Item 2 has nothing to say about what a
+  context may hold that is not safe to share across the calls batched onto it,
+  which is exactly the assumption `bindTenantAccess` got wrong.
+- **It does not cover a SUBSCRIPTION's authorization lifetime as a rule, only as
+  a comment.** `context.ts`'s header states the exposure honestly (evaluated at
+  open, re-evaluated on every forced reconnect, not in between) and
+  `sse-bounds.test.ts` pins the bound. Neither is in item 2, so an author adding
+  the second subscription in wave 6 has no numbered rule telling them the bound
+  is load-bearing rather than a resource knob.
+- **It says nothing about a write whose only client-supplied input is a
+  `boardId` used solely to feed the guard.** Wave 5 threaded that prop into two
+  components that had no `boardId` at all. The pattern is now everywhere in the
+  live screen, the mismatch defence (`assertMatchesAuthorizedBoard`) is what
+  makes it safe, and item 2 mentions the cost in passing without ever making the
+  defence a required half of the pattern.
