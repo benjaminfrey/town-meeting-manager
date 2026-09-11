@@ -2528,6 +2528,18 @@ shape ("`board.detail` leaves out `board_type`"), a marker's existence ("see tha
 citation, which item 1 already tells you not to write for the identical reason) as a claim to verify
 against HEAD — the same standard a Known-gaps bullet has been held to since wave 2.
 
+**Widened again at wave 5, Task 6: a bullet can be contradicted by ANOTHER SECTION OF THIS FILE,
+and the sweep as written cannot see that.** Wave 5, Task 4's Known-gaps bullet 4 said the SSE
+routing seam "has no end-to-end test through the WEB client ... the ROUTING half is not [pinned]".
+It was false on the day it shipped — the reviewer who struck that task's "unautomatable" claim wrote
+the test in the same round, and item 2's "The client half of one stream" section describes it in
+detail ("the split is PINNED, in jsdom, in about forty lines"). It then survived a close-out,
+because every instruction above says to check a bullet against HEAD, and HEAD had not changed: what
+had changed was a different paragraph of this document. **So check each assertion against the rest
+of this document as well as against the tree — if another section narrates the same mechanism, read
+it.** The cheapest form of this is a grep of this file for the symbol a bullet's claim turns on
+(here, `trpc.test.ts`), which would have surfaced the contradiction immediately.
+
 **Wave 5, Task 0 — run now, before any wave-5 code, per this task's own brief ("now, not at the
 end").** Method: walked every Known-gaps bullet and every present-tense status claim in items 2, 9
 and 11 for the specific ASSERTION it makes (not for whether it names a file this task touched — the
@@ -2722,9 +2734,12 @@ introduced:
    `adjourned_by` misattribution, not separately** — both are the same class
    (a live defect in what a generated legal record says) and both have the same
    two readers.
-3. **`ConnectionStatusBar` is still on a Supabase Realtime heartbeat channel**,
-   and this screen still renders it — wave 5, Task 6's, carried forward from
-   Task 4's list unchanged.
+3. ~~**`ConnectionStatusBar` is still on a Supabase Realtime heartbeat
+   channel**, and this screen still renders it — wave 5, Task 6's, carried
+   forward from Task 4's list unchanged.~~ — **closed in wave 5, Task 6**,
+   along with the identically-worded Task 4 bullet it was carried forward
+   from. `live.tsx` renders `LiveStreamStatusBar` now, fed by
+   `useLiveMeetingEvents`'s return value.
 
 ---
 
