@@ -61,11 +61,11 @@
  * ─── Why the writers are not wired here ───────────────────────────────────
  *
  * Task 1 owns the transport; Task 3 owns the live-meeting routers that write
- * these nine tables, and Task 5 owns the screen. `publishRealtimeEvent` is the
+ * these eight tables, and Task 5 owns the screen. `publishRealtimeEvent` is the
  * seam between them. The cost of an application-level publisher rather than a
  * database trigger, stated rather than discovered: **a write that forgets to
  * publish leaves every other device stale, with no error anywhere.** A trigger
- * on the nine tables could not be forgotten and would also cover writes this
+ * on the eight tables could not be forgotten and would also cover writes this
  * process does not make.
  *
  * It was still declined, for two reasons that are about correctness rather
@@ -93,6 +93,26 @@
  * the only occurrence of `phase-e-wave-5-publish` in the repository was the
  * sentence itself. It was written before the check and is now written after
  * it.)
+ *
+ * **That inventory is per-file, and Task 3's new router files need nothing
+ * extra for it to keep working — but read this before reformatting one.**
+ * The scan finds a file's mutations via two regexes tuned to today's
+ * prettier output (`trpc/__tests__/router-wiring.test.ts`'s `PROCEDURE_KEY`
+ * and `TOP_LEVEL_FUNCTION`). Task 3 creates new router files — motion, vote
+ * record, attendance, executive session, guest speaker — that this repo has
+ * never seen; each is picked up automatically the moment it writes one of
+ * these eight tables, because the scan reads every file in
+ * `trpc/routers/`, not a named list. The requirement worth stating plainly:
+ * do not judge the inventory healthy from `scanned.length > 0` or from
+ * "the two named procedures still show up" — that guard only ever proves
+ * the OTHER files still parse. `router-wiring.test.ts` also runs a per-file
+ * check ("every router file that writes a live-meeting table is represented
+ * in the scan") that re-derives, from each file's raw text independent of
+ * those two regexes, whether it writes a live-meeting table at all, and
+ * fails BY FILE NAME if that file's mutations silently dropped out of the
+ * scan. That is the check to trust; if it ever points at one of Task 3's new
+ * files, the fix is in `PROCEDURE_KEY`/`TOP_LEVEL_FUNCTION`, not in this
+ * paragraph.
  *
  * If Task 3 finds the per-mutation call unwieldy across its thirty-five write
  * sites, the trigger is the documented escalation and this paragraph is the

@@ -231,6 +231,35 @@ describe("router wiring", () => {
  * found a non-empty set, and it names two procedures it must always find.
  * Both exist because a scan that silently matches nothing is the exact shape
  * `docs/superpowers/plans/phase-e-conventions.md` item 13 catalogues.
+ *
+ * ─── The guard above is per FILE, not per repository — fix round 2 ────────
+ *
+ * `scanned.length > 0` and the two named procedures protect exactly the two
+ * files those procedures happen to live in (`agenda-item.ts`, `meeting.ts`).
+ * They say NOTHING about a third file. If `PROCEDURE_KEY` or
+ * `TOP_LEVEL_FUNCTION` stops matching in only THAT file — a reformat, a
+ * differently-indented mutation, a helper renamed in a way the regex no
+ * longer sees — `scanRouterFile` silently returns `[]` for it. `scanned`
+ * stays non-empty (the other files still contribute) and the two named
+ * procedures are untouched, so the guard above stays green while that file's
+ * mutations quietly vanish from both `scanned` and the ledger check below —
+ * which then compares two lists BOTH missing the same entries, and passes
+ * for the wrong reason.
+ *
+ * This matters concretely for Task 3: it creates new router files (motion,
+ * vote record, attendance, executive session, guest speaker) that this file
+ * has never seen and names no canary for. The fix is not "add more named
+ * procedures" — that only ever protects files someone remembered to name.
+ * `"every router file that writes a live-meeting table is represented in the
+ * scan"` below is the mechanical version: for EVERY file in `ROUTERS_DIR`,
+ * it re-derives — from the file's raw text, independent of `PROCEDURE_KEY`/
+ * `TOP_LEVEL_FUNCTION` — whether that file writes a live-meeting table at
+ * all, and if so, requires `scanned` to contain at least one mutation
+ * attributed to that file's router prefix. A new router file Task 3 adds is
+ * covered automatically the moment it writes a live-meeting table; nothing
+ * needs to be added to this test for it. `realtime/events.ts`'s header
+ * states this same requirement for whoever opens that file looking for
+ * `publishRealtimeEvent` instead of this one.
  */
 const ROUTERS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "routers");
 
@@ -281,13 +310,25 @@ const TOP_LEVEL_FUNCTION = /^(?:export\s+)?(?:async\s+)?function\*?\s+([A-Za-z0-
 /** A procedure key inside a `router({ … })` literal, at prettier's two-space indent. */
 const PROCEDURE_KEY =
   /^ {2}([A-Za-z][A-Za-z0-9_]*): (?:protectedProcedure|publicProcedure|subscriptionProcedure)\b/gm;
+/**
+ * A router file's own `export const xRouter = router({` declaration. Shared
+ * between `scanRouterFile` (which needs the body it opens) and the per-file
+ * vacuity guard below (which only needs the prefix) — one regex, so the two
+ * can never disagree about what counts as a router file.
+ */
+const ROUTER_EXPORT = /^export const ([A-Za-z0-9_]+)Router = router\(\{$/m;
 
 function liveTablesWrittenIn(text: string): string[] {
   return [...text.matchAll(LIVE_TABLE_WRITE)].map((match) => match[1]!.toLowerCase());
 }
 
+/** The router prefix a file's mutations would be attributed under, or `null`. */
+function routerPrefixOf(source: string): string | null {
+  return ROUTER_EXPORT.exec(source)?.[1] ?? null;
+}
+
 function scanRouterFile(source: string): ScannedMutation[] {
-  const routerMatch = /^export const ([A-Za-z0-9_]+)Router = router\(\{$/m.exec(source);
+  const routerMatch = ROUTER_EXPORT.exec(source);
   if (!routerMatch) return [];
   const prefix = routerMatch[1]!;
   const bodyStart = routerMatch.index + routerMatch[0].length;
@@ -359,18 +400,88 @@ describe("the live-meeting publish inventory", () => {
     }
   });
 
+  it("every router file that writes a live-meeting table is represented in the scan", () => {
+    // The mechanical version of the guard above — see this describe block's
+    // header, "The guard above is per FILE, not per repository". Named
+    // canaries only ever protect the specific files someone remembered to
+    // name; this protects every file, including ones that do not exist yet.
+    //
+    // For each router file, independently of PROCEDURE_KEY/TOP_LEVEL_FUNCTION
+    // (the machinery this very check exists to distrust), re-derive from the
+    // raw text whether the file writes a live-meeting table at all. If it
+    // does, `scanned` must contain at least one mutation attributed to that
+    // file's router prefix — proving `scanRouterFile` actually saw into this
+    // file, not just into the repository as a whole.
+    const files = readdirSync(ROUTERS_DIR).filter((file) => file.endsWith(".ts"));
+    expect(files.length).toBeGreaterThan(0);
+
+    for (const file of files) {
+      const source = readFileSync(join(ROUTERS_DIR, file), "utf8");
+      if (liveTablesWrittenIn(source).length === 0) continue; // this file touches no live table
+
+      const prefix = routerPrefixOf(source);
+      expect(
+        prefix,
+        `${file} writes a live-meeting table but has no "export const …Router = router({" ` +
+          `declaration the scan can find`,
+      ).not.toBeNull();
+
+      const attributed = scanned.some((mutation) => mutation.path.startsWith(`${prefix}.`));
+      expect(
+        attributed,
+        `${file} writes a live-meeting table (matched directly against the raw file text) but ` +
+          `the scan attributed NO mutation to "${prefix}." — a formatting or structural change ` +
+          `likely broke PROCEDURE_KEY or TOP_LEVEL_FUNCTION for this file specifically, and it is ` +
+          `now silently unprotected. See this file's header before adjusting either regex.`,
+      ).toBe(true);
+    }
+  });
+
   it("every live-meeting write mutation either publishes or is on the ledger", () => {
-    const silent = scanned.filter((mutation) => !mutation.publishes).map((m) => m.path);
-    const publishing = scanned.filter((mutation) => mutation.publishes).map((m) => m.path);
+    // Two directional checks rather than one list-equality assertion, so
+    // each is independently reachable and produces its own message — fix
+    // round 2: the equality form below (now deleted) always failed on the
+    // SAME condition as the "stale ledger entry" check that followed it, so
+    // the second assertion's own message could never fire; it was dead code
+    // that happened to look like a check.
+    //   const silent = scanned.filter(...).map(...);
+    //   expect(silent, message).toEqual([...AWAITING_PUBLISH].sort());
+    //   const stale = publishing.filter((path) => AWAITING_PUBLISH.includes(path));
+    //   expect(stale, "...").toEqual([]); // unreachable: `silent` and
+    //     // `publishing` partition `scanned`, so whenever the equality above
+    //     // holds, `stale` is always `[]` by construction — and whenever it
+    //     // doesn't hold, the throw above it means this line never runs.
+    const silentPaths = new Set(
+      scanned.filter((mutation) => !mutation.publishes).map((m) => m.path),
+    );
+    const publishingPaths = new Set(
+      scanned.filter((mutation) => mutation.publishes).map((m) => m.path),
+    );
 
-    // A new live-meeting mutation that forgets `publishRealtimeEvent` lands
-    // here by name. Adding it to `AWAITING_PUBLISH` to get green is a
+    // Direction 1 — the actual silent-failure mode this test exists to
+    // catch: a live-meeting mutation that writes without publishing and is
+    // not on the ledger. Adding it to `AWAITING_PUBLISH` to get green is a
     // deliberate, reviewable act; forgetting is not an option.
-    const message = "a live-meeting mutation writes without publishing — see this file's header";
-    expect(silent, message).toEqual([...AWAITING_PUBLISH].sort());
+    const undeclaredSilence = [...silentPaths]
+      .filter((path) => !AWAITING_PUBLISH.includes(path))
+      .sort();
+    expect(
+      undeclaredSilence,
+      "a live-meeting mutation writes without publishing and is not on AWAITING_PUBLISH — see this file's header",
+    ).toEqual([]);
 
-    // The other direction, so the ledger empties as Task 3 wires each one.
-    const stale = publishing.filter((path) => AWAITING_PUBLISH.includes(path));
-    expect(stale, "these publish now and must come off AWAITING_PUBLISH").toEqual([]);
+    // Direction 2 — a ledger entry that no longer describes reality: either
+    // the mutation now publishes (Task 3 discharged it and forgot to remove
+    // the entry) or it no longer appears in the scan at all (renamed,
+    // removed). Checked against `silentPaths` directly rather than derived
+    // from direction 1's result, so this can fail — and report by name — on
+    // its own, independently of whether direction 1 passed.
+    const staleLedgerEntries = AWAITING_PUBLISH.filter((path) => !silentPaths.has(path)).sort();
+    expect(
+      staleLedgerEntries,
+      "these AWAITING_PUBLISH entries no longer match a silent mutation — remove the ones that " +
+        `now call publishRealtimeEvent (currently publishing: ${[...publishingPaths].sort().join(", ")}); ` +
+        "investigate the rest (renamed or removed?)",
+    ).toEqual([]);
   });
 });
