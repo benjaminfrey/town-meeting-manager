@@ -56,7 +56,7 @@
  * procedures, deliberately:
  *
  *   - they are authorized by different codes. `insert` is A1
- *     (`schedule_meeting`, via `requireBoardPermission("A1", …)`);
+ *     (`create_meeting`, via `requireBoardPermission("A1", …)`);
  *     `instantiateFromTemplate` is A2 (`edit_agenda`). Folding them into one
  *     procedure would need a rule spanning both codes — one that does not
  *     exist in `rules.ts` — and would change who may schedule a meeting: a

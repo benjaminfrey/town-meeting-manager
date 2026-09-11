@@ -1821,6 +1821,13 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   `pathfilter-pin-coverage.test.ts`'s own `stripComments` over the same file list, exactly as the
   check itself does; walked that way at `8cbf749` it answers **39**, unchanged from the whole-branch
   round's own last figure, because the one new mention this task added is comment-only.
+  **Re-measured at `24bfcd4` (wave 4, Task 3): raw 44, stripped 41.** The two new comment-stripped
+  writers are `components/meetings/ExhibitUploader.tsx` and `components/meetings/ExhibitRow.tsx`,
+  both of which gained `trpc.exhibit.pathFilter()` when the agenda builder's exhibit read moved;
+  the extra raw-only file is `components/meetings/agenda-types.ts`, whose header names the
+  `RouterOutputs`-derived types in prose. Zero violations — the check passes at that commit, so the
+  five writer files this task added or changed each have at least one test importing them and
+  asserting an invalidation.
   **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
   not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
   file's new header explains that the four template writers' existing `trpc.agendaTemplate.pathFilter()`
@@ -1835,16 +1842,10 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   Task 4 also added a comment-only false positive to item 11's OTHER grep: `CreateMeetingDialog.tsx`'s
   new header cites `lib/supabase.ts` in prose while importing nothing from it, so
   `grep -rl "lib/supabase\|useSupabase"` counts 34 non-test files where 33 really reach the client.
-  **Re-measured at `24bfcd4` (wave 4, Task 3): raw 44, stripped 41.** The two new comment-stripped
-  writers are `components/meetings/ExhibitUploader.tsx` and `components/meetings/ExhibitRow.tsx`,
-  both of which gained `trpc.exhibit.pathFilter()` when the agenda builder's exhibit read moved;
-  the extra raw-only file is `components/meetings/agenda-types.ts`, whose header names the
-  `RouterOutputs`-derived types in prose. Zero violations — the check passes at that commit, so the
-  five writer files this task added or changed each have at least one test importing them and
-  asserting an invalidation.
-  The three files the gap between the pair accounts for are `routes/people.tsx`, `test/trpc.ts`, and
-  (as of this task) `routes/boards.$boardId.tsx` — this is the durable claim here, and it is a claim
-  about which FILES make up the gap, not a number that stays put; quote the check's own
+  The gap between the pair now accounts for FOUR files, not three — `routes/people.tsx`,
+  `test/trpc.ts`, `routes/boards.$boardId.tsx` and, as of `cd10b54` (wave 4, Task 4),
+  `routes/templates.tsx` — this is the durable claim here, and it is a claim about which FILES make
+  up the gap, not a number that stays put; quote the check's own
   `findUnpinnedWriters(SRC_DIR).writerCount` (and, for the raw/stripped gap specifically, re-run the
   comment-stripping walk described above) rather than trust any of these numbers to still be current.
   Validated against `git archive` snapshots of three real commits,
@@ -2279,7 +2280,7 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
 - **Wave 4, Task 4 — a client flow that spans TWO guarded procedures, which item 2 does not cover
   and waves 5 and 6 both inherit.** Every write this document discusses is one procedure with one
   guard. `CreateMeetingDialog`'s "create from template" is two: `meeting.insert` (A1,
-  `schedule_meeting`) then `agendaItem.instantiateFromTemplate` (A2, `edit_agenda`), and the second
+  `create_meeting`) then `agendaItem.instantiateFromTemplate` (A2, `edit_agenda`), and the second
   runs after the first has committed. Three things follow that a wave-5 author writing a
   multi-step live-meeting flow should not re-derive:
   - **Do not fold them to get atomicity.** One procedure spanning two codes needs a rule that does

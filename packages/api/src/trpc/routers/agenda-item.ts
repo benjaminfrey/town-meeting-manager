@@ -768,12 +768,12 @@ async function loadTemplateSections(
  * migration's call.
  *
  * One filter is NOT preserved character-for-character, and is stated here
- * rather than left for a diff to find: the client
- * (`lib/meeting-helpers.ts:100-140`) applies `.eq("board_id", boardId)` only
- * to its FIRST query (`adjourned`/`minutes_draft` meetings); its SECOND query
- * — the merge step that re-fetches reviewed meetings by id
- * (`meeting-helpers.ts:134-140`, `.in("id", reviewedMeetingIds)`) — carries
- * no board filter at all. The single query above applies
+ * rather than left for a diff to find: the client's `autoPopulateMinutesApproval`
+ * (`lib/meeting-helpers.ts`, deleted in wave 4 Task 4, `cd10b54`) applied
+ * `.eq("board_id", boardId)` only to its FIRST query (the `adjourned`/
+ * `minutes_draft` meetings query); its SECOND query — the merge step that
+ * re-fetches reviewed meetings by id (`.in("id", reviewedMeetingIds)`) —
+ * carried no board filter at all. The single query above applies
  * `WHERE m.board_id = ${args.boardId}` to BOTH halves of what the client did
  * as two separate queries, because here they are one `WHERE` clause covering
  * one `LEFT JOIN`. This only diverges under denormalisation drift — a
