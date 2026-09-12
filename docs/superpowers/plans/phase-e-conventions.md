@@ -4024,6 +4024,24 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
     is no elapsed time after which the banner tells an operator to reload**, and
     a wave-6 reader should decide whether that is the intended ceiling.
 
+  **Decided at wave 6, Task 0, rather than left for a "wave-6 reader" a second
+  time.** Re-checked against HEAD: `useLiveMeetingEvents.ts`'s `stopped` state
+  is still reachable only from a real `TRPCError` or `event: return` (line
+  384's `setStatus("stopped")` and its own doc comment, "`"idle"` is also
+  `"stopped"`, and is not reachable today"), and nothing in the file adds a
+  time-based ceiling on top of that. **This outlives Phase E.** Giving
+  "reconnecting" a terminal timeout is a retry/backoff policy decision — how
+  long is long enough, whether it should differ for a public portal kiosk
+  versus a clerk's laptop, whether the server should start sending
+  `EventSource`'s `retry:` field at all (`routers/realtime.ts`'s header already
+  declines to, for reasons orthogonal to this) — and none of wave 6's seven
+  tasks (`minutesDocument`, `futureItem`/`meeting.liveByTown`, the minutes and
+  review screens, the ten strays, the deletion, close-out) touches the live
+  transport at all. Recording the decision here, rather than repeating "a
+  wave-6 reader should decide" a second time with no wave-6 task positioned to
+  decide it, is what stops this from becoming a third wave's carry-over by
+  default.
+
 - **Wave 5, Task 7 — `supabase/seed.sql`'s ids are not RFC-valid UUIDs, so the
   seeded database cannot be used to exercise ANY migrated screen.** The
   placeholders (`bbbb1111-bbbb-bbbb-bbbb-bbbbbbbbbbbb`,
@@ -4142,12 +4160,36 @@ one list rather than reconstructing it from seven task reports.
    its five categories (`validation`, `conflict`, `unknown`) have no reader at
    all. Wiring them is a UX decision about copy at 24 files' worth of call
    sites, which is why the transport task did not make it. `errorMessage`'s
-   CONFLICT-verbatim behaviour is the obvious first fold-in.
+   CONFLICT-verbatim behaviour is the obvious first fold-in. **Decided at wave
+   6, Task 0, re-verified against HEAD rather than carried forward unchanged a
+   second wave** (`git grep -n "getMutationErrorMessage" -- packages/web/src`
+   still answers only the definition, its own doc comment and
+   `trpc.test.ts` — zero production callers): **this outlives Phase E.** None
+   of wave 6's seven tasks (the `minutesDocument`/`futureItem`/`meeting.liveByTown`
+   reads, the minutes and review screens, the ten strays, or the deletion)
+   touch mutation error copy, and picking which of `validation`/`conflict`/`unknown`
+   gets its own wording at which of the 24 call sites is a product decision
+   about USER-FACING TEXT, not a migration-completeness question this phase's
+   definition of done (`lib/supabase.ts` deleted) turns on. Recording it here,
+   explicitly out of scope, is what stops a third wave from inheriting it
+   silently — the alternative is exactly the drift item 14 exists to catch,
+   just aimed at a decision instead of a claim.
 6. **An offline device pauses its mutations silently at the form.** The shell's
    pill states the app-global fact; nothing anywhere renders `isPaused`, so the
    Save the user just pressed shows a spinner that never resolves. The fix is
    per-form, not global — which is why a reader of the pill will wrongly assume
-   it was covered.
+   it was covered. **Decided at wave 6, Task 0, re-verified against HEAD**
+   (`git grep -n "isPaused" -- packages/web/src` answers **nothing at all** —
+   not a production reader, not a test, not a comment): **this also outlives
+   Phase E.** Closing it well means a per-form design for "queued, not failed"
+   — a different affordance from the error and loading states item 5 of THIS
+   document already requires, not a variant of them — and no wave 6 task
+   proposes one. Wave 6 adds more mutations behind more forms (the minutes and
+   review screens, the ten strays' writes), each of which inherits this gap
+   unchanged; none of them is positioned to invent the pattern the other ~70
+   already-migrated forms would also need. Recorded as a standing product gap
+   for whichever initiative owns offline UX after Phase E, not reopened as a
+   wave-6 task.
 
 ### For the merge notes: a production bug this wave fixed incidentally
 
@@ -4198,7 +4240,10 @@ about the development topology:
   `useSubscription` never leaves `connecting` and the banner never leaves amber.
   The three-state vocabulary is honest but has no terminal state for the most
   likely real outage, and no elapsed time at which it tells an operator to
-  reload.
+  reload. **Decided at wave 6, Task 0** (see the "Wave 5, Task 7 — the browser
+  check" finding (c) above for the full reasoning): this outlives Phase E — no
+  wave 6 task touches the live transport, and a timeout ceiling is a
+  retry/backoff policy decision, not a migration-completeness one.
 - **An intermediary can keep a dead stream looking alive.** Measured: with the
   API killed, a stream direct to it ends at once and a stream through the Vite
   dev proxy stays open indefinitely. Whatever sits between the browser and the
