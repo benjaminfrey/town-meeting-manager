@@ -16,13 +16,19 @@
  * `assertCanInsertUserAccount` rather than inventing a new rule). The token is
  * now `gen_random_uuid()`, generated IN THE DATABASE — this dialog no longer
  * mints its own with `crypto.randomUUID()` in the browser.
+ *
+ * Phase E, wave 6, Task 5 closes the READ this file's header never mentioned:
+ * a live `person` email-uniqueness check behind `useSupabase()`, with no
+ * `TODO(phase-e-wave-*)` marker, in a file whose own comments narrated every
+ * WRITE as migrated. It is `trpc.person.emailExists` now — the procedure that
+ * was `boardMember.personEmailExists` until this task moved it to the router
+ * whose noun it reads (conventions item 1); see its doc comment.
  */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { Loader2, ChevronLeft, IdCard, UserCog } from "lucide-react";
-import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc, errorMessage } from "@/lib/trpc";
@@ -54,28 +60,21 @@ interface AddPersonDialogProps {
 }
 
 export function AddPersonDialog({ townId, open, onOpenChange }: AddPersonDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2>(1);
   const [mode, setMode] = useState<"choose" | "staff">("choose");
   const personForm = useWizardForm(NewPersonSchema, INITIAL_PERSON);
 
   const email = personForm.values.email.toLowerCase().trim();
-  const { data: emailRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), "emailCheck", email],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("person")
-        .select("id")
-        .eq("town_id", townId)
-        .eq("email", email)
-        .limit(1);
-      if (error) throw error;
-      return data ?? [];
-    },
+  // No `excludePersonId`: this form creates a brand-new person, so there is no
+  // id to exclude (that argument is `EditPersonDialog`'s). The `town_id`
+  // filter the raw query carried is gone because `ctx.withTenant` IS that
+  // filter — the same predicate, moved from a value the browser supplied to
+  // one the session establishes.
+  const { data: emailExists = false } = useQuery({
+    ...trpc.person.emailExists.queryOptions({ email }),
     enabled: !!townId && !!email && email.includes("@"),
   });
-  const emailExists = emailRows.length > 0;
 
   function reset() {
     setStep(1);

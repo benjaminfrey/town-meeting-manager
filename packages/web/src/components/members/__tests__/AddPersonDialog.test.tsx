@@ -14,15 +14,16 @@
  * pattern this copies. Only `globalThis.fetch` is replaced, by
  * `installTRPCFetchStub`. `invitation` moved onto `trpc.invitation.insert` in
  * Phase E wave 4, Task 0 — stubbed below like `person.insert`/
- * `person.insertStaffAccount`. `@/lib/supabase` is still mocked, narrowly:
- * only the live email-uniqueness check reads through it now.
+ * `person.insertStaffAccount`. The narrow `@/hooks/useSupabase` mock that
+ * covered the live email-uniqueness check is gone as of wave 6, Task 5 — that
+ * read is `trpc.person.emailExists` now.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterInputs } from "@/lib/trpc";
 
 // ─── Mock the form to be valid with fixed values ──────────────────────
 
@@ -35,21 +36,6 @@ vi.mock("@/hooks/useWizardForm", () => ({
     setValues: vi.fn(),
     handleBlur: vi.fn(),
     validate: vi.fn(),
-  }),
-}));
-
-// ─── Mock Supabase (only the email-uniqueness check still uses it) ─────
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: () => {
-      const chain: Record<string, unknown> = {
-        select: () => chain,
-        eq: () => chain,
-        limit: () => Promise.resolve({ data: [], error: null }), // emailExists → false
-      };
-      return chain;
-    },
   }),
 }));
 
@@ -82,9 +68,13 @@ const queryClient = setupAppQueryClient();
  * with no check at all. Both are real tRPC procedures with real admin gates
  * now, so both refusals are reachable, and neither had a test.
  */
-const server = { personInsertRejects: false, staffAccountRejects: false };
+const server = { personInsertRejects: false, staffAccountRejects: false, emailTaken: false };
 
 const stub = installTRPCFetchStub({
+  "person.emailExists": (input) => {
+    received.emailExists = input;
+    return server.emailTaken;
+  },
   "person.insert": (input) => {
     if (server.personInsertRejects) trpcTestError("FORBIDDEN");
     return { id: "new-person", name: input.name, email: input.email };
@@ -99,6 +89,8 @@ const stub = installTRPCFetchStub({
   },
   "invitation.insert": () => ({ id: "new-invitation" }),
 });
+
+const received: { emailExists?: RouterInputs["person"]["emailExists"] } = {};
 
 const props = { townId: "town-1", open: true, onOpenChange: vi.fn() };
 
@@ -128,7 +120,9 @@ describe("AddPersonDialog", () => {
     await user.click(screen.getByText("Directory only"));
 
     await waitFor(() => expect(stub.countFor("person.insert")).toBe(1));
-    expect(stub.calls[0]?.inputs["0"]).toMatchObject({
+    // Not `calls[0]` — `person.emailExists` fires while the form is typed,
+    // before this write.
+    expect(stub.calls.find((c) => c.paths.includes("person.insert"))?.inputs["0"]).toMatchObject({
       name: "Jane Doe",
       email: "jane@example.com",
     });
@@ -219,5 +213,19 @@ describe("AddPersonDialog", () => {
     } finally {
       server.staffAccountRejects = false;
     }
+  });
+
+  it("checks the typed email for uniqueness, with no excludePersonId", async () => {
+    // Wave 6, Task 5 — this was the file's last raw Supabase call, unmarked.
+    // `excludePersonId` is `EditPersonDialog`'s; a create form has no id yet.
+    renderDialog();
+    await waitFor(() => expect(stub.countFor("person.emailExists")).toBeGreaterThan(0));
+    expect(received.emailExists).toEqual({ email: "jane@example.com" });
+  });
+
+  it("warns when the email is already used in the town", async () => {
+    server.emailTaken = true;
+    renderDialog();
+    expect(await screen.findByText(/a person with this email already exists/i)).toBeInTheDocument();
   });
 });

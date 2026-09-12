@@ -7,27 +7,18 @@
  * `installTRPCFetchStub`. Verified by mutation: deleting either
  * `queryClient.invalidateQueries(...)` line from `EditPersonDialog.tsx`'s
  * `onSuccess` turns the matching test below red.
+ *
+ * Wave 6, Task 5: the narrow `@/hooks/useSupabase` mock for the
+ * email-uniqueness check is gone — that read is `trpc.person.emailExists`, and
+ * it is the reason that procedure grew an `excludePersonId` argument.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub } from "@/test/trpc";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterInputs } from "@/lib/trpc";
 import { queryKeys } from "@/lib/queryKeys";
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: () => {
-      const chain: Record<string, unknown> = {
-        select: () => chain,
-        eq: () => chain,
-        neq: () => Promise.resolve({ data: [], error: null }), // emailTaken → false
-      };
-      return chain;
-    },
-  }),
-}));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -39,7 +30,14 @@ const queryClient = setupAppQueryClient();
 // list), so the dialog's CONFLICT-specific message branch is not exercised
 // here. Covered instead at the API layer, where the real constraint fires —
 // `person.test.ts`'s "answers CONFLICT when renaming..." case.
+const server = { emailTaken: false };
+const received: { emailExists?: RouterInputs["person"]["emailExists"] } = {};
+
 const stub = installTRPCFetchStub({
+  "person.emailExists": (input) => {
+    received.emailExists = input;
+    return server.emailTaken;
+  },
   "person.update": (input) => ({ id: input.personId, name: input.name, email: input.email }),
 });
 
@@ -53,6 +51,11 @@ function renderDialog() {
 }
 
 describe("EditPersonDialog", () => {
+  beforeEach(() => {
+    server.emailTaken = false;
+    received.emailExists = undefined;
+  });
+
   it("submits the edited name and email through trpc.person.update", async () => {
     const { user } = renderDialog();
     const nameInput = screen.getByDisplayValue("Original Name");
@@ -77,5 +80,33 @@ describe("EditPersonDialog", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(legacyKey)?.isInvalidated).toBe(true));
     await waitFor(() => expect(queryClient.getQueryState(trpcKey)?.isInvalidated).toBe(true));
+  });
+
+  it("excludes the person's own id when checking a changed email", async () => {
+    // Wave 6, Task 5 — the file's last raw Supabase call, unmarked. The
+    // `.neq("id", person.id)` it replaces is now `excludePersonId`, without
+    // which editing anything else about a person would report their OWN email
+    // as taken the moment the check ran.
+    const { user } = renderDialog();
+    const emailInput = screen.getByDisplayValue("original@example.test");
+    await user.clear(emailInput);
+    await user.type(emailInput, "new@example.test");
+
+    await waitFor(() => expect(stub.countFor("person.emailExists")).toBeGreaterThan(0));
+    expect(received.emailExists).toEqual({
+      email: "new@example.test",
+      excludePersonId: "p1",
+    });
+  });
+
+  it("blocks the save when another person already uses the email", async () => {
+    server.emailTaken = true;
+    const { user } = renderDialog();
+    const emailInput = screen.getByDisplayValue("original@example.test");
+    await user.clear(emailInput);
+    await user.type(emailInput, "taken@example.test");
+
+    expect(await screen.findByText(/another person already uses this email/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
   });
 });

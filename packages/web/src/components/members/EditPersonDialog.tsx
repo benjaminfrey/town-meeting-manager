@@ -5,13 +5,18 @@
  * for the gov_title, which lives on the user_account). Gated to admins (T2);
  * the server's own `assertCanUpdatePerson` (Phase E, wave 1, Task 3,
  * `trpc.person.update`) enforces it too now, not just the UI gate.
+ *
+ * Phase E, wave 6, Task 5 closes the READ — a live `person` email-uniqueness
+ * check behind `useSupabase()`, unmarked, in a file whose header narrated only
+ * the write. `trpc.person.emailExists` carries an `excludePersonId` argument
+ * added for exactly this form: a person keeping their own email must not be
+ * told it is taken.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
-import { useSupabase } from "@/hooks/useSupabase";
 import { useWizardForm } from "@/hooks/useWizardForm";
 import { queryKeys } from "@/lib/queryKeys";
 import { trpc } from "@/lib/trpc";
@@ -41,7 +46,6 @@ interface EditPersonDialogProps {
 }
 
 export function EditPersonDialog({ person, townId, open, onOpenChange }: EditPersonDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const form = useWizardForm(EditPersonSchema, {
     name: person.name,
@@ -49,22 +53,14 @@ export function EditPersonDialog({ person, townId, open, onOpenChange }: EditPer
   });
 
   const email = form.values.email.toLowerCase().trim();
-  const { data: dupRows = [] } = useQuery({
-    queryKey: [...queryKeys.persons.byTown(townId), "emailCheck", email, person.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("person")
-        .select("id")
-        .eq("town_id", townId)
-        .eq("email", email)
-        .neq("id", person.id)
-        .limit(1);
-      if (error) throw error;
-      return data ?? [];
-    },
+  // `excludePersonId` is this form's `.neq("id", person.id)`. The `enabled`
+  // guard still skips the check when the address is unchanged, so the
+  // exclusion is belt-and-braces for the case where a user types away from
+  // and back to their own email within one session.
+  const { data: emailTaken = false } = useQuery({
+    ...trpc.person.emailExists.queryOptions({ email, excludePersonId: person.id }),
     enabled: !!townId && !!email && email.includes("@") && email !== person.email.toLowerCase(),
   });
-  const emailTaken = dupRows.length > 0;
 
   const save = useMutation(
     trpc.person.update.mutationOptions({
