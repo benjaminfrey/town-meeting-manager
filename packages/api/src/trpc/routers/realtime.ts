@@ -70,15 +70,50 @@
  * stream. See `context.ts`'s "How long a context lives" for the general
  * answer, which covers a future subscription that does need a code.
  *
+ * ─── Why this stream sends no `retry:` field ──────────────────────────────
+ *
+ * Decided in wave 5, Task 7's fix round, alongside the handshake event, and
+ * recorded because the browser check raised it as an open question: the gap
+ * between a server-forced reconnect and the client coming back is **3000 ms,
+ * every time** (measured `3000, 3002, 3002, 3003` across four deadlines),
+ * and that number comes from the browser's default `EventSource` reconnection
+ * time, not from anything here. A server CAN set it, with a `retry:` field.
+ * This one does not, for three reasons in decreasing order of weight:
+ *
+ *   1. **The gap is no longer lossy.** That was the reason to care. With the
+ *      handshake event below, a reconnect after a quiet stream resumes and
+ *      catches up like any other, so what `retry:` tunes is how long the
+ *      screen lags another device's write after a routine bounce — not
+ *      whether it ever learns about it.
+ *   2. **One number cannot serve the two things it sets.** `EventSource`
+ *      applies `retry:` as a FIXED interval with no backoff and no ceiling,
+ *      so the same value is both "how fast a healthy stream comes back" and
+ *      "how hard every client hammers a server that is down". Those pull in
+ *      opposite directions. 3000 ms is a defensible middle, and a client-side
+ *      retry POLICY — which is what the "connecting and broken are
+ *      indistinguishable forever" question in the conventions doc actually
+ *      needs — is not expressible as a `retry:` field at all. Whoever answers
+ *      that question owns this one with it.
+ *   3. **tRPC's producer has no option for it**, and emits only
+ *      `event:`/`data:`/`id:`/`:` comment frames (read directly out of
+ *      `@trpc/server`'s bundled `sseStreamProducer`). Sending one would mean
+ *      wrapping every SSE response in a Fastify `onSend` transform — new
+ *      transport machinery, to set a value to roughly what it already is.
+ *
+ * The residual, stated rather than left to be discovered: the default is
+ * implementation-defined, so a browser that picks something much larger than
+ * 3000 ms would lag correspondingly longer after each bounce. It would still
+ * catch up.
+ *
  * ─── Exactly one transaction, for the whole stream ────────────────────────
  *
  * `ctx.withTenant` is called once, at subscribe time, and never again. The
  * events carry no payload (`realtime/events.ts`), so there is nothing per
  * event to read; and one transaction per event on a stream that bursts during
  * a roll-call vote would take a pooled connection per event for no purpose.
- * It is also what makes `bindTenantAccess`'s `inTransaction` guard
- * unreachable here — the hazard is two OVERLAPPING calls, and there is only
- * one call. `__tests__/realtime.test.ts` counts it.
+ * It is also what makes `bindTenantAccess`'s reentrancy guard unreachable here
+ * — the hazard is a NESTED call, and there is only one call.
+ * `__tests__/realtime.test.ts` counts it.
  */
 
 import { z } from "zod";
@@ -122,19 +157,42 @@ import { LIVE_MEETING_TOPICS, type LiveMeetingTopic } from "../../realtime/event
  * (`docs/advisory-resolutions/5.1-realtime-transport.md`), so a schema without
  * the field strips it during parsing and the resume handshake binds to
  * nothing. What this procedure does with it is below.
+ *
+ * It arrives by two routes and tRPC merges both into this one field: the
+ * `Last-Event-ID` REQUEST HEADER, which is what a browser `EventSource` sends
+ * when it reconnects on its own, and a `lastEventId` query parameter. Verified
+ * in `@trpc/server`'s bundled `resolveResponse`, which reads the header first
+ * and the search param second. The header is the path that matters here — see
+ * "The handshake event" below.
  */
 const onMeetingChangeInput = z.object({
   meetingId: z.uuid(),
   lastEventId: z.string().nullish(),
 });
 
+/**
+ * One event's payload. `topic: null` is the RESUME HANDSHAKE and nothing else.
+ *
+ * See "The handshake event" in `onMeetingChange` below for why a stream has to
+ * emit an event before it has anything to say. The client
+ * (`hooks/useLiveMeetingEvents.ts`) ignores a `null` topic; it is not a
+ * `LiveMeetingTopic` and is deliberately not expressible as one, so the
+ * exhaustive `Record<LiveMeetingTopic, …>` mapping over there cannot silently
+ * acquire a meaningless entry.
+ */
+export interface MeetingChangeEvent {
+  readonly topic: LiveMeetingTopic | null;
+}
+
 export const realtimeRouter = router({
   /**
    * Tell one client which of a live meeting's reads have gone stale.
    *
-   * Yields `{ topic }` — a member of `LIVE_MEETING_TOPICS` — and nothing else.
-   * The client maps a topic to the query keys it invalidates; the server does
-   * not know or care which those are.
+   * Yields `{ topic }` — a member of `LIVE_MEETING_TOPICS` — and nothing else,
+   * with ONE exception: the first event on every connection carries
+   * `topic: null` and is the resume handshake. See "The handshake event" in
+   * the resolver. The client maps a topic to the query keys it invalidates;
+   * the server does not know or care which those are.
    */
   onMeetingChange: subscriptionProcedure.input(onMeetingChangeInput).subscription(async function* ({
     ctx,
@@ -196,9 +254,44 @@ export const realtimeRouter = router({
     // reconnects. `Number("")` is 0 and `Number("nope")` is NaN, so anything
     // unparseable falls back to 0 — a client-supplied id may be any string,
     // and this one only has to be unique within the stream.
-    const resumedFrom = Number(input.lastEventId ?? "");
+    //
+    // `lastEventId == null` is kept OUT of `Number()` deliberately: `Number("")`
+    // is 0, not NaN, so the old `Number(input.lastEventId ?? "")` made a FIRST
+    // connection start at 1 while claiming in this comment to start at 0.
+    // Cosmetic — ids only have to be unique within a stream — but the comment
+    // and the code now agree, and the handshake id a fresh stream emits is 0.
     const resuming = input.lastEventId != null;
+    const resumedFrom = resuming ? Number(input.lastEventId) : Number.NaN;
     let sequence = Number.isFinite(resumedFrom) ? resumedFrom + 1 : 0;
+
+    // ─── The handshake event ───────────────────────────────────────────
+    //
+    // **A resume protocol has to answer what "I have been here before" means
+    // for a client that has received nothing, and until wave 5, Task 7 this
+    // one did not.** The gate below is `input.lastEventId != null`, which is
+    // the right question; the defect was that a browser could never answer
+    // it. `EventSource` sends `Last-Event-ID` only once it has received an
+    // `id:` frame, and tRPC attaches an id to exactly one kind of frame — a
+    // `tracked()` yield. Neither `event: connected` nor `event: ping` carries
+    // one. So a stream that had been connected QUIETLY — a meeting in recess,
+    // which is most of a meeting — reconnected at the `SSE_MAX_STREAM_DURATION_MS`
+    // deadline as a FRESH subscribe, skipped the catch-up entirely, and lost
+    // everything published during the gap. Silently, permanently, on exactly
+    // the streams least likely to be watched. Found in a browser and
+    // reproduced with curl alone; see this wave's Task 7 report.
+    //
+    // One `tracked()` yield, first thing on every connection, fixes it: the
+    // client has a resume token within milliseconds of connecting, whether or
+    // not the meeting ever produces an event. It carries `topic: null`
+    // because there is nothing stale to announce — it exists to be
+    // ACKNOWLEDGED, not to be acted on.
+    //
+    // Two alternatives were considered and rejected. Dropping the gate and
+    // resyncing on EVERY connection would make a fresh page load refetch all
+    // of the live screen's reads a second time, immediately after its own
+    // first fetch, on every mount. Reusing a real topic as the sentinel would
+    // do the same for one read and make `LIVE_MEETING_TOPICS` mean two things.
+    yield tracked(String(sequence++), { topic: null } satisfies MeetingChangeEvent);
 
     // A reconnect means there was a window with no connection, and Postgres
     // does not queue notifications for an absent listener — so anything
@@ -211,7 +304,7 @@ export const realtimeRouter = router({
     // five minutes rather than thirty seconds.
     const initial: readonly LiveMeetingTopic[] = resuming ? LIVE_MEETING_TOPICS : [];
     for (const topic of initial) {
-      yield tracked(String(sequence++), { topic });
+      yield tracked(String(sequence++), { topic } satisfies MeetingChangeEvent);
     }
 
     // ─── The stream ────────────────────────────────────────────────────
@@ -228,7 +321,7 @@ export const realtimeRouter = router({
       { townId: ctx.tenant.townId, meetingId: input.meetingId },
       signal,
     )) {
-      yield tracked(String(sequence++), { topic });
+      yield tracked(String(sequence++), { topic } satisfies MeetingChangeEvent);
     }
   }),
 });

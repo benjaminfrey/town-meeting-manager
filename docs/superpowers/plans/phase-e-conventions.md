@@ -3755,6 +3755,21 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      resumed stream delivers its catch-up topics" — is true only under that
      condition, and does not say so.
 
+     **FIXED in the same task's fix round**, by the first of those two shapes
+     rather than the second: the procedure yields one `tracked()` handshake
+     event (`topic: null`) at the top of every connection, so the client has a
+     resume token within milliseconds whether or not the meeting ever speaks,
+     and the `lastEventId != null` gate — which is the right question — becomes
+     answerable. The keep-alive was NOT the place for it: tRPC's producer emits
+     `event: ping` with no id and no hook to add one, and a ping-borne id would
+     make the first resume possible only after the first ping (15 s). The gate
+     is kept rather than replaced because dropping it would resync all of the
+     live screen's reads immediately after its own first fetch, on every mount.
+     Both header claims now state the condition. Pinned by
+     `packages/api/src/trpc/__tests__/sse-resume.test.ts` at the frame level —
+     `createCaller` never serialises an `id:`, so nothing at the router level
+     could have caught this.
+
   3. **Killing the API does NOT break the browser's stream in the development
      topology, so the amber banner cannot be demonstrated that way.** With the
      API dead and confirmed dead, the banner stayed **silent for the full 30 s**
@@ -3838,8 +3853,22 @@ one list rather than reconstructing it from seven task reports.
    meeting's id rather than the earlier meeting whose minutes were approved, so
    the request 404s into a swallowed `.catch(() => {})` and **the DRAFT
    watermark is never removed**. Neither is pinned by any test today.
-3. **The quiet-stream resume gap (Task 7 finding 2).** A write made during the
-   3.0 s bounce is lost, silently, on exactly the streams that have been quiet.
+3. ~~**The quiet-stream resume gap (Task 7 finding 2).**~~ **FIXED in wave 5,
+   Task 7's fix round**, alongside the batch defect and for the same reason —
+   the owner asked for both before merge. `realtime.onMeetingChange` now yields
+   one `tracked()` handshake event (`topic: null`) at the top of EVERY
+   connection, so a browser always has a `Last-Event-ID` to echo back and the
+   `resuming` gate is answerable by a stream that has delivered nothing. The
+   client ignores a `null` topic. Pinned at the frame level by
+   `packages/api/src/trpc/__tests__/sse-resume.test.ts` — real Fastify, real
+   `appRouter`, raw SSE bytes, the real `Last-Event-ID` header path — because
+   `createCaller` hands back envelopes and never serialises an `id:`, so the
+   router test could not have failed. Deleting the handshake turns seven tests
+   red across three files. **The server still sends no `retry:` field**, by
+   decision rather than omission; the reasoning is in `routers/realtime.ts`'s
+   header, and it hands the question to whoever answers the banner's missing
+   terminal state, since `EventSource`'s fixed, no-backoff `retry:` cannot
+   express a retry policy anyway.
 4. **`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
    shell, now carrying its first marker. `meeting.byTown` is not a drop-in: it
    selects no `started_at`, which is the ordering column, and returns every
@@ -3878,17 +3907,27 @@ about the development topology:
   the client resumes with `Last-Event-ID` against a real process kill. What that
   cannot show is the case where the client HAS no `Last-Event-ID` because the
   stream delivered nothing — which is the normal state of a meeting in recess,
-  and which turns "resume" into "fresh subscribe" with a 3.0 s hole in it. A
-  resume protocol has to answer what "I have been here before" means for a
-  client that has received nothing, and neither the ADR nor `realtime.ts`'s
-  comment distinguishes the two.
+  and which turned "resume" into "fresh subscribe" with a 3.0 s hole in it.
+  **The ADR's spike emitted `tracked()` events continuously, so its stream was
+  never quiet and the question never arose** — which is how a genuinely verified
+  property came to be verified and still wrong. A resume protocol has to answer
+  what "I have been here before" means for a client that has received nothing.
+  Answered in Task 7's fix round: the server emits an id-bearing handshake on
+  every connection, so there is always something for the client to say.
 - **The number that matters to an operator is the GAP, not the deadline.** The
   ADR sets `SSE_MAX_STREAM_DURATION_MS` from an authorization-staleness
   argument, which is right. But the observable consequence is a 3000 ms window,
   twelve times an hour, in which this client is not listening — a figure that
   comes from `EventSource`'s default retry, not from anything in this codebase,
   and that the server can change any time it likes by sending a `retry:` field.
-  Nothing currently does.
+  Nothing currently does, and Task 7's fix round decided to keep it that way —
+  see `routers/realtime.ts`'s "Why this stream sends no `retry:` field". In
+  short: with the handshake in place that window is no longer LOSSY, only
+  latent; `EventSource` applies `retry:` as a fixed interval with no backoff and
+  no ceiling, so one number is both "how fast a healthy stream returns" and "how
+  hard every client hammers a dead server"; and tRPC's producer emits no such
+  frame and offers no option for one (verified in its bundled
+  `sseStreamProducer`, which writes only `event:`/`data:`/`id:`/comment).
 - **"Connecting" and "broken" are indistinguishable to the client, forever.** A
   server that is simply gone produces no `TRPCError` and no `event: return`, so
   `useSubscription` never leaves `connecting` and the banner never leaves amber.

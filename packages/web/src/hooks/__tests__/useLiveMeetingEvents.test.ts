@@ -168,6 +168,66 @@ describe("live meeting topic mapping", () => {
 });
 
 /**
+ * The resume handshake — the event that carries no topic.
+ *
+ * Phase E, wave 5, Task 7's fix round. `realtime.onMeetingChange` now emits one
+ * `tracked()` event with `topic: null` at the top of every connection, because
+ * a browser `EventSource` sends `Last-Event-ID` only once it has received an
+ * `id:` frame and neither `event: connected` nor `event: ping` carries one — so
+ * a quiet meeting used to reconnect as a fresh subscribe and lose everything
+ * published during the gap. The server half is pinned in
+ * `packages/api/src/trpc/__tests__/sse-resume.test.ts`. This is the client
+ * half, and the thing it has to get right is INACTION: the handshake must
+ * invalidate nothing.
+ *
+ * The mutation: delete `if (topic === null) return;` from `onData`. The first
+ * test below goes red — `LIVE_MEETING_TOPIC_ROUTERS[null]` is `undefined` and
+ * the loop throws, which is exactly the failure a live meeting would have seen
+ * on every connection.
+ */
+describe("the resume handshake event", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    subscription.status = "pending";
+  });
+
+  function renderWithClient() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+    return queryClient;
+  }
+
+  it("invalidates nothing at all", () => {
+    const queryClient = renderWithClient();
+    const motionKey = trpc.motion.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    const agendaKey = trpc.agendaItem.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(motionKey, []);
+    queryClient.setQueryData(agendaKey, []);
+
+    subscription.options!.onData!({ id: "0", data: { topic: null } });
+
+    expect(queryClient.getQueryState(motionKey)?.isInvalidated).toBeFalsy();
+    expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBeFalsy();
+  });
+
+  it("does not stop a real topic on the same stream from being acted on", () => {
+    // The control. Without it, a hook whose `onData` had been broken outright
+    // would pass the assertion above.
+    const queryClient = renderWithClient();
+    const motionKey = trpc.motion.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(motionKey, []);
+
+    subscription.options!.onData!({ id: "0", data: { topic: null } });
+    subscription.options!.onData!({ id: "1", data: { topic: "motion" } });
+
+    expect(queryClient.getQueryState(motionKey)?.isInvalidated).toBe(true);
+  });
+});
+
+/**
  * The stream's own failure, which this hook used to drop on the floor.
  *
  * Added in Task 4's fix round. `realtime.onMeetingChange` refuses with a

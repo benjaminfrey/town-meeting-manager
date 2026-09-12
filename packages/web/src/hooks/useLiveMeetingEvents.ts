@@ -113,11 +113,20 @@ type LiveMeetingEvent =
     ? TEvent
     : never;
 
-/** The topics `realtime.onMeetingChange` can yield. Never restated by hand. */
-export type LiveMeetingTopic = LiveMeetingEvent extends {
-  data: { topic: infer TTopic extends string };
-}
-  ? TTopic
+/**
+ * The topics `realtime.onMeetingChange` can yield. Never restated by hand.
+ *
+ * `Extract<…, string>` rather than `infer TTopic extends string`, because the
+ * procedure's payload is `LiveMeetingTopic | null` — `null` is the resume
+ * handshake (see `onData` below and the procedure's "The handshake event"),
+ * and a constrained `infer` over that union does not narrow, it FAILS: the
+ * whole conditional falls to `never`, every `TOPIC_INVALIDATIONS` key becomes
+ * an error, and the cause is nowhere near the message. Extract keeps the eight
+ * real topics and drops the sentinel, so the exhaustive mapping below still
+ * has exactly the keys `LIVE_MEETING_TOPICS` has.
+ */
+export type LiveMeetingTopic = LiveMeetingEvent extends { data: { topic: infer TTopic } }
+  ? Extract<TTopic, string>
   : never;
 
 /**
@@ -232,6 +241,14 @@ export type LiveStreamStatus =
  * (`realtime.ts` re-yields every topic when a `lastEventId` is present), so
  * the screen's data is refreshed on the transport's schedule regardless of
  * what the banner is doing.
+ *
+ * **That was true only of a stream that had already delivered something, until
+ * wave 5, Task 7.** A browser sends `Last-Event-ID` only once it has received
+ * an `id:` frame, so a meeting in recess — which is most of a meeting —
+ * reconnected carrying no id at all, took the fresh-subscribe path, and lost
+ * whatever was published during the bounce. The server now emits a handshake
+ * event at the top of every connection, so the condition this paragraph
+ * describes is always satisfiable. See `onData`.
  */
 export const LIVE_STREAM_RECONNECT_GRACE_MS = 5_000;
 
@@ -252,7 +269,16 @@ export function useLiveMeetingEvents(meetingId: string): LiveStreamStatus {
 
   const onData = useCallback(
     (event: LiveMeetingEvent) => {
-      for (const name of LIVE_MEETING_TOPIC_ROUTERS[event.data.topic]) {
+      // `null` is the RESUME HANDSHAKE, not a topic. The server emits one
+      // `tracked()` event at the top of every connection so that a browser
+      // `EventSource` has a `Last-Event-ID` to send back even on a stream that
+      // has never delivered anything — without it, a quiet meeting reconnects
+      // as a fresh subscribe and loses every write made during the gap. See
+      // `packages/api/src/trpc/routers/realtime.ts`, "The handshake event".
+      // There is nothing stale to invalidate: the acknowledgement IS the work.
+      const topic = event.data.topic;
+      if (topic === null) return;
+      for (const name of LIVE_MEETING_TOPIC_ROUTERS[topic]) {
         void queryClient.invalidateQueries(liveMeetingPathFilter(name));
       }
     },

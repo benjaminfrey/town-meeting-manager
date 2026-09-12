@@ -101,10 +101,25 @@ async function withBus(
  * client reconstructs. Destructured in one place so a test reads as a list of
  * topics.
  */
-type TrackedYield = [string, { topic: LiveMeetingTopic }, unknown];
+type TrackedYield = [string, { topic: LiveMeetingTopic | null }, unknown];
 
-function topicsOf(values: TrackedYield[]): LiveMeetingTopic[] {
+/**
+ * Every payload topic in order, INCLUDING the leading `null`.
+ *
+ * The `null` is the resume handshake — one `tracked()` event at the top of
+ * every connection, so that a browser has a `Last-Event-ID` to send back even
+ * on a stream that never delivers anything (see `realtime.ts`, "The handshake
+ * event"). It is kept in the assertions rather than filtered out of this
+ * helper: a test that silently dropped it could not tell "the handshake is
+ * first" from "the handshake is missing", and missing is the defect.
+ */
+function topicsOf(values: TrackedYield[]): (LiveMeetingTopic | null)[] {
   return values.map(([, data]) => data.topic);
+}
+
+/** The real topics, with the handshake dropped. For order-insensitive checks. */
+function changeTopicsOf(values: TrackedYield[]): LiveMeetingTopic[] {
+  return topicsOf(values).filter((topic): topic is LiveMeetingTopic => topic !== null);
 }
 
 function idsOf(values: TrackedYield[]): string[] {
@@ -153,7 +168,7 @@ describe("realtime.onMeetingChange", () => {
           controller.abort();
           await done;
 
-          expect(topicsOf(values)).toEqual(["motion"]);
+          expect(topicsOf(values)).toEqual([null, "motion"]);
         });
       } finally {
         await app.end();
@@ -187,7 +202,8 @@ describe("realtime.onMeetingChange", () => {
           // this procedure that can name a town.
           await publish({ townId: theirs.townId, meetingId: myMeeting, topic: "motion" });
           await delay(300);
-          expect(topicsOf(values)).toEqual([]);
+          // The handshake, and nothing else: Bristol's event was refused.
+          expect(topicsOf(values)).toEqual([null]);
 
           // The control, without which a subscription that delivers nothing at
           // all would pass the assertion above.
@@ -196,7 +212,7 @@ describe("realtime.onMeetingChange", () => {
           controller.abort();
           await done;
 
-          expect(topicsOf(values)).toEqual(["vote_record"]);
+          expect(topicsOf(values)).toEqual([null, "vote_record"]);
         });
       } finally {
         await app.end();
@@ -351,10 +367,13 @@ describe("realtime.onMeetingChange", () => {
           // was down are gone — Postgres does not queue for an absent
           // listener. The alternative is a live meeting quietly missing the
           // motion that passed during the gap.
-          expect(topicsOf(values).sort()).toEqual([...LIVE_MEETING_TOPICS].sort());
+          expect(changeTopicsOf(values).sort()).toEqual([...LIVE_MEETING_TOPICS].sort());
           // Ids continue from the resumed one rather than restarting, so the
-          // sequence a client sees stays monotonic across reconnects.
+          // sequence a client sees stays monotonic across reconnects. 42 is
+          // the handshake; the eight catch-up topics run 43..50.
           expect(idsOf(values)[0]).toBe("42");
+          expect(topicsOf(values)[0]).toBeNull();
+          expect(idsOf(values)).toEqual(["42", "43", "44", "45", "46", "47", "48", "49", "50"]);
         });
       } finally {
         await app.end();
@@ -362,7 +381,16 @@ describe("realtime.onMeetingChange", () => {
     });
   });
 
-  it("yields nothing up front on a FIRST connection, which carries no lastEventId", async () => {
+  // ─── The handshake: what makes a resume possible AT ALL ───────────────
+  //
+  // Phase E, wave 5, Task 7's fix round. The test this replaces asserted that
+  // a first connection yields NOTHING, which was true and was the defect: a
+  // browser `EventSource` sends `Last-Event-ID` only once it has received an
+  // `id:` frame, so a stream that stayed quiet reconnected at the deadline
+  // with no id, took the branch below's `resuming === false` path, and lost
+  // everything published during the gap. The frame-level proof is
+  // `trpc/__tests__/sse-resume.test.ts`; this is the router-level one.
+  it("yields ONLY the resume handshake up front on a FIRST connection, which carries no lastEventId", async () => {
     await withTestDb(async (owner) => {
       const app = await connectAsAppRole(owner);
       try {
@@ -382,8 +410,12 @@ describe("realtime.onMeetingChange", () => {
 
           // A fresh subscribe happens alongside the screen's own first fetch
           // of all eight reads. Resyncing here would refetch every one of them
-          // a second time on every mount.
-          expect(values).toEqual([]);
+          // a second time on every mount — so the handshake carries
+          // `topic: null` and the catch-up stays behind the `lastEventId`
+          // gate.
+          expect(topicsOf(values)).toEqual([null]);
+          // And it carries an ID, which is the entire point of it.
+          expect(idsOf(values)).toEqual(["0"]);
         });
       } finally {
         await app.end();
