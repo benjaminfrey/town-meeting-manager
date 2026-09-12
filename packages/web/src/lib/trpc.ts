@@ -19,6 +19,7 @@ import {
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@town-meeting/api/trpc/router";
+import { TRPC_BATCH_URL_LIMIT } from "@town-meeting/shared";
 import { queryClient } from "./queryClient";
 
 /**
@@ -67,6 +68,19 @@ export type RouterInputs = inferRouterInputs<AppRouter>;
  * nginx in production), so the session cookie is sent either way. It is passed
  * anyway, so that the two branches state the same intent rather than leaving a
  * reader to reconstruct why only one of them mentions credentials.
+ *
+ * `maxURLLength: TRPC_BATCH_URL_LIMIT` — Phase E, wave 5, Task 7. Without a
+ * cap, `httpBatchLink` coalesces every query fired in one tick into a single
+ * request no matter how long the resulting URL gets; the live meeting screen
+ * already composes a six-procedure batch whose path alone runs ~151
+ * characters, and Fastify's router bounds that segment
+ * (`server.ts`'s `maxParamLength`, also `TRPC_BATCH_PATH_LENGTH_LIMIT`). A cap
+ * sized to fit only today's longest batch would fail silently the next time a
+ * loader or a procedure name grows; this one instead makes `@trpc/client`
+ * split an over-limit tick into more than one HTTP request automatically —
+ * seeing the shared constant's doc comment for why it is set well below the
+ * server's own bound, and everywhere else in this file's own
+ * `refusalMessage`, an extra round trip is the honest cost, not a 404.
  */
 export const trpcClient = createTRPCClient<AppRouter>({
   links: [
@@ -78,6 +92,7 @@ export const trpcClient = createTRPCClient<AppRouter>({
       }),
       false: httpBatchLink({
         url: "/api/trpc",
+        maxURLLength: TRPC_BATCH_URL_LIMIT,
         fetch(url, options) {
           return fetch(url, { ...options, credentials: "include" });
         },

@@ -2514,6 +2514,28 @@ before the kill, so the count itself is not diagnostic — the query is. Every f
 `turbo run test`, in wave 6 and beyond, leaks the same way; check `pg_database`, not the backend
 count, every time.
 
+**A retry policy is a harness hazard too, not only a mock — it can mask a real defect as
+completely as any of the above, with no test and no mock involved at all.** Wave 5, Task 7 found
+Fastify's default `maxParamLength` (100) 404ing the live meeting screen's six-procedure
+`httpBatchLink` batch (`/api/trpc/exhibit.byMeeting,...` at ~151 characters) — a real defect, on
+every load, in production. Task 6's browser check still recorded PASS: `QueryClient`'s
+`retry: 2` retried each failed query independently, and by the time it did, the set of
+still-in-flight queries had changed, so the retried batch was smaller and fit under 100 characters.
+The screen rendered completely. **Nothing a developer would normally look at said otherwise** — no
+console error (a 404 status on a `fetch` is not a thrown exception `httpBatchLink` surfaces as
+one), no toast (nothing in this app's error-categorization path treats a transparently-retried
+success as a failure worth reporting), no failing test (no test in the repository drove a real
+batched HTTP request before `http-batch.test.ts` — item 8's "mock the transport" convention means
+even the web suite's own tests stub `httpBatchLink` away entirely). The only places it was visible
+at all: the Network tab, as a 404 request a retry immediately followed with a 200; and the API's
+own request log, at `info` level, indistinguishable from any other 404 unless someone were already
+looking for one. A retry policy that quietly re-shapes a failing request into a passing one is, for
+observability purposes, exactly as dangerous as a mock that cannot express the bug it covers — the
+fix is the same discipline item 13 already asks for: drive the real transport directly (a real
+Fastify server, a real batched `fetch`, as `http-batch.test.ts` and `sse-bounds.test.ts` both do),
+because a retry-smoothed browser check and a stubbed-transport unit test fail to see this defect
+for the same underlying reason — neither one drives the real request shape past the real server.
+
 ---
 
 ## 14. The close-out step: re-check every Known-gaps bullet against HEAD

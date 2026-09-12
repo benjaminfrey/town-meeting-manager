@@ -63,12 +63,14 @@
  * message on items 2 and 3. Run in this task's fix round; see the report.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { initTRPC } from "@trpc/server";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
+import { TRPC_BATCH_PATH_LENGTH_LIMIT } from "@town-meeting/shared";
 import { createTrpcContextFactory, type TrpcContext } from "../context.js";
 import type { TenantTx } from "../../db/with-tenant.js";
+import { buildServer } from "../../server.js";
 
 /** A town id shaped the way a real one is. Nothing reads it but `loadActor`. */
 const TOWN_ID = "0f1c9d64-6a5f-4a2e-9c3b-7c5f0a1b2c3d";
@@ -218,6 +220,172 @@ describe("a tRPC HTTP batch, which shares ONE context across concurrently-resolv
       // Mixed outcomes on one request are a 207, which is how the browser
       // check first noticed the defect at all.
       expect(status).toBe(207);
+    });
+  }, 20_000);
+});
+
+/**
+ * ─── The THIRD defect, surfaced by the reentrancy fix above ────────────────
+ *
+ * Once a batch actually resolves every procedure concurrently, the live
+ * meeting screen composes a real one: `boardMember.activeCountForBoard` plus
+ * the five reads its loader does not prime (`exhibit.byMeeting`,
+ * `voteRecord.byMeeting`, `guestSpeaker.byMeeting`,
+ * `agendaItemTransition.byMeeting`, `executiveSession.byMeeting`) all land in
+ * one React Query tick. Joined by `httpBatchLink` into
+ * `/api/trpc/exhibit.byMeeting,voteRecord.byMeeting,...` that path segment is
+ * 151 characters — over Fastify's *default* `maxParamLength` of 100, so
+ * `find-my-way` answers 404 before the request reaches tRPC's adapter at
+ * all, let alone a resolver. Bisected directly against a running server: 5
+ * procedures / 89 characters got 200, 6 procedures / 107 characters got 404.
+ *
+ * It was invisible in the browser because `QueryClient`'s `retry: 2` retries
+ * each failed query independently, and by the time it does the in-flight set
+ * has changed shape — the retried batch happens to be smaller and fits under
+ * 100 characters, so the screen renders completely on the second pass. See
+ * `docs/superpowers/plans/phase-e-conventions.md` item 13's new paragraph on
+ * retry as a harness hazard for the full account of why nothing short of
+ * driving the real transport would have caught this.
+ *
+ * `TRPC_BATCH_PATH_LENGTH_LIMIT` (`@town-meeting/shared`) is the fix:
+ * `server.ts` passes it as Fastify's `maxParamLength`, and that constant's
+ * own doc comment carries the sizing argument (why 4096 is safe to raise to,
+ * and why `TRPC_BATCH_URL_LIMIT` on the CLIENT is the other half — it caps
+ * the url `httpBatchLink` will build so a batch too large ever splits into
+ * more than one request instead of ever depending on the server's ceiling).
+ *
+ * Two things are pinned below, mirroring `sse-bounds.test.ts`'s own split
+ * between a config-shape claim and a behaviour claim:
+ *
+ *  1. The PRODUCTION server actually carries the raised bound — built with
+ *     real `buildServer()`, the same way `public-route-inventory.test.ts`
+ *     does (env vars only; no query ever runs, so no database round trip is
+ *     needed to make this assertion true).
+ *  2. A batch shaped exactly like the live meeting screen's real one — same
+ *     six procedure names, same ~151-character path — actually resolves at
+ *     that bound, AND still 404s at the OLD default. The second half is a
+ *     permanent regression control: it does not require mutating source to
+ *     prove the assertion is real, because it demonstrates the failure mode
+ *     directly, the same role `sse-bounds.test.ts`'s `endsCleanly` control
+ *     plays for its own claim.
+ *
+ * ─── The mutation that proves this file is load-bearing ───────────────────
+ *
+ * In `server.ts`, delete the `maxParamLength: TRPC_BATCH_PATH_LENGTH_LIMIT`
+ * option from the `Fastify({...})` call (restoring the implicit default of
+ * 100). "carries the raised maxParamLength bound" must go red, reporting 100
+ * where it expects 4096. Run in this task's fix round; see the report.
+ */
+describe("the production server's batch-path bound (Phase E, wave 5, Task 7)", () => {
+  /** The environment `buildServer` refuses to boot without. */
+  const REQUIRED_ENV = {
+    BETTER_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+    SUPABASE_URL: "http://localhost:54321",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role-key-for-this-test-only",
+    DATABASE_URL: process.env.DATABASE_URL ?? "postgres://localhost:5432/postgres",
+  } as const;
+
+  const savedEnv: Record<string, string | undefined> = {};
+
+  afterEach(() => {
+    for (const [key, previous] of Object.entries(savedEnv)) {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    }
+  });
+
+  it("carries the raised maxParamLength bound, from the exported constant", async () => {
+    for (const [key, value] of Object.entries(REQUIRED_ENV)) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = value;
+    }
+
+    // No query ever runs — `postgres.js` pools lazily and `createClient`
+    // does no I/O — so this proves the config shape, not connectivity.
+    const app = await buildServer();
+    try {
+      expect(app.initialConfig.maxParamLength).toBe(TRPC_BATCH_PATH_LENGTH_LIMIT);
+    } finally {
+      // Closing clears the notification retry interval and the database pool.
+      await app.close();
+    }
+  });
+});
+
+/**
+ * The live meeting screen's real batch, named exactly as production has it —
+ * see the header above. `t.router({ exhibit: t.router({ byMeeting: ... }) })`
+ * nesting is what produces the dotted `exhibit.byMeeting` path tRPC's client
+ * builds for a real sub-router procedure; a flat `exhibitByMeeting` key would
+ * not reproduce the real path shape.
+ */
+const t2 = initTRPC.create();
+const longBatchRouter = t2.router({
+  exhibit: t2.router({ byMeeting: t2.procedure.query(() => "exhibit") }),
+  voteRecord: t2.router({ byMeeting: t2.procedure.query(() => "voteRecord") }),
+  guestSpeaker: t2.router({ byMeeting: t2.procedure.query(() => "guestSpeaker") }),
+  agendaItemTransition: t2.router({
+    byMeeting: t2.procedure.query(() => "agendaItemTransition"),
+  }),
+  executiveSession: t2.router({ byMeeting: t2.procedure.query(() => "executiveSession") }),
+  boardMember: t2.router({
+    activeCountForBoard: t2.procedure.query(() => "boardMember"),
+  }),
+});
+
+/** The exact six paths the live meeting screen batches — ~151 characters joined. */
+const LIVE_MEETING_BATCH_PATHS = [
+  "exhibit.byMeeting",
+  "voteRecord.byMeeting",
+  "guestSpeaker.byMeeting",
+  "agendaItemTransition.byMeeting",
+  "executiveSession.byMeeting",
+  "boardMember.activeCountForBoard",
+];
+
+async function withLongPathServer(
+  maxParamLength: number | undefined,
+  fn: (baseUrl: string) => Promise<void>,
+): Promise<void> {
+  const server: FastifyInstance = Fastify({ logger: false, maxParamLength });
+  await server.register(fastifyTRPCPlugin, {
+    prefix: "/api/trpc",
+    trpcOptions: { router: longBatchRouter, createContext: () => ({}) },
+  });
+  await server.listen({ port: 0, host: "127.0.0.1" });
+  try {
+    const address = server.server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    await fn(`http://127.0.0.1:${port}/api/trpc`);
+  } finally {
+    await server.close();
+  }
+}
+
+describe("a batch path sized like the live meeting screen's real one", () => {
+  it("returns 200 with all six results at the raised bound", async () => {
+    await withLongPathServer(TRPC_BATCH_PATH_LENGTH_LIMIT, async (baseUrl) => {
+      const { status, body } = await batchGet(baseUrl, LIVE_MEETING_BATCH_PATHS);
+
+      expect(status).toBe(200);
+      // Each stub resolver returns its own top-level router name — see
+      // `longBatchRouter` above — so this proves all six actually resolved,
+      // not merely that six envelopes came back.
+      expect(body).toEqual(
+        LIVE_MEETING_BATCH_PATHS.map((path) => ({
+          result: { data: path.split(".")[0] },
+        })),
+      );
+    });
+  }, 20_000);
+
+  // The permanent regression control: proves the assertion above is real by
+  // reproducing the actual bisected failure (6 procedures / ~151 characters,
+  // over the OLD default of 100) with no source mutation needed to see it.
+  it("404s the identical batch at Fastify's OLD default of 100 — the bug this file pins", async () => {
+    await withLongPathServer(undefined, async (baseUrl) => {
+      const { status } = await batchGet(baseUrl, LIVE_MEETING_BATCH_PATHS);
+      expect(status).toBe(404);
     });
   }, 20_000);
 });

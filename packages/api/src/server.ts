@@ -29,6 +29,7 @@ import { appRouter } from "./trpc/router.js";
 import { createTrpcContextFactory } from "./trpc/context.js";
 import { createRealtimeBus } from "./realtime/bus.js";
 import postgres from "postgres";
+import { TRPC_BATCH_PATH_LENGTH_LIMIT } from "@town-meeting/shared";
 
 export interface BuildServerOptions {
   /**
@@ -65,7 +66,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // network, and nginx sets `X-Forwarded-Proto` itself — overwriting anything
   // a client sent. If the API is ever exposed directly, this must be narrowed
   // to the proxy's address.
-  const app = Fastify({ logger: true, trustProxy: true });
+  // `maxParamLength` — Phase E, wave 5, Task 7. Fastify's router
+  // (`find-my-way`) defaults this to 100, sized for an id or a slug in a
+  // dynamic path segment. `/api/trpc/*` puts something else there:
+  // `httpBatchLink` joins every procedure a screen's loader fires in one
+  // tick into ONE comma-separated segment (`/api/trpc/a,b,c?batch=1`), and
+  // the live meeting screen alone composes a batch of six whose joined path
+  // is 151-152 characters — over the default, so the route 404s before tRPC
+  // ever sees the request. `TRPC_BATCH_PATH_LENGTH_LIMIT`'s doc comment
+  // (`@town-meeting/shared`) has the full sizing argument: the check this
+  // guards is a single length comparison against a string the transport
+  // layer (Node's own header-size limit, and nginx's in production) has
+  // already bounded far below this value, so raising it costs nothing extra
+  // and admits no request shape that was not reaching Fastify regardless.
+  const app = Fastify({
+    logger: true,
+    trustProxy: true,
+    maxParamLength: TRPC_BATCH_PATH_LENGTH_LIMIT,
+  });
 
   // Registered before anything else so it sees every route, including those
   // inside encapsulated children (`onRoute` propagates down).
