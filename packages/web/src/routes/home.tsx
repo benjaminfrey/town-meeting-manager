@@ -5,32 +5,56 @@
  * next meeting, and surfaces what needs doing. Role-aware: admin/staff see the
  * full operations view; board members see a lighter review-oriented view.
  *
- * Stage 1, Phase E, wave 1, Task 5 — the town name/state header moved onto
- * `town.detail` (shipped in Task 1 of this wave). The other three reads below
- * stay on Supabase: no `meeting` or `minutesDocument` router exists yet in
- * `packages/api/src/trpc/routers/`, and `board.list` (used elsewhere in this
- * same task) is not a substitute for the board picker's `boardRows` read
- * below — that query filters `archived_at IS NULL`, which `board.list`
- * deliberately does not (see that procedure's own doc comment: its one
- * existing consumer, `settings.meeting-notices.tsx`, needs archived boards
- * visible). Migrating the picker onto `board.list` would silently start
- * offering archived boards as places to schedule a new meeting — a real
- * regression, not a port.
+ * Stage 1, Phase E, wave 6, Task 5 — every read on this screen is tRPC now.
+ * `town.detail` moved in wave 1; `meeting.byTown`, `minutesDocument
+ * .pendingByTown` and `board.listActive` move here, discharging this file's
+ * `TODO(phase-e-wave-6)` marker in full.
  *
- * **Corrected in this wave's whole-branch review — a wrong rule, not a
- * missing one.** This comment (and the marker below) used to say the picker
- * "still needs its own procedure (an archived-filtered `board.listActive` or
- * an `activeOnly` argument on `board.list`)". That procedure now EXISTS —
- * `board.listActive` shipped in wave 2, Task 4, and Task 5 wired it into the
- * identical archived-filtering gap in `StaffAccountFlow.tsx`'s board picker.
- * The reason it is not simply reused here is real, though, not stale: per
- * `board.listActive`'s own doc comment, it orders governing boards first,
- * then alphabetically — not `boardRows`'s plain `.order("name")` — a
- * behavior change this route's picker has not been checked against. Whoever
- * migrates this file next should verify that ordering difference is
- * acceptable (or add an option) rather than swap the call blind. See the
- * `TODO(phase-e-wave-2)` marker below (conventions item 11) for the full set
- * of reads still owed.
+ * ─── The three reads, and what changed with each ─────────────────────────
+ *
+ * `meetingRows` -> `trpc.meeting.byTown`. The raw query was
+ * `select("*, board:board_id(id, name)")`, so this screen used to receive
+ * every column of `meeting` whether it read it or not; the procedure names
+ * nine, and `started_at` was added to it for this screen's "started N min
+ * ago" hero (see its own doc comment). The board arrives as flat
+ * `board_id`/`board_name` rather than a PostgREST to-one embed. Order and
+ * filter are identical (`status != 'cancelled'`, `scheduled_date` then
+ * `scheduled_time` ascending).
+ *
+ * `minutesDocs` -> `trpc.minutesDocument.pendingByTown`. Same `draft`/`review`
+ * filter, same `{meeting_id, status}` shape — and a NARROWING the raw query
+ * could not perform: that procedure applies rule 9 (R4) per row, so an account
+ * with R4 on no board no longer sees every unadopted document in the town.
+ * See its own doc comment; that is a deliberate fix, not a side effect.
+ *
+ * `boardRows` -> `trpc.board.listActive`. Same `archived_at IS NULL` filter
+ * (the hazard this file's header has warned about for four waves: an archived
+ * board must never be offered as a place to schedule a meeting). **The
+ * ordering difference is real and is accepted here, not papered over:**
+ * `listActive` orders `is_governing_board DESC, name ASC` where this picker's
+ * raw read was plain `.order("name")`. This is a labelled, one-click list of a
+ * town's handful of boards, and the governing board — the one that meets most
+ * often — sorting first is if anything the better answer for it. The four
+ * extra columns the procedure returns are invisible to a consumer that does
+ * not read them (`test/trpc.ts`'s "the gap runs one way"). The alternative,
+ * a second procedure differing only in ORDER BY, was declined for the reason
+ * `listActive`'s own doc comment already gives.
+ *
+ * ─── A dead status vocabulary, audited rather than missed ────────────────
+ *
+ * `"in_progress"` appears three times below (the `active.push` branch, the
+ * hero's `isLive`, and `primaryAction`'s case) and `"published"` once (the
+ * `upcoming` exclusion). Neither is a `meeting_status` value: the enum is
+ * `draft, noticed, open, adjourned, minutes_draft, approved, cancelled`
+ * (`0000_baseline.sql`), and `SELECT 'in_progress'::meeting_status` raises
+ * "invalid input value for enum meeting_status" against a live database.
+ * `"published"` is a `minutes_document_status`, borrowed by mistake. Both are
+ * therefore inert, on both sides of this migration — no row has ever matched
+ * either. Left as-is and NAMED rather than quietly deleted, matching the
+ * identical call `meetings.tsx`'s own `KANBAN_COLUMNS` comment made in wave 3;
+ * `components/MeetingLifecycle.tsx`'s `LIFECYCLE_STAGES` carries the same two
+ * dead values and is shared by a second screen, so the fix belongs in one
+ * change across all three rather than smuggled into a transport task.
  */
 
 import { useMemo, useState, useCallback } from "react";
@@ -50,34 +74,7 @@ import {
 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
-import { queryKeys } from "@/lib/queryKeys";
-// TODO(phase-e-wave-6): minutesDocument.pendingByTown, board.listActive
-// (exists, not yet wired here — see this file's header comment for the
-// ordering difference that needs checking first).
-//
-// The marker above is the machine-checkable half of this comment (item 11)
-// — a completeness sweep greps for it, not for prose. `meetingRows` below
-// used to be on this list too (`meeting.byTown`, no router at all) — closed
-// by wave 3's own Task 1, which shipped `meeting.byTown`
-// (`packages/api/src/trpc/routers/meeting.ts`); retagged here to say so
-// rather than left claiming a gap that no longer exists (wave 3's own Task 1
-// brief: "Do not migrate any screen... the screens are Task 2", so this file
-// still reads `meetingRows` off Supabase — only the marker's CLAIM changed,
-// not the wiring). ~~`minutesDocs` is the one remaining read with no
-// procedure at all — a `minutesDocument` router, wave 3's own plan scopes
-// `minutes.tsx`/`review.tsx` to wave 6, and this is the identical table.~~ —
-// **false since wave 6, Task 1**: `minutesDocument.pendingByTown` exists
-// (`packages/api/src/trpc/routers/minutes-document.ts`), and it is the
-// procedure the marker above already names. Like `board.listActive`, it is
-// shipped and not yet wired HERE; this screen is wave 6, Task 5's. Corrected
-// in Task 4 under conventions item 14, which asks a task to retire a false
-// present-tense claim wherever it finds one, not only in files it owns.
-// `boardRows` has an
-// existing candidate (`board.listActive`, wave 2) that is deliberately not
-// used yet, for the reason in this file's header comment — unrelated to
-// which wave owns the remaining `minutesDocs` gap.
-import { supabase } from "@/lib/supabase";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MEETING_STATUS_LABELS, MEETING_STATUS_COLORS } from "@/components/meetings/meeting-labels";
@@ -121,6 +118,8 @@ function primaryAction(status: string, id: string) {
       return { label: "Open agenda", to: `/meetings/${id}/agenda` };
     case "noticed":
       return { label: "Start meeting", to: `/meetings/${id}/live` };
+    // `"in_progress"` below is not a `meeting_status` value and never has
+    // been — see this file's header. Inert, named rather than deleted.
     case "open":
     case "in_progress":
       return { label: "Rejoin meeting", to: `/meetings/${id}/live` };
@@ -134,18 +133,14 @@ function primaryAction(status: string, id: string) {
 
 // ─── Types ────────────────────────────────────────────────────────────
 
-interface MeetingRow {
-  id: string;
-  title: string;
-  status: string;
-  meeting_type: string;
-  scheduled_date: string;
-  scheduled_time: string | null;
-  started_at: string | null;
-  board: { id: string; name: string } | null;
-  town_id: string;
-  [key: string]: unknown;
-}
+/**
+ * `meeting.byTown`'s real row shape, not a hand-written bag with an
+ * `[key: string]: unknown` escape hatch — conventions item 10, and this is
+ * exactly the type that made `ArchiveBoardDialog`'s `board.town_id` read
+ * compile to `""`. The three child components below take this type too, since
+ * the audit covers props, not only this file's own JSX.
+ */
+type MeetingRow = RouterOutputs["meeting"]["byTown"][number];
 
 interface ActionItem {
   meeting: MeetingRow;
@@ -170,19 +165,12 @@ export default function Home() {
 
   // ─── Queries ──────────────────────────────────────────────────────
 
-  const { data: meetingRows = [], isLoading: meetingsLoading } = useQuery({
-    queryKey: queryKeys.meetings.byTown(townId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("meeting")
-        .select("*, board:board_id(id, name)")
-        .eq("town_id", townId)
-        .neq("status", "cancelled")
-        .order("scheduled_date", { ascending: true })
-        .order("scheduled_time", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as MeetingRow[];
-    },
+  const {
+    data: meetingRows = [],
+    isLoading: meetingsLoading,
+    isError: isMeetingsError,
+  } = useQuery({
+    ...trpc.meeting.byTown.queryOptions(),
     enabled: !!townId,
   });
 
@@ -201,31 +189,12 @@ export default function Home() {
   });
 
   const { data: minutesDocs = [] } = useQuery({
-    queryKey: [...queryKeys.minutes.byMeeting("__home_pending__"), townId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("minutes_document")
-        .select("meeting_id, status")
-        .eq("town_id", townId)
-        .in("status", ["draft", "review"])
-        .throwOnError();
-      return (data ?? []) as Array<{ meeting_id: string; status: string }>;
-    },
+    ...trpc.minutesDocument.pendingByTown.queryOptions(),
     enabled: !!townId,
   });
 
   const { data: boardRows = [] } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name")
-        .throwOnError();
-      return (data ?? []) as Array<{ id: string; name: string }>;
-    },
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId && canCreateMeeting,
   });
 
@@ -258,8 +227,8 @@ export default function Home() {
     const review: MeetingRow[] = [];
 
     for (const m of meetingRows) {
-      const date = m.scheduled_date ?? "";
-      const status = m.status ?? "";
+      const date = m.scheduled_date;
+      const status = m.status;
 
       if (date === today && (status === "open" || status === "in_progress")) {
         active.push(m);
@@ -326,6 +295,8 @@ export default function Home() {
         });
       }
 
+      // `"published"` is a `minutes_document_status`, not a `meeting_status`
+      // — inert here. See this file's header.
       if (date >= today && date <= thirtyDaysOut && !["approved", "published"].includes(status)) {
         upcomingList.push(m);
       }
@@ -394,7 +365,26 @@ export default function Home() {
         )}
       </div>
 
-      {meetingsLoading ? (
+      {/* The meeting list failed after mount (conventions item 5/12). Unlike
+          the town-header banner above, this one replaces the pipeline rather
+          than sitting beside it: every section below is computed from
+          `meetingRows`, so rendering them from an empty array would show an
+          empty, healthy-looking landing for a town that may have a meeting
+          starting in an hour — the exact silent failure this phase exists to
+          end. */}
+      {isMeetingsError ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center"
+        >
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 font-medium text-destructive">Couldn't load your meetings.</p>
+          <p className="mt-1 text-sm text-destructive/80">
+            Try reloading the page. If the problem continues, contact support.
+          </p>
+        </div>
+      ) : meetingsLoading ? (
         <MeetingListSkeleton rows={4} />
       ) : (
         <>
@@ -436,7 +426,7 @@ export default function Home() {
                   <Card key={m.id} className="transition-colors hover:bg-accent/50">
                     <CardContent className="flex items-center justify-between p-4">
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{m.board?.name ?? "Meeting"}</p>
+                        <p className="truncate font-medium">{m.board_name}</p>
                         <p className="truncate text-sm text-muted-foreground">{m.title}</p>
                       </div>
                       <Button variant="outline" size="sm" asChild>
@@ -556,7 +546,8 @@ export default function Home() {
 // ─── Next meeting hero ──────────────────────────────────────────────
 
 function NextMeetingHero({ meeting }: { meeting: MeetingRow }) {
-  const status = meeting.status ?? "draft";
+  const status = meeting.status;
+  // `"in_progress"`: inert, see this file's header.
   const isLive = status === "open" || status === "in_progress";
   const action = primaryAction(status, meeting.id);
   const elapsed =
@@ -578,7 +569,7 @@ function NextMeetingHero({ meeting }: { meeting: MeetingRow }) {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               {isLive && <Radio className="h-4 w-4 animate-pulse text-red-600 dark:text-red-400" />}
-              <span className="font-semibold">{meeting.board?.name ?? "Meeting"}</span>
+              <span className="font-semibold">{meeting.board_name}</span>
               <span
                 className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${MEETING_STATUS_COLORS[status] ?? ""}`}
               >
@@ -622,7 +613,7 @@ function NeedsActionCard({ item }: { item: ActionItem }) {
             <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{item.meeting.board?.name ?? "Meeting"}</p>
+            <p className="truncate font-medium">{item.meeting.board_name}</p>
             <p className="truncate text-sm text-muted-foreground">{item.meeting.title}</p>
             <div className="mt-1.5 flex items-center gap-1.5">
               {(item.priority <= 1 || item.reason.includes("Notice due")) && (
@@ -646,8 +637,8 @@ function NeedsActionCard({ item }: { item: ActionItem }) {
 // ─── Upcoming row ───────────────────────────────────────────────────
 
 function UpcomingRow({ meeting }: { meeting: MeetingRow }) {
-  const status = meeting.status ?? "draft";
-  const date = meeting.scheduled_date ?? "";
+  const status = meeting.status;
+  const date = meeting.scheduled_date;
   const time = meeting.scheduled_time ?? "";
   const action = primaryAction(status, meeting.id);
 
@@ -661,19 +652,18 @@ function UpcomingRow({ meeting }: { meeting: MeetingRow }) {
         <Link to={`/meetings/${meeting.id}/agenda`} className="font-medium hover:underline">
           {meeting.title}
         </Link>
-        <div className="text-xs text-muted-foreground sm:hidden">{meeting.board?.name ?? ""}</div>
+        <div className="text-xs text-muted-foreground sm:hidden">{meeting.board_name}</div>
       </td>
       <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
-        {meeting.board ? (
-          <Link
-            to={`/boards/${meeting.board.id}`}
-            className="transition-colors hover:text-foreground"
-          >
-            {meeting.board.name}
-          </Link>
-        ) : (
-          "—"
-        )}
+        {/* `board_id` is NOT NULL on `meeting` and `meeting.byTown` INNER
+            JOINs `board`, so the "no board" fallback the PostgREST embed
+            needed has nothing left to represent. */}
+        <Link
+          to={`/boards/${meeting.board_id}`}
+          className="transition-colors hover:text-foreground"
+        >
+          {meeting.board_name}
+        </Link>
       </td>
       <td className="px-4 py-3">
         <span

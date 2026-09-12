@@ -1,24 +1,20 @@
 /**
  * Home (/) — role-aware landing.
  *
- * Stage 1, Phase E, wave 1, Task 5 — the town name/state header moved onto
- * `town.detail`, so this file now needs `setupAppQueryClient()` +
- * `installTRPCFetchStub` (conventions item 8/9), the same shape every other
- * tRPC screen test in this phase uses: the real options proxy and a real
- * `QueryClient` run, only `globalThis.fetch` is replaced. `@/lib/supabase`
- * stays mocked wholesale — `meetingRows`, `minutesDocs` and `boardRows` all
- * still go through it (see `home.tsx`'s own `TODO(phase-e-wave-6)` marker —
- * retagged in wave 3's Task 0 after `meeting.byTown` shipped and closed the
- * `meetingRows` third of what this comment used to cite as `wave-2`; this
- * file's own reference was stale until this fix round caught it).
+ * Phase E, wave 6, Task 5 — the Supabase chain mock is GONE. All four of this
+ * screen's reads (`town.detail`, `meeting.byTown`,
+ * `minutesDocument.pendingByTown`, `board.listActive`) now run through the
+ * real options proxy with only `globalThis.fetch` replaced (conventions item
+ * 8/9), which is what makes the `pathFilter()` assertions below expressible at
+ * all — under the old wholesale mock the keys were invented by the test.
  */
 
 import React from "react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
-import { type RouterOutputs } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { createAdminUser, createBoardMemberUser } from "@/test/mocks/auth-mock";
 import type { CurrentUser } from "@/hooks/useCurrentUser";
 
@@ -34,22 +30,6 @@ vi.mock("@/hooks/usePermission", () => ({
   usePermission: () => ({ allowed: permRef.allowed }),
 }));
 
-// Supabase chain — every remaining Home Supabase query resolves empty
-// (meetingRows, minutesDocs, boardRows — see home.tsx's own header comment
-// for why these three are not yet on tRPC).
-const { mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-    Promise.resolve({ data: [], error: null }).then(resolve, reject);
-  chain["catch"] = (reject: (e: unknown) => unknown) =>
-    Promise.resolve({ data: [], error: null }).catch(reject);
-  for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "throwOnError"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { mockFrom: vi.fn().mockReturnValue(chain) };
-});
-vi.mock("@/lib/supabase", () => ({ supabase: { from: mockFrom } }));
-
 // Avoid the first-run tour and the create dialog
 vi.mock("@/components/QuickTour", () => ({
   QuickTour: () => null,
@@ -59,7 +39,7 @@ vi.mock("@/components/meetings/CreateMeetingDialog", () => ({
   CreateMeetingDialog: () => null,
 }));
 
-// ─── tRPC stub (town.detail) ──────────────────────────────────────────
+// ─── tRPC stub (all four reads) ───────────────────────────────────────
 
 const queryClient = setupAppQueryClient();
 
@@ -86,14 +66,50 @@ const fullTown = {
   minutes_review_window_days: 7,
 } satisfies RouterOutputs["town"]["detail"];
 
-/** Mutable so a test can make `town.detail` reject. */
-const server = { detailRejects: false };
+const liveMeeting = {
+  id: "m-live",
+  title: "Regular Meeting",
+  status: "open",
+  meeting_type: "regular",
+  scheduled_date: new Date().toISOString().slice(0, 10),
+  scheduled_time: "18:00:00",
+  // Added to `meeting.byTown` in wave 6, Task 5 for the "started N min ago"
+  // line this screen renders — the only reader of the column.
+  started_at: new Date(Date.now() - 12 * 60_000).toISOString(),
+  board_id: "b1",
+  board_name: "Select Board",
+} satisfies RouterOutputs["meeting"]["byTown"][number];
 
-installTRPCFetchStub({
+const boards = [
+  {
+    id: "b1",
+    name: "Select Board",
+    member_count: 5,
+    is_governing_board: true,
+    election_method: "at_large",
+    officer_election_method: "vote_of_board",
+  },
+] satisfies RouterOutputs["board"]["listActive"];
+
+/** Mutable so a test can change what the server returns between refetches. */
+const server = {
+  detailRejects: false,
+  meetingsReject: false,
+  meetings: [] as RouterOutputs["meeting"]["byTown"],
+  pending: [] as RouterOutputs["minutesDocument"]["pendingByTown"],
+};
+
+const stub = installTRPCFetchStub({
   "town.detail": () => {
     if (server.detailRejects) trpcTestError("INTERNAL_SERVER_ERROR");
     return fullTown;
   },
+  "meeting.byTown": () => {
+    if (server.meetingsReject) trpcTestError("INTERNAL_SERVER_ERROR");
+    return server.meetings;
+  },
+  "minutesDocument.pendingByTown": () => server.pending,
+  "board.listActive": () => boards,
 });
 
 import Home from "@/routes/home";
@@ -101,6 +117,9 @@ import Home from "@/routes/home";
 describe("Home (role-aware)", () => {
   beforeEach(() => {
     server.detailRejects = false;
+    server.meetingsReject = false;
+    server.meetings = [];
+    server.pending = [];
   });
 
   it("admin sees the meeting pipeline and the Schedule meeting action", async () => {
@@ -142,5 +161,101 @@ describe("Home (role-aware)", () => {
     expect(await screen.findByText("Your town")).toBeInTheDocument();
     // The rest of the page is still useful — not replaced by the alert.
     expect(await screen.findByText("Your meeting pipeline")).toBeInTheDocument();
+  });
+
+  it("leads with an open meeting, and says how long ago it started", async () => {
+    server.meetings = [liveMeeting];
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+
+    expect(await screen.findByText("Happening now")).toBeInTheDocument();
+    // `started_at` is the column this screen is the only reader of; without
+    // it in `meeting.byTown` this line cannot render at all.
+    expect(await screen.findByText(/started 12 min ago/)).toBeInTheDocument();
+  });
+
+  it("surfaces minutes pending review, which needs BOTH reads to agree", async () => {
+    const adjourned = {
+      ...liveMeeting,
+      id: "m-adj",
+      status: "adjourned",
+      title: "Adjourned Meeting",
+    };
+    server.meetings = [adjourned];
+    server.pending = [{ meeting_id: "m-adj", status: "review" as const }];
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+
+    expect(await screen.findByText("Minutes pending review")).toBeInTheDocument();
+  });
+
+  it("offers only active boards in the Schedule meeting picker", async () => {
+    // `board.listActive` filters `archived_at IS NULL` — the hazard this
+    // screen's header has named for four waves (never offer an archived board
+    // as a place to schedule a meeting).
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    const { user } = renderWithProviders(<Home />, { route: "/", queryClient });
+
+    await user.click((await screen.findAllByRole("button", { name: /schedule meeting/i }))[0]!);
+    expect(await screen.findByText("Which board is meeting?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select Board" })).toBeInTheDocument();
+  });
+
+  it("replaces the pipeline with an alert when meeting.byTown rejects", async () => {
+    // Every section on this screen is computed from `meetingRows`; rendering
+    // them from an empty array would show a healthy-looking, empty landing.
+    server.meetingsReject = true;
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+
+    expect(await screen.findByText(/couldn't load your meetings/i)).toBeInTheDocument();
+    expect(screen.queryByText("Your meeting pipeline")).not.toBeInTheDocument();
+  });
+
+  it("refetches when a writer invalidates trpc.meeting.pathFilter()", async () => {
+    server.meetings = [liveMeeting];
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+    // The hero and the Upcoming table both render the title, so this is
+    // "at least one", not "exactly one".
+    await waitFor(() => expect(screen.getAllByText("Regular Meeting").length).toBeGreaterThan(0));
+    const before = stub.countFor("meeting.byTown");
+
+    server.meetings = [{ ...liveMeeting, title: "Renamed Meeting" }];
+    await queryClient.invalidateQueries(trpc.meeting.pathFilter());
+
+    await waitFor(() => expect(stub.countFor("meeting.byTown")).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getAllByText("Renamed Meeting").length).toBeGreaterThan(0));
+  });
+
+  it("refetches when a writer invalidates trpc.minutesDocument.pathFilter()", async () => {
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+    await waitFor(() => expect(stub.countFor("minutesDocument.pendingByTown")).toBeGreaterThan(0));
+    const before = stub.countFor("minutesDocument.pendingByTown");
+
+    await queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
+
+    await waitFor(() =>
+      expect(stub.countFor("minutesDocument.pendingByTown")).toBeGreaterThan(before),
+    );
+  });
+
+  it("refetches the board picker when a writer invalidates trpc.board.pathFilter()", async () => {
+    userRef.value = createAdminUser();
+    permRef.allowed = true;
+    renderWithProviders(<Home />, { route: "/", queryClient });
+    await waitFor(() => expect(stub.countFor("board.listActive")).toBeGreaterThan(0));
+    const before = stub.countFor("board.listActive");
+
+    await queryClient.invalidateQueries(trpc.board.pathFilter());
+
+    await waitFor(() => expect(stub.countFor("board.listActive")).toBeGreaterThan(before));
   });
 });
