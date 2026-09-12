@@ -2895,6 +2895,57 @@ Fastify server, a real batched `fetch`, as `http-batch.test.ts` and `sse-bounds.
 because a retry-smoothed browser check and a stubbed-transport unit test fail to see this defect
 for the same underlying reason — neither one drives the real request shape past the real server.
 
+**A `vi.mock` specifier is a string nothing resolves — a fifth hazard of the same species, and the
+one that sits closest to this phase's own definition of done.** An `import` is covered TWICE: `tsc`
+answers `TS2307` for a path that does not exist, and vitest's transform answers "Failed to resolve
+import … Does the file exist?". A `vi.mock` specifier is covered **zero** times. Measured at wave 6,
+Task 7 on a throwaway test file, all three cases in the same package:
+
+```
+vi.mock("./does-not-exist-at-all", () => ({ … }));   →  1 passed   (silent)
+vi.mock("./does-not-exist-at-all");                  →  1 passed   (silent)
+import { thing } from "./does-not-exist-at-all";     →  vitest: Failed to resolve import
+                                                        tsc:    TS2307 Cannot find module
+```
+
+**Both forms are silent, and the second is the one that matters** — "just drop the factory and
+vitest will resolve it for real" is the obvious mitigation and it does not work. Wave 6, Task 6
+measured the factory form on the two DELETED Supabase modules (three test files went on mocking
+them, 693 tests green); the factory-less form was measured here, which closes the mitigation off.
+So the phase's deletion step proves the absence of **imports**, not the absence of **dependence** —
+recorded in the design spec's own "Definition of done" as well, because that is where a reader looks
+for the guarantee.
+
+A mock can also be silent because its subject **never had a runtime existence**, not only because it
+was deleted. The in-tree instance, found by resolving all 124 comment-stripped `vi.mock` specifiers
+across 42 files:
+
+```
+packages/web/src/routes/meetings.$meetingId.live.test.tsx:73   (at be61cfa, now removed)
+  vi.mock("./+types/meetings.$meetingId.live", () => ({}));
+```
+
+React Router generates that module under `.react-router/types/`, reachable only through tsconfig's
+`rootDirs` — a TYPE-level mechanism vitest does not honour — and the route consumes it as
+`import type`, so nothing survives to runtime to be mocked. Inert and harmless. **Deleted rather
+than annotated in place**, with a comment at the site saying why there is none and not to re-add it:
+an inert mock that looks load-bearing is a line the next author copies into a new route test, and
+the comment is the only thing that stops that. Fourteen non-test modules under `packages/web/src`
+import a `./+types/…` sibling (`grep -rln 'from "\./+types/' src --include='*.tsx' --include='*.ts' | grep -v '\.test\.'`)
+and this was the only mock of one anywhere in the tree, which is what makes deletion the consistent
+choice rather than a local preference.
+
+**The check is a resolver sweep, not a grep.** Extract every `vi.mock` specifier from
+comment-stripped sources (multiline-safe — `vi.mock(\n  "…"` is common), resolve `@/` against
+`src/`, `./`/`../` against the file, and bare specifiers through the package's own resolution, then
+report what does not land on a file. `packages/web/src/lib/__tests__/pathfilter-pin-coverage.test.ts`
+already carries `stripComments` and `resolveSpecifier` to copy from. Two false-positive modes to
+expect, both hit on the first run of this sweep: a specifier inside a FIXTURE string literal (that
+check's own `@/components/Widget` fixtures), and a bare workspace package whose `exports` map has no
+`require` condition (`@town-meeting/shared` fails `require.resolve` and resolves fine under
+`import.meta.resolve`) — resolve bare specifiers the way the runtime will, not the way `require`
+would.
+
 ---
 
 ## 14. The close-out step: re-check every Known-gaps bullet against HEAD

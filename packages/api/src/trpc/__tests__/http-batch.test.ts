@@ -277,11 +277,14 @@ describe("a tRPC HTTP batch, which shares ONE context across concurrently-resolv
  * where it expects 4096. Run in this task's fix round; see the report.
  */
 describe("the production server's batch-path bound (Phase E, wave 5, Task 7)", () => {
-  /** The environment `buildServer` refuses to boot without. */
+  /**
+   * The environment `buildServer` refuses to boot without. The two `SUPABASE_*`
+   * entries that used to sit here were dropped at Phase E's close-out (wave 6,
+   * Task 7) — nothing in `packages/api/src` reads either, and `server.ts` asks
+   * only for `BETTER_AUTH_SECRET` and `DATABASE_URL`.
+   */
   const REQUIRED_ENV = {
     BETTER_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
-    SUPABASE_URL: "http://localhost:54321",
-    SUPABASE_SERVICE_ROLE_KEY: "service-role-key-for-this-test-only",
     DATABASE_URL: process.env.DATABASE_URL ?? "postgres://localhost:5432/postgres",
   } as const;
 

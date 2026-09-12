@@ -70,7 +70,14 @@ vi.mock("react-router", async () => {
   };
 });
 
-vi.mock("./+types/meetings.$meetingId.live", () => ({}));
+// There is deliberately NO `vi.mock("./+types/meetings.$meetingId.live")` here.
+// One used to sit at this line and it was inert: no runtime module of that name
+// exists anywhere. React Router generates the file under `.react-router/types/`
+// and it is reachable only through tsconfig's `rootDirs`, a TYPE-level mechanism
+// vitest does not honour, and the route consumes it as `import type`, so nothing
+// survives to runtime to be mocked. It passed for the same reason a mock of a
+// DELETED module passes (conventions item 13): a `vi.mock` specifier is resolved
+// by nothing, in either the factory or the factory-less form. Do not re-add it.
 
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: vi.fn(() => ({

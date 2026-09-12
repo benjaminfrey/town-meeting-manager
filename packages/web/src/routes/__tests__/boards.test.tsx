@@ -208,6 +208,13 @@ describe("board list", () => {
     expect(stub.countFor("board.stats")).toBeGreaterThan(0);
   });
 
+  // Sound as the negative half of the pair above; unsound on its own. It cannot
+  // distinguish "board.stats returned 0" from "board.stats errored" — the
+  // permissive `(boardStats?.meetings ?? 0)` default in `EditBoardDialog`
+  // swallows both, and `countFor` counts a refused call as a call. Measured at
+  // Phase E wave 6, Task 7: replacing this file's `board.stats` handler with
+  // `trpcTestError("INTERNAL_SERVER_ERROR")` turns the test ABOVE red and leaves
+  // this one green. Do not cite it alone as evidence that the read works.
   it("leaves the name field editable when trpc.board.stats reports no meetings", async () => {
     server.meetingCount = 0;
     const { user } = renderRoute();
