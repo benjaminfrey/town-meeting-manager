@@ -5004,8 +5004,14 @@ peer: edit the importer entry by hand and verify with
    `supabase/migrations/` tree is history.
 4. **Prose that outlived its subject** — `e2e/`'s four files tell a reader to
    run `supabase start` and carry `supabase/seed.sql`'s UUIDs, `README.md`,
-   `docs/deployment.md`, and ~29 files under `packages/web/src` whose comments
-   narrate a migration that is finished. All harmless; all wrong.
+   `docs/deployment.md`, and — depending on how you grep — **29 or 105** files
+   under `packages/web/src` whose comments narrate a migration that is finished
+   (`grep -rl "supabase" packages/web/src` answers 29; `grep -rli` answers 105,
+   the difference being prose that capitalises the product name). Every one of
+   the 105 is a comment and the import grep is zero, so this is one last
+   specimen of the mention-versus-code hazard item 11 spent the phase
+   documenting — produced by the close-out that was checking for it. All
+   harmless; all wrong.
 
 **What item 2 still does not say, for Phase F specifically.** Item 2 settles
 where a rule goes and which guard shape carries it. Three things it does not
