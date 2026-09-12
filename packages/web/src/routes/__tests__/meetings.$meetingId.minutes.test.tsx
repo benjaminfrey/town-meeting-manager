@@ -181,6 +181,7 @@ const server = {
   submitRefuses: false,
   approveRefuses: false,
   publishRefuses: false,
+  publishConflicts: false,
   returnRefuses: false,
   unpublishRefuses: false,
 };
@@ -208,6 +209,7 @@ const stub = installTRPCFetchStub({
     return { id: minutesDocumentId, status: "approved" as const };
   },
   "minutesDocument.publish": ({ minutesDocumentId }) => {
+    if (server.publishConflicts) trpcTestError("CONFLICT");
     if (server.publishRefuses) trpcTestError("FORBIDDEN");
     return { id: minutesDocumentId, status: "published" as const };
   },
@@ -259,6 +261,7 @@ beforeEach(() => {
   server.submitRefuses = false;
   server.approveRefuses = false;
   server.publishRefuses = false;
+  server.publishConflicts = false;
   server.returnRefuses = false;
   server.unpublishRefuses = false;
   toastSuccess.mockClear();
@@ -317,6 +320,57 @@ describe("MinutesReviewPage — reads", () => {
   });
 });
 
+describe("MinutesReviewPage — gates and disclosures", () => {
+  it("renders Access Denied for a caller with no view_draft_minutes on a draft", async () => {
+    currentUser.value = {
+      id: "user-3",
+      townId: "town-1",
+      role: "staff",
+      permissions: { global: {}, board_overrides: [] },
+    };
+    server.document = { ...baseDocument, status: "draft" };
+    renderRoute();
+
+    expect(await screen.findByText("Access Denied")).toBeInTheDocument();
+  });
+
+  it("expands the amendment history and shows each round's reason", async () => {
+    server.document = {
+      ...baseDocument,
+      amendments_history: [
+        {
+          round: 1,
+          returned_at: "2026-01-04T00:00:00Z",
+          reason: "Fix the vote tally",
+          returned_by: "user-1",
+          resubmitted_at: "2026-01-05T00:00:00Z",
+        },
+      ],
+    };
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: /amendment history \(1 round\)/i }));
+    expect(screen.getByText("Round 1")).toBeInTheDocument();
+    expect(screen.getByText("Fix the vote tally")).toBeInTheDocument();
+    expect(screen.getByText(/^Resubmitted/)).toBeInTheDocument();
+  });
+
+  it("toggles tracked changes when the document has an original to compare against", async () => {
+    server.document = {
+      ...baseDocument,
+      content_json: { sections: [] },
+      original_content_json: { sections: [] },
+    };
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: "Show Changes" }));
+    expect(screen.getByTestId("tracked-changes")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Hide Changes" }));
+    expect(screen.queryByTestId("tracked-changes")).not.toBeInTheDocument();
+  });
+});
+
 describe("MinutesReviewPage — the two migrated defects", () => {
   // Defect 1: the button gated on `minutesDoc.pdf_url`, which is not a column
   // on `minutes_document`, so it could never render. `has_pdf` is.
@@ -372,6 +426,29 @@ describe("MinutesReviewPage — writes", () => {
       expect(queryClient.getQueryState(pillKey)?.isInvalidated).toBe(true);
     });
     expect(inputFor("minutesDocument.approve")).toEqual({ minutesDocumentId: "minutes-1" });
+  });
+
+  // A SECOND `pathFilter()` call site in the same file. Conventions item 8's
+  // mechanical check credits a writer per TEST FILE, so this one would ride in
+  // free on the approve pin above; it is pinned in its own right, and verified
+  // by deleting its own line.
+  it("invalidates trpc.minutesDocument.pathFilter() after a regenerate", async () => {
+    server.document = { ...baseDocument, status: "draft" };
+    const pillKey = trpc.minutesDocument.byMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+
+    const { user } = renderRoute();
+    await user.click(await screen.findByRole("button", { name: /regenerate/i }));
+    await waitFor(() => expect(apiJson).toHaveBeenCalled());
+
+    queryClient.setQueryData(pillKey, { id: "minutes-1", status: "draft" });
+    expect(queryClient.getQueryState(pillKey)?.isInvalidated).toBeFalsy();
+    await user.click(screen.getByRole("button", { name: /regenerate/i }));
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(pillKey)?.isInvalidated).toBe(true);
+    });
   });
 
   it("submits for review with the board id the guard authorizes on", async () => {
@@ -515,6 +592,26 @@ describe("MinutesReviewPage — refusals", () => {
     // therefore invisible to `getAllByRole`, which is exactly how a duplicate
     // (or a misplaced sole) refusal goes unnoticed.
     expect(alertNodes()).toHaveLength(1);
+  });
+
+  // A CONFLICT is NOT a refusal, and this screen must not say "Try again" to
+  // one: three of the six procedures gained a status precondition in the
+  // migration, and their message names the status the document actually has.
+  // The stub sends the code as the message, so seeing it verbatim is the pin —
+  // `refusalMessage` alone would have replaced it with its own sentence.
+  it("shows the server's own message for a CONFLICT rather than refusal copy", async () => {
+    server.document = { ...baseDocument, status: "approved" };
+    server.publishConflicts = true;
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: /publish to portal/i }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Publish" }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("CONFLICT");
+    expect(alert).not.toHaveTextContent("Try again");
   });
 
   it("shows a refusal INSIDE the submit dialog when submitForReview is FORBIDDEN", async () => {

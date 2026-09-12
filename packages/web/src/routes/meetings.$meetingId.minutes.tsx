@@ -120,7 +120,7 @@ import type { MinutesContentJson } from "@town-meeting/shared/types";
 import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
 import { queryClient } from "@/lib/queryClient";
-import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
+import { trpc, errorMessage, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { apiFetch, apiJson } from "@/lib/api-client";
 
 // ─── Route Loader ─────────────────────────────────────────────────
@@ -197,6 +197,30 @@ const TIMELINE_STEPS: ReadonlyArray<{
   { key: "approved", label: "Approved", field: "approved_at" },
   { key: "published", label: "Published", field: "published_at" },
 ];
+
+/**
+ * What to tell the clerk when a write does not happen.
+ *
+ * `refusalMessage` alone is not enough on this screen, and the reason arrived
+ * with the migration: three of the six procedures added a STATUS PRECONDITION
+ * that did not exist before (`saveDraft` requires `draft`, `publish` requires
+ * `approved`, `unpublish` requires `published` — `minutes-document.ts`'s
+ * header states all three as behaviour changes). Those answer CONFLICT, and
+ * their message is written to be read by a clerk: "These minutes are approved,
+ * not draft, so they cannot be edited." `refusalMessage` would replace it with
+ * "Couldn't save these minutes. Try again." — advice that cannot work, because
+ * another clerk moved the document on and retrying changes nothing.
+ *
+ * `errorMessage` is the house helper for exactly the CONFLICT half, so the two
+ * are COMPOSED rather than a third being written: `errorMessage` returns the
+ * server's message verbatim for a CONFLICT and its fallback otherwise, and the
+ * fallback here is what `refusalMessage` would have said (see `lib/trpc.ts`'s
+ * own doc comments on both, and conventions item 2's carry-over note about not
+ * growing a fourth copy of this branch).
+ */
+function writeError(err: unknown, action: string): string {
+  return errorMessage(err, refusalMessage(err, action));
+}
 
 // ─── Component ────────────────────────────────────────────────────
 
@@ -357,7 +381,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       onSuccess: () => {
         invalidateMinutes();
       },
-      onError: (err) => setActionError(refusalMessage(err, "save these minutes")),
+      onError: (err) => setActionError(writeError(err, "save these minutes")),
     }),
   );
 
@@ -393,7 +417,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         setSubmitDialogOpen(false);
         toast.success("Minutes submitted for board review");
       },
-      onError: (err) => setActionError(refusalMessage(err, "submit these minutes for review")),
+      onError: (err) => setActionError(writeError(err, "submit these minutes for review")),
     }),
   );
 
@@ -404,7 +428,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         invalidateMinutes();
         toast.success("Minutes approved");
       },
-      onError: (err) => setActionError(refusalMessage(err, "approve these minutes")),
+      onError: (err) => setActionError(writeError(err, "approve these minutes")),
     }),
   );
 
@@ -417,7 +441,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         toast.success("Minutes published to public portal");
       },
       onError: (err) =>
-        setActionError(refusalMessage(err, "publish these minutes to the public portal")),
+        setActionError(writeError(err, "publish these minutes to the public portal")),
     }),
   );
 
@@ -430,7 +454,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         setReturnReason("");
         toast.success("Minutes returned for amendments");
       },
-      onError: (err) => setActionError(refusalMessage(err, "return these minutes for amendments")),
+      onError: (err) => setActionError(writeError(err, "return these minutes for amendments")),
     }),
   );
 
@@ -441,8 +465,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         invalidateMinutes();
         toast.success("Minutes unpublished");
       },
-      onError: (err) =>
-        setActionError(refusalMessage(err, "take these minutes off the public portal")),
+      onError: (err) => setActionError(writeError(err, "take these minutes off the public portal")),
     }),
   );
 
