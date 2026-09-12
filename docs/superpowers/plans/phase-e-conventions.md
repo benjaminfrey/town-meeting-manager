@@ -792,6 +792,35 @@ window (call `ctx.actor()`, do not await it, call it again), which is what that 
 is reachable, so the test stays; it is narrow, and saying which narrow shape it is beats leaving a
 reader to assume it covers more.
 
+**RESCOPED in wave 5, Task 7's fix round, and this time the SCOPE was wrong rather than the
+condition.** Everything above is about WHEN the guard should fire. The flag it fired on was
+per-REQUEST, and a request is not the unit the hazard lives in. `httpBatchLink` — the client's
+default transport — puts N procedure calls on ONE HTTP request; tRPC builds ONE context for it and
+resolves the calls CONCURRENTLY. So the first call to reach `ctx.withTenant` set the flag and every
+sibling on the batch was refused. The live meeting screen's five-query loader got one result and
+four reentrancy errors, a `207 Multi-Status`, and rendered blank. Present since Stage 1, Task D1;
+invisible to 1725 green tests because every router test drives ONE procedure through `createCaller`
+and the web suite stubs the transport (item 8), so nothing anywhere built a batch.
+
+The hazard is NESTING — `withTenant` called from inside another `withTenant`'s own callback — and
+nesting is a property of a call's DYNAMIC EXTENT, not of the request it arrived on. Two CONCURRENT
+transactions take two pooled connections and cannot deadlock each other; on the single-connection
+test pool they simply QUEUE. `bindTenantAccess` now holds its marker in an `AsyncLocalStorage`
+established around `rawWithTenant`, so it is visible to everything that call awaits and to nothing
+else. Two consequences worth carrying into wave 6:
+
+- **State 3 above changed shape.** While the marker was per-request, a pending actor load left the
+  flag set for the whole request, so the only reachable third state was a bare second `actor()` call
+  in the load's own window — refused, even though it returns the same promise and opens no second
+  transaction. That bare re-entry is now allowed, correctly. The state that still threatens a
+  connection, and that the test now constructs, is a pending load reached from inside a SEPARATE,
+  open `withTenant` of the same context.
+- **A per-request unit of state is a design decision, not a default.** Anything `bindTenantAccess`
+  or a future context helper holds is shared by every procedure the client chose to batch together.
+  Ask of each one whether it is per REQUEST or per CALL before writing it, because the tests in this
+  repository cannot tell you: `trpc/__tests__/http-batch.test.ts` is the only one that builds a
+  batch at all.
+
 **The example files a reader lands on now match this item's own rule.** `board-scope.test.ts`'s
 four board-scoped procedures and `require-permission.test.ts`'s `editAgenda`/`scheduleMeeting` used
 to declare `.input().use(guard)` — the preemptable order — because they predate this item's
@@ -1295,9 +1324,10 @@ forces at least every five minutes; it is not re-evaluated between those points.
 deadline the generator's `finally` runs with `signal.aborted === true`, the client resumes with no
 gap, no duplicate and no `onError`, and a fresh context is built.
 
-**A subscription must open at most one `ctx.withTenant`, at subscribe time.** Two OVERLAPPING calls
-are what `bindTenantAccess`'s `inTransaction` guard refuses, and a stream that fans out per-event
-work is the only shape in this codebase that could produce them. Events carry no payload, so there
+**A subscription must open at most one `ctx.withTenant`, at subscribe time.** A NESTED call is what
+`bindTenantAccess`'s reentrancy guard refuses (two merely concurrent ones are fine, since wave 5
+Task 7's rescope), and a stream that fans out per-event work from inside its subscribe-time
+transaction is the only shape in this codebase that could produce one. Events carry no payload, so there
 is nothing per event to read. `routers/__tests__/realtime.test.ts` counts the transactions and the
 actor resolutions, so adding either goes red rather than being discovered under load.
 
@@ -3684,7 +3714,11 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      no migrated screen works in a browser, and **the remaining observations
      below were only reachable by temporarily setting `maxItems: 1` on the
      client's `httpBatchLink`** — disclosed rather than quietly worked around,
-     and restored byte-identical.
+     and restored byte-identical. **FIXED in the same task's fix round**, by
+     scope rather than by condition: the marker now lives in an
+     `AsyncLocalStorage` established around the raw `withTenant` call, so it
+     covers that call's dynamic extent and not the request. `maxItems: 1` was
+     not shipped and is not needed.
 
   2. **The SSE resume catch-up never runs on a QUIET stream, so a write made
      during the routine reconnect is lost silently and permanently.**
@@ -3780,13 +3814,20 @@ one list rather than reconstructing it from seven task reports.
 
 ### Carried forward, in priority order
 
-1. **The batch reentrancy false positive (Task 7 finding 1).** Blocking for the
-   whole phase, not for one screen: with `httpBatchLink` in front of it, every
-   migrated screen that fires two or more queries at once gets all but one
-   refused. Fix it before anything else in wave 6, and fix it by distinguishing
-   NESTED from CONCURRENT rather than by narrowing the flag a third time. The
-   test that would have caught it does not exist in any package: a router test
-   that drives two procedures on ONE context concurrently.
+1. ~~**The batch reentrancy false positive (Task 7 finding 1).**~~ **FIXED in
+   wave 5, Task 7's fix round — it did not survive to wave 6.** The owner asked
+   for it before merge. `bindTenantAccess` now holds its reentrancy marker in
+   an `AsyncLocalStorage` established around the raw `withTenant` call, so the
+   marker lasts for a call's DYNAMIC EXTENT instead of for the request: a
+   genuinely nested call still fails fast, and the concurrent siblings of a
+   batch each open their own transaction. See item 2's "RESCOPED in wave 5,
+   Task 7's fix round" paragraph. The test that did not exist in any package
+   now does — `packages/api/src/trpc/__tests__/http-batch.test.ts` drives a
+   real batched GET against a real Fastify server and asserts one context
+   served all three procedures and that their transactions genuinely
+   overlapped; `__tests__/context.test.ts` carries the function-level version.
+   Both verified by restoring the per-request boolean and watching four tests
+   go red.
 2. **The two preserved minutes-surface defects, which are one job.** Wave 5,
    Task 5 said so and it is worth repeating at the top level, because they have
    the same two readers and the same class — a live defect in what a generated
@@ -3870,9 +3911,11 @@ address, all of which wave 5 hit and worked around locally:
 - **It is written one procedure at a time, and the client is not.** Wave 4, Task
   4 already named a flow spanning two guarded procedures; wave 5 found the
   transport-level version of the same gap — N procedures on ONE request, sharing
-  ONE context, resolved CONCURRENTLY. Item 2 has nothing to say about what a
+  ONE context, resolved CONCURRENTLY. Item 2 had nothing to say about what a
   context may hold that is not safe to share across the calls batched onto it,
-  which is exactly the assumption `bindTenantAccess` got wrong.
+  which is exactly the assumption `bindTenantAccess` got wrong. **Task 7's fix
+  round added it** — see item 2's "a per-request unit of state is a design
+  decision, not a default" — so this one is closed rather than carried forward.
 - **It does not cover a SUBSCRIPTION's authorization lifetime as a rule, only as
   a comment.** `context.ts`'s header states the exposure honestly (evaluated at
   open, re-evaluated on every forced reconnect, not in between) and
