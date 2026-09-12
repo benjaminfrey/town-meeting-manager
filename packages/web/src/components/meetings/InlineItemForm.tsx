@@ -114,8 +114,9 @@ export function InlineItemForm({
 
   /**
    * The legacy key plus the router filter (conventions item 7). The legacy
-   * `queryKeys.agendaItems.byMeeting` line stays because `SourceDataPanel`,
-   * `live.tsx` and `review.tsx` still read it.
+   * `queryKeys.agendaItems.byMeeting` line stays because `review.tsx` still
+   * reads it. (`SourceDataPanel.tsx` named here until Phase E wave 6, Task 3
+   * moved it to `trpc.agendaItem.byMeeting`; `live.tsx` moved in wave 5.)
    */
   const invalidateItems = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });

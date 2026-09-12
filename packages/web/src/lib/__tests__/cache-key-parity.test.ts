@@ -93,9 +93,10 @@
  * `attendance` — every one of them a real writer of the table its router
  * owns, each fixed on its own merits with a `pathFilter()` call and a pin
  * test, each pin verified by deleting the line and watching it go red. The
- * legacy `queryKeys.*` lines all STAY: `SourceDataPanel.tsx`,
- * `useQuorumCheck.ts` and reads inside `live.tsx`/`review.tsx`/`agenda.tsx`
- * still consume them, and they go when the last legacy reader does.
+ * legacy `queryKeys.*` lines all STAY: `useQuorumCheck.ts` and reads inside
+ * `review.tsx`/`agenda.tsx` still consume them, and they go when the last
+ * legacy reader does. (`SourceDataPanel.tsx` was in that list until Phase E
+ * wave 6, Task 3 migrated its five reads; `live.tsx` until wave 5.)
  *
  * `exhibits: "exhibit"` joined in Phase E wave 4, Task 3, the commit that
  * moved `routes/meetings.$meetingId.agenda.tsx`'s exhibit read onto

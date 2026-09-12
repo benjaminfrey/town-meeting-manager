@@ -278,9 +278,9 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
   const addSection = useMutation(
     trpc.agendaItem.insert.mutationOptions({
       onSuccess: () => {
-        // Legacy key: `SourceDataPanel.tsx`, `live.tsx` and `review.tsx`
-        // still read it (conventions item 7 — the legacy line goes when the
-        // last legacy reader does).
+        // Legacy key: `review.tsx` still reads it (conventions item 7 — the
+        // legacy line goes when the last legacy reader does). `live.tsx` left
+        // it in wave 5 and `SourceDataPanel.tsx` in wave 6, Task 3.
         void queryClient.invalidateQueries({
           queryKey: queryKeys.agendaItems.byMeeting(meetingId),
         });
