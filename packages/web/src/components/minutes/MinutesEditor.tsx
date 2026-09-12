@@ -12,7 +12,6 @@ import type {
 } from "@town-meeting/shared/types";
 
 interface MinutesEditorProps {
-  minutesDocId: string;
   meetingId: string;
   /**
    * The meeting's board, passed straight through to `SourceDataPanel`.
@@ -31,13 +30,7 @@ type SaveStatus = "saved" | "unsaved" | "saving";
 
 const AUTO_SAVE_INTERVAL_MS = 30_000;
 
-export function MinutesEditor({
-  minutesDocId,
-  meetingId,
-  boardId,
-  contentJson,
-  onSave,
-}: MinutesEditorProps) {
+export function MinutesEditor({ meetingId, boardId, contentJson, onSave }: MinutesEditorProps) {
   const [editableContent, setEditableContent] = useState<MinutesContentJson>(() =>
     structuredClone(contentJson),
   );

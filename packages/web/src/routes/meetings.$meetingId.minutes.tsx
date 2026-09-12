@@ -37,11 +37,13 @@
  *
  * ─── A behaviour change, stated: the town read is gone ────────────────────
  *
- * The `town` query fed exactly one thing, the `town_id` in the
- * `minutes_published` notification's request body, and nothing rendered it.
- * `minutesDocument.publish` queues that event server-side from
- * `ctx.tenant.townId`, so both the read and the `townId` local are dead and
- * removed rather than carried forward (conventions item 1).
+ * Fix round 1 correction: the `town` query's `data` fed nothing at all — it
+ * was never read anywhere in this file. The `townId` local that DID feed the
+ * `minutes_published` notification's request body came from
+ * `meeting?.town_id`, not from this read. Both were dead for the same
+ * reason (neither was consulted), just not the same overstatement, and both
+ * are removed rather than carried forward. `minutesDocument.publish` queues
+ * that event server-side from `ctx.tenant.townId` (conventions item 1).
  *
  * ─── Two live defects, both fixed here (see the `task-3-brief.md` list) ───
  *
@@ -375,6 +377,37 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   /** Clear the previous refusal when a new attempt starts. */
   const beginWrite = () => setActionError(null);
 
+  /**
+   * A refused write's `actionError` is not scoped to the action that produced
+   * it — one piece of state feeds all four render sites (the outer paragraph
+   * plus the three in-dialog copies). Opening a DIFFERENT dialog while a
+   * refusal from another write is still standing must not carry that message
+   * in: at `status === "review"`, Approve (no dialog) and Return for
+   * Amendments (a dialog) sit on screen together, and a clerk refused on
+   * Approve who then opens Return was shown "You don't have permission to
+   * approve these minutes" INSIDE the Return dialog — accurate for the wrong
+   * action, which reads as a refusal of the action they are currently
+   * attempting. So every dialog's open transition clears the stale error
+   * first; this same handler is what OPENS the dialog (the trigger buttons
+   * call it with `true` instead of setting state directly), so the clear
+   * happens on the one path that actually opens each dialog, not only on
+   * Radix's own close events.
+   */
+  const handleSubmitDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setSubmitDialogOpen(open);
+  }, []);
+
+  const handlePublishDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setPublishDialogOpen(open);
+  }, []);
+
+  const handleReturnDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setReturnDialogOpen(open);
+  }, []);
+
   const saveDraftMutation = useMutation(
     trpc.minutesDocument.saveDraft.mutationOptions({
       onMutate: beginWrite,
@@ -679,7 +712,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
           </Button>
         )}
         {status === "draft" && canSubmitForReview && (
-          <Button size="sm" onClick={() => setSubmitDialogOpen(true)}>
+          <Button size="sm" onClick={() => handleSubmitDialogOpenChange(true)}>
             <Send className="mr-1.5 h-4 w-4" />
             Submit for Review
           </Button>
@@ -702,13 +735,13 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
           </Button>
         )}
         {status === "review" && isAdmin && (
-          <Button variant="outline" size="sm" onClick={() => setReturnDialogOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => handleReturnDialogOpenChange(true)}>
             <Undo2 className="mr-1.5 h-4 w-4" />
             Return for Amendments
           </Button>
         )}
         {status === "approved" && canPublish && (
-          <Button size="sm" onClick={() => setPublishDialogOpen(true)}>
+          <Button size="sm" onClick={() => handlePublishDialogOpenChange(true)}>
             <Upload className="mr-1.5 h-4 w-4" />
             Publish to Portal
           </Button>
@@ -755,7 +788,6 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       {/* Main Content */}
       {isEditing && contentJson ? (
         <MinutesEditor
-          minutesDocId={docId}
           meetingId={meetingId}
           boardId={boardId}
           contentJson={contentJson}
@@ -830,7 +862,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       {/* ─── Dialogs ─────────────────────────────────────────────── */}
 
       {/* Submit for Review Dialog */}
-      <AlertDialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+      <AlertDialog open={submitDialogOpen} onOpenChange={handleSubmitDialogOpenChange}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Submit for Board Review</AlertDialogTitle>
@@ -859,7 +891,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       </AlertDialog>
 
       {/* Publish Dialog */}
-      <AlertDialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+      <AlertDialog open={publishDialogOpen} onOpenChange={handlePublishDialogOpenChange}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Publish to Portal</AlertDialogTitle>
@@ -883,7 +915,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       </AlertDialog>
 
       {/* Return for Amendments Dialog */}
-      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+      <Dialog open={returnDialogOpen} onOpenChange={handleReturnDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Return for Amendments</DialogTitle>

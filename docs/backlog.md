@@ -109,3 +109,111 @@ on 2026-09-12, which created this file. See
 (items 5 and 6) and "What the transport taught" section (the
 connecting/broken bullet) for the full history and the exact commands each
 re-verification ran._
+
+---
+
+## 4. The minutes editor's source panel downloads every seat's live invitation token to resolve names
+
+**Where:** `packages/web/src/components/minutes/SourceDataPanel.tsx` (the
+`boardMember.roster` read and its `memberNames` map) and
+`packages/api/src/trpc/routers/board-member.ts` (`roster`'s `SELECT`, which
+returns `invitation_token` per seat).
+
+**What the gap is:** `boardMember.roster` is the only procedure that maps a
+`board_member_id`/mover/seconder id to a person's name, and its row shape
+includes each seat's most recent invitation id, token and status —
+`activeCountForBoard`'s own doc comment in the same file states the trade
+explicitly: "Sending a board's live invitation tokens to every user who opens
+that dialog, to count rows the server can count, is not a trade worth making
+to avoid a nine-line procedure." `SourceDataPanel` needs names, not a count,
+but it pays the same price: every clerk who opens the minutes editor now
+receives every board seat's live invitation token in the `roster` response,
+to read `.name` off it.
+
+**Why it wasn't closed in Phase E:** this widens an EXISTING pattern rather
+than opening a new hole — `meetings.$meetingId.live.tsx` already fetches
+`boardMember.roster` for the identical reason (`VotePanel`'s
+board-member-id-to-name mapping), so wave 6 Task 3 is the second screen to
+make this trade, not the first. Closing it means adding a narrower procedure
+(`boardMember.namesForBoard`, returning `id`/`name` only) and moving both
+callers onto it — a real fix, but a new procedure plus two call-site
+migrations is out of scope for a task whose brief was "wire the six writes
+Task 1 already built," and no Phase E wave task owns a token-minimization pass
+across the app.
+
+**Verification command:**
+
+```
+grep -n "invitation_token" packages/api/src/trpc/routers/board-member.ts
+grep -rln "boardMember.roster" packages/web/src/routes/meetings.\$meetingId.live.tsx packages/web/src/components/minutes/SourceDataPanel.tsx
+```
+
+---
+
+## 5. The web client's `isAdmin` includes sys_admin; the server's authorization does not
+
+**Where:** `packages/web/src/routes/meetings.$meetingId.minutes.tsx:341`
+(`const isAdmin = user?.role === "admin" || user?.role === "sys_admin";`) and
+`packages/api/src/trpc/authorization/permission.ts` (`resolvePermission`:
+line 156 `if (actor.role === "admin") return true;`, line 162
+`if (actor.role === "sys_admin") return false;`).
+
+**What the gap is:** the minutes screen shows Approve, Return for Amendments
+and Unpublish to any `isAdmin` caller, which the client computes as
+`admin || sys_admin`. The server's `resolvePermission` short-circuits `admin`
+to true but explicitly denies `sys_admin` — the removed `has_permission()`
+function denied sys_admin on purpose, per `permission.ts`'s own comment. So a
+sys_admin sees all three buttons and is refused on every one.
+
+**Why it wasn't closed in Phase E:** this is pre-existing — `resolvePermission`
+already drew this line before wave 6 touched the file — and reconciling the
+client and server definitions of "admin" is a product decision (should
+sys_admin be able to approve/return/unpublish a town's minutes, or is the
+denial intentional platform-operator scoping?), not a wiring gap this task's
+brief covered. Wave 6 Task 3's own contribution is that the refusal is now
+VISIBLE (the button submits and shows a FORBIDDEN toast) rather than silent,
+which is a strict improvement but not a fix.
+
+**Verification command:**
+
+```
+grep -n "isAdmin = user" packages/web/src/routes/meetings.\$meetingId.minutes.tsx
+sed -n '150,165p' packages/api/src/trpc/authorization/permission.ts
+```
+
+---
+
+## 6. The web client never normalises a code-keyed permissions matrix
+
+**Where:** `packages/shared/src/utils/permissions.ts` (`hasPermission`'s own
+doc comment: "It takes an ALREADY-NORMALISED matrix: pass a raw database row
+through normalisePermissionsMatrix first, or half the accounts in the system
+silently resolve to no permissions at all.") `normalisePermissionsMatrix` has
+zero call sites anywhere under `packages/web/src` (production code — the sole
+web-package hit is a mock in `StaffAccountFlow.test.tsx`); the server's
+`authorization/permission.ts` calls it on every resolution.
+
+**What the gap is:** `supabase/seed.sql` writes at least one account's
+`permissions` keyed by action CODE (`{"global": {"A2": true, "A3": true, ...}}`,
+the Sarah Mitchell / Deputy Clerk row) rather than by action NAME. The server
+normalises this before resolving and allows the action; the web client passes
+`user.permissions` straight to `hasPermission` with no normalisation step, so
+the same code-keyed matrix resolves to nothing client-side — every
+button gated on `hasPermission(...)` for that account is hidden even though
+the server would allow the write.
+
+**Why it wasn't closed in Phase E:** repo-wide, not specific to any one
+screen or wave-6 task — every web caller of `hasPermission` (this task's
+`minutes.tsx` included) shares the same gap, so fixing it belongs in
+`useCurrentUser` or wherever `user.permissions` is first read, not in an
+individual screen. It limits how much of wave 6 Task 3's `hasPermission`
+widening (passing `boardId`/`role`, matching the server) a seeded staff
+account can actually exercise: the buttons are correctly computed FROM the
+matrix the client has, but the matrix itself is wrong for a code-keyed row.
+
+**Verification command:**
+
+```
+git grep -n "normalisePermissionsMatrix" -- packages/web/src
+grep -n "global.*A2.*true" supabase/seed.sql
+```

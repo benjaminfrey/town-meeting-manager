@@ -75,7 +75,6 @@ function contentJson(): MinutesContentJson {
 function renderEditor(onSave = vi.fn().mockResolvedValue(undefined)) {
   const result = render(
     <MinutesEditor
-      minutesDocId="minutes-1"
       meetingId="meeting-1"
       boardId="board-1"
       contentJson={contentJson()}

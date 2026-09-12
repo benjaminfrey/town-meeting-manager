@@ -60,14 +60,9 @@ vi.mock("@/lib/api-client", () => ({ apiFetch, apiJson }));
 // `saveDraft` write. The editor's own behaviour is covered in
 // `components/minutes/__tests__/MinutesEditor.test.tsx`.
 vi.mock("@/components/minutes/MinutesEditor", () => ({
-  MinutesEditor: (props: {
-    boardId: string;
-    minutesDocId: string;
-    onSave: (json: unknown) => Promise<void>;
-  }) => (
+  MinutesEditor: (props: { boardId: string; onSave: (json: unknown) => Promise<void> }) => (
     <div data-testid="minutes-editor">
       <span data-testid="editor-board-id">{props.boardId}</span>
-      <span data-testid="editor-doc-id">{props.minutesDocId}</span>
       <button
         data-testid="editor-save"
         onClick={() => {
@@ -680,5 +675,28 @@ describe("MinutesReviewPage — refusals", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "You don't have permission to save these minutes.",
     );
+  });
+
+  // Fix round 1, REQUIRED 1. `actionError` is one piece of state feeding all
+  // four render sites, and opening a dialog did not clear it: a clerk refused
+  // on Approve (no dialog, the outer site) who then opened Return for
+  // Amendments (a dialog) was shown "You don't have permission to approve
+  // these minutes" INSIDE the Return dialog — accurate for a DIFFERENT
+  // action, which reads as a refusal of the one they are currently
+  // attempting. `status: "review"` is the default `baseDocument`, where
+  // Approve and Return for Amendments sit on screen together.
+  it("does not carry a stale refusal from a different write into a dialog that opens over it", async () => {
+    server.approveRefuses = true;
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: /approve minutes/i }));
+    const outerAlert = await screen.findByRole("alert");
+    expect(outerAlert).toHaveTextContent("You don't have permission to approve these minutes.");
+
+    await user.click(screen.getByRole("button", { name: /return for amendments/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/permission to approve/i)).not.toBeInTheDocument();
   });
 });
