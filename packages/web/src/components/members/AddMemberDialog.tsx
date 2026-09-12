@@ -239,6 +239,16 @@ export function AddMemberDialog({
       // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
       // (this task) — same reasoning, new key.
       void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+      // Seating or retiring a member changes three BOARD-level aggregates —
+      // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+      // `board.list.active_member_count` (`/boards`) and
+      // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+      // live on the `board` router, which `trpc.boardMember.pathFilter()`
+      // does not match. Found in wave 6, Task 5; see conventions item 8's
+      // "a `pathFilter()` obligation no grep could have surfaced" for why
+      // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+      // this class of miss.
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       // Fire invitation email (best-effort, non-blocking) — same as the
       // original mutationFn's direct call, now against the id the server
       // handed back rather than one this component generated itself.

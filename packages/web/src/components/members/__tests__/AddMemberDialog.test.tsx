@@ -124,6 +124,21 @@ describe("AddMemberDialog", () => {
     expect(queryClient.getQueryState(rosterKey)?.isInvalidated).toBe(true);
   });
 
+  it("invalidates trpc.board.pathFilter() after adding a board member — board.stats counts active seats", async () => {
+    // `board.stats.active_members` lives on the `board` router, which
+    // `trpc.boardMember.pathFilter()` does NOT match — see this mutation's own
+    // comment and conventions item 8.
+    const statsKey = trpc.board.stats.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(statsKey, { active_members: 3, meetings: 0 });
+    expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderDialog();
+    await createNewPerson(user);
+    await user.click(screen.getByRole("button", { name: /add board member/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBe(true));
+  });
+
   it("invalidates trpc.person.pathFilter() and trpc.boardMember.pathFilter() after adding a staff member", async () => {
     const personKey = trpc.person.list.queryOptions().queryKey;
     const rosterKey = trpc.boardMember.roster.queryOptions({ boardId: "b1" }).queryKey;

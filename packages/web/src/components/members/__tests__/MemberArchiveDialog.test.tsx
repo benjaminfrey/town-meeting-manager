@@ -172,6 +172,21 @@ describe("MemberArchiveDialog", () => {
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
 
+  it("invalidates trpc.board.pathFilter() — board.stats counts active seats", async () => {
+    // `board.stats.active_members` lives on the `board` router, which
+    // `trpc.boardMember.pathFilter()` does NOT match — see this mutation's own
+    // comment and conventions item 8.
+    server.otherActiveCount = 0;
+    const key = trpc.board.stats.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(key, { active_members: 3, meetings: 0 });
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+    const { user } = renderDialog(() => {});
+
+    await user.click(await screen.findByRole("button", { name: /archive member/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
   it("does NOT invalidate trpc.person.pathFilter() when the server declines to archive the account, even though the client asked", async () => {
     server.otherActiveCount = 0;
     server.archivedAccountOverride = false; // the server's real answer, disagreeing with the request
