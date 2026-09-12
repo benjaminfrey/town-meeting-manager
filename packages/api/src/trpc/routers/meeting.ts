@@ -962,7 +962,7 @@ export const meetingRouter = router({
    * `boardMemberById.get(...)` — a **`board_member.id`** map. So the lookup
    * resolves to `null`, and `minutes-formatters.ts`'s `formatAdjournmentText`
    * treats a null `adjourned_by` as "not recorded" and falls back to
-   * `attendance.presiding_officer` (`minutes-formatters.ts:629-636`) — it does
+   * `attendance.presiding_officer` (`minutes-formatters.ts`'s `formatAdjournmentText`) — it does
    * **not** print a blank. So when the clerk adjourns and the chair presides,
    * the generated legal record states that the chair adjourned the meeting,
    * silently, with nothing anywhere flagging it as wrong. That is live today,
@@ -976,7 +976,8 @@ export const meetingRouter = router({
    *
    * ─── A second cache comment that does not reproduce ──────────────────────
    *
-   * `live.tsx`'s `handleMeetingEnd` cache comment (around line 1078) says
+   * The cache comment that sat on `live.tsx`'s `handleMeetingEnd` — a function
+   * wave 5, Task 5 removed from that file when this procedure replaced it — said
    * adjournment "marks the remaining items `completed` and moves tabled ones
    * to `future_agenda_item`." Neither half is what this procedure does: the
    * unreached items are marked `deferred` (not `completed`), and both the
