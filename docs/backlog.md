@@ -240,8 +240,13 @@ lines those namespaces' writers still carry, and did not delete the matching `MI
 `boardMember`, `town` and `minutesDocument`. Roughly 80 dead lines across ~20 writer files, plus 13
 test files that assert on those keys.
 
-**Widened by wave 6, Task 5 (`43c2963`): the set is now FOURTEEN namespaces, and `meetings` is one of
-them.** That task removed the last legacy reader of `meetings`, `boards`, `persons` and `minutes` —
+**Widened by wave 6, Task 5 (`43c2963`): the set grew again, and `meetings` is now one of the
+namespaces affected.** (`MIGRATED` in `cache-key-parity.test.ts` is the authoritative list, not a
+count restated here — it holds nineteen entries as of this fix round, and the verification grep
+below matches fifteen of them; the two numbers differ because the grep pattern only lists namespaces
+with a still-live legacy invalidation to find, and that is a moving target this section's own body
+already tracks by name.) That task removed the last legacy reader of `meetings`, `boards`, `persons`
+and `minutes` —
 the three files the paragraph above names as `meetings`' live readers all migrated in it, along with
 `boards.$boardId.templates.$templateId.edit.tsx` (`queryKeys.boards.detail`), `meetings.tsx` /
 `home.tsx` / `CommandPalette.tsx` (`queryKeys.boards.byTown`), `home.tsx`
@@ -270,7 +275,7 @@ deserves its own diff rather than riding along with a screen migration.
 any of the affected files, or (b) wave 6 closes out, whichever comes first. **(a) is now satisfied —
 Task 5 was the last task that adds writers, and Task 6 only deletes — so this is actionable as soon
 as wave 6's close-out wants it.** At that point: delete the now-pointless `queryKeys.<abandoned>`
-invalidation lines for all fourteen namespaces, delete the matching `MIGRATED` entries in
+invalidation lines for every namespace `MIGRATED` names (quote the object, not a count), delete the matching `MIGRATED` entries in
 `cache-key-parity.test.ts` in the SAME commit (an entry with nothing left to match reports zero
 violations for the wrong reason), and update the test files that assert on those keys. Note that
 emptying the map entirely leaves `cache-key-parity.test.ts` checking nothing at all — decide then
@@ -322,4 +327,75 @@ legacy-key route.
 ```
 grep -rn "queryKeys.futureItemQueues" packages/web/src   # comment mentions only today, no live reads
 grep -rn "trpc.futureItem.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.'
+```
+
+---
+
+## 9. `MeetingLifecycle.tsx` renders a stage no row can reach, and the values were unmarked in the one file where they're user-visible
+
+**Where:** `packages/web/src/components/MeetingLifecycle.tsx:14,16` (`LIFECYCLE_STAGES`) and its
+`MEETING_STATUS_LABELS`-less "Published" stage.
+
+**What the gap is:** `"in_progress"` (line 14, the `meeting` stage's `statuses`) and `"published"`
+(line 16, the `published` stage's `statuses`) are not `meeting_status` enum values — the enum is
+`draft, noticed, open, adjourned, minutes_draft, approved, cancelled`
+(`0000_baseline.sql`; `SELECT 'in_progress'::meeting_status` raises "invalid input value for enum
+meeting_status"). `home.tsx` and `meetings.tsx` both carry the identical two dead values and both
+NAME them in a header comment (wave 6 Task 5); `MeetingLifecycle.tsx` carries the same two and,
+until this fix round, named neither, even though this is the file where the dead vocabulary is
+user-visible rather than merely inert: `LIFECYCLE_STAGES` renders a "Published" stage no meeting row
+can ever reach, and `components/meetings/meeting-labels.ts`'s `MEETING_STATUS_LABELS` has no entry
+for `in_progress` or for the `approved`+`published` pair `published`'s stage would need, so a row
+that somehow reached either dead value would render with no label at all.
+
+**Why it wasn't closed in Phase E:** deferring the three-file fix is correct — deciding what the
+lifecycle rail should actually show is a product decision (does "Published" get renamed, dropped, or
+does an `approved` meeting need a real post-adoption status the schema doesn't have yet?), not a
+transport change, and wave 6 Task 5 said so explicitly for `home.tsx` and `meetings.tsx`. Leaving the
+_shared_ file — the one both screens render through — unmarked while its two consumers are marked is
+an inconsistency, not a scope decision; annotated here rather than left for a later wave to
+rediscover a third time.
+
+**Retirement condition:** whoever resolves `home.tsx`'s and `meetings.tsx`'s own dead-status
+comments (both point back at this file) fixes all three in one change — either by removing
+`"in_progress"`/`"published"` from `LIFECYCLE_STAGES`'s `statuses` arrays (they match nothing, so
+deleting them changes no observable behavior) or by giving the product decision behind them a real
+answer first. This entry retires the moment `MeetingLifecycle.tsx`'s `LIFECYCLE_STAGES` no longer
+contains either string.
+
+**Verification command:**
+
+```
+grep -n '"in_progress"\|"published"' packages/web/src/components/MeetingLifecycle.tsx
+psql -c "SELECT 'in_progress'::meeting_status"   # confirms the enum still rejects it
+```
+
+---
+
+## 10. `meeting.byTown` has no `LIMIT` and now feeds three screens
+
+**Where:** `packages/api/src/trpc/routers/meeting.ts`'s `byTown` procedure; read by `home.tsx`, the
+`/meetings` kanban, and `CommandPalette`.
+
+**What the gap is:** `meeting.byTown` selects every `status != 'cancelled'` meeting row for the
+caller's town with no `LIMIT` clause. This is not a regression from wave 6 Task 5 — `home.tsx`'s raw Supabase
+read before the migration was already unbounded — but Task 5 widened its blast radius: dropping
+`CommandPalette`'s own `.limit(50)` was the correct fix for a real defect (a search that could not
+find the 51st-oldest meeting), and it works only because the shared procedure now returns everything
+regardless of which of the three screens asked. A town with enough meeting history eventually sends
+its entire meeting table to the browser on every home-page load, every kanban load, and every
+command-palette open.
+
+**Why it wasn't closed in Phase E:** it isn't a defect any single task introduced — it's a scaling
+question with no current symptom (no town in this dataset is large enough to notice), and none of
+the three consumers has a natural per-screen cap that wouldn't reintroduce the CommandPalette bug in
+reverse (a `LIMIT` on the shared procedure caps the kanban and home too). Fixing it needs either a
+`limit`/pagination argument on `byTown` that each caller sets independently, or a separate narrower
+procedure for the two screens that only need "upcoming" or "recent," leaving the unbounded scan to
+whichever caller (if any) genuinely needs the whole history.
+
+**Verification command:**
+
+```
+grep -n "byTown" packages/api/src/trpc/routers/meeting.ts
 ```

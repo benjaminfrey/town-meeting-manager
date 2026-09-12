@@ -2092,11 +2092,50 @@ procedure ("grep `queryKeys.<entity>`, check every `invalidateQueries` hit") fin
 accident, because the legacy key it points at (`queryKeys.meetings.byBoard`) names `meeting`, not
 `board`; `cache-key-parity.test.ts` cannot see it either, since the file DOES call a `pathFilter()`
 and the check is per-file-and-namespace, not per-procedure. This is the read-side twin of backlog
-entry 8's write-side blind spot. **The question to ask when you migrate a read is not "which legacy
-key did this abandon" but "which ROUTER does the new procedure live on, and does every writer that
-changes what it returns invalidate THAT router" — and those are different answers whenever a
-procedure aggregates across tables** (`board.stats`, `board.list`'s `active_member_count`,
-`boardMember.memberCount`). Found by hand, fixed with its pin in the same commit.
+entry 8's write-side blind spot. **The question to ask is not "which legacy key did this abandon"
+but "which ROUTER does the procedure live on, and does every writer that changes what it returns
+invalidate THAT router" — and those are different answers whenever a procedure aggregates across
+tables** (`board.stats`, `board.list`'s `active_member_count`, `boardMember.memberCount`). This is
+NOT only a question to ask at the moment you migrate a read: `EditBoardDialog`'s case above was
+triggered by a read migration, but the next occurrence, one commit later, was standing writer debt
+with no migration on either side — widen the framing accordingly. Found by hand, fixed with its pin
+in the same commit.
+
+**Chasing the same shape one step further (wave 6, Task 5, `dc1b035`) found five more writers, none
+of them touched by a read migration at all.** `board.stats.active_members`
+(`boards.$boardId.tsx`'s Overview) and `board.list.active_member_count` (`/boards`) are the
+identical cross-router aggregate over `board_member` rows, and had been since `board.stats` and
+`board.list` first shipped — `boards.$boardId.tsx` moved to `board.stats` in unit 0, `/boards` to
+`board.list` in wave 2, both waves before this one. Five mutations changed what those two columns
+report and invalidated `trpc.boardMember.pathFilter()` instead of `trpc.board.pathFilter()`:
+`AddMemberDialog`'s `boardMember.addBoardMember`, `MemberArchiveDialog`'s
+`boardMember.archiveMembership`, and `MemberTransitionDialog`'s `archiveMembership`, `addToBoard`
+and `convertToStaff`. Seating or retiring a member left the Overview's member count and `/boards`'s
+"N / M" cell stale for up to the full 60s `staleTime`, on every affected screen, since before wave
+6 started. Found by hand (the same "which router does the aggregate live on" question, asked of
+`boardMember`'s own writers rather than at a read's call site), fixed with three pins in the same
+commit, each verified by deletion.
+
+**The sweep this shape calls for is now complete for the whole API, not partial — verified by
+scanning every `count(*)` on every router, not only `board`'s:**
+
+```
+$ grep -rn "count(\*)" packages/api/src/trpc/routers/*.ts
+```
+
+Five procedures aggregate across a foreign-key boundary in some sense, but only three of them are
+cross-ROUTER: `board.stats` (counts `board_member` and `meeting`, on the `board` router) and
+`board.list`'s `active_member_count` (counts `board_member`, also on `board`) — both closed above.
+The other four are same-noun: `agendaTemplate.countForBoard` counts `agenda_template` on the
+`agendaTemplate` router, `agendaItem.countByMeeting` counts `agenda_item` on `agendaItem`,
+`meetingAttendance.countByMeeting` counts `meeting_attendance` on `meetingAttendance`, and
+`boardMember.memberCount` counts `board_member` on `boardMember` itself — each router matches the
+table it counts, so `pathFilter()` on that router covers its own aggregate by construction, and the
+cross-router shape cannot occur there. There is no sixth router with a `count(*)` this scan missed
+(19 router files, this grep's the whole list). So the hazard this item names is real and was worth
+naming, but it does not generalize past the three `board.ts` procedures already fixed — the next
+wave should not spend a task re-deriving that, only re-run the grep above if a new cross-table
+`count(*)` is added to any router.
 
 **Write the pin the same commit a writer's `pathFilter()` call lands, not on a later wave.** These
 six calls already exist and already serve an already-migrated screen; deferring the pin to
@@ -2817,6 +2856,22 @@ earlier red runs before this was known to check for. Leak size scales with how f
 before the kill, so the count itself is not diagnostic — the query is. Every future red
 `turbo run test`, in wave 6 and beyond, leaks the same way; check `pg_database`, not the backend
 count, every time.
+
+**A turbo test run can go red at exit 1 while every assertion in it passed, and this is a third
+hazard of exactly this species, not a wave-6 anecdote either.** Wave 6, Task 5 shipped
+`ArchiveBoardDialog.handleArchive` and `EditBoardDialog.handleSave` calling `await mutateAsync(...)`
+inside a handler the button invoked as `void handler()` — the returned promise was discarded, so a
+refusal (or any rejection) inside either handler became an unhandled promise rejection. `npx vitest
+run` on the single file prints "2 errors" underneath its own green `Tests … passed` summary line —
+easy to miss, since the line a developer's eye goes to first is still green. `npx turbo run test`,
+run across the whole monorepo the way the gates require, reports the same thing as a **failed
+task** at process exit 1, with `Tasks: N successful, M total` naming one fewer success than the
+task count — the number the CI-order gate list singles out for exactly this reason. Grepping a
+turbo run's output for `Tests |Test Files ` and calling that green is not a sufficient check: both
+of those lines can read entirely clean while the task itself exited red. Read the `Tasks:` line, or
+the process exit code, not only the per-file test counts — a third mechanism, alongside the leaked
+scratch database just above, that produces the same "the summary you'd normally check reads green
+and the run is not" shape for a different underlying reason.
 
 **A retry policy is a harness hazard too, not only a mock — it can mask a real defect as
 completely as any of the above, with no test and no mock involved at all.** Wave 5, Task 7 found

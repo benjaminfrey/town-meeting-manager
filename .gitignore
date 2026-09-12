@@ -55,6 +55,15 @@ docker/.env
 *.tgz
 .cache/
 
+# The user's own working doc — asked to stay on disk but out of git twice now
+# (wave 5's fix round `git rm --cached` it; a broad `git add` in wave 6 Task 5
+# re-added it, since gitignore does not retroactively apply to an add-by-name
+# or `git add -A` unless the path itself is listed here). Named specifically,
+# not a `docs/*.docx` glob, because `docs/town_meeting_manager_plan.docx` is a
+# real tracked project doc and a glob would risk hiding a legitimate future
+# addition the same way.
+docs/UI-Redesign-Plan.docx
+
 # Test artifacts
 playwright-report/
 test-results/
