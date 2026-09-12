@@ -716,7 +716,10 @@ describe("minutesDocument.submitForReview", () => {
       try {
         const db = testDb(app);
         const town = await seedTown(db);
-        const { docId } = await scene(db, town, { board: town.otherBoardId });
+        const { docId } = await scene(db, town, {
+          board: town.otherBoardId,
+          denormalisedBoardId: town.boardId,
+        });
         const actor = await seedActor(db, town, staffOn(town, { R3: true }));
         const caller = appRouter.createCaller(contextFor(db, town, actor));
 

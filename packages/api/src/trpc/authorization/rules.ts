@@ -469,6 +469,17 @@ export function assertCanUpdateMinutesSection(actor: Actor, scope: BoardScope): 
 // while the server enforces nothing at all, so R5 here is a large narrowing
 // against the server and a small widening against the button.
 //
+// **That widening is reversible, but not in the one line it looks like.**
+// Swapping only this `.use()` for `requireActor(assertAdmin, ...)` throws
+// `assertMatchesAuthorizedBoard`'s wiring `Error` — reproduced directly, an
+// admin caller gets a 500 — because `unpublish` still resolves scope through
+// `assertMinutesDocumentOnAuthorizedBoard`, which sets and checks
+// `ctx.authorizedBoardId`, and `requireActor` never sets it. The real
+// reversal is TWO lines: that guard swap, plus trading
+// `assertMinutesDocumentOnAuthorizedBoard` for `resolveMinutesDocumentScope`
+// in the procedure body, after which `boardId` in the input is dead. See
+// `minutes-document.ts`'s `unpublish` doc comment for the exact two lines.
+//
 // `minutesDocument.publish`/`unpublish` reach this code through
 // `requireBoardPermission("R5", boardIdFrom())` rather than importing this
 // function — that middleware resolves exactly one `PermissionCode` via

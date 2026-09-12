@@ -235,6 +235,15 @@ export async function approveMinutesForPassedMotion(
   );
   if (!approved[0]) return null;
 
+  // A second live defect, not the one named in this function's header: this
+  // payload carries no `board_id`, and `NotificationService.getSubscribersForEvent`
+  // returns `[]` without one (`if (!boardId) return []`) — so the "minutes
+  // approved" email a board vote queues here reaches nobody. Contrast wave 6
+  // Task 1's `submitForReview`/`approve`/`publish` payloads below in this file,
+  // which all carry `board_id` for exactly this reason. Not fixed here — this
+  // is wave 5's procedure, outside this task's diff — but recorded at the
+  // payload itself rather than only in a report; see `task-3-brief.md` and
+  // `progress.md`, since Task 3's minutes screen will hit this.
   await tx.execute(sql`
     INSERT INTO notification_event (town_id, event_type, payload, status)
     VALUES (
@@ -793,7 +802,17 @@ export const minutesDocumentRouter = router({
    * administrator" is a real cost. Against the SERVER this is an enormous
    * narrowing (from nothing to R5); against the BUTTON it widens from
    * administrators to administrators-plus-R5-holders, and that half is the
-   * decision to overturn if the owner disagrees — one line, here.
+   * decision to overturn if the owner disagrees — but it is TWO lines, not
+   * one. Swapping only the `.use()` below to `requireActor(assertAdmin, ...)`
+   * is not enough and is worse than doing nothing: `ctx.authorizedBoardId` is
+   * then never set, and `assertMinutesDocumentOnAuthorizedBoard` below still
+   * calls `assertMatchesAuthorizedBoard`, which throws its wiring `Error` —
+   * reproduced directly, an admin caller gets a 500, not a working
+   * admin-only unpublish. The second line is trading
+   * `assertMinutesDocumentOnAuthorizedBoard` for `resolveMinutesDocumentScope`
+   * a few lines below, dropping the board comparison entirely — after which
+   * `input.boardId` is dead, and this procedure authorizes no board at all,
+   * the same shape rule 13b already uses for `approve`/`returnForAmendments`.
    *
    * `published`-only is ADDED, and it is what stops this from being a general
    * "set status to approved" primitive: `approved_at` and the adoption itself

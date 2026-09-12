@@ -1604,6 +1604,28 @@ a foreign key whose target table is tenant-scoped. Verify the gap the way it was
 the existence check, attempt the cross-tenant write, and confirm it is refused (NOT_FOUND) rather
 than silently succeeding.
 
+**Scope correction (wave 6, Task 1, reproduced against a real database): this hazard is INSERT-side
+specifically, not a general property of writes on an RLS-covered table.** Every one of the nine
+reproductions above is an INSERT taking a foreign key from client input. Probed directly, tenant
+context town A targeting town B's `minutes_document`:
+
+```
+UPDATE minutes_document SET status = 'published' WHERE id = <town B's document>  →  0 rows, no write
+SELECT the same row as town A                                                    →  [] (invisible)
+the row read back as town B, unchanged                                           →  still 'approved'
+INSERT carrying an FK to town B's invisible row (the shape above)                →  SUCCEEDED, silently
+```
+
+`FOR ALL USING (town_id = get_current_town_id())` covers `UPDATE` the same way it covers `SELECT` —
+there is no constraint-enforcement bypass on the write path itself, only on the FK's target lookup.
+So an existence check guarding an UPDATE's target row buys the **honest `NOT_FOUND`**, not the
+prevention of a write that RLS was already stopping: removing `resolveMinutesDocumentScope`'s
+`if (!row)` still turns every cross-tenant test on `minutesDocument`'s six status transitions red,
+but the four board-scoped ones answer FORBIDDEN (the mismatch defence comparing against an empty
+board id) and the two administrator-gated ones, with no mismatch defence behind them, report success
+or `INTERNAL_SERVER_ERROR` for a transition that changed nothing — never a cross-tenant write. Do
+not carry "any unguarded cross-tenant write succeeds silently" into a brief; say INSERT.
+
 ---
 
 ## 4. The client call shape
