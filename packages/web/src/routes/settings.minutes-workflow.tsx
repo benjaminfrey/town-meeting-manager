@@ -85,15 +85,14 @@ export default function MinutesWorkflowSettingsPage() {
   const saveMutation = useMutation(
     trpc.town.updateMinutesWorkflow.mutationOptions({
       onSuccess: () => {
-        // Both invalidations run during the transition (conventions item 7):
-        // `queryKeys.towns.detail(townId)` is still read directly by several
-        // unmigrated screens (`boards.tsx`, `boards.$boardId.tsx`,
-        // `meetings.$meetingId.{agenda,review,minutes}.tsx`,
-        // `CreateMeetingDialog` — see `TownSettingsEditor.tsx`'s header for
-        // the current list; `home.tsx` moved onto `town.detail` in Task 5 of
-        // this wave, so it is no longer on it), and `trpc.town.pathFilter()`
-        // is this screen's own read (`town.detail`) — the legacy line stays
-        // until the last of those migrates, per item 7's own rule.
+        // Both invalidations run (conventions item 7). `queryKeys.towns.detail(townId)`
+        // has NO reader left as of wave 6, Task 4 (`review.tsx` was the
+        // last — see `TownSettingsEditor.tsx`'s header, corrected in that
+        // task's fix round, for the current state), and `trpc.town.pathFilter()`
+        // is this screen's own read (`town.detail`). The legacy line stays
+        // for the sequencing reason in `cache-key-parity.test.ts`'s "Why a
+        // dead legacy line is not removed on sight", not because a reader
+        // remains.
         void queryClient.invalidateQueries({ queryKey: queryKeys.towns.detail(townId ?? "") });
         void queryClient.invalidateQueries(trpc.town.pathFilter());
         setRetentionPolicy(null);

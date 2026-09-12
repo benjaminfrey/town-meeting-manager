@@ -702,6 +702,34 @@ field names the untaken branch by line number directly. This costs one extra fla
 already being run and reads output the author already knows how to interpret, without the
 manifest-maintenance or repo-wide-noise costs above.
 
+**Caveat, found in wave 6 Task 4's fix round, and it is scoped rather than general: branch coverage
+only names a refusal unpinned when the conditional sits behind a MOUNT GUARD.** The worked example
+above (`AgendaSection.tsx:167`, `{confirmDelete && (<AlertDialog …>`) is a mount guard — the whole
+dialog, refusal included, is absent from the tree until `confirmDelete` is true — so `BRDA:178,6,1,0`
+correctly named it unpinned. `routes/meetings.$meetingId.review.tsx`'s two minutes-generation dialogs
+are NOT mount-guarded: both `<Dialog open={...}>` components are always in the tree, and Radix
+suppresses the closed one's rendering downstream (`display: none` under the hood), which React does
+not treat as "unevaluated" — a closed dialog's children, including a `{generateError && <p
+role="alert">…}` inside it, are evaluated on every render regardless of `open`. Measured directly:
+against this screen's un-mounted-guard code plus the pre-fix test file (`75affd1`, 34 tests, no test
+that ever exercises the regenerate dialog's error state), `--coverage.include` on the file reports
+`BRDA:1119,104,0,102` `BRDA:1119,104,1,1` — the truthy (refusal) arm reads HIT once, with nothing
+ever rendered to a user, because the dialog mounts (with `generateError` null) whenever a nearby test
+opens it. Wrapping that same dialog in a mount guard (`{regenerateDialogOpen && (<Dialog …>`) and
+re-running one isolated, unrelated test (`-t "renders the meeting header…"`, which never opens the
+regenerate dialog at all) reports `BRDA:1120,105,0,0` `BRDA:1120,105,1,0` for the same conditional —
+both arms genuinely zero, because the guard keeps the dialog out of the tree entirely when it is
+closed. Same conditional, same missing test coverage; the mount guard is what makes the branch
+report the truth. **What to do instead when a refusal conditional sits inside an always-mounted
+`<Dialog open={...}>` (or anything else hidden only downstream — `hidden`, `aria-hidden`, CSS,
+Radix's own portal suppression): do not trust a nonzero hit count on that branch as proof the refusal
+was reached. Reason about reachability directly — is there a test that actually opens/reveals this
+specific container and asserts on `role="alert"` (or whatever the refusal renders) from inside it —
+and write that test if it does not exist, independent of what the branch counter says.** This matters
+because item 2's coverage procedure was adopted in wave 4 specifically to catch unpinned refusal
+branches, over a CI gate; a false positive on exactly the case it was chosen for is worse than the
+procedure not existing, since it reads as confirmation rather than as silence.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`

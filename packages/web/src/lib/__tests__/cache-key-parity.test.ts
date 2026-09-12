@@ -99,10 +99,18 @@
  * no `queryKeys.*` at all any more (`grep -n "queryKeys" hooks/useQuorumCheck.ts`
  * is empty). `agendaItems.byMeeting`, `attendance.byMeeting` and
  * `minutesDocuments.byMeeting` therefore have **no reader left**. The lines
- * stay anyway, and deliberately: this check keys off them, so removing the
- * last legacy invalidation from a file also removes the tripwire that would
- * catch the NEXT writer added to it. See "Why a dead legacy line is not
- * removed on sight" below.
+ * stay anyway — not because removing them would make this check vacuous
+ * (it would not: stripping all thirteen dead legacy lines and planting a
+ * writer that invalidates `queryKeys.agendaItems.byMeeting` with no
+ * `pathFilter()` still gets caught, because a file that KEEPS its
+ * `pathFilter()` call passes regardless of whether the dead legacy line is
+ * still there to match on — the "tripwire" argument is circular: it only
+ * fires on a writer that copies the legacy line, which exists solely
+ * because the line was kept). The real reason is sequencing: an ~80-line
+ * deletion across ~20 writer files plus 13 test files, landing in the same
+ * wave Task 5 adds writers to several of those same files, deserves its own
+ * diff rather than riding along with a screen migration. See "Why a dead
+ * legacy line is not removed on sight" below.
  *
  * `exhibits: "exhibit"` joined in Phase E wave 4, Task 3, the commit that
  * moved `routes/meetings.$meetingId.agenda.tsx`'s exhibit read onto
@@ -144,17 +152,21 @@
  * reader of THIRTEEN legacy keys and migrated all of them at once. Item 7's
  * "the legacy line goes when the last legacy reader does" would then delete
  * roughly eighty lines across twenty-odd writer files — and with them every
- * `queryKeys.<migrated>` reference this check matches on, for twelve
- * namespaces simultaneously. The check would go quiet for `agendaItem`,
- * `motion`, `voteRecord`, `executiveSession`, `agendaItemTransition`,
- * `guestSpeaker`, `exhibit`, `meetingAttendance`, `boardMember`, `town`,
- * `meeting` and `minutesDocument` in the same commit that wave 6's remaining
- * tasks start adding writers to several of those files. The lines are
- * therefore kept, and the asymmetry is the reason: a dead invalidation costs
- * one no-op cache scan, a missing `pathFilter()` costs a silently stale
- * screen. Whoever removes them should remove the matching `MIGRATED` entry in
- * the same commit, because an entry with nothing left to match is a check
- * that reports zero violations for the wrong reason.
+ * `queryKeys.<migrated>` reference this check matches on, for ELEVEN
+ * namespaces simultaneously (not twelve: `meetings` is one of the thirteen
+ * keys this screen read, but `queryKeys.meetings.byTown`/`.byBoard` are still
+ * read live by `CommandPalette.tsx`, `EditBoardDialog.tsx` and `home.tsx` —
+ * this screen was never the last reader of that namespace, so its lines were
+ * never removable under item 7 regardless of this task). The check would go
+ * quiet for `agendaItem`, `motion`, `voteRecord`, `executiveSession`,
+ * `agendaItemTransition`, `guestSpeaker`, `exhibit`, `meetingAttendance`,
+ * `boardMember`, `town` and `minutesDocument` in the same commit that wave
+ * 6's remaining tasks start adding writers to several of those files. The
+ * lines are therefore kept, and the asymmetry is the reason: a dead
+ * invalidation costs one no-op cache scan, a missing `pathFilter()` costs a
+ * silently stale screen. Whoever removes them should remove the matching
+ * `MIGRATED` entry in the same commit, because an entry with nothing left to
+ * match is a check that reports zero violations for the wrong reason.
  *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three

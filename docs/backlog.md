@@ -217,3 +217,81 @@ matrix the client has, but the matrix itself is wrong for a code-keyed row.
 git grep -n "normalisePermissionsMatrix" -- packages/web/src
 grep -n "global.*A2.*true" supabase/seed.sql
 ```
+
+---
+
+## 7. Thirteen dead legacy cache-invalidation lines, kept deliberately, not yet removed
+
+**Where:** `packages/web/src/lib/__tests__/cache-key-parity.test.ts`'s own header, under "Why a dead
+legacy line is not removed on sight"; the same reasoning is in wave 6 Task 4's report
+(`.superpowers/sdd/2026-09-12-phase-e-wave-6-minutes-and-completion/task-4-report.md`, §4). Item 7 of
+`docs/superpowers/plans/phase-e-conventions.md` ("the legacy line goes when the last legacy reader
+does — not before") is the rule roughly 80 wave migrations copy from, and it still reads unamended —
+this deviation from it is recorded nowhere the next wave's author would see it before copying that
+rule.
+
+**What the gap is:** wave 6 Task 4 moved `routes/meetings.$meetingId.review.tsx` off the last of
+THIRTEEN legacy `queryKeys.*` reads, but did NOT delete the now-dead `invalidateQueries(queryKeys.*)`
+lines those namespaces' writers still carry, and did not delete the matching `MIGRATED` entries in
+`cache-key-parity.test.ts`. Eleven namespaces are affected (not `meetings` — see item 3 of the same
+task's fix round; it keeps live legacy readers in `CommandPalette.tsx`, `EditBoardDialog.tsx` and
+`home.tsx` unrelated to this screen): `agendaItem`, `motion`, `voteRecord`, `executiveSession`,
+`agendaItemTransition`, `guestSpeaker`, `exhibit`, `meetingAttendance`, `boardMember`, `town` and
+`minutesDocument`. Roughly 80 dead lines across ~20 writer files, plus 13 test files that assert on
+those keys.
+
+**Why it wasn't closed in Phase E:** the call to keep them stands on sequencing, not on the check
+going vacuous without them (verified false — deleting them and planting an unpathFiltered writer on
+top still gets caught, 1 violation out of 16 matched pairs). An ~80-line deletion across ~20 writer
+files plus 13 test files, in the same wave Task 5 adds writers to several of those same files,
+deserves its own diff rather than riding along with a screen migration.
+
+**Condition that retires this entry:** either (a) no remaining Phase E wave task is adding writers to
+any of the eleven affected files, or (b) wave 6 closes out, whichever comes first. At that point:
+delete the eleven now-pointless `queryKeys.<abandoned>` invalidation lines, delete the matching
+eleven `MIGRATED` entries in `cache-key-parity.test.ts` in the SAME commit (an entry with nothing
+left to match reports zero violations for the wrong reason), and update the 13 test files that assert
+on those keys.
+
+**Verification command (re-run before acting, in case counts have moved):**
+
+```
+grep -rl "queryKeys\.\(agendaItems\|motions\|voteRecords\|executiveSessions\|agendaItemTransitions\|guestSpeakers\|exhibits\|attendance\|members\|towns\|minutesDocuments\)\." packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+```
+
+---
+
+## 8. The cache-key parity check cannot see a writer whose table never had a legacy key
+
+**Where:** `packages/web/src/lib/__tests__/cache-key-parity.test.ts`'s header, the
+`futureItemQueues: "futureItem"` paragraph; wave 6 Task 4's report, §4 ("The one real gap, and the
+check could not have found it").
+
+**What the gap is:** `future_item_queue` rows are written only server-side, inside
+`meeting.performAdjournment` — no client code ever invalidated `queryKeys.futureItemQueues`, because
+no client code ever wrote through that legacy key in the first place. Conventions item 7's prescribed
+procedure for finding writers that owe a `pathFilter()` call — `grep -rn "queryKeys.<entity>"` across
+the tree, then check every `invalidateQueries` hit for the router's `pathFilter()` — returns exactly
+ONE hit for `futureItemQueues` (the reader itself, before it migrated) and ZERO invalidation call
+sites to check. The two real writers of the table (`routes/meetings.$meetingId.live.tsx`'s
+`adjournMutation`, `components/meeting/VotePanel.tsx`'s `data.adjourned` branch) both invalidated
+three other routers each and silently omitted the fourth — invisible to the procedure at any legacy
+key count, because the procedure only ever looks at what already has a legacy key to grep for. This
+is the client-side half of the blind spot wave 5 Task 3 named for the server side (a multi-table
+mutation needs its own topic-set test; the inventory will not ask for it).
+
+**Why it wasn't closed in Phase E:** it isn't a defect in any one task's diff — both real writers were
+fixed on discovery, in wave 6 Task 4 itself. It's a gap in the CHECKING PROCEDURE (item 7's own
+prescription) that no amount of running it more carefully would have caught, because the procedure's
+input (a legacy key to grep for) doesn't exist for a table with no legacy reader at all. Closing it
+needs either a different kind of check (e.g., a per-mutation topic/invalidation manifest, independent
+of legacy keys) or an explicit convention that a NEW tRPC-only read of a server-written table gets its
+writers audited by hand for a missing invalidation, since no mechanised check can find it via the
+legacy-key route.
+
+**Verification command:**
+
+```
+grep -rn "queryKeys.futureItemQueues" packages/web/src   # comment mentions only today, no live reads
+grep -rn "trpc.futureItem.pathFilter()" packages/web/src | grep -v __tests__ | grep -v '\.test\.'
+```
