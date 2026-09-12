@@ -614,10 +614,12 @@ export const minutesDocumentRouter = router({
    *     rather than `assertMinutesDocumentOnAuthorizedBoard`, and calling the
    *     latter would throw `assertMatchesAuthorizedBoard`'s wiring `Error`
    *     because `requireActor` sets no `ctx.authorizedBoardId`.
-   *   - The cross-tenant defence is the existence check alone, and it is
-   *     load-bearing: without it a `minutes_document` id from another town
-   *     satisfies every constraint this UPDATE touches and the adoption
-   *     succeeds silently.
+   *   - The cross-tenant defence is therefore the existence check ALONE,
+   *     with no mismatch defence behind it. That does not mean a missing
+   *     check would write another town's row — RLS covers an UPDATE on
+   *     `minutes_document` (probed; see `resolveMinutesDocumentScope`) — it
+   *     means this procedure would report SUCCESS for an adoption that
+   *     changed nothing, which is the answer a caller cannot act on.
    *
    * This is NOT the only way minutes get approved. `approveMinutesForPassedMotion`
    * above is the other — a board voting a minutes-approval motion through in a

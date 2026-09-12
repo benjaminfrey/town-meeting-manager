@@ -216,13 +216,31 @@ export interface MinutesDocumentScope {
  * a document this town cannot see, and a caller that then loops over the empty
  * board set writes with nothing having been checked.
  *
- * **Removing the check is not a refusal that becomes an error; it is a
- * cross-tenant write that SUCCEEDS.** Postgres enforces a foreign key with row
- * security bypassed — reproduced nine times in this project — so a
- * `minutes_document` id from another town satisfies every constraint the six
- * transitions touch. Delete the `if (!row)` below and `publish` puts ANOTHER
- * TOWN'S minutes on the public portal, with no error anywhere. Pinned by one
- * test per transition; see `routers/__tests__/minutes-document.test.ts`.
+ * **What removing it actually does, measured rather than assumed — and it is
+ * NOT this project's usual FK-bypasses-RLS story.** That hazard is about an
+ * INSERT taking a foreign key from client input: Postgres enforces a
+ * constraint with row security bypassed, so the reference lands on a row the
+ * caller cannot see and the write succeeds silently. Every one of the six
+ * minutes transitions is an UPDATE on `minutes_document` ITSELF, and RLS does
+ * apply to that — `minutes_document_tenant_isolation`'s `USING` clause means
+ * another town's row simply does not match. Probed directly against a real
+ * database during wave 6, Task 1: one town's tenant context running
+ * `UPDATE minutes_document SET status = 'published' WHERE id = <the other
+ * town's document>` left that document `approved`.
+ *
+ * So the check buys the HONEST ANSWER, not the prevention of a write. Delete
+ * the `if (!row)` below and all six cross-tenant tests turn red: the four
+ * board-scoped transitions answer FORBIDDEN (the mismatch defence comparing
+ * against an empty board id — the right refusal for the wrong reason, and one
+ * that tells a caller a document they cannot see exists somewhere), and the
+ * two administrator-gated ones, which have no mismatch defence to fall back
+ * on, report SUCCESS or an INTERNAL_SERVER_ERROR for a transition that
+ * changed nothing. Pinned by one test per transition; see
+ * `routers/__tests__/minutes-document.test.ts`.
+ *
+ * The FK hazard IS live one join away, and is why this reads the meeting
+ * rather than trusting anything: the `meeting_id` a `minutes_document` row
+ * carries was itself supplied at insert time.
  */
 export async function resolveMinutesDocumentScope(
   tx: TenantTx,

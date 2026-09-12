@@ -1097,9 +1097,12 @@ describe("minutesDocument.publish", () => {
   });
 
   it("answers NOT_FOUND for a document in another town, and does not publish it", async () => {
-    // The FK-bypasses-RLS hazard at its worst: remove the existence check in
-    // `resolveMinutesDocumentScope` and this UPDATE succeeds silently, putting
-    // ANOTHER TOWN'S minutes on the public portal.
+    // Remove the existence check in `resolveMinutesDocumentScope` and this
+    // turns red. It does NOT become a cross-tenant write — RLS covers an
+    // UPDATE on `minutes_document`, probed directly and recorded in that
+    // function's doc comment — it becomes FORBIDDEN, the mismatch defence
+    // comparing against an empty board id: a refusal that tells this caller a
+    // document they cannot see exists somewhere.
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
