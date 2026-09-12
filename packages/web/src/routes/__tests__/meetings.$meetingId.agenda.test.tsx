@@ -171,6 +171,18 @@ function exhibit(overrides: Partial<Exhibit> & { id: string }): Exhibit {
   };
 }
 
+/**
+ * `& { adjournment: unknown }` is not decoration. `RouterOutputs` runs the
+ * procedure's row through tRPC's serialization inference, which turns an
+ * `unknown` column into an OPTIONAL property (`unknown` includes
+ * `undefined`), while `TestHandlers` infers from `inferProcedureOutput`
+ * directly and still requires it. The intersection restores the requirement,
+ * so a fixture that forgets the column is a compile error — the same shape
+ * `meetings.$meetingId.minutes.test.tsx` already carries for three JSONB
+ * columns of its own.
+ */
+type MeetingDetail = RouterOutputs["meeting"]["detail"] & { adjournment: unknown };
+
 const meetingDetail = {
   id: "meeting-1",
   board_id: "board-1",
@@ -190,10 +202,11 @@ const meetingDetail = {
   agenda_packet_generated_at: null,
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
-} satisfies RouterOutputs["meeting"]["detail"];
+  adjournment: null,
+} satisfies MeetingDetail;
 
 const server = {
-  meeting: meetingDetail as RouterOutputs["meeting"]["detail"],
+  meeting: meetingDetail as MeetingDetail,
   items: [] as Item[],
   exhibits: [] as Exhibit[],
   meetingRejects: false,

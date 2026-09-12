@@ -221,7 +221,10 @@ vi.mock("@/components/RouteErrorBoundary", () => ({
 
 const queryClient = setupAppQueryClient();
 
-type Meeting = RouterOutputs["meeting"]["detail"];
+// `meeting` gained a JSONB column of its own in wave 6, Task 4
+// (`adjournment`), so it needs the same intersection the comment below
+// describes for the other three.
+type Meeting = RouterOutputs["meeting"]["detail"] & { adjournment: unknown };
 type AgendaItem = RouterOutputs["agendaItem"]["byMeeting"][number];
 // `board`, `executive_session` and `motion` each carry a JSONB column, and
 // `RouterOutputs` types those as `unknown` — which `TestHandlers` (built from
@@ -291,6 +294,7 @@ const baseMeeting: Meeting = {
   agenda_packet_generated_at: null,
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
+  adjournment: null,
 };
 
 const baseBoard = {

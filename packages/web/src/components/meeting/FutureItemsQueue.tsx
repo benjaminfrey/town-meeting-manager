@@ -12,17 +12,25 @@
 
 import { Clock, Pause, ArrowRight, ListTodo } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { RouterOutputs } from "@/lib/trpc";
 
-interface FutureQueueItem {
-  id: string;
-  title: string;
-  description: string | null;
-  source: string; // "tabled" | "deferred" | "future_queue"
-  status: string; // "pending" | "placed" | "dismissed"
-}
+/**
+ * The procedure's own row, not a hand-written interface that happens to
+ * match — conventions item 10. `routes/meetings.$meetingId.review.tsx` is
+ * the only caller and now passes `trpc.futureItem.byMeeting`'s rows
+ * straight through, so a column dropped from that procedure is a compile
+ * error here rather than an `undefined` badge.
+ *
+ * `source` is "tabled" | "deferred" | "future_queue" and `status` is
+ * "pending" | "placed" | "dismissed" — both plain `text` columns with no
+ * database constraint (see `future_item_queue` in `0000_baseline.sql`),
+ * which is why the procedure declares them `string` and `SOURCE_CONFIG`
+ * below carries a fallback.
+ */
+type FutureQueueItem = RouterOutputs["futureItem"]["byMeeting"][number];
 
 interface FutureItemsQueueProps {
-  items: FutureQueueItem[];
+  items: readonly FutureQueueItem[];
 }
 
 const SOURCE_CONFIG: Record<

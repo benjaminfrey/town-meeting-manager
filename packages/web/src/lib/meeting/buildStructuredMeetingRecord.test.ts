@@ -67,7 +67,7 @@ function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
       status: "present",
       arrived_at: "2026-03-10T18:30:00Z",
       departed_at: null,
-      is_recording_secretary: 0,
+      is_recording_secretary: false,
     },
     {
       board_member_id: "bm-2",
@@ -75,7 +75,7 @@ function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
       status: "present",
       arrived_at: "2026-03-10T18:30:00Z",
       departed_at: null,
-      is_recording_secretary: 0,
+      is_recording_secretary: false,
     },
     {
       board_member_id: "bm-3",
@@ -83,7 +83,7 @@ function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
       status: "present",
       arrived_at: "2026-03-10T18:31:00Z",
       departed_at: null,
-      is_recording_secretary: 1,
+      is_recording_secretary: true,
     },
     {
       board_member_id: "bm-4",
@@ -91,7 +91,7 @@ function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
       status: "absent",
       arrived_at: null,
       departed_at: null,
-      is_recording_secretary: 0,
+      is_recording_secretary: false,
     },
     {
       board_member_id: "bm-5",
@@ -99,7 +99,7 @@ function baseAttendance(): StructuredMeetingRecordInput["attendance"] {
       status: "remote",
       arrived_at: "2026-03-10T18:30:00Z",
       departed_at: null,
-      is_recording_secretary: 0,
+      is_recording_secretary: false,
     },
   ];
 }

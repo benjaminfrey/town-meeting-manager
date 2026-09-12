@@ -10,10 +10,126 @@
  * - Recusals (member, item, reason)
  * - Future items queue (tabled/deferred items for next meeting)
  * - Export button for structured meeting data JSON
+ *
+ * ─── Phase E, wave 6, Task 4 ──────────────────────────────────────────────
+ *
+ * Sixteen raw `select("*")` reads, zero writes — the largest single read
+ * surface in the phase. Fourteen are now tRPC procedures; two are gone
+ * outright (see below). Every row type comes from `RouterOutputs`, never
+ * `Record<string, unknown>`: conventions item 10, and the bag type is what
+ * let this screen's siblings read columns that do not exist.
+ *
+ * **`POST /api/meetings/:id/minutes/generate` (and `/regenerate`) STAY on
+ * Fastify.** They are not an oversight and not a gap. Minutes generation
+ * holds a Chromium process and a pooled connection for seconds; it was
+ * deliberately kept off the transaction path, and moving it behind a tRPC
+ * resolver would put a Puppeteer render inside `ctx.withTenant`.
+ *
+ * ─── The column audit ─────────────────────────────────────────────────────
+ *
+ * Task 3 migrated `components/minutes/SourceDataPanel.tsx`, which reads
+ * `motion`, `vote_record` and `agenda_item_transition` — three of the same
+ * tables — and found SEVEN keys that are not columns: the "Moved:" line, all
+ * three vote badges and every voter name had never rendered there.
+ *
+ * Every column this screen reads was checked the same way, against
+ * `packages/api/drizzle/0000_baseline.sql`'s own `CREATE TABLE` statements,
+ * across all sixteen tables and including the ones only reached as props
+ * (`lib/meeting/buildStructuredMeetingRecord.ts`, `FutureItemsQueue`).
+ * **All of them exist.** This screen reads `motion.moved_by` /
+ * `seconded_by` (the real uuid FKs) through a `board_member.id → name` map,
+ * reads the tally out of `motion.vote_summary`, and never reads
+ * `transition_type` at all — it had, independently, the three things its
+ * sibling got wrong. The one column that is not what its consumer claims is
+ * `meeting_attendance.is_recording_secretary`, and that is a TYPE mismatch
+ * rather than a phantom: see "One dead conversion" below.
+ *
+ * ─── Two reads deleted, not migrated ──────────────────────────────────────
+ *
+ *   - `person` by town, which existed only to turn `board_member.person_id`
+ *     into a name. `boardMember.roster` already JOINs `person` and returns
+ *     `name` per seat, so the whole `personMap`/`personRows` pair is gone.
+ *     `SourceDataPanel` reaches the identical mapping the identical way.
+ *   - `town_id` as a local. It fed exactly three things: the `town` read
+ *     (`town.detail` takes no input — it reads `ctx.tenant.townId`), the
+ *     `person` read (deleted), and the `exhibit` read's own `town_id` filter
+ *     (replaced, see below). Nothing renders it.
+ *
+ * ─── Behaviour changes, stated (conventions item 1) ───────────────────────
+ *
+ * The query being replaced is a specification, so every dropped or added
+ * clause is named here:
+ *
+ *   - **The exhibit read NARROWS, twice.** It was
+ *     `.eq("town_id", townId)` — every exhibit in the town, for a screen that
+ *     only ever groups them by THIS meeting's agenda item ids. The extra rows
+ *     were inert in the exported JSON and are gone. `exhibit.byMeeting` also
+ *     applies rule 14, so a caller who may not see a `board_only` or
+ *     `admin_only` attachment no longer gets its title in the export. Both
+ *     are tightenings; the second is a real visibility change.
+ *   - **Member ordering is ADDED.** `boardMember.roster` is
+ *     `ORDER BY p.name`; the raw `board_member` read had no ORDER BY, so the
+ *     attendance table rendered in whatever order Postgres returned. It is
+ *     alphabetical now. No status filter is added — the raw read had none
+ *     and `roster` has none, so a resigned seat still appears exactly as it
+ *     did.
+ *   - **Three more ORDER BYs are ADDED**, all the procedures' own (waves
+ *     3–5): `motion.byMeeting` orders by `created_at, id`,
+ *     `guestSpeaker.byMeeting` by `created_at, id`, `futureItem.byMeeting`
+ *     by `created_at, id`. `agendaItem.byMeeting` keeps this screen's
+ *     `sort_order` and adds an `id` tiebreak. `voteRecord.byMeeting` and
+ *     `executiveSession.byMeeting` still have none, matching the raw reads.
+ *   - **A missing meeting is NOT_FOUND, not `null`.** The loader lets that
+ *     reject into `RouteErrorBoundary`; the old `.single()` on a foreign id
+ *     left this screen on "Loading meeting data..." forever.
+ *   - **The vote line's gate is `voteTallyOf`, not `Boolean(vote_summary)`.**
+ *     A `vote_summary` object carrying neither a numeric `yeas` nor a numeric
+ *     `nays` used to render "Yeas: 0, Nays: 0, Abstentions: 0" beside the
+ *     Result badge; it now renders nothing. `voteRecord.recordForMotion`
+ *     always writes all three, so this reaches only a malformed or
+ *     hand-written row — and rendering three invented zeros for one is worse
+ *     than saying nothing.
+ *   - **`canGenerateMinutes` gains a board and a role.** It was
+ *     `hasPermission(permissions, "generate_ai_minutes")` with neither, which
+ *     is a DIFFERENT question from the one the server answers:
+ *     `routes/minutes.ts` resolves R2 against `meeting.board_id` (see that
+ *     file's header — the board-scoped fix is the confirmed defect it
+ *     closed), so the browser was ignoring this board's overrides. A clerk
+ *     granted R2 on this board only now sees the button, and one whose town
+ *     REVOKED it for this board no longer does. The explicit
+ *     `admin`/`sys_admin` short-circuit stays: it predates this and `role`
+ *     does not subsume it (`hasPermission` short-circuits `admin` alone).
+ *
+ * ─── One dead conversion, removed ─────────────────────────────────────────
+ *
+ * `meeting_attendance.is_recording_secretary` is a `boolean` column. This
+ * screen normalised it to `0`/`1` and `buildStructuredMeetingRecord`
+ * compared `=== 1` — a round trip that produced the right answer through two
+ * wrong types. Wave 5, Task 5 named exactly this pair as surviving in these
+ * two wave-6 files. The builder's input is `boolean` now, the `normalizeBool`
+ * helper is gone, and the exported JSON is byte-identical.
+ *
+ * ─── Cache keys ───────────────────────────────────────────────────────────
+ *
+ * Every legacy `queryKeys.*` read this screen carried is gone, and it was the
+ * LAST reader of THIRTEEN of them — `meetings.detail`, `towns.detail`,
+ * `members.byBoard`, `attendance.byMeeting`, `agendaItems.*`, `motions.*`,
+ * `voteRecords.*`, `executiveSessions.*`, `agendaItemTransitions.*`,
+ * `guestSpeakers.*`, `exhibits.*`, `futureItemQueues.*` and
+ * `minutesDocuments.*`. Every one of those namespaces' writers already
+ * carried the matching `trpc.<router>.pathFilter()` call, so nothing had to
+ * be added and nothing was deleted — see `cache-key-parity.test.ts`'s "Why a
+ * dead legacy line is not removed on sight" for why the now-dead
+ * invalidations stay. The exception, and the one real gap this migration
+ * opened: `future_item_queue` had NO client writer invalidating it and is not
+ * a `LIVE_MEETING_TOPICS` entry, so the two adjournment call sites that
+ * create its rows (`live.tsx`'s `adjournMutation`, `VotePanel.tsx`'s
+ * `data.adjourned` branch) now call `trpc.futureItem.pathFilter()`, each
+ * pinned.
  */
 
 import { useMemo, useCallback, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
@@ -24,6 +140,7 @@ import {
   Lock,
   Download,
   ArrowLeft,
+  AlertTriangle,
   CheckCircle2,
   PauseCircle,
   ArrowRightCircle,
@@ -60,30 +177,30 @@ import {
   downloadMeetingRecord,
   type StructuredMeetingRecordInput,
 } from "@/lib/meeting/buildStructuredMeetingRecord";
-import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { voteTallyOf } from "@/lib/meeting/voteTally";
+import { isTRPCClientError } from "@trpc/client";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { apiJson } from "@/lib/api-client";
-import { supabase } from "@/lib/supabase";
 import { queryClient } from "@/lib/queryClient";
+
+// ─── Row types, bound to the procedures that produce them ─────────
+
+type AgendaItem = RouterOutputs["agendaItem"]["byMeeting"][number];
+type Motion = RouterOutputs["motion"]["byMeeting"][number];
+type VoteRecord = RouterOutputs["voteRecord"]["byMeeting"][number];
+type ExecutiveSession = RouterOutputs["executiveSession"]["byMeeting"][number];
+type Transition = RouterOutputs["agendaItemTransition"]["byMeeting"][number];
 
 // ─── Route Loader ─────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const meetingId = params.meetingId;
 
-  // Prefetch meeting data
-  await queryClient.ensureQueryData({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  // Not wrapped in try/catch: a nonexistent or foreign meeting answers
+  // NOT_FOUND and letting that reject routes to `RouteErrorBoundary` below
+  // (conventions item 12), rather than the indefinite "Loading meeting
+  // data..." the old `select("*").single()` produced.
+  await queryClient.ensureQueryData(trpc.meeting.detail.queryOptions({ meetingId }));
 
   return { meetingId };
 }
@@ -95,6 +212,20 @@ const MINUTES_STYLE_LABELS: Record<string, string> = {
   summary: "Summary Minutes",
   narrative: "Narrative Minutes",
 };
+
+/**
+ * `meeting.adjournment` is JSONB, declared `unknown` by `meeting.detail`.
+ *
+ * The `JSON.parse` fallback this replaces was there because PostgREST could
+ * hand back either shape; `meeting.detail` cannot — `meeting.test.ts`'s
+ * "returns the adjournment JSONB, parsed, not as text" pins that it arrives
+ * as an object. Its five keys are documented on `meeting.adjourn`, including
+ * the `adjourned_by` misattribution this screen does not read.
+ */
+function adjournmentOf(stored: unknown): Record<string, unknown> | null {
+  if (typeof stored !== "object" || stored === null) return null;
+  return stored as Record<string, unknown>;
+}
 
 export default function PostMeetingReviewPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
@@ -109,231 +240,95 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   // ─── Reactive queries ───────────────────────────────────────────
-  const { data: meeting } = useQuery({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
-  const boardId = (meeting?.board_id as string) ?? "";
-  const townId = (meeting?.town_id as string) ?? "";
+  const {
+    data: meeting,
+    isLoading: isMeetingLoading,
+    isError: isMeetingError,
+    error: meetingError,
+  } = useQuery(trpc.meeting.detail.queryOptions({ meetingId }));
 
+  const boardId = meeting?.board_id ?? "";
+
+  // `enabled: !!boardId` on the three board-scoped reads: every input below
+  // is `z.string().uuid()`, so an empty id is a BAD_REQUEST rather than a
+  // query that quietly returns nothing.
   const { data: board } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("id", boardId)
-        .single()
-        .throwOnError();
-      return data;
-    },
+    ...trpc.board.detail.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
-  const { data: town } = useQuery({
-    queryKey: queryKeys.towns.detail(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-    enabled: !!townId,
-  });
+  const { data: town } = useQuery(trpc.town.detail.queryOptions());
 
-  const { data: memberRows } = useQuery({
-    queryKey: queryKeys.members.byBoard(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board_member")
-        .select("*")
-        .eq("board_id", boardId)
-        .throwOnError();
-      return data ?? [];
-    },
+  const { data: roster = [] } = useQuery({
+    ...trpc.boardMember.roster.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
-  const { data: personRows } = useQuery({
-    queryKey: queryKeys.persons.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("person")
-        .select("*")
-        .eq("town_id", townId)
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId,
-  });
+  const { data: attendanceRows = [] } = useQuery(
+    trpc.meetingAttendance.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: attendanceRows } = useQuery({
-    queryKey: queryKeys.attendance.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting_attendance")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: itemRows = [] } = useQuery(trpc.agendaItem.byMeeting.queryOptions({ meetingId }));
 
-  const { data: itemRows } = useQuery({
-    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_item")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .order("sort_order", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: motionRows = [] } = useQuery(trpc.motion.byMeeting.queryOptions({ meetingId }));
 
-  const { data: motionRows } = useQuery({
-    queryKey: queryKeys.motions.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("motion")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: voteRecordRows = [] } = useQuery(
+    trpc.voteRecord.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: voteRecordRows } = useQuery({
-    queryKey: queryKeys.voteRecords.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("vote_record")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: execSessionRows = [] } = useQuery(
+    trpc.executiveSession.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: execSessionRows } = useQuery({
-    queryKey: queryKeys.executiveSessions.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("executive_session")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: transitionRows = [] } = useQuery(
+    trpc.agendaItemTransition.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: transitionRows } = useQuery({
-    queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("agenda_item_transition")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .order("started_at", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: speakerRows = [] } = useQuery(
+    trpc.guestSpeaker.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: speakerRows } = useQuery({
-    queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("guest_speaker")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .order("created_at", { ascending: true })
-        .throwOnError();
-      return data ?? [];
-    },
-  });
+  const { data: exhibitRows = [] } = useQuery(trpc.exhibit.byMeeting.queryOptions({ meetingId }));
 
-  const { data: exhibitRows } = useQuery({
-    queryKey: [...queryKeys.exhibits.byMeeting(meetingId), townId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("exhibit")
-        .select("*")
-        .eq("town_id", townId)
-        .throwOnError();
-      return data ?? [];
-    },
-    enabled: !!townId,
-  });
+  const { data: futureItems = [] } = useQuery(
+    trpc.futureItem.byMeeting.queryOptions({ meetingId }),
+  );
 
-  const { data: futureItemRows } = useQuery({
-    queryKey: queryKeys.futureItemQueues.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("future_item_queue")
-        .select("*")
-        .eq("source_meeting_id", meetingId)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
-
-  // Minutes document query
-  const { data: minutesDocRows } = useQuery({
-    queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("minutes_document")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .limit(1)
-        .throwOnError();
-      return data ?? [];
-    },
-  });
-  const minutesDoc = minutesDocRows?.[0] as Record<string, unknown> | undefined;
+  // The status pill's row, and the existence check behind "Generate" vs
+  // "View / Regenerate". `byMeeting`, not `detail`: this screen needs the
+  // status and nothing else, and `detail` applies rule 9 — a caller who may
+  // not read a DRAFT's text can still be told one exists.
+  const { data: minutesDoc } = useQuery(trpc.minutesDocument.byMeeting.queryOptions({ meetingId }));
   const hasMinutes = !!minutesDoc;
 
-  // Check user permission for R2 (generate_ai_minutes)
+  // ─── Permissions ────────────────────────────────────────────────
+  //
+  // `boardId` and `role` are ADDED arguments — see this file's header for
+  // which question the browser used to ask and which one the server answers.
   const canGenerateMinutes = useMemo(() => {
     if (!currentUser) return false;
     const role = currentUser.role;
     if (role === "admin" || role === "sys_admin") return true;
-    return hasPermission(currentUser.permissions, "generate_ai_minutes");
-  }, [currentUser]);
+    return hasPermission(
+      currentUser.permissions,
+      "generate_ai_minutes",
+      boardId || undefined,
+      role ?? undefined,
+    );
+  }, [currentUser, boardId]);
 
   // ─── Data merging ─────────────────────────────────────────────
 
-  const personMap = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    (personRows ?? []).forEach((p: Record<string, unknown>) => map.set(p.id as string, p));
-    return map;
-  }, [personRows]);
-
+  /** `board_member.id` → the seat, with the person's name already joined. */
   const members = useMemo(
     () =>
-      (memberRows ?? []).map((m: Record<string, unknown>) => {
-        const person = personMap.get(m.person_id as string);
-        return {
-          boardMemberId: m.id as string,
-          personId: m.person_id as string,
-          name: (person?.name as string) ?? "Unknown",
-          seatTitle: (m.seat_title as string) ?? null,
-        };
-      }),
-    [memberRows, personMap],
+      roster.map((seat) => ({
+        boardMemberId: seat.id,
+        personId: seat.person_id,
+        name: seat.name,
+        seatTitle: seat.seat_title,
+      })),
+    [roster],
   );
 
   const memberNameMap = useMemo(() => {
@@ -342,89 +337,67 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     return map;
   }, [members]);
 
-  const allItems = useMemo(() => itemRows ?? [], [itemRows]);
+  const allItems = itemRows;
 
   // Build sections with child items
   const sections = useMemo(() => {
-    const parents = allItems.filter((item: Record<string, unknown>) => !item.parent_item_id);
-    return parents.map((section: Record<string, unknown>) => {
+    const parents = allItems.filter((item) => !item.parent_item_id);
+    return parents.map((section) => {
       const children = allItems
-        .filter((item: Record<string, unknown>) => item.parent_item_id === section.id)
-        .sort(
-          (a: Record<string, unknown>, b: Record<string, unknown>) =>
-            (a.sort_order as number) - (b.sort_order as number),
-        );
+        .filter((item) => item.parent_item_id === section.id)
+        .sort((a, b) => a.sort_order - b.sort_order);
       return { section, children };
     });
   }, [allItems]);
 
-  const motions = useMemo(() => motionRows ?? [], [motionRows]);
-  const voteRecords = useMemo(() => voteRecordRows ?? [], [voteRecordRows]);
-  const execSessions = useMemo(() => execSessionRows ?? [], [execSessionRows]);
-  const transitions = useMemo(() => transitionRows ?? [], [transitionRows]);
-
   // Motions by item for display
   const motionsByItem = useMemo(() => {
-    const map = new Map<string, Array<Record<string, unknown>>>();
-    (motions as Array<Record<string, unknown>>).forEach((m) => {
-      const itemId = m.agenda_item_id as string;
-      if (!map.has(itemId)) map.set(itemId, []);
-      map.get(itemId)!.push(m);
+    const map = new Map<string, Motion[]>();
+    motionRows.forEach((m) => {
+      if (!map.has(m.agenda_item_id)) map.set(m.agenda_item_id, []);
+      map.get(m.agenda_item_id)!.push(m);
     });
     return map;
-  }, [motions]);
+  }, [motionRows]);
 
   // Votes by motion
   const votesByMotion = useMemo(() => {
-    const map = new Map<string, Array<Record<string, unknown>>>();
-    (voteRecords as Array<Record<string, unknown>>).forEach((v) => {
-      const mId = v.motion_id as string;
-      if (!map.has(mId)) map.set(mId, []);
-      map.get(mId)!.push(v);
+    const map = new Map<string, VoteRecord[]>();
+    voteRecordRows.forEach((v) => {
+      if (!map.has(v.motion_id)) map.set(v.motion_id, []);
+      map.get(v.motion_id)!.push(v);
     });
     return map;
-  }, [voteRecords]);
+  }, [voteRecordRows]);
 
   // Transitions by item (for time tracking)
   const transitionsByItem = useMemo(() => {
-    const map = new Map<string, Array<Record<string, unknown>>>();
-    (transitions as Array<Record<string, unknown>>).forEach((t) => {
-      const itemId = t.agenda_item_id as string;
-      if (!map.has(itemId)) map.set(itemId, []);
-      map.get(itemId)!.push(t);
+    const map = new Map<string, Transition[]>();
+    transitionRows.forEach((t) => {
+      if (!map.has(t.agenda_item_id)) map.set(t.agenda_item_id, []);
+      map.get(t.agenda_item_id)!.push(t);
     });
     return map;
-  }, [transitions]);
+  }, [transitionRows]);
 
   // Presiding officer and recording secretary names
   const presidingOfficerName = useMemo(() => {
-    const id = (meeting?.presiding_officer_id as string) ?? null;
+    const id = meeting?.presiding_officer_id ?? null;
     return id ? (memberNameMap.get(id) ?? null) : null;
   }, [meeting, memberNameMap]);
 
   const recordingSecretaryName = useMemo(() => {
-    const id = (meeting?.recording_secretary_id as string) ?? null;
+    const id = meeting?.recording_secretary_id ?? null;
     return id ? (memberNameMap.get(id) ?? null) : null;
   }, [meeting, memberNameMap]);
 
-  // Adjournment data — Supabase returns native JSONB objects
-  const adjournment = useMemo(() => {
-    if (!meeting?.adjournment) return null;
-    // Supabase returns JSONB as native objects; handle string fallback for safety
-    if (typeof meeting.adjournment === "object")
-      return meeting.adjournment as Record<string, unknown>;
-    try {
-      return JSON.parse(meeting.adjournment as string) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }, [meeting]);
+  const adjournment = useMemo(() => adjournmentOf(meeting?.adjournment), [meeting]);
 
   // Duration
   const duration = useMemo(() => {
     if (!meeting?.started_at || !meeting?.ended_at) return null;
-    const start = new Date(meeting.started_at as string);
-    const end = new Date(meeting.ended_at as string);
+    const start = new Date(meeting.started_at);
+    const end = new Date(meeting.ended_at);
     const mins = Math.round((end.getTime() - start.getTime()) / 60000);
     const hours = Math.floor(mins / 60);
     const remaining = mins % 60;
@@ -433,39 +406,23 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
   // All recusals across the meeting
   const recusals = useMemo(() => {
-    return (voteRecords as Array<Record<string, unknown>>)
+    return voteRecordRows
       .filter((v) => v.vote === "recusal")
       .map((v) => {
-        const motion = (motions as Array<Record<string, unknown>>).find(
-          (m) => m.id === v.motion_id,
-        );
-        const itemId = motion?.agenda_item_id as string;
-        const item = allItems.find((i: Record<string, unknown>) => i.id === itemId);
+        const motion = motionRows.find((m) => m.id === v.motion_id);
+        const item = allItems.find((i) => i.id === motion?.agenda_item_id);
         return {
-          member: memberNameMap.get(v.board_member_id as string) ?? "Unknown",
-          item: (item?.title as string) ?? "Unknown item",
-          reason: (v.recusal_reason as string) ?? "Not specified",
+          member: memberNameMap.get(v.board_member_id) ?? "Unknown",
+          item: item?.title ?? "Unknown item",
+          reason: v.recusal_reason ?? "Not specified",
         };
       });
-  }, [voteRecords, motions, allItems, memberNameMap]);
-
-  // Future items queue
-  const futureItems = useMemo(
-    () =>
-      (futureItemRows ?? []).map((fi: Record<string, unknown>) => ({
-        id: fi.id as string,
-        title: (fi.title as string) ?? "",
-        description: (fi.description as string) ?? null,
-        source: (fi.source as string) ?? "deferred",
-        status: (fi.status as string) ?? "pending",
-      })),
-    [futureItemRows],
-  );
+  }, [voteRecordRows, motionRows, allItems, memberNameMap]);
 
   // Effective minutes style for the board
   const effectiveMinutesStyle = useMemo(() => {
-    const boardOverride = (board?.minutes_style_override as string) ?? null;
-    const townDefault = (town?.minutes_style as string) ?? "summary";
+    const boardOverride = board?.minutes_style_override ?? null;
+    const townDefault = town?.minutes_style ?? "summary";
     return boardOverride ?? townDefault;
   }, [board, town]);
 
@@ -488,18 +445,17 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
         await apiJson(endpoint, { method: "POST", json: body });
 
-        // Success — close dialogs and invalidate minutes query
+        // Success — close dialogs and invalidate the minutes router.
         setGenerateDialogOpen(false);
         setRegenerateDialogOpen(false);
         setStyleOverride("");
-        await queryClient.invalidateQueries({
-          queryKey: queryKeys.minutesDocuments.byMeeting(meetingId),
-        });
         // Generation/regeneration creates or replaces the meeting's
-        // `minutes_document`, which is exactly what
-        // `routes/meetings.$meetingId.tsx`'s shell renders as its minutes
-        // status pill ("Not yet generated" → "Draft") via
-        // `trpc.minutesDocument.byMeeting`.
+        // `minutes_document`, which is this screen's own "Generate" vs
+        // "View / Regenerate" branch AND the status pill
+        // `routes/meetings.$meetingId.tsx`'s shell renders from
+        // `trpc.minutesDocument.byMeeting`. One `pathFilter()` reaches both;
+        // the legacy `queryKeys.minutesDocuments.byMeeting` line that used to
+        // sit beside it is gone with this screen's own read of that key.
         await queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
       } catch (err) {
         setGenerateError(
@@ -509,7 +465,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         setGenerating(false);
       }
     },
-    [meetingId, styleOverride, effectiveMinutesStyle, queryClient],
+    [meetingId, styleOverride, effectiveMinutesStyle],
   );
 
   // ─── Export handler ────────────────────────────────────────────
@@ -517,13 +473,10 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   const handleExport = useCallback(() => {
     if (!meeting || !board || !town) return;
 
-    // Helper: Supabase returns native booleans; normalize is_recording_secretary
-    const normalizeBool = (val: unknown): number => {
-      if (typeof val === "boolean") return val ? 1 : 0;
-      return (val as number) ?? 0;
-    };
-
-    // Helper: Supabase returns native JSONB; ensure string for export
+    // `adjournment`, `vote_summary` and `post_session_action_motion_ids` are
+    // JSONB, and `buildStructuredMeetingRecord` takes them as TEXT (it
+    // `JSON.parse`s them itself). `normalizeBool` used to sit beside this and
+    // does not any more — see this file's header.
     const normalizeJsonString = (val: unknown): string | null => {
       if (val == null) return null;
       if (typeof val === "string") return val;
@@ -532,107 +485,106 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
     const input: StructuredMeetingRecordInput = {
       meeting: {
-        id: meeting.id as string,
-        title: (meeting.title as string) ?? "",
-        scheduled_date: (meeting.scheduled_date as string) ?? "",
-        scheduled_time: (meeting.scheduled_time as string) ?? null,
-        location: (meeting.location as string) ?? null,
-        meeting_type: (meeting.meeting_type as string) ?? "regular",
-        started_at: (meeting.started_at as string) ?? null,
-        ended_at: (meeting.ended_at as string) ?? null,
+        id: meeting.id,
+        title: meeting.title,
+        scheduled_date: meeting.scheduled_date,
+        scheduled_time: meeting.scheduled_time,
+        location: meeting.location,
+        meeting_type: meeting.meeting_type,
+        started_at: meeting.started_at,
+        ended_at: meeting.ended_at,
         adjournment: normalizeJsonString(meeting.adjournment),
       },
       board: {
-        id: board.id as string,
-        name: (board.name as string) ?? "",
-        board_type: (board.board_type as string) ?? "",
-        motion_display_format: (board.motion_display_format as string) ?? null,
+        id: board.id,
+        name: board.name,
+        board_type: board.board_type,
+        motion_display_format: board.motion_display_format,
       },
       town: {
-        name: (town.name as string) ?? "",
-        meeting_formality: (town.meeting_formality as string) ?? null,
-        minutes_style: (town.minutes_style as string) ?? null,
+        name: town.name,
+        meeting_formality: town.meeting_formality,
+        minutes_style: town.minutes_style,
       },
       presidingOfficerName,
       recordingSecretaryName,
       members,
-      attendance: (attendanceRows ?? []).map((a: Record<string, unknown>) => ({
-        board_member_id: (a.board_member_id as string) ?? null,
-        person_id: (a.person_id as string) ?? "",
-        status: (a.status as string) ?? "absent",
-        arrived_at: (a.arrived_at as string) ?? null,
-        departed_at: (a.departed_at as string) ?? null,
-        is_recording_secretary: normalizeBool(a.is_recording_secretary),
+      attendance: attendanceRows.map((a) => ({
+        board_member_id: a.board_member_id,
+        person_id: a.person_id,
+        status: a.status,
+        arrived_at: a.arrived_at,
+        departed_at: a.departed_at,
+        is_recording_secretary: a.is_recording_secretary,
       })),
-      agendaItems: allItems.map((i: Record<string, unknown>) => ({
-        id: i.id as string,
+      agendaItems: allItems.map((i) => ({
+        id: i.id,
         meeting_id: meetingId,
-        section_type: (i.section_type as string) ?? null,
-        sort_order: (i.sort_order as number) ?? 0,
-        title: (i.title as string) ?? "",
-        description: (i.description as string) ?? null,
-        presenter: (i.presenter as string) ?? null,
-        estimated_duration: (i.estimated_duration as number) ?? null,
-        parent_item_id: (i.parent_item_id as string) ?? null,
-        status: (i.status as string) ?? "pending",
-        staff_resource: (i.staff_resource as string) ?? null,
-        background: (i.background as string) ?? null,
-        recommendation: (i.recommendation as string) ?? null,
-        suggested_motion: (i.suggested_motion as string) ?? null,
-        operator_notes: (i.operator_notes as string) ?? null,
+        section_type: i.section_type,
+        sort_order: i.sort_order,
+        title: i.title,
+        description: i.description,
+        presenter: i.presenter,
+        estimated_duration: i.estimated_duration,
+        parent_item_id: i.parent_item_id,
+        status: i.status,
+        staff_resource: i.staff_resource,
+        background: i.background,
+        recommendation: i.recommendation,
+        suggested_motion: i.suggested_motion,
+        operator_notes: i.operator_notes,
       })),
-      motions: (motions as Array<Record<string, unknown>>).map((m) => ({
-        id: m.id as string,
-        agenda_item_id: (m.agenda_item_id as string) ?? "",
-        motion_text: (m.motion_text as string) ?? "",
-        motion_type: (m.motion_type as string) ?? "main",
-        moved_by: (m.moved_by as string) ?? null,
-        seconded_by: (m.seconded_by as string) ?? null,
-        status: (m.status as string) ?? "pending",
-        parent_motion_id: (m.parent_motion_id as string) ?? null,
+      motions: motionRows.map((m) => ({
+        id: m.id,
+        agenda_item_id: m.agenda_item_id,
+        motion_text: m.motion_text,
+        motion_type: m.motion_type,
+        moved_by: m.moved_by,
+        seconded_by: m.seconded_by,
+        status: m.status,
+        parent_motion_id: m.parent_motion_id,
         vote_summary: normalizeJsonString(m.vote_summary),
       })),
-      voteRecords: (voteRecords as Array<Record<string, unknown>>).map((v) => ({
-        id: v.id as string,
-        motion_id: (v.motion_id as string) ?? "",
-        board_member_id: (v.board_member_id as string) ?? "",
-        vote: (v.vote as string) ?? "",
-        recusal_reason: (v.recusal_reason as string) ?? null,
+      voteRecords: voteRecordRows.map((v) => ({
+        id: v.id,
+        motion_id: v.motion_id,
+        board_member_id: v.board_member_id,
+        vote: v.vote,
+        recusal_reason: v.recusal_reason,
       })),
-      executiveSessions: (execSessions as Array<Record<string, unknown>>).map((es) => ({
-        id: es.id as string,
-        agenda_item_id: (es.agenda_item_id as string) ?? null,
-        statutory_basis: (es.statutory_basis as string) ?? "",
-        entered_at: (es.entered_at as string) ?? null,
-        exited_at: (es.exited_at as string) ?? null,
-        entry_motion_id: (es.entry_motion_id as string) ?? null,
+      executiveSessions: execSessionRows.map((es) => ({
+        id: es.id,
+        agenda_item_id: es.agenda_item_id,
+        statutory_basis: es.statutory_basis,
+        entered_at: es.entered_at,
+        exited_at: es.exited_at,
+        entry_motion_id: es.entry_motion_id,
         post_session_action_motion_ids: normalizeJsonString(es.post_session_action_motion_ids),
       })),
-      transitions: (transitions as Array<Record<string, unknown>>).map((t) => ({
-        agenda_item_id: (t.agenda_item_id as string) ?? "",
-        started_at: (t.started_at as string) ?? "",
-        ended_at: (t.ended_at as string) ?? null,
+      transitions: transitionRows.map((t) => ({
+        agenda_item_id: t.agenda_item_id,
+        started_at: t.started_at,
+        ended_at: t.ended_at,
       })),
-      exhibits: (exhibitRows ?? []).map((e: Record<string, unknown>) => ({
-        id: e.id as string,
-        agenda_item_id: (e.agenda_item_id as string) ?? "",
-        title: (e.title as string) ?? "",
-        file_name: (e.file_name as string) ?? "",
+      // `file_name` is nullable on the column and `agenda_item_id` is
+      // nullable on `guest_speaker`; both `?? ""` exactly as they did when
+      // every row was a `Record<string, unknown>`.
+      exhibits: exhibitRows.map((e) => ({
+        id: e.id,
+        agenda_item_id: e.agenda_item_id,
+        title: e.title,
+        file_name: e.file_name ?? "",
       })),
-      speakers: (speakerRows ?? []).map((s: Record<string, unknown>) => ({
-        id: s.id as string,
-        agenda_item_id: (s.agenda_item_id as string) ?? "",
-        name: (s.name as string) ?? "",
-        topic: (s.topic as string) ?? null,
+      speakers: speakerRows.map((s) => ({
+        id: s.id,
+        agenda_item_id: s.agenda_item_id ?? "",
+        name: s.name,
+        topic: s.topic,
       })),
     };
 
     const record = buildStructuredMeetingRecord(input);
-    downloadMeetingRecord(
-      record,
-      (board.name as string) ?? "meeting",
-      (meeting.scheduled_date as string) ?? "unknown-date",
-    );
+    downloadMeetingRecord(record, board.name, meeting.scheduled_date);
   }, [
     meeting,
     board,
@@ -642,18 +594,48 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     members,
     attendanceRows,
     allItems,
-    motions,
-    voteRecords,
-    execSessions,
-    transitions,
+    motionRows,
+    voteRecordRows,
+    execSessionRows,
+    transitionRows,
     exhibitRows,
     speakerRows,
     meetingId,
   ]);
 
-  // ─── Loading / error states ────────────────────────────────────
+  // ─── Error state ───────────────────────────────────────────────
+  //
+  // A failure AFTER mount — a refetch or a `staleTime` expiry. The loader
+  // covers the before-mount case through `RouteErrorBoundary`; conventions
+  // item 12 requires both, and neither substitutes for the other.
 
-  if (!meeting) {
+  if (isMeetingError) {
+    const notFound = isTRPCClientError(meetingError) && meetingError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This meeting could not be found."
+              : "Something went wrong loading this meeting."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link to="/meetings" className="mt-4 inline-block text-sm text-primary hover:underline">
+            Back to Meetings
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Loading state ─────────────────────────────────────────────
+
+  if (isMeetingLoading || !meeting) {
     return (
       <div className="flex items-center justify-center p-12">
         <p className="text-sm text-muted-foreground">Loading meeting data...</p>
@@ -661,8 +643,8 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     );
   }
 
-  const boardName = (board?.name as string) ?? "";
-  const meetingDate = (meeting.scheduled_date as string) ?? "";
+  const boardName = board?.name ?? "";
+  const meetingDate = meeting.scheduled_date;
 
   // ─── Render ────────────────────────────────────────────────────
 
@@ -676,7 +658,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             Back to Boards
           </Button>
         </div>
-        <h1 className="mt-3 text-2xl font-bold">{meeting.title as string}</h1>
+        <h1 className="mt-3 text-2xl font-bold">{meeting.title}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
           {boardName && (
             <span className="flex items-center gap-1.5">
@@ -698,7 +680,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
           {meeting.location && (
             <span className="flex items-center gap-1.5">
               <MapPin className="h-4 w-4" />
-              {meeting.location as string}
+              {meeting.location}
             </span>
           )}
           {duration && (
@@ -742,15 +724,10 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             </thead>
             <tbody>
               {members.map((m) => {
-                const att = (attendanceRows ?? []).find(
-                  (a: Record<string, unknown>) => a.board_member_id === m.boardMemberId,
-                ) as Record<string, unknown> | undefined;
-                const status = (att?.status as string) ?? "absent";
-                // Supabase returns native booleans
-                const isRecSec =
-                  att?.is_recording_secretary === true ||
-                  (att?.is_recording_secretary as number) === 1;
-                const isPresiding = (meeting?.presiding_officer_id as string) === m.boardMemberId;
+                const att = attendanceRows.find((a) => a.board_member_id === m.boardMemberId);
+                const status = att?.status ?? "absent";
+                const isRecSec = att?.is_recording_secretary === true;
+                const isPresiding = meeting.presiding_officer_id === m.boardMemberId;
 
                 return (
                   <tr key={m.boardMemberId} className="border-b last:border-0">
@@ -777,30 +754,28 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         <h2 className="mb-3 text-lg font-semibold">Agenda Coverage</h2>
         <div className="space-y-4">
           {sections.map(({ section, children }, sIdx) => (
-            <div key={section.id as string}>
+            <div key={section.id}>
               <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                {sIdx + 1}. {section.title as string}
+                {sIdx + 1}. {section.title}
               </h3>
               {children.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">No items in this section.</p>
               ) : (
                 <div className="space-y-1">
-                  {children.map((item: Record<string, unknown>, iIdx: number) => {
-                    const itemId = item.id as string;
-                    const itemStatus = (item.status as string) ?? "pending";
-                    const itemTransitions = transitionsByItem.get(itemId) ?? [];
+                  {children.map((item: AgendaItem, iIdx: number) => {
+                    const itemTransitions = transitionsByItem.get(item.id) ?? [];
                     const timeSpent = computeTimeSpent(itemTransitions);
                     const letter = String.fromCharCode(65 + iIdx);
-                    const itemMotions = motionsByItem.get(itemId) ?? [];
+                    const itemMotions = motionsByItem.get(item.id) ?? [];
 
                     return (
                       <div
-                        key={itemId}
+                        key={item.id}
                         className="flex items-center gap-3 rounded-md border px-4 py-2"
                       >
-                        <ItemStatusIcon status={itemStatus} />
+                        <ItemStatusIcon status={item.status} />
                         <span className="min-w-0 flex-1 text-sm">
-                          {letter}. {item.title as string}
+                          {letter}. {item.title}
                         </span>
                         {timeSpent && (
                           <span className="text-xs text-muted-foreground">{timeSpent}</span>
@@ -813,17 +788,17 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                         )}
                         <Badge
                           variant={
-                            itemStatus === "completed"
+                            item.status === "completed"
                               ? "default"
-                              : itemStatus === "tabled"
+                              : item.status === "tabled"
                                 ? "secondary"
-                                : itemStatus === "deferred"
+                                : item.status === "deferred"
                                   ? "outline"
                                   : "secondary"
                           }
                           className="text-xs"
                         >
-                          {itemStatus}
+                          {item.status}
                         </Badge>
                       </div>
                     );
@@ -838,93 +813,69 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       {/* Motions & Votes */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">Motions & Votes</h2>
-        {(motions as Array<Record<string, unknown>>).length === 0 ? (
+        {motionRows.length === 0 ? (
           <p className="text-sm text-muted-foreground italic">
             No motions were recorded during this meeting.
           </p>
         ) : (
           <div className="space-y-4">
-            {sections.map(({ section, children }) =>
+            {sections.map(({ children }) =>
               children
-                .filter((item: Record<string, unknown>) => motionsByItem.has(item.id as string))
-                .map((item: Record<string, unknown>) => {
-                  const itemMotions = motionsByItem.get(item.id as string) ?? [];
+                .filter((item) => motionsByItem.has(item.id))
+                .map((item) => {
+                  const itemMotions = motionsByItem.get(item.id) ?? [];
                   return (
-                    <div key={item.id as string}>
-                      <h4 className="mb-2 text-sm font-medium">{item.title as string}</h4>
+                    <div key={item.id}>
+                      <h4 className="mb-2 text-sm font-medium">{item.title}</h4>
                       <div className="space-y-2 pl-4">
-                        {itemMotions.map((m: Record<string, unknown>) => {
-                          const mId = m.id as string;
-                          const votes = votesByMotion.get(mId) ?? [];
-                          // Supabase returns JSONB natively; handle string fallback
-                          let summary: Record<string, unknown> | null = null;
-                          if (m.vote_summary) {
-                            if (typeof m.vote_summary === "object") {
-                              summary = m.vote_summary as Record<string, unknown>;
-                            } else {
-                              try {
-                                summary = JSON.parse(m.vote_summary as string) as Record<
-                                  string,
-                                  unknown
-                                >;
-                              } catch {
-                                /* ignore */
-                              }
-                            }
-                          }
+                        {itemMotions.map((m) => {
+                          const votes = votesByMotion.get(m.id) ?? [];
+                          const tally = voteTallyOf(m.vote_summary);
 
                           return (
-                            <div key={mId} className="rounded-md border px-4 py-3">
+                            <div key={m.id} className="rounded-md border px-4 py-3">
                               <div className="flex items-start gap-2">
                                 <Gavel className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-sm">{m.motion_text as string}</p>
+                                  <p className="text-sm">{m.motion_text}</p>
                                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                                     {!!m.moved_by && (
                                       <span>
-                                        Moved:{" "}
-                                        {memberNameMap.get(m.moved_by as string) ??
-                                          (m.moved_by as string)}
+                                        Moved: {memberNameMap.get(m.moved_by) ?? m.moved_by}
                                       </span>
                                     )}
                                     {!!m.seconded_by && (
                                       <span>
                                         Seconded:{" "}
-                                        {memberNameMap.get(m.seconded_by as string) ??
-                                          (m.seconded_by as string)}
+                                        {memberNameMap.get(m.seconded_by) ?? m.seconded_by}
                                       </span>
                                     )}
                                     {!!m.motion_type && m.motion_type !== "main" && (
                                       <Badge variant="outline" className="text-xs">
-                                        {(m.motion_type as string).replace(/_/g, " ")}
+                                        {m.motion_type.replace(/_/g, " ")}
                                       </Badge>
                                     )}
                                   </div>
-                                  {summary && (
+                                  {tally && (
                                     <div className="mt-2 text-xs">
                                       <span className="font-medium">Result: </span>
                                       <Badge
-                                        variant={
-                                          (m.status as string) === "passed"
-                                            ? "default"
-                                            : "secondary"
-                                        }
+                                        variant={m.status === "passed" ? "default" : "secondary"}
                                         className="text-xs"
                                       >
-                                        {(m.status as string) ?? "pending"}
+                                        {m.status}
                                       </Badge>
                                       <span className="ml-2">
-                                        Yeas: {(summary.yeas as number) ?? 0}, Nays:{" "}
-                                        {(summary.nays as number) ?? 0}, Abstentions:{" "}
-                                        {(summary.abstentions as number) ?? 0}
+                                        Yeas: {tally.yeas}, Nays: {tally.nays}, Abstentions:{" "}
+                                        {tally.abstentions}
                                       </span>
                                     </div>
                                   )}
                                   {votes.length > 0 && (
                                     <div className="mt-2 flex flex-wrap gap-1">
-                                      {votes.map((v: Record<string, unknown>) => (
+                                      {votes.map((v) => (
                                         <span
-                                          key={v.id as string}
+                                          key={v.id}
                                           className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${
                                             v.vote === "yea"
                                               ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
@@ -935,8 +886,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
                                                   : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
                                           }`}
                                         >
-                                          {memberNameMap.get(v.board_member_id as string) ?? "?"}:{" "}
-                                          {v.vote as string}
+                                          {memberNameMap.get(v.board_member_id) ?? "?"}: {v.vote}
                                         </span>
                                       ))}
                                     </div>
@@ -956,30 +906,28 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       </section>
 
       {/* Executive Sessions */}
-      {(execSessions as Array<Record<string, unknown>>).length > 0 && (
+      {execSessionRows.length > 0 && (
         <section>
           <h2 className="mb-3 text-lg font-semibold">Executive Sessions</h2>
           <div className="space-y-3">
-            {(execSessions as Array<Record<string, unknown>>).map((es) => (
+            {execSessionRows.map((es: ExecutiveSession) => (
               <div
-                key={es.id as string}
+                key={es.id}
                 className="rounded-md border border-red-200 bg-red-50/50 px-4 py-3 dark:border-red-900 dark:bg-red-950/20"
               >
                 <div className="flex items-center gap-2">
                   <Lock className="h-4 w-4 text-red-500" />
-                  <span className="text-sm font-medium">{es.statutory_basis as string}</span>
+                  <span className="text-sm font-medium">{es.statutory_basis}</span>
                 </div>
                 <div className="mt-1 flex gap-4 text-xs text-muted-foreground">
                   {!!es.entered_at && (
-                    <span>Entered: {new Date(es.entered_at as string).toLocaleTimeString()}</span>
+                    <span>Entered: {new Date(es.entered_at).toLocaleTimeString()}</span>
                   )}
                   {!!es.exited_at && (
-                    <span>Returned: {new Date(es.exited_at as string).toLocaleTimeString()}</span>
+                    <span>Returned: {new Date(es.exited_at).toLocaleTimeString()}</span>
                   )}
                   {!!es.entered_at && !!es.exited_at && (
-                    <span>
-                      Duration: {computeDuration(es.entered_at as string, es.exited_at as string)}
-                    </span>
+                    <span>Duration: {computeDuration(es.entered_at, es.exited_at)}</span>
                   )}
                 </div>
               </div>
@@ -1112,7 +1060,11 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             </div>
           </div>
 
-          {generateError && <p className="text-sm text-destructive">{generateError}</p>}
+          {generateError && (
+            <p className="text-sm text-destructive" role="alert">
+              {generateError}
+            </p>
+          )}
 
           <DialogFooter>
             <Button
@@ -1163,7 +1115,11 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
             </div>
           </div>
 
-          {generateError && <p className="text-sm text-destructive">{generateError}</p>}
+          {generateError && (
+            <p className="text-sm text-destructive" role="alert">
+              {generateError}
+            </p>
+          )}
 
           <DialogFooter>
             <Button
@@ -1225,13 +1181,11 @@ function ItemStatusIcon({ status }: { status: string }) {
   }
 }
 
-function computeTimeSpent(transitions: Array<Record<string, unknown>>): string | null {
+function computeTimeSpent(transitions: Transition[]): string | null {
   let totalMs = 0;
   transitions.forEach((t) => {
-    const start = t.started_at as string;
-    const end = (t.ended_at as string) ?? null;
-    if (start && end) {
-      totalMs += new Date(end).getTime() - new Date(start).getTime();
+    if (t.started_at && t.ended_at) {
+      totalMs += new Date(t.ended_at).getTime() - new Date(t.started_at).getTime();
     }
   });
   if (totalMs === 0) return null;

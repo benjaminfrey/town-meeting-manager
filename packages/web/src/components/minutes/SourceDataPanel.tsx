@@ -26,7 +26,11 @@
  *   - `motion.yeas` / `nays` / `abstentions` — no such columns; the tally
  *     lives in the `vote_summary` JSONB that `voteRecord.recordForMotion`
  *     writes. `hasVoteData` was therefore always `false` and the three vote
- *     badges have never rendered either. Now read from `vote_summary`.
+ *     badges have never rendered either. Now read from `vote_summary`,
+ *     through `lib/meeting/voteTally.ts`'s `voteTallyOf` — written here in
+ *     Task 3, moved out unchanged in Task 4 when
+ *     `routes/meetings.$meetingId.review.tsx` needed the same narrowing of
+ *     the same column and a second copy would have been a second answer.
  *   - `vote_record.member_name` — the column is `board_member_id`. Each
  *     individual-vote badge rendered as ": yea". Same roster mapping.
  *   - `agenda_item_transition.transition_type` — no such column, so the
@@ -51,6 +55,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Clock } from "lucide-react";
 import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { voteTallyOf } from "@/lib/meeting/voteTally";
 import type { MinutesContentJson, MinutesContentSection } from "@town-meeting/shared/types";
 
 interface SourceDataPanelProps {
@@ -62,29 +67,6 @@ interface SourceDataPanelProps {
 }
 
 type Motion = RouterOutputs["motion"]["byMeeting"][number];
-
-/**
- * The three counts the badges render, off `motion.vote_summary`.
- *
- * `vote_summary` is JSONB, so the procedure declares it `unknown` and this
- * narrows rather than casts. `voteRecord.recordForMotion` writes seven keys
- * (`yeas`, `nays`, `abstentions`, `recusals`, `absent`, `result`, `passed`);
- * only the first three are read here, matching the three badges that were
- * meant to render. A row written before that procedure existed, or a null
- * column, answers `null` and the badges stay hidden exactly as they do today.
- */
-function voteTallyOf(stored: unknown): { yeas: number; nays: number; abstentions: number } | null {
-  if (typeof stored !== "object" || stored === null) return null;
-  const record = stored as Record<string, unknown>;
-  const yeas = record.yeas;
-  const nays = record.nays;
-  if (typeof yeas !== "number" && typeof nays !== "number") return null;
-  return {
-    yeas: typeof yeas === "number" ? yeas : 0,
-    nays: typeof nays === "number" ? nays : 0,
-    abstentions: typeof record.abstentions === "number" ? record.abstentions : 0,
-  };
-}
 
 function formatTime(timestamp: string | null): string {
   if (!timestamp) return "--";

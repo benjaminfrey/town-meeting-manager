@@ -142,7 +142,11 @@ const meetingDetail = {
   agenda_packet_generated_at: null,
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
-} satisfies RouterOutputs["meeting"]["detail"];
+  // Wave 6, Task 4 added this JSONB column for the review screen; the
+  // intersection is the same `unknown`-is-optional quirk the three
+  // `MinutesDetail` members above document.
+  adjournment: null,
+} satisfies RouterOutputs["meeting"]["detail"] & { adjournment: unknown };
 
 const boardDetail = {
   id: "board-1",
