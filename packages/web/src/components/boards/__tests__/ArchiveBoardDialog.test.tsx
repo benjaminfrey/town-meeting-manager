@@ -16,30 +16,32 @@
  *
  * This is the template for pinning the other three writers as their screens
  * migrate; see `docs/superpowers/plans/phase-e-conventions.md`, item 8.
+ *
+ * Wave 6, Task 5: the two-write Supabase chain mock is gone. The dialog calls
+ * `trpc.board.archive` — ONE transactional procedure — so the "did the member
+ * write happen" question the `updates` array used to answer client-side is now
+ * the API's (`board.test.ts`'s "rolls the board write back when the member
+ * write fails"), and what is left to pin here is this file's own three
+ * invalidations plus the refusal surface the dialog never had.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import { trpc, type RouterInputs, type RouterOutputs } from "@/lib/trpc";
 import { queryKeys } from "@/lib/queryKeys";
 
-const { updates } = vi.hoisted(() => ({ updates: [] as string[] }));
+const server = { refuses: false };
+const received: { archive?: RouterInputs["board"]["archive"] } = {};
 
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: (table: string) => {
-      const chain = {
-        update: () => chain,
-        eq: () => {
-          updates.push(table);
-          return Object.assign(Promise.resolve({ error: null }), chain);
-        },
-      };
-      return chain;
-    },
-  }),
-}));
+const stub = installTRPCFetchStub({
+  "board.archive": (input) => {
+    received.archive = input;
+    if (server.refuses) trpcTestError("FORBIDDEN");
+    return { id: input.boardId, archivedMembers: 3 };
+  },
+});
 
 import { ArchiveBoardDialog } from "../ArchiveBoardDialog";
 
@@ -83,12 +85,33 @@ async function archive() {
 
   await user.type(screen.getByPlaceholderText("Select Board"), "Select Board");
   await user.click(screen.getByRole("button", { name: /archive board/i }));
-  await waitFor(() => expect(updates).toContain("board_member"));
+  await waitFor(() => expect(stub.countFor("board.archive")).toBe(1));
 
   return { detailKey, listKey };
 }
 
-describe("ArchiveBoardDialog cache invalidation", () => {
+describe("ArchiveBoardDialog", () => {
+  beforeEach(() => {
+    server.refuses = false;
+    received.archive = undefined;
+  });
+
+  it("archives through the one transactional procedure, not two writes", async () => {
+    // The dialog used to make `board.update` then `board_member.update` as
+    // separate round trips; a failure between them left a board archived with
+    // its members still active. One call now, and the API owns the atomicity.
+    await archive();
+    expect(received.archive).toEqual({ boardId: "b1" });
+  });
+
+  it("says why an archive failed — it said nothing at all before", async () => {
+    server.refuses = true;
+    await archive();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /don't have permission to archive this board/i,
+    );
+  });
+
   it("invalidates the tRPC key the board detail screen reads under", async () => {
     const { detailKey } = await archive();
     await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true));

@@ -80,7 +80,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTRPCClientError } from "@trpc/client";
-import { queryKeys } from "@/lib/queryKeys";
 import { refusalMessage, trpc } from "@/lib/trpc";
 import { z } from "zod";
 import { AlertCircle, Info, Loader2 } from "lucide-react";
@@ -242,12 +241,18 @@ export function CreateMeetingDialog({
   const insertMutation = useMutation(
     trpc.meeting.insert.mutationOptions({
       onSuccess: () => {
-        // Legacy key: `EditBoardDialog`'s "does this board have meetings"
-        // check still reads a `queryKeys.meetings.byBoard(boardId)`-prefixed
-        // key raw — conventions item 7, "the legacy line stays because
-        // other, unmigrated screens still read that key."
-        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byBoard(boardId) });
         void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+        // Wave 6, Task 5. `EditBoardDialog`'s "does this board have meetings"
+        // check — the thing that disables the name field — moved off its raw
+        // `queryKeys.meetings.byBoard(boardId)`-prefixed count onto
+        // `trpc.board.stats`, whose `meetings` column this insert changes.
+        // `trpc.meeting.pathFilter()` above does NOT reach a `board.*` key, so
+        // this line is a real, new obligation, not a duplicate — conventions
+        // item 7's "the commit that moves a read to tRPC also updates every
+        // writer that was invalidating the key it abandoned, in that same
+        // commit." The legacy line it replaces is deleted rather than kept:
+        // that key now has no reader anywhere.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
       },
     }),
   );

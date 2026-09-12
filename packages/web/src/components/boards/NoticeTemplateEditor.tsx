@@ -5,13 +5,17 @@
  * add/remove/edit per block, and a save button that writes to
  * board.notice_template_blocks.
  *
- * TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
- * `supabase.from("board").update(...)` — no `requireBoardPermission` /
- * `requireBoardActor` stands between a caller and this board's notice
- * template blocks. Recorded rather than fixed in the single fix wave after
- * wave 5's review (finding L8): item 11's completeness sweep reads this file
- * as done because it carries no `TODO(phase-e-wave-*)` marker of its own,
- * which is the exact hole item 11 exists to close.
+ * ~~TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
+ * `supabase.from("board").update(...)`~~ — closed in wave 6, Task 5.
+ *
+ * The write is `trpc.board.updateNoticeTemplate` now, guarded by
+ * `requireActor(assertCanUpdateBoard)` before `.input()` — the same admin gate
+ * `board.copyNoticeTemplate`, the OTHER writer of this column, has carried
+ * since wave 1. See that new procedure's doc comment for why it is not
+ * `board.update`.
+ *
+ * Unlike `MinutesWorkflowEditor`'s sibling write, this one DID work: it sent
+ * only `notice_template_blocks`, no phantom `updated_at`.
  */
 
 import { useState, useRef, useCallback } from "react";
@@ -20,9 +24,8 @@ import { Plus, GripVertical, Trash2, ChevronDown, ChevronUp, Save } from "lucide
 import { useForm, Controller } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { refusalMessage, trpc } from "@/lib/trpc";
 import type {
   NoticeTemplateBlock,
   NoticeBlockType,
@@ -465,24 +468,19 @@ export function NoticeTemplateEditor({
   const availableTypes = ALL_BLOCK_TYPES.filter((t) => !usedSingletonTypes.has(t));
 
   // ─── Save ──────────────────────────────────────────────────────
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("board")
-        .update({ notice_template_blocks: blocks as unknown as Record<string, unknown>[] })
-        .eq("id", boardId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
-      // The legacy key above no longer reaches BoardDetailPage's tRPC-backed
-      // board.detail read (see ArchiveBoardDialog's matching comment) —
-      // without this, saving here and navigating back to the board within
-      // the 60s staleTime window would show the pre-save blocks again.
-      void queryClient.invalidateQueries(trpc.board.pathFilter());
-      setDirty(false);
-    },
-  });
+  const saveMutation = useMutation(
+    trpc.board.updateNoticeTemplate.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+        // The legacy key above has no reader left anywhere (see
+        // `ArchiveBoardDialog`'s matching comment); `trpc.board.pathFilter()`
+        // below is what stops saving here and navigating back to the board
+        // within the 60s staleTime window from showing the pre-save blocks.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        setDirty(false);
+      },
+    }),
+  );
 
   return (
     <div className="space-y-4">
@@ -524,7 +522,7 @@ export function NoticeTemplateEditor({
           <Button
             size="sm"
             disabled={!dirty || saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
+            onClick={() => saveMutation.mutate({ boardId, blocks })}
           >
             <Save className="mr-1 h-4 w-4" />
             {saveMutation.isPending ? "Saving..." : "Save Template"}
@@ -532,9 +530,16 @@ export function NoticeTemplateEditor({
         </div>
       </div>
 
+      {/* A refusal is reachable for the first time (there was no guard before
+          this migration), so this cannot stay a fixed string — conventions
+          item 5, and `refusalMessage` is the house helper. */}
       {saveMutation.isError && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
-          Failed to save template. Please try again.
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+        >
+          {refusalMessage(saveMutation.error, "change this board's notice template")}
         </div>
       )}
 

@@ -28,7 +28,6 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
-import { queryKeys } from "@/lib/queryKeys";
 
 import { CreateMeetingDialog } from "../CreateMeetingDialog";
 
@@ -126,12 +125,15 @@ async function waitForTemplates() {
 
 async function create(onOpenChange: (open: boolean) => void = () => {}) {
   const byBoardKey = trpc.meeting.byBoard.queryOptions({ boardId: "b1" }).queryKey;
-  const legacyKey = queryKeys.meetings.byBoard("b1");
+  // `board.stats` is what `EditBoardDialog`'s meeting-count check reads since
+  // wave 6, Task 5 — the key that replaced the legacy `meetings.byBoard` one
+  // this dialog used to invalidate.
+  const statsKey = trpc.board.stats.queryOptions({ boardId: "b1" }).queryKey;
   const agendaKey = trpc.agendaItem.countByMeeting.queryOptions({
     meetingId: "new-meeting",
   }).queryKey;
   queryClient.setQueryData(byBoardKey, []);
-  queryClient.setQueryData(legacyKey, []);
+  queryClient.setQueryData(statsKey, { active_members: 3, meetings: 0 });
   queryClient.setQueryData(agendaKey, 0);
   expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBeFalsy();
   expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBeFalsy();
@@ -144,7 +146,7 @@ async function create(onOpenChange: (open: boolean) => void = () => {}) {
   await submit(user);
   await waitFor(() => expect(stub.countFor("meeting.insert")).toBe(1));
 
-  return { byBoardKey, legacyKey, agendaKey };
+  return { byBoardKey, statsKey, agendaKey };
 }
 
 describe("CreateMeetingDialog", () => {
@@ -166,9 +168,12 @@ describe("CreateMeetingDialog", () => {
     await waitFor(() => expect(queryClient.getQueryState(byBoardKey)?.isInvalidated).toBe(true));
   });
 
-  it("invalidates the legacy meetings.byBoard key — EditBoardDialog's meeting-count check still reads it", async () => {
-    const { legacyKey } = await create();
-    await waitFor(() => expect(queryClient.getQueryState(legacyKey)?.isInvalidated).toBe(true));
+  it("invalidates trpc.board.pathFilter() — EditBoardDialog's meeting-count check reads board.stats", async () => {
+    // `trpc.meeting.pathFilter()` does not reach a `board.*` key, so this is
+    // a separate, real obligation. Deleting the `trpc.board.pathFilter()`
+    // line from `CreateMeetingDialog`'s `onSuccess` turns this red.
+    const { statsKey } = await create();
+    await waitFor(() => expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBe(true));
   });
 
   it("builds the agenda through trpc.agendaItem.instantiateFromTemplate, naming the board, the new meeting and the template", async () => {

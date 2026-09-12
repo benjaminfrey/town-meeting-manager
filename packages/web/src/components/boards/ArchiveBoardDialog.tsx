@@ -4,23 +4,29 @@
  * Requires typing the board name to confirm. Archives the board
  * and all its active members. Boards are never deleted (legal compliance).
  *
- * TODO(phase-e-wave-6): `archiveMutation` below still makes two raw,
- * untransacted Supabase writes (`board.update`, then `board_member.update`)
- * with no tRPC equivalent to migrate onto yet. A failure between them leaves
- * a board archived with its members still `active`. Recorded rather than
- * fixed in the single fix wave after wave 5's review (finding L8): item 11's
- * completeness sweep reads this file as done because it carries no
- * `TODO(phase-e-wave-*)` marker of its own, which is the exact hole item 11
- * exists to close.
+ * ~~TODO(phase-e-wave-6): `archiveMutation` below still makes two raw,
+ * untransacted Supabase writes~~ — closed in wave 6, Task 5.
+ *
+ * It is `trpc.board.archive` now: one procedure, one transaction, both writes
+ * or neither. The tRPC equivalent that "did not exist yet" was built for this
+ * — see `board.ts`'s own doc comment, and `board.test.ts`'s
+ * "rolls the board write back when the member write fails", which is the test
+ * this dialog's old shape could not have passed.
+ *
+ * **And the old shape never archived anything.** Its `board` update sent
+ * `archived_at` AND `updated_at`, and `board` has no `updated_at` column
+ * (confirmed against a live database and `0000_baseline.sql`) — so PostgREST
+ * rejected the first write, the mutation threw, and this dialog rendered
+ * NOTHING: no error state existed at all, so it simply stayed open with the
+ * button re-enabled. There is a `role="alert"` now (conventions item 5).
  */
 
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
-import { Loader2 } from "lucide-react";
+import { refusalMessage, trpc, type RouterOutputs } from "@/lib/trpc";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -51,7 +57,6 @@ interface ArchiveBoardDialogProps {
 }
 
 export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: ArchiveBoardDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState("");
@@ -60,62 +65,55 @@ export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: Archiv
   const boardName = board.name;
   const isConfirmed = confirmation === boardName;
 
-  const archiveMutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-
-      // Archive the board
-      const { error: boardError } = await supabase
-        .from("board")
-        .update({
-          archived_at: now,
-          updated_at: now,
-        })
-        .eq("id", boardId);
-      if (boardError) throw boardError;
-
-      // Archive all active board members
-      const { error: membersError } = await supabase
-        .from("board_member")
-        .update({ status: "archived" })
-        .eq("board_id", boardId)
-        .eq("status", "active");
-      if (membersError) throw membersError;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
-      // `queryKeys.boards.detail` no longer reaches BoardDetailPage's read —
-      // that screen's board.detail/stats query keys are tRPC's own now.
-      // Both invalidations stay: unmigrated screens can still be keyed off
-      // the legacy factory, and the writer should not need to know which of
-      // `board`'s procedures a given screen happens to call.
-      void queryClient.invalidateQueries(trpc.board.pathFilter());
-      // Archives every active `board_member` row on this board —
-      // `MemberRoster.tsx`'s roster read moved onto `boardMember.roster`
-      // (Phase E, wave 2, Task 3), a fourth writer of the legacy
-      // `queryKeys.members.byBoard` key that missed this call in that
-      // task's own commit; caught in review.
-      void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
-      onOpenChange(false);
-      setConfirmation("");
-      void navigate("/boards");
-    },
-  });
+  const archiveMutation = useMutation(
+    trpc.board.archive.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.members.byBoard(boardId) });
+        // The legacy `queryKeys.boards.*` invalidations above have had NO
+        // reader since wave 6, Task 5 removed the last of them
+        // (`CommandPalette.tsx`, `home.tsx`, `meetings.tsx` for `byTown`;
+        // `boards.$boardId.templates.$templateId.edit.tsx` for `detail`).
+        // They stay for one more commit, deliberately: deleting every
+        // `queryKeys.boards.*` line empties `cache-key-parity.test.ts`'s
+        // `boards` MIGRATED entry, which then reports zero violations for the
+        // wrong reason and has to be removed in the same diff. That batch is
+        // `docs/backlog.md` entry 7's, which this task extends rather than
+        // executes.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        // Archives every active `board_member` row on this board —
+        // `MemberRoster.tsx`'s roster read moved onto `boardMember.roster`
+        // (Phase E, wave 2, Task 3), a fourth writer of the legacy
+        // `queryKeys.members.byBoard` key that missed this call in that
+        // task's own commit; caught in review.
+        void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        onOpenChange(false);
+        setConfirmation("");
+        void navigate("/boards");
+      },
+    }),
+  );
 
   const isSaving = archiveMutation.isPending;
 
   const handleArchive = useCallback(async () => {
     if (!isConfirmed) return;
-    await archiveMutation.mutateAsync();
-  }, [isConfirmed, archiveMutation]);
+    await archiveMutation.mutateAsync({ boardId });
+  }, [isConfirmed, archiveMutation, boardId]);
 
   return (
     <AlertDialog
       open={open}
       onOpenChange={(val) => {
         if (!val) setConfirmation("");
+        // Clear a previous refusal whenever the dialog OPENS: conventions
+        // item 2's shared-dialog-error paragraph asks for exactly this, and
+        // it applies to a single dialog too — reopening after a failed
+        // attempt must not show the stale message. `useMutation`'s `error`
+        // survives a close/open cycle otherwise, because the component is
+        // never unmounted.
+        if (val) archiveMutation.reset();
         onOpenChange(val);
       }}
     >
@@ -146,6 +144,21 @@ export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: Archiv
             />
           </div>
         </div>
+
+        {/* No error surface existed here at all before wave 6, Task 5 — a
+            failed archive closed nothing and said nothing. `board.archive` is
+            also the first version of this write that can be REFUSED, so a
+            silent failure would now be a new defect, not an inherited one. */}
+        {archiveMutation.isError && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>{refusalMessage(archiveMutation.error, "archive this board")}</p>
+          </div>
+        )}
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isSaving}>Cancel</AlertDialogCancel>
