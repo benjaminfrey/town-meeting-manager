@@ -133,6 +133,10 @@ describe("router wiring", () => {
         // replacement will call, and a rename in the meantime should be caught
         // here rather than in that task's first client change.
         "realtime.onMeetingChange",
+        // Phase E wave 6, Task 2 — `AppShell.tsx`'s sidebar indicator. Not
+        // wired client-side by this task; pinned here for the reason the
+        // wave-4/wave-5 unwired entries above are.
+        "meeting.liveByTown",
         "whoami",
       ]),
     );

@@ -396,6 +396,75 @@ export const meetingRouter = router({
   }),
 
   /**
+   * Phase E, wave 6, Task 2 — `AppShell.tsx`'s sidebar live-meeting indicator:
+   * the id of the town's most recently started `open` meeting, or `null`.
+   *
+   * ─── Why `byTown` above is not a drop-in — verified, not assumed ─────────
+   *
+   * The router's own `TODO(phase-e-wave-6)` on `useLiveMeetingId` says
+   * `byTown` "selects no `started_at`, which is this query's ordering
+   * column." True: `byTown`'s SELECT list four procedures up has no
+   * `started_at`, and it also lists every non-cancelled meeting rather than
+   * the one most recently opened — two reasons it cannot be reused, not one.
+   * The marker was accurate; three of this wave's eight markers named
+   * procedures that already existed, and this was not a fourth.
+   *
+   * ─── The raw query, and the one clause NOT carried over ──────────────────
+   *
+   * Replaces `useLiveMeetingId`'s `supabase.from("meeting").select("id")
+   * .eq("town_id", townId).in("status", ["open", "in_progress"])
+   * .order("started_at", {ascending: false}).limit(1)`. `'in_progress'` is
+   * DROPPED from the status filter rather than reproduced, and this is not a
+   * narrowing of real behaviour: `meeting_status`'s enum (`0000_baseline.sql`)
+   * has exactly `draft, noticed, open, adjourned, minutes_draft, approved,
+   * cancelled` — no `in_progress` — so no `meeting` row has ever been able to
+   * hold that value. Probed directly rather than inferred from the schema
+   * alone: `SELECT 'in_progress'::meeting_status` itself raises "invalid
+   * input value for enum meeting_status." Reproducing the literal filter as a
+   * typed comparison here (`status = ANY(ARRAY['open','in_progress']::
+   * meeting_status[])`) would make EVERY call to this procedure throw that
+   * same error — worse than the original, which silently degraded instead:
+   * the browser's `.in(...)` call carries no `.throwOnError()`, so
+   * PostgREST's identical rejection of the same invalid literal left `data`
+   * `undefined` and the hook falling to `null` on every 30-second poll,
+   * meaning the sidebar's live-meeting indicator has never actually lit up in
+   * production. `status = 'open'` matches every row the original filter
+   * could ever have matched (since `in_progress` matched none) and no row it
+   * could not — the honest form of the same intent, not a widened one.
+   *
+   * `NULLS LAST` on the DESC order for the reason `byBoard`'s own comment
+   * gives for its own DESC clause: Postgres's default for DESC is NULLS
+   * FIRST, which would let a stray `open` meeting with no `started_at` (a
+   * state nothing in this codebase should produce, but not one this router
+   * can assume against) shadow a real live one instead of sorting behind it.
+   *
+   * ─── No guard, no existence check ─────────────────────────────────────────
+   *
+   * `meeting_tenant_isolation` is tenancy-only (this file's header), and the
+   * raw Supabase read had no application-level check either — the same
+   * "protectedProcedure and no guard" shape `byTown` states just above.
+   * Unlike `byBoard`/`detail`, this takes no id from the caller at all: the
+   * only scope is the caller's own town, which RLS already enforces, so there
+   * is no foreign id for a correlated scan to hide behind an empty result —
+   * conventions item 3's hazard does not arise when there is nothing for the
+   * caller to name.
+   */
+  liveByTown: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) => {
+      const rows = toRows<{ id: string }>(
+        await tx.execute(sql`
+          SELECT id FROM meeting
+          WHERE status = 'open'::meeting_status
+          ORDER BY started_at DESC NULLS LAST
+          LIMIT 1
+        `),
+        (message) => new Error(`meeting.liveByTown: ${message}`),
+      );
+      return { id: rows[0]?.id ?? null };
+    });
+  }),
+
+  /**
    * The board's Meetings tab (`routes/boards.$boardId.meetings.tsx`) —
    * every meeting on one board, most-recent-first, INCLUDING cancelled ones
    * (that screen renders them dimmed, not hidden — unlike the kanban). Same
