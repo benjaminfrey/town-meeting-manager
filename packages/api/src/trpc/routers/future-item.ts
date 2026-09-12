@@ -27,7 +27,7 @@
  *
  * ─── `future_item_queue`'s board is its OWN column, not a join ───────────
  *
- * `board_derivation.ts`'s header already states this precisely, for the
+ * `board-derivation.ts`'s header already states this precisely, for the
  * benefit of whoever reaches for it next: `future_item_queue` carries
  * `board_id uuid NOT NULL` directly (`0000_baseline.sql:1248`), while its
  * `source_meeting_id` is NULLABLE (`:1250`) — verified again here rather than

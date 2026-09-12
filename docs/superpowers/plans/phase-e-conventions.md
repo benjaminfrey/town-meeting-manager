@@ -1218,6 +1218,27 @@ No regex needed widening: five new router files were picked up with no change to
 is empty — that `publishes` is really being read off the source for its two named canaries, since a
 `publishes` stuck at `true` would make an empty-ledger check green for the wrong reason.
 
+**Correction (wave 6, Task 2, fix round 1) — the per-file guard does not reach every router file,
+only every router file that writes a live-meeting table.** A wave-6 brief asserted the new
+`future-item.ts` "must be reachable by the publish inventory's per-file canary, which fails by file
+name if a router becomes unscannable," and directed re-indenting `byMeeting:` from two spaces to
+four to demonstrate it, exactly as done to `guest-speaker.ts` above. It stayed green — all 5 tests
+in `router-wiring.test.ts`. The scan itself explains why: `future_item_queue` is not one of the
+eight `LIVE_MEETING_TOPICS`, and the per-file loop skips any file with no live-meeting write before
+it ever asks whether the file is scannable —
+
+```
+if (liveTablesWrittenIn(source).length === 0) continue; // this file touches no live table
+```
+
+(`trpc/__tests__/router-wiring.test.ts:552`). So the guard's own name — "every router file … is
+represented in the scan" — is true only of the subset that writes one of the eight tables; a
+read-only router, or one scoped to a different table entirely, can go unscannable with nothing
+failing. Whether that scope is the right one is a separate question (a router with nothing to
+publish has nothing the canary needs to protect), but the boundary itself is real and worth stating
+plainly next to the canary's own description, since "it protects every router" is exactly the
+over-reading its name invites.
+
 **4. The inventory is a boolean per mutation, so a COMPOSITE needs a topic-set test of its own.**
 The check asks "does this mutation call `publishRealtimeEvent` at all". Three of this wave's
 mutations write four live-meeting tables; announcing one of the four passes it and leaves three
