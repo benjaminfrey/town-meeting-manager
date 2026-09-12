@@ -990,7 +990,7 @@ re-recorded rather than carried forward silently a second wave.**
    below is now **three** of seven with no override-specific pin (`reorder`, `delete`,
    `instantiateFromTemplate`), not five.
    ```
-   $ grep -cE '^\s+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
+   $ grep -cE '^[[:space:]]+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
    7   # at fb3a5cd
    5   # at 18bad5f
    ```
@@ -2187,9 +2187,38 @@ grep that isolates real markers — anchored so the comment's own first word mus
 sentence mentioning it — answers 8:
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 8
 ```
+
+**Written with `[[:space:]]`, not `\s` — every quoted grep in this document that anchors on
+leading whitespace now is, and this is why.** `\s` is a GNU/PCRE extension; POSIX ERE (what `git
+grep -E` implements) does not recognise it as a shorthand class, so it matches the literal
+characters `s` or backslash-then-`s` depending on the tool, which in practice means it matches
+nothing useful for this pattern. Measured on this exact command, at this exact commit:
+
+```
+$ grep -rnE   "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l    # GNU grep, \s
+8
+$ git grep -nE "^\s*(//|\*) TODO\(phase-e-wave" -- packages/web/src | wc -l # git grep, \s
+1
+$ git grep -nE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" -- packages/web/src | wc -l
+8
+```
+
+`git grep -E` silently undercounts by 8× — a reader who runs the `\s` form through `git grep`
+(the more common way to reproduce a count in this repo) would conclude the phase is nearly done
+when 8 markers remain, not 1. This single character has now produced **nine** wrong counts in this
+project's history (the eight the `TODO(phase-e-wave` grep itself produced before this fix, plus the
+board-scoped-guard census below, which carried the identical `\s` and was never itself run through
+`git grep` to notice). `[[:space:]]` is honoured by both POSIX ERE and GNU/PCRE, answers
+identically under `grep -E` and `git grep -E`, and is what every quoted grep in this document uses
+from this point on — including the two `requireBoardPermission`/`requireBoardActor` census
+commands later in this item, which carried the same `\s` and are fixed the same way. wave 5, Task 7
+had already caught this once, locally, for one grep (the `AppShell.tsx` re-run below already notes
+it) but the fix was never propagated to the canonical pattern this item opens with, or to the other
+`\s`-anchored greps in the document — exactly the kind of drift item 14 exists to catch, found here
+by re-deriving the count rather than trusting the prose.
 
 **Stale as of wave 2's own final fix round — corrected here, and timestamped the way item 9
 timestamps its greps (item 9: "current as of `2d78964`"); this enumeration read as current and was
@@ -2201,7 +2230,7 @@ written), `StaffAccountFlow.tsx`'s `board.listByTown` marker closed the same way
 so). Re-run at HEAD, this fix round's own commit (`bb60e295b8ebc81e26a03206dcac6aaa6548c8ed`):
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 6
 ```
 
@@ -2221,7 +2250,7 @@ correct as of `bb60e295` but the review's own new markers moved it before this p
 updated — the identical drift item 14 exists to catch, one wave later.**
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 22
 ```
 
@@ -2244,7 +2273,7 @@ paragraph stopped at Task 1's fix round and was never updated across Task 2, eve
 own progress note already recorded the numbers.**
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 11   # at c34b987 — Task 2 closed CancelMeetingDialog.tsx's and meetings.tsx's raw-write
      # authorization holes (both markers named `updateStatus`/the kanban gap above)
 20   # at 1b1d635 — Task 2's fix round re-tagged four writers newly implicated by adding
@@ -2278,7 +2307,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # round re-tagged.
 13   # at the end of Phase E wave 4, Task 0 — down from 18, and now with
      # ZERO `phase-e-wave-2` markers left in the tree
-     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-2\)" packages/web/src`
+     # (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-2\)" packages/web/src`
      # answers empty). Task 0 closed all four of wave 2's leftover markers —
      # `boards.$boardId.tsx` (`town.detail`), `people.tsx`
      # (`boardMember.listByTown`), `AddPersonDialog.tsx` (`invitation.insert`,
@@ -2311,7 +2340,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # item exists to close, found by a task brief rather than by the grep.
  6   # at cd10b54, the close of Phase E wave 4, Task 4 — DOWN six from
      # Task 3's 12, and now with ZERO `phase-e-wave-4` markers left in the
-     # tree (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-4\)" packages/web/src`
+     # tree (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-4\)" packages/web/src`
      # answers empty; the 6 that remain are all wave-5/6). The six removed
      # are exactly the six on this task's own two files:
      # `CreateMeetingDialog.tsx` carried FOUR (a header line plus three
@@ -2346,7 +2375,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # meetings.$meetingId.minutes.tsx (all wave-6).
  4   # at 01ff3ab, the close of Phase E wave 5, Task 5 — DOWN two, and now
      # with ZERO `phase-e-wave-5` markers left in the tree
-     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
+     # (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
      # answers empty; all 4 that remain are wave-6). The two removed are
      # exactly the two this task's own files carried,
      # `MeetingStartFlow.tsx` and `meetings.$meetingId.live.tsx`, and both
@@ -2635,7 +2664,7 @@ mistake this step exists to catch), and re-ran the grep or read the code each as
 anchored to `fb3a5cd` (this task's base) and, where a fix landed in this task, to `1ef127a`. Checked
 and held, unchanged:
 
-- Item 11's marker countdown — `grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l`
+- Item 11's marker countdown — `grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l`
   answers **6** at `fb3a5cd`, the same 6 lines recorded at the end of wave 4 (`cd10b54`) and unchanged
   since — see item 11's own re-run below for the full list.
 - Item 2's board-scoped guard census — `requireBoardPermission` **9**, `requireBoardActor` **3**,
@@ -2778,8 +2807,8 @@ findings below name files this task never opened. What moved:
 
 Checked and still true, unchanged: item 2's board-scoped census moved for the
 ordinary reason and is quoted rather than counted
-(`grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l`
-answers **20**, `grep -rnE "^\s+\.use\(requireBoardActor\(" …` answers **9**,
+(`grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l`
+answers **20**, `grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" …` answers **9**,
 `grep -cE ": BoardScope" rules.ts` answers **29** — the first two grew in wave
 5 Task 3 and this task added no rule and no guard, only callers); item 9's
 `useMockAuth`/`MockAuthProvider` claims (this task rewrote eleven test files
@@ -2929,9 +2958,9 @@ through a `board_member.id` map, `formatAdjournmentText` falls back to
   **re-run at `5d11393` (wave 4, Task 2's close-out); quote the grep, not the number:**
 
   ```
-  $ grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
+  $ grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
   9    # agendaItem's seven writes (Task 1), meeting.insert, meeting.publishAgenda (Task 2)
-  $ grep -rnE "^\s+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
+  $ grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
   3    # meeting.cancel, meeting.updateStatus, exhibit.link (Task 2)
   ```
 
