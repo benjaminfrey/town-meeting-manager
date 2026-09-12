@@ -2419,6 +2419,103 @@ $ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # task's Part 1 temporarily edited two tracked files and restored them.
 ```
 
+**Wave 6, Task 0 — the marker grep is not the measure that matters, and re-deriving the "23 files"
+headline by hand found the sweep is wrong in three different directions at once.** The task's own
+brief quoted item 11's SECOND grep (the "honest denominator," `lib/supabase\|useSupabase`) at **23**
+remaining files. Re-run at HEAD (`e5250ad`):
+
+```
+$ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+23
+```
+
+Confirmed. But 23 answers "how many files mention the string," which is not "how many files still
+depend on the client," and not "how many gaps item 11's own token sweep is silently missing" either
+— three different questions this one number gets asked to answer.
+
+1. **One of the 23 is comment-only prose in a file the anchored TOKEN grep never claims to cover:**
+   `src/test/render.ts` matches only because its own doc comment quotes
+   `vi.mock("@/lib/supabase")` as an example for other files to copy (line 142) — it imports nothing
+   from either module itself.
+2. **Six more are comment-only prose in files that HAVE been migrated**, each carrying a header that
+   narrates the fact rather than a live import: `MeetingStartFlow.tsx` ("this file's writes are all
+   still raw Supabase … this" — struck through, in its own header), `CreateMeetingDialog.tsx`
+   ("`lib/supabase.ts`'s own header"), `useQuorumCheck.ts` ("migrated off `@/lib/supabase` onto
+   tRPC"), `lib/trpc.ts` ("`lib/supabase.ts` is being removed"),
+   `routes/meetings.$meetingId.agenda.tsx` ("`@/lib/supabase` is gone from it"), and
+   `routes/meetings.$meetingId.live.tsx` ("`useSupabase`, and the adjournment write's total
+   absence…"). Verified individually, not assumed from the grep alone: each file's only match is a
+   prose sentence, confirmed by reading it. So 22 of the 23 have a live dependency; 16 do, once the
+   six migrated headers are also excluded.
+3. **Four of the remaining sixteen carry no `TODO(phase-e-wave` token at all, despite live, unwrapped
+   Supabase code — the exact hole this item exists to close, still open at HEAD:**
+   `CommandPalette.tsx` and `MeetingSubnavHeader.tsx` (`import { supabase } from "@/lib/supabase"`,
+   live reads, no marker, no header comment mentioning Phase E at all), `EditBoardDialog.tsx` (a raw
+   `count` query against `meeting` at its own line 82, sitting in a file whose header otherwise
+   narrates a `board.update` migration as if the file were fully converted), and
+   `boards.$boardId.templates.$templateId.edit.tsx` (a raw `board` name lookup at its own line 73,
+   in the exact file this item's own log above records as "**closed** in Phase E wave 4, Task 0" —
+   that entry closed the template read/write pair and never re-checked the file for anything else).
+   Anchored `grep -n "TODO(phase-e-wave" <file>` answers empty for all four, confirmed directly, not
+   inferred from the countdown.
+
+   **Re-deriving this by hand past the brief's own four found three more of the identical shape it
+   did not name**, because the brief's own diagnosis is limited to the files it happened to sample:
+   `AddPersonDialog.tsx` and `EditPersonDialog.tsx` each carry a live raw `person` table read (an
+   email-uniqueness check, `.eq("email", email).limit(1)`) behind a `useSupabase()` call with no
+   marker, sitting in files whose own header comments narrate their WRITES as migrated
+   (`person.insert`/`person.insertStaffAccount`/`invitation.insert` for the first,
+   `person.update` for the second) and say nothing about the read that remains; and
+   `SourceDataPanel.tsx` is unwrapped raw Supabase for every one of its reads, with no header comment
+   at all — this item's own log mentions the file only once, in an unrelated context (which legacy
+   `queryKeys.*` invalidation lines stay live, item 7), never as an unmigrated screen in its own
+   right. **The corrected count is seven files, not four**, all confirmed by reading the file
+   directly rather than trusted from either number: `CommandPalette.tsx`, `MeetingSubnavHeader.tsx`,
+   `EditBoardDialog.tsx`, `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+   `EditPersonDialog.tsx`, `SourceDataPanel.tsx`. An eighth candidate,
+   `routes/meetings.$meetingId.review.tsx`, carries the same no-token, all-raw shape but is not
+   counted with the other seven, because it is not silent the way they are — this document names it
+   as a still-raw, wave-6-owned screen in at least four other places (item 7's "the legacy line
+   stays," item 8's `pathfilter-pin-coverage` discussion, and two of Task 3's own open-items lists) —
+   so a reader of this DOCUMENT, as opposed to a reader of only its token countdown, already knows.
+   The other seven have no such standing mention anywhere in this file; the token sweep is the only
+   place a reader would look, and it says nothing.
+
+**Why a mention grep and an import grep disagree, and why that gap is exactly where the four (now
+seven) unmarked files hide.** `grep -rl "lib/supabase\|useSupabase"` matches the STRING anywhere in
+a file — a doc comment quoting the module name, a header narrating a past migration, a real `import`
+— and cannot distinguish them; that is what items 1 and 14 call the comment-versus-code hazard for
+every other grep in this document, and it applies here with the same force. **The measure that
+answers "does this file still depend on the client" is an import grep**, because an import is the
+one thing the phase's own definition of done (`lib/supabase.ts` deleted turns any remaining
+dependency into a build error) actually cares about:
+
+```
+$ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' -- packages/web/src | wc -l
+17
+```
+
+17, not 23 — 16 real consumers plus `lib/supabase.ts` itself (which necessarily imports
+`@supabase/supabase-js`; it is the module the other 16 import FROM, not a 17th dependent). Of those
+16, this item's anchored token grep already knows about 7 (the files carrying a live
+`TODO(phase-e-wave` marker: `ArchiveBoardDialog.tsx`, `MinutesWorkflowEditor.tsx`,
+`NoticeTemplateEditor.tsx`, `AppShell.tsx`, `home.tsx`, `meetings.$meetingId.minutes.tsx`,
+`meetings.tsx`) and one more this document names in prose elsewhere without a token
+(`meetings.$meetingId.review.tsx`). **The remaining eight account for the rest: the seven real,
+silent gaps this task found, plus `useSupabase.ts` itself**, which is infrastructure rather than a
+screen and needs no marker of its own, the same as `lib/supabase.ts`. An import grep cannot tell you
+WHICH lines are unmigrated inside a partially-converted file (that is what the token exists for,
+scoped per-gap rather than per-file); a mention grep cannot tell you whether a file has any live
+dependency at all. Between them, an import grep is the correct DENOMINATOR (how many files still
+truly depend on the client) and the token grep is the correct NUMERATOR only for the files that
+bothered to mark themselves — which is exactly why a file with real, unmarked code invisibly drops
+out of the numerator while staying in a correct denominator, and why checking the two against each
+other is what surfaces it. None of the seven newly-named files had a token to begin with, so none of
+item 11's own countdown numbers above are wrong on their own terms — the countdown was always
+counting real markers correctly; it was never capable of noticing a file with no marker to count,
+which is the same class of blind spot item 14 names for prose claims and this item now names for
+itself.
+
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
 what closed since — quote the grep, not the number, still the rule four tasks later.
 
