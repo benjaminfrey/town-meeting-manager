@@ -4054,6 +4054,28 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   where a template id reaches a `z.uuid()` procedure — wave 6 should check the
   template pickers before assuming it does not.
 
+- **`SourceDataPanel.tsx` is not on any wave-6 task's file list, and it is fully
+  raw Supabase — found at wave 6, Task 0 while re-deriving item 11's corrected
+  measure.** The wave 6 plan's Task 5 ("the ten strays") names twelve files
+  (not ten — a second, smaller drift the same task's own title has) —
+  `home.tsx`, `meetings.tsx`, `AppShell.tsx`, `CommandPalette.tsx`,
+  `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`, `ArchiveBoardDialog.tsx`,
+  `MinutesWorkflowEditor.tsx`, `NoticeTemplateEditor.tsx`,
+  `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+  `EditPersonDialog.tsx` — which covers six of item 11's seven newly-named
+  unmarked files. The seventh, `SourceDataPanel.tsx`, appears on no task's file
+  list in the wave-6 plan at all: not Task 5, and not Task 3/4 (the minutes and
+  review screens), even though `SourceDataPanel.tsx` is a minutes-review
+  component and every one of its reads (`agenda_item`, `motion`, and others) is
+  still unwrapped `useSupabase()`. Task 6's deletion step will eventually catch
+  this as a build error if it is missed (`lib/supabase.ts`/`hooks/useSupabase.ts`
+  deleted, the file fails to compile), which is the whole point of that task —
+  but that is a late, expensive way to discover a missing file on a list, and
+  Task 6 explicitly says to run it "only when Tasks 1–5 are complete," which
+  assumes the file list for those tasks is complete. It is not. Whichever task
+  picks up the minutes/review screens or the strays should add this file
+  rather than let Task 6's build find it first.
+
 ---
 
 ## What wave 6 inherits from wave 5
