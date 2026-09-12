@@ -297,6 +297,23 @@ describe("router wiring", () => {
  * Both exist because a scan that silently matches nothing is the exact shape
  * `docs/superpowers/plans/phase-e-conventions.md` item 13 catalogues.
  *
+ * **It does not strip comments, so a COMMENTED-OUT `publishRealtimeEvent(`
+ * call passes it.** `chunk.includes("publishRealtimeEvent(")` is a raw
+ * substring test over the procedure's source text; a call left behind inside
+ * `/* ... *\/` or after `//` — say, disabled while debugging and never
+ * restored — reads as "publishes" exactly as a live call would. Found in the
+ * single fix wave after wave 5's review, recorded rather than fixed because
+ * no such comment exists in this file today and stripping comments correctly
+ * (nested block comments, strings containing `//`) is more machinery than
+ * this scan's own "a floor, not a proof" scope buys. Defence in depth holds
+ * regardless: `routers/__tests__/meeting.test.ts`'s per-mutation
+ * `captureRealtimeEvents` assertions check the actual topic SET a call
+ * emits at runtime, which a comment cannot satisfy. This is the same
+ * comment-vs-code false positive `docs/superpowers/plans/phase-e-conventions.md`
+ * item 11 documents for its own `TODO(phase-e-wave-` markers-versus-mentions
+ * grep — the inventory here is not immune to the class just because it is a
+ * different grep.
+ *
  * ─── The guard above is per FILE, not per repository — fix round 2 ────────
  *
  * `scanned.length > 0` and the two named procedures protect exactly the two

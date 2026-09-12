@@ -35,7 +35,7 @@ export type AppRouter = typeof appRouter;
 ```
 
 **Never `SELECT *`.** List the columns the screen reads, and say in the doc comment where you
-checked — **by symbol or tab, never by line number.** `board.detail` names its 20 columns and, as
+checked — **by symbol or tab, never by line number.** `board.detail` names its 21 columns and, as
 written today, cites the tab and the mapping it was checked against:
 
 ```ts
@@ -593,7 +593,9 @@ asked about is the board the write is really about. It cannot guarantee that the
 
 **Fix round 1 caught the identical hole sitting one function away, undocumented.** `assertCanInsertExhibit`
 (rule 15, the write above) is not the only place `isBoardMember` appears board-blind: `canSelectExhibit`'s
-`board_only` case (rule 14, `rules.ts:431`) is `isAdmin(actor) || resolvePermission(actor, "A3", row.boardId)
+`board_only` case (rule 14, the `case "board_only":` branch — **not cited by line number, per this
+item's own rule; it drifted from `rules.ts:431` to `:544` to `:546` across this document's own
+lifetime, which is the point**) is `isAdmin(actor) || resolvePermission(actor, "A3", row.boardId)
 || isBoardMember(actor)` — the same town-level fact in the same inert position. `exhibit.byMeeting` is the
 first tRPC consumer of that branch, so it inherits the property unchanged: any board member of the town
 reads any board's `board_only` exhibit titles, not just their own board's. Not a `requireBoardActor`
@@ -932,7 +934,11 @@ plan alone:
   bookkeeping tables took **M1** (`start_run_meeting`), the code of the action that causes them,
   rather than a new code of their own — the reasoning is stated next to each rule in `rules.ts`
   (21d, 21e) and summarised in "Wave 5, Task 2" below. A fifth gap the plan also did not name:
-  `vote_record` had INSERT and UPDATE rules and no DELETE, while `VotePanel.tsx:207` deletes.
+  `vote_record` had INSERT and UPDATE rules and no DELETE, while the pre-tRPC `VotePanel.tsx`'s raw
+  `.delete().eq("motion_id", motionId)` re-vote did. **Correction, single fix wave after wave 5's
+  review:** `VotePanel.tsx:207` is a stale citation — the file now calls `voteRecord.recordForMotion`
+  (one transaction) and performs no raw delete at all; see the M3 paragraph below, corrected the
+  same way.
 
 **`future_item_queue`'s own board column, re-verified at wave 5 Task 0 rather than taken on the
 plan's word.** The bullet above states it from wave 5's own plan; Task 0 checked it directly against
@@ -1083,15 +1089,21 @@ refuses everyone, in a system where unset means false.
 **`vote_record` DELETE is M3, and deliberately NOT rule 5's self-vote branch.** It is the only one of
 the six above where a plausible wrong answer already existed in the file: rule 5 (INSERT) allows a
 board member to record their OWN vote (M8), rule 6 (UPDATE) does not. DELETE resembles UPDATE.
-`VotePanel.tsx:207`'s re-vote is `.delete().eq("motion_id", motionId)` — every member's vote on that
-motion, not one seat's — so a self-vote branch there would be a licence to delete other people's
-votes, since the statement is not keyed by seat at all.
+`VotePanel.tsx`'s pre-tRPC re-vote was `.delete().eq("motion_id", motionId)` — every member's vote on
+that motion, not one seat's — so a self-vote branch there would have been a licence to delete other
+people's votes, since the statement was not keyed by seat at all. **Correction, single fix wave
+after wave 5's review:** `VotePanel.tsx:207` is now `});`, unrelated syntax, not a citation for this
+claim — the re-vote is `voteRecord.recordForMotion`, and `vote-record.ts`'s own header states it
+still "clear[s] every vote on the motion, write[s] the roll" server-side in one transaction, so the
+reasoning above holds even though the file-and-line no longer does.
 
 **The A2-versus-M1 verdict: A2 OR M1, for the live-run columns only, and it is the fourth guard
 shape.** `routers/agenda-item.ts`'s header predicted "a second code, hence `requireBoardActor`" and
 that is exactly what it is. `agendaItem.setOperatorNotes` and `agendaItem.markComplete` are now
-`.use(requireBoardActor(assertCanUpdateAgendaItemProgress))`; the other seven writes in that file
-keep `requireBoardPermission("A2", …)`. The line between them is CONTENT versus LIVE-RUN state —
+`.use(requireBoardActor(assertCanUpdateAgendaItemProgress))`; the other five writes in that file
+(seven total, minus these two) keep `requireBoardPermission("A2", …)` — `git grep -cE
+'^[[:space:]]*requireBoardPermission\("A2"' -- packages/api/src/trpc/routers/agenda-item.ts`
+answers 5. The line between them is CONTENT versus LIVE-RUN state —
 `status` and `operator_notes` are what the meeting did to the agenda, not what the agenda says.
 **It is a WIDENING, so nothing that worked before stops working:** dropping A2 for M1 alone would
 refuse a hand-built matrix holding A2 without M1, and keeping both costs nothing because every
@@ -3469,10 +3481,12 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      answers **9 lines, not empty** (corrected in the wave 4 fix round, after review reproduced the
      command verbatim) — every hit is a comment or test assertion documenting the column's absence,
      none a source line that reads or writes it: this doc comment's own two lines quoting the
-     command (`exhibit.ts:172,180`), `agenda-item.ts:316`'s twin doc comment, `agenda-item.test.ts`'s
+     command (`exhibit.ts:172,180`), `agenda-item.ts:354`'s twin doc comment (re-derived here; it had
+     drifted to `:316`), `agenda-item.test.ts`'s
      two comments plus its two `not.toHaveProperty("exhibit_count")` assertions
      (`agenda-item.test.ts:285,290,319,320`), and `meetings.$meetingId.agenda.tsx:55`'s comment with
-     its test's echo (`meetings.$meetingId.agenda.test.tsx:326`). The substantive claim — no code
+     its test's echo (`meetings.$meetingId.agenda.test.tsx:330`, re-derived here; it had drifted to
+     `:326`). The substantive claim — no code
      path produces or consumes the column — holds; only the quoted grep result was wrong, the exact
      comment-vs-code false positive this document warns about elsewhere. **The general lesson for a
      wave that finds a filtered read and an unfiltered count over the same rows: the count is part of
@@ -3891,7 +3905,16 @@ one list rather than reconstructing it from seven task reports.
    whenever the clerk did; and `live.tsx`'s minutes re-render posts the LIVE
    meeting's id rather than the earlier meeting whose minutes were approved, so
    the request 404s into a swallowed `.catch(() => {})` and **the DRAFT
-   watermark is never removed**. Neither is pinned by any test today.
+   watermark is never removed**. **Correction, single fix wave after wave 5's
+   review:** the MISATTRIBUTION is not pinned by any test today, but its write
+   SHAPE is — `meeting.test.ts:1997` asserts `adjourned_by: operator.personId`
+   inside `expect(meeting?.adjournment).toMatchObject({...})`. That is a
+   deliberate tripwire, not proof the shape is correct: a fix that changes what
+   `adjourned_by` receives (a `board_member.id`, say, to match what the
+   formatter's lookup expects) will turn this assertion red on its own, which
+   is exactly the "found me" a wave-6 implementer should want from this test
+   rather than a silent pass either way. The second defect (the DRAFT
+   watermark) genuinely has no pin of any kind today.
 3. ~~**The quiet-stream resume gap (Task 7 finding 2).**~~ **FIXED in wave 5,
    Task 7's fix round**, alongside the batch defect and for the same reason —
    the owner asked for both before merge. `realtime.onMeetingChange` now yields
@@ -3994,12 +4017,17 @@ address, all of which wave 5 hit and worked around locally:
   which is exactly the assumption `bindTenantAccess` got wrong. **Task 7's fix
   round added it** — see item 2's "a per-request unit of state is a design
   decision, not a default" — so this one is closed rather than carried forward.
-- **It does not cover a SUBSCRIPTION's authorization lifetime as a rule, only as
-  a comment.** `context.ts`'s header states the exposure honestly (evaluated at
-  open, re-evaluated on every forced reconnect, not in between) and
-  `sse-bounds.test.ts` pins the bound. Neither is in item 2, so an author adding
-  the second subscription in wave 6 has no numbered rule telling them the bound
-  is load-bearing rather than a resource knob.
+- ~~It does not cover a SUBSCRIPTION's authorization lifetime as a rule, only as
+  a comment. Neither is in item 2.~~ **False, re-checked in the single fix wave
+  after wave 5's review — it IS in item 2**, in bold, inside item 2's own span:
+  the "Subscriptions follow item 2's rule unchanged, plus one" subsection's
+  "Authorization lifetime, stated rather than left implicit" paragraph states
+  "Authorization is therefore evaluated when a stream opens and re-evaluated in
+  full at every reconnect ... it is not re-evaluated between those points."
+  `context.ts`'s header states the same thing (not the only place it lives, as
+  this bullet used to claim) and `sse-bounds.test.ts` pins the bound. Fixed
+  first among this wave's corrections, because as written it was a handoff to
+  wave 6 inviting a duplicate of a rule item 2 already carries.
 - **It says nothing about a write whose only client-supplied input is a
   `boardId` used solely to feed the guard.** Wave 5 threaded that prop into two
   components that had no `boardId` at all. The pattern is now everywhere in the

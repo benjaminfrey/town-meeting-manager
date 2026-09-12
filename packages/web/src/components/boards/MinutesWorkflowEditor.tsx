@@ -5,6 +5,14 @@
  * and optional overrides for town-level defaults (audio retention, auto-publish).
  *
  * @see docs/advisory-resolutions/3.5-minutes-approval-workflow-config.md §6.2
+ *
+ * TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
+ * `supabase.from("board").update(...)` — no `requireBoardPermission` /
+ * `requireBoardActor` stands between a caller and this board's minutes
+ * workflow settings. Recorded rather than fixed in the single fix wave after
+ * wave 5's review (finding L8): item 11's completeness sweep reads this file
+ * as done because it carries no `TODO(phase-e-wave-*)` marker of its own,
+ * which is the exact hole item 11 exists to close.
  */
 
 import { useState } from "react";

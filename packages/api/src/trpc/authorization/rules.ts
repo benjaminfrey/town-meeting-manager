@@ -189,13 +189,15 @@ export function assertCanUpdateAgendaItem(actor: Actor, scope: BoardScope): void
 // need not hold A2 at all.
 //
 // **A2 stays in the rule rather than being replaced by M1**, deliberately.
-// Dropping it would NARROW what ships today — `setOperatorNotes` and
-// `markComplete` are guarded `requireBoardPermission("A2", …)` at HEAD — and
-// refuse a hand-built matrix holding A2 without M1. Nothing in the five
-// shipped templates is affected either way (every template granting A2 also
-// grants M1: Town Clerk, Deputy Clerk and Board-Specific Staff; Recording
-// Secretary and General Staff grant neither), so the widening costs nothing
-// and the narrowing would buy nothing.
+// Dropping it would NARROW what ships today. `setOperatorNotes` and
+// `markComplete` were guarded `requireBoardPermission("A2", …)` before this
+// task; at HEAD they are `requireBoardActor(assertCanUpdateAgendaItemProgress)`
+// below, and dropping the A2 branch out of that function would refuse a
+// hand-built matrix holding A2 without M1. Nothing in the five shipped
+// templates is affected either way (every template granting A2 also grants
+// M1: Town Clerk, Deputy Clerk and Board-Specific Staff; Recording Secretary
+// and General Staff grant neither), so the widening costs nothing and the
+// narrowing would buy nothing.
 //
 // It is also the rule that makes ADJOURNMENT coherent. `handleMeetingEnd`
 // (`routes/meetings.$meetingId.live.tsx`, which wave 5 Task 3 moves whole into

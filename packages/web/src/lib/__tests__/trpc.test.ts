@@ -5,6 +5,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { queryClient } from "../queryClient";
 import { TRPCClientError } from "@trpc/client";
+import { TRPC_BATCH_URL_LIMIT } from "@town-meeting/shared";
 import {
   categorizeMutationError,
   getMutationErrorMessage,
@@ -181,6 +182,71 @@ describe("the link split", () => {
 
     expect(calls.length).toBe(1);
     expect(FakeEventSource.urls).toEqual([]);
+  });
+});
+
+/**
+ * The client half of the batch-path fix — Phase E, wave 5, Task 7's fix
+ * round, hardened in the single fix wave that followed.
+ *
+ * `packages/shared/src/constants/trpc-batch.ts` exports two constants that
+ * only mean anything together: `TRPC_BATCH_PATH_LENGTH_LIMIT` raises
+ * `server.ts`'s Fastify `maxParamLength` so a batched request's comma-joined
+ * path segment is no longer refused at 100 characters (pinned server-side by
+ * `packages/api/src/trpc/__tests__/http-batch.test.ts`), and
+ * `TRPC_BATCH_URL_LIMIT` is `httpBatchLink`'s `maxURLLength` — the half that
+ * makes a GROWING batch on the client SPLIT into more than one HTTP request
+ * once the resulting URL is long enough, rather than depending on the server
+ * ceiling never being reached. Before this test, `trpc.ts:95`'s
+ * `maxURLLength: TRPC_BATCH_URL_LIMIT` could be deleted (import included)
+ * with web green, typecheck green, and lint clean — the wave-5 whole-branch
+ * review's finding M1.
+ *
+ * Removing it is not cosmetic: it is the recurrence guard for the defect that
+ * 404'd every load of the live meeting screen three commits before this one
+ * (the six-procedure, ~151-character batch in `http-batch.test.ts`'s own
+ * header). Without a client-side cap, the next screen whose loader composes a
+ * seventh or eighth query grows the batch past whatever the server allows
+ * with nothing on this side to notice.
+ */
+describe("the batch URL cap (Phase E, wave 5, Task 7)", () => {
+  it("splits a growing batch into more than one request once the URL would exceed TRPC_BATCH_URL_LIMIT", async () => {
+    // Every call below is `whoami` with no input, so `getInput`'s dict of all
+    // `undefined` values serializes to `{}` — a fixed-size `input=%7B%7D` no
+    // matter how many calls are in the group. Only the comma-joined PATH
+    // segment ("whoami,whoami,...") grows with the call count, and it is what
+    // `httpBatchLink`'s `validate()` measures against `maxURLLength`. 300
+    // calls comfortably clears `TRPC_BATCH_URL_LIMIT` (2048) — ~7 chars per
+    // "whoami," puts the unsplit path alone past 2000 characters — so a
+    // single group can no longer hold them all.
+    const CALL_COUNT = 300;
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url));
+      // The stub only has to answer with as many envelopes as procedures are
+      // in THIS request's own path segment, not the grand total.
+      const procCount = (String(url).match(/whoami/g) ?? []).length;
+      return new Response(
+        JSON.stringify(Array.from({ length: procCount }, () => ({ result: { data: null } }))),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await Promise.all(
+      Array.from({ length: CALL_COUNT }, () => trpcClient.whoami.query().catch(() => undefined)),
+    );
+
+    // The load-bearing assertion. Deleting `maxURLLength` from `trpc.ts`
+    // collapses this to a single request (`calls.length === 1`) — verified by
+    // mutation, restored afterward.
+    expect(calls.length).toBeGreaterThan(1);
+
+    // And the cap is actually being obeyed, not just triggering a split at
+    // some other threshold: no request this client built exceeds the limit
+    // it was configured with.
+    for (const url of calls) {
+      expect(url.length).toBeLessThanOrEqual(TRPC_BATCH_URL_LIMIT);
+    }
   });
 });
 

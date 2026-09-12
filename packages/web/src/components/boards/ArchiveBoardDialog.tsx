@@ -3,6 +3,15 @@
  *
  * Requires typing the board name to confirm. Archives the board
  * and all its active members. Boards are never deleted (legal compliance).
+ *
+ * TODO(phase-e-wave-6): `archiveMutation` below still makes two raw,
+ * untransacted Supabase writes (`board.update`, then `board_member.update`)
+ * with no tRPC equivalent to migrate onto yet. A failure between them leaves
+ * a board archived with its members still `active`. Recorded rather than
+ * fixed in the single fix wave after wave 5's review (finding L8): item 11's
+ * completeness sweep reads this file as done because it carries no
+ * `TODO(phase-e-wave-*)` marker of its own, which is the exact hole item 11
+ * exists to close.
  */
 
 import { useCallback, useState } from "react";

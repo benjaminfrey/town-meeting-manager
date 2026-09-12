@@ -915,6 +915,30 @@ export const meetingRouter = router({
    * cannot be marked deferred without its queue row being written from the
    * same rows, in the same statement.
    *
+   * ─── The authorization cost, stated as `callToOrder`'s doc comment states
+   * its own — added in the single fix wave after wave 5's review, the one
+   * composite in this file that had shipped without this section ─────────
+   *
+   * `requireBoardActor(assertCanUpdateMeeting)` — the same guard `callToOrder`
+   * and `navigateToAgendaItem` carry, and for the same reason: `meeting.status`
+   * is that rule's stated scope. **That is ONE rule for an act that writes
+   * FOUR tables** (`performAdjournment` below is the shared body for both of
+   * this act's origins — see its own doc comment):
+   *
+   *   | write                               | its own rule                                       |
+   *   | ----------------------------------- | --------------------------------------------------- |
+   *   | `meeting.status` etc.               | 21, `assertCanUpdateMeeting` — admin/A1/M1           |
+   *   | `agenda_item_transition.ended_at`   | 21d, `assertCanUpdateAgendaItemTransition` — M1      |
+   *   | `agenda_item.status = 'deferred'`   | 2a, `assertCanUpdateAgendaItemProgress` — A2 or M1   |
+   *   | `future_item_queue` INSERT (x2)     | 21e, `assertCanInsertFutureItem` — M1                |
+   *
+   * A caller holding A1 alone (no M1, no A2) passes the guard and performs all
+   * four — the identical shape `callToOrder`'s own table names, for the
+   * identical reason (rule 2a's and 21d's own comments: refusing an M1
+   * presiding officer who holds no A1/A2 would be the "partial adjournment,
+   * worse than either answer" `rules.ts` rule 2a is organised around,
+   * reached one act later here). Revisit it with rule 21, not here.
+   *
    * ─── What is preserved exactly ───────────────────────────────────────────
    *
    *   - **The unreached filter**: a CHILD item (`parent_item_id IS NOT NULL`)

@@ -371,13 +371,27 @@ export const voteRecordRouter = router({
    * for something they did not do.
    *
    * **The authorization cost, stated as `callToOrder`'s doc comment states its
-   * own.** This is M3 (`capture_motions_votes`) performing acts whose own
-   * rules are 21b (M6, executive session) and 21 (admin/A1/M1, the meeting's
-   * status). Requiring those in addition would refuse the recording secretary
+   * own — corrected in the single fix wave after wave 5's review, which found
+   * this enumeration four rules short.** This is M3 (`capture_motions_votes`)
+   * performing acts whose own rules are:
+   *
+   *   - **21b** (M6, executive session `entered_at` / delete)
+   *   - **21** (admin/A1/M1, `meeting.status` — reached when the motion
+   *     adjourns, via `performAdjournment` below)
+   *   - **11/R1** (`assertCanUpdateMinutesDocument`, the `minutes_document`
+   *     approve + `notification_event` insert — `approveMinutesForPassedMotion`,
+   *     called directly here, not through `performAdjournment`)
+   *   - **2a, 21d and 21e** — `agenda_item.status = 'deferred'`,
+   *     `agenda_item_transition.ended_at`, and `future_item_queue` INSERT,
+   *     all three arriving TRANSITIVELY through `performAdjournment` when the
+   *     motion adjourns, exactly as `meeting.adjourn`'s own authorization-cost
+   *     table (below, in `meeting.ts`) states them for its other caller.
+   *
+   * Requiring any of these in addition would refuse the recording secretary
    * mid-roll-call, which is `rules.ts` rule 2a's stated failure — "a partial
    * adjournment, worse than either answer" — and it is not what the act is:
    * the board decided, and M3 is the code for recording what the board
-   * decided. It is a NARROWING either way, since all four writes were
+   * decided. It is a NARROWING either way, since every one of these writes was
    * authorized by nothing at all before. Revisit it with rule 21, not here.
    *
    * **Every branch is a no-op for a second concurrent caller**, and none of

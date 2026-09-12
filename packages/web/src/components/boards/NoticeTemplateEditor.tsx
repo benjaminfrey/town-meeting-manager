@@ -4,6 +4,14 @@
  * Renders the list of template blocks in order, with drag-to-reorder,
  * add/remove/edit per block, and a save button that writes to
  * board.notice_template_blocks.
+ *
+ * TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
+ * `supabase.from("board").update(...)` — no `requireBoardPermission` /
+ * `requireBoardActor` stands between a caller and this board's notice
+ * template blocks. Recorded rather than fixed in the single fix wave after
+ * wave 5's review (finding L8): item 11's completeness sweep reads this file
+ * as done because it carries no `TODO(phase-e-wave-*)` marker of its own,
+ * which is the exact hole item 11 exists to close.
  */
 
 import { useState, useRef, useCallback } from "react";
