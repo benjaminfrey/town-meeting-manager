@@ -2618,6 +2618,39 @@ $ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Both residues are comment-only prose plus the two modules — the
      # comment-versus-code hazard this item names two paragraphs down, now
      # the ONLY thing either mention grep is still counting.
+ 0   # at be61cfa, the close of Phase E wave 6, Task 7 — the LAST entry in this
+     # countdown, and the phase ends here. Re-derived against
+     # `git archive be61cfa`, not against the working tree and not from any
+     # task report, because this task ran mutation sweeps that edited eleven
+     # tracked files and restored them. Unchanged at zero since 43c2963; Task
+     # 6 added no marker and removed none.
+     #
+     # The mention/marker gap this item spent six waves describing is now the
+     # WHOLE of the residue, and it is worth quoting once at the end rather
+     # than summarising, because it is the clearest specimen the phase
+     # produced:
+     #   $ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+     #   0
+     #   $ grep -rn "TODO(phase-e-wave" packages/web/src | wc -l
+     #   25
+     # Twenty-five lines mention a marker; ZERO lines are one. Every one of the
+     # 25 is prose — a struck-through `~~TODO(`, a header narrating a closed
+     # gap, a test comment citing the marker it discharged. An unanchored count
+     # would report this finished phase as having twenty-five open gaps.
+     # The other three greps this item tracks, at the same commit:
+     #   $ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' \
+     #       -- packages/web/src | wc -l                       -> 0  (2 at 43c2963, 17 at e5250ad)
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l                      -> 4  (5 at 43c2963)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 10 (11 then)
+     # The import grep — the only one that answers "does anything still depend
+     # on the client" — is the one that reached zero. The other two are
+     # counting ten files' worth of comments: `test/render.ts`,
+     # `MeetingStartFlow.tsx`, `AddPersonDialog.tsx`, `EditPersonDialog.tsx`,
+     # `useQuorumCheck.ts`, `CreateMeetingDialog.tsx`, `lib/trpc.ts`,
+     # `meetings.$meetingId.live.tsx`, `meetings.$meetingId.agenda.tsx`,
+     # `meetings.$meetingId.minutes.tsx`. None of them imports anything.
 ```
 
 **Wave 6, Task 0 — the marker grep is not the measure that matters, and re-deriving the "23 files"
@@ -2686,6 +2719,17 @@ depend on the client," and not "how many gaps item 11's own token sweep is silen
    The other seven have no such standing mention anywhere in this file; the token sweep is the only
    place a reader would look, and it says nothing.
 
+   **All seven are closed, and so is the eighth — re-checked at the phase's close-out (wave 6,
+   Task 7) against `git archive be61cfa`, file by file rather than by count.** Task 3 took
+   `SourceDataPanel.tsx`; Task 4 took `meetings.$meetingId.review.tsx`; Task 5 took the other six
+   (`CommandPalette.tsx`, `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`,
+   `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+   `EditPersonDialog.tsx`). The paragraphs above keep the present tense they were written in
+   because they are anchored to `e5250ad` and are the record of HOW the hole was found; read them
+   as history, not as status. **The finding that outlives them is the method, not the list:** seven
+   files with live, unwrapped Supabase code hid in the gap between a mention grep and a token grep
+   for five waves, and nothing but checking the two against each other would have shown them.
+
 **Why a mention grep and an import grep disagree, and why that gap is exactly where the four (now
 seven) unmarked files hide.** `grep -rl "lib/supabase\|useSupabase"` matches the STRING anywhere in
 a file — a doc comment quoting the module name, a header narrating a past migration, a real `import`
@@ -2733,10 +2777,17 @@ paragraph); tracking it per-task is for visibility, not for proving progress eve
 The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
 and a file reaching it that way is no more migrated than one importing directly.
 
-Track `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at
+~~Track `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at
 the same moment `packages/web/src/lib/supabase.ts` is deleted, which is the phase's real
 definition of done — with the client gone, a screen that still depends on it is a build error
-rather than a silent zero-row read.
+rather than a silent zero-row read.~~ — **falsified by the phase's own close-out, and it is this
+item's opening sentence that gets it wrong, in the document that spends four pages warning about
+exactly this.** That UNANCHORED grep answers **25** at `be61cfa`, with `lib/supabase.ts` deleted,
+every marker discharged and the import grep at zero. All 25 are prose. Track the ANCHORED form
+(`^[[:space:]]*(//|\*) TODO\(phase-e-wave`) for markers, and the IMPORT grep for the definition of
+done; the unanchored form is a mention count and was never a countdown. And the deletion is a
+ratchet and a backstop, not a sweep — see the design spec's own amended "Definition of done", and
+item 13 for the boundary it does not cover (`vi.mock`).
 
 ---
 
@@ -3389,6 +3440,80 @@ few sections above, from this same task) already used for a claim about the CODE
 candidate file directly rather than trusting a grep's mention count — applied to a claim about a
 PLAN DOCUMENT instead of the codebase.
 
+**Wave 6, Task 7 — the phase close-out. Run over every Known-gaps bullet and every numbered item's
+prose, with all three widenings in play, and NOT selected by which files this task touched.** Method:
+walked items 1, 2, 7, 8, 9, 11, 12, 13 and 14 paragraph-by-paragraph plus the whole Known-gaps list
+and the "What wave 6 inherits" list; took each present-tense ASSERTION; re-ran the grep or read the
+code behind it against `git archive be61cfa` rather than the working tree (this task ran eleven
+mutation sweeps that edited tracked files and restored them); then, per widenings two and three,
+grepped THIS file and the wave-6 plan document and `docs/backlog.md` for the symbol each surviving
+claim turns on. **Six claims moved, and the third widening earned its keep twice.**
+
+- **"Wave 4, Task 3's own open items" #3 — the legacy `queryKeys.exhibits.*` bullet — has a false
+  PREMISE and a true conclusion.** `review.tsx` was its named last legacy reader; wave 6, Task 4
+  migrated it, and that file now has zero `queryKeys.exhibits` reads and zero Supabase. Two other
+  places in this repository already said so — `ExhibitUploader.tsx`'s own comment and
+  `cache-key-parity.test.ts`'s header, which had struck the claim through — while this bullet went
+  on asserting it. **Fourth instance of "another section falsifies it", and the first where the
+  contradicting section is in the CODE rather than in this document.** Corrected in place.
+- **The `routes/meetings.$meetingId.minutes.tsx` bullet's three closing claims are all false**
+  ("the legacy line stays", "still raw Supabase on that key", "no procedure exists for any of the
+  six transitions"). Wave 6 Task 1 built the six transitions plus `detail`, Task 3 migrated the
+  screen. Struck, with what closed each.
+- **"Wave 5, Task 6's own open items" #3 and "Carried forward" #4 — `AppShell.tsx`'s
+  `useLiveMeetingId` — are false**, and the bullets' "`meeting.byTown` is not a drop-in" diagnosis
+  is exactly why: Task 2 built `meeting.liveByTown` instead of reusing it. Both struck.
+- **Item 11's own opening instruction is false, at the phase's own finish line.** "Track
+  `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at the
+  same moment `lib/supabase.ts` is deleted." The client is deleted, every marker is discharged, the
+  import grep is zero — and that unanchored grep answers **25**. Struck and corrected in place.
+  Worth its own line because the sentence sits in the item that exists to warn about unanchored
+  greps, three paragraphs above the anchored form it should have used.
+- **"Carried forward" #2, the two minutes-surface defects, is the one this sweep could not close
+  and should not have had to.** The wave's plan assigned the DECISION to wave 6 in bold; wave 6
+  ended without making it, because the only two tasks positioned to (3 and 4) correctly judged it
+  out of scope and no later task owned it. Both defects re-verified as live at `be61cfa`. Moved to
+  `docs/backlog.md` (item 11) rather than left in a phase-scoped document — the failure mode here
+  is not a stale claim but a live decision with no owner after the phase ends, which no version of
+  this step was looking for.
+- **Wave 5, Task 7's `permission_template` id question — "wave 6 should check the template pickers
+  before assuming it does not [reach a `z.uuid()` procedure]" — is now answered: it does not.**
+  Recorded at the bullet with the grep. An open question handed forward is the same hazard as a
+  stale claim; it just fails quietly by never being asked again.
+
+Checked and still true, unchanged: item 9's `useMockAuth` ("zero callers outside its own module")
+and `MockAuthProvider` ("directly named in 4 files" — still `test/render.ts`,
+`test/mocks/auth-mock.ts`, `PermissionGate.test.tsx`, `boards.$boardId.test.tsx`); item 1's
+`exhibit_count` grep (**9** lines, all comments and assertions); the
+`assertCanSelectTownNotificationConfig` trio (still zero procedure callers); wave 5 Task 5's open
+item 1 (`executiveSession.markEntered`/`discard` still have no production caller); item 7's
+`initConnectionErrorHandler` carve-out (the anchored bare-`invalidateQueries()` grep still answers
+empty); `docs/backlog.md` items 1–10, each re-run against its own stated verification command —
+`getMutationErrorMessage` still has zero production callers, `isPaused` still appears nowhere,
+`normalisePermissionsMatrix` still has no web caller outside a mock, `MeetingLifecycle.tsx` still
+carries both dead statuses, `minutes_addendum` still has zero application code; and the
+`SetPortalAddressModal` one-door bullet, which a mention grep makes look CLOSED (`grep -rln`
+now finds it in six files including `settings.town.tsx`) and which reading the code shows is not —
+that route only hosts the dialog and passes `onSetPortalAddressClick` down to `ProgressChecklist`,
+still the only opener. The same mention-versus-code hazard item 11 documents, met while running the
+sweep that exists to catch it.
+
+**Two censuses moved, both for ordinary reasons, and both quoted rather than counted:**
+
+```
+$ grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
+22    # 20 at 670d9df — wave 6 Task 1's minutes transitions
+$ grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
+9     # unchanged
+$ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
+30    # 29 at 670d9df — rule 13a, R5's own rule
+```
+
+One imprecision, recorded rather than chased: this item's own wave-5 Task 7 paragraph cites
+`useLiveMeetingEvents.ts` "line 384's `setStatus("stopped")`", which is at 385 at `be61cfa` — a
+comment-only edit in wave 6 moved it. Item 1 already says not to cite line numbers for exactly this
+reason; the substance holds and `docs/backlog.md` item 3 carries the claim without the citation.
+
 ---
 
 ## Files to copy from
@@ -3569,6 +3694,47 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   **28 sites, 28 RED**, each naming a test, each restored from a copy. The sweep was run in two
   passes, one per commit, scoped to the touched directory rather than the whole web suite (~10s a
   site rather than ~12s), which is what makes it affordable per-task rather than per-wave.
+
+  **Re-measured at `be61cfa` (wave 6, Task 7 — the phase's close-out): raw 53 files, 97 calls.**
+  The FILE count is unchanged from `01ff3ab`; the CALL count moved 88 → 97, and all nine of the
+  added calls are wave 6's. **Derived against `git archive e5250ad` (the wave's base) rather than
+  from a diff, and the two methods disagree.** `git diff e5250ad..be61cfa | grep -c "^+.*pathFilter"`
+  answers **21**; filtered to non-test files it answers **13**, against **9** genuinely new sites.
+  The gap is four lines in `ArchiveBoardDialog.tsx` (×2), `MinutesWorkflowEditor.tsx` and
+  `NoticeTemplateEditor.tsx` that were REWRITTEN in place — removed and re-added in the same
+  file, same count either side. A diff counts a moved or reworded line as added; only a
+  before-and-after census counts sites. Sweep the census, not the diff:
+
+  ```
+  $ grep -rn "invalidateQueries(trpc\..*\.pathFilter())" packages/web/src \
+      | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  97     # at be61cfa;  88 at e5250ad
+  ```
+
+  **All nine swept by deletion: 9 sites, 9 RED**, each naming one test, each restored from a copy
+  and confirmed byte-identical by an empty `git diff`:
+
+  | Site                                                         | Test that went red                                                             |
+  | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+  | `components/meeting/VotePanel.tsx` (`futureItem`)            | invalidates all FOUR routers the adjournment touches…                          |
+  | `components/meetings/CreateMeetingDialog.tsx` (`board`)      | invalidates `trpc.board.pathFilter()` — EditBoardDialog's meeting-count check… |
+  | `components/members/AddMemberDialog.tsx` (`board`)           | …after adding a board member — `board.stats` counts active seats               |
+  | `components/members/MemberArchiveDialog.tsx` (`board`)       | …— `board.stats` counts active seats                                           |
+  | `components/members/MemberTransitionDialog.tsx` ×3 (`board`) | …for all three writes (one test covers all three sites)                        |
+  | `routes/meetings.$meetingId.live.tsx` (`futureItem`)         | …when adjourning — the review page's queue                                     |
+  | `routes/meetings.$meetingId.minutes.tsx` (`minutesDocument`) | …after a regenerate                                                            |
+
+  **One methodological finding, and it is the sweep's own verdict predicate that lied.** The first
+  run of the `live.tsx` site reported GREEN. The site was fine; the scope path was wrong
+  (`src/routes/__tests__/meetings.$meetingId.live` — that file lives at `src/routes/`, not under
+  `__tests__/`). Vitest was honest about it — "No test files found, exiting with code 1" — but the
+  sweep script decided RED-versus-GREEN by grepping the output for `Test Files … failed`, and a run
+  that found no files prints no such line. **Decide a sweep's verdict on the exit code, never on the
+  presence of a failure line**: this is the same shape as item 13's turbo `Tasks:` hazard and its
+  leaked-scratch-database sibling — a summary that reads clean over a run that is not what you
+  think it is — arriving this time in the very tool built to catch that class of defect. A per-site
+  scope that matches zero files reads as a passing site, which is the worst possible failure for a
+  check whose entire output is "did something go red."
 
   **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
   not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
@@ -3946,11 +4112,16 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   `MIGRATED` now; adding it surfaced exactly one violation (that helper), fixed in the same commit,
   with a real pin (`meetings.$meetingId.minutes.test.tsx`) verified by deletion. `home.tsx`'s
   `queryKeys.minutes.byMeeting("__home_pending__")` is a `useQuery` key, not an `invalidateQueries`
-  call, so the check does not reach it. The legacy line stays — this screen's own `minutesDoc` read is
+  call, so the check does not reach it. ~~The legacy line stays — this screen's own `minutesDoc` read is
   still raw Supabase on that key. What remains open is the file itself, now carrying a marker that
   says so: `TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes` — the
   `minutesDocument` router has `byMeeting` only, and no procedure exists for any of the six
-  transitions.
+  transitions.~~ — **all three claims closed in wave 6**, re-checked at the phase's close-out (Task
+  7). Task 1 built `minutesDocument.detail` and all six transitions as real procedures (each with a
+  guard — `R5` got its own rule in the same task rather than being folded onto `R1`); Task 3
+  migrated the screen onto them, so the raw read and the `minutes` legacy key are both gone from it;
+  and the marker is discharged. The residual `queryKeys.minutes` invalidation lines in other writers
+  belong to `docs/backlog.md` item 7's deferred batch.
 
 - **Wave 4, Task 2's own open items, named rather than left silent.** Four, all inherited by Task 3
   or later, none of them a defect this task introduced (fix round 1 corrected the scope of #2 and
@@ -4042,10 +4213,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      Both were unauthorized before — `agenda_item_tenant_isolation` is tenancy-only — so FORBIDDEN
      became newly reachable and each write now renders an inline `role="alert"` refusal beside its own
      control, pinned per item 13.
-  3. **The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
+  3. ~~**The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
      last legacy reader does": `routes/meetings.$meetingId.review.tsx` still reads
      `[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and that file is wave
-     6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.
+     6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.~~ —
+     **the PREMISE is false as of wave 6, Task 4; the CONCLUSION still stands, for a different
+     reason.** `review.tsx` has zero `queryKeys.exhibits` reads and zero Supabase at `be61cfa`
+     (`grep -c supabase` on that file answers 0), so `queryKeys.exhibits.*` has no reader left
+     anywhere — `ExhibitUploader.tsx`'s own comment already said so, and so does
+     `cache-key-parity.test.ts`'s header, which struck this claim through while this bullet went on
+     asserting it. Two sections of this file disagreeing about the same key, again. The four
+     writers' legacy lines nonetheless stay, now as part of the deliberate ~80-line batch deferred
+     in `docs/backlog.md` item 7, not because a reader survives. Re-checked at the phase's
+     close-out (wave 6, Task 7).
 
 - **Wave 4, Task 4 — a client flow that spans TWO guarded procedures, which item 2 does not cover
   and waves 5 and 6 both inherit.** Every write this document discusses is one procedure with one
@@ -4186,12 +4366,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      the only local signal and it never resolves. Nothing in this repo renders
      `isPaused`. Named because the fix is per-form, not global, and a reader of
      the pill will reasonably assume it was covered.
-  3. **`layouts/AppShell.tsx`'s `useLiveMeetingId` is still a raw Supabase
+  3. ~~**`layouts/AppShell.tsx`'s `useLiveMeetingId` is still a raw Supabase
      read**, now carrying a `TODO(phase-e-wave-6)` marker it did not have
      through four waves. `meeting.byTown` is not a drop-in — it selects no
      `started_at`, which is that query's ordering column, and it returns every
      non-cancelled meeting where this needs the single most recently started
-     `open`/`in_progress` one.
+     `open`/`in_progress` one.~~ — **closed in wave 6**, and the "not a
+     drop-in" diagnosis was right, which is why it is worth recording rather
+     than only striking. Task 2 built a PURPOSE-BUILT procedure,
+     `meeting.liveByTown`, instead of reusing `byTown`; Task 5 wired it
+     (`useLiveMeetingId` is `trpc.meeting.liveByTown` with a 30 s
+     `refetchInterval`) and discharged the marker. The `in_progress` half of
+     the old predicate turned out not to be a `meeting_status` enum value at
+     all — see `docs/backlog.md` item 9.
   4. ~~**The banner has never been seen in a browser.** Its states are pinned by
      jsdom tests and its INPUT — the transport's own `status` — is driven by a
      mock, so what is untested is the same seam bullet 4 above narrows to: a
@@ -4385,8 +4572,23 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   have a version nibble of `0` and a variant nibble of `0`. Those rows exist in
   every database the repo has ever built, so changing the literal is a data
   migration with a foreign-key rewrite behind it, not an edit. It matters only
-  where a template id reaches a `z.uuid()` procedure — wave 6 should check the
-  template pickers before assuming it does not.
+  where a template id reaches a `z.uuid()` procedure — ~~wave 6 should check the
+  template pickers before assuming it does not.~~ **Checked at wave 6, Task 7,
+  and the answer is that it does not reach one:**
+
+  ```
+  $ grep -rn "permissionTemplate\|permission_template" packages/api/src/trpc packages/web/src \
+      --include='*.ts' --include='*.tsx' | grep -v __tests__
+  packages/api/src/trpc/trpc.ts:286: * Known limitation: `permission_template` rows a town writes …
+  ```
+
+  One comment, and nothing else — no procedure takes a `permission_template.id`
+  as input and no web file names the table or the ids. The `templateId:
+z.string().uuid()` inputs in `agenda-template.ts` and `agenda-item.ts` are
+  AGENDA templates, a different table whose ids are `gen_random_uuid()`. So the
+  five malformed ids are inert today, and the migration-plus-FK-rewrite stays
+  unnecessary until something builds a permission-template picker. Whoever does
+  build one inherits this as its first constraint.
 
 - **CORRECTED in wave 6, Task 0's fix round: the bullet originally recorded here claimed
   `SourceDataPanel.tsx` was missing from every wave-6 task's file list. That was false — it
@@ -4453,6 +4655,26 @@ one list rather than reconstructing it from seven task reports.
    is exactly the "found me" a wave-6 implementer should want from this test
    rather than a silent pass either way. The second defect (the DRAFT
    watermark) genuinely has no pin of any kind today.
+
+   **Wave 6 ended without deciding either, and this needs saying plainly
+   because the wave's own plan assigned the decision to it** ("Wave 6 owns the
+   reading surface, so this is where they get decided … Fixing either changes a
+   legal record. Decide deliberately and state the reasoning; if the product
+   question is genuinely open, say so rather than choosing"). Task 3 owned
+   `minutes.tsx` and Task 4 owned `review.tsx` — the two readers — and both
+   correctly declined on scope; Task 4's report says so in as many words
+   ("neither is in this task's scope"). No later task was positioned to pick it
+   up. Re-verified at the close-out (wave 6, Task 7): `meeting.ts`'s
+   `performAdjournment` still writes `'adjourned_by', ${personId}` and
+   `minutes-assembler.ts` still resolves it through a `board_member.id` map;
+   `VotePanel.tsx` still POSTs `/api/meetings/${meetingId}/minutes/render` with
+   the live meeting's id into a swallowed `.catch`. **Both are now
+   `docs/backlog.md` item 11**, because this document is scoped to Phase E and
+   nothing reads it once the phase ends — which is exactly how a decision
+   assigned to a wave dies with the wave. The product question is genuinely
+   open: both change what a generated legal record says, and neither has an
+   answer a migration task could have supplied.
+
 3. ~~**The quiet-stream resume gap (Task 7 finding 2).**~~ **FIXED in wave 5,
    Task 7's fix round**, alongside the batch defect and for the same reason —
    the owner asked for both before merge. `realtime.onMeetingChange` now yields
@@ -4469,10 +4691,14 @@ one list rather than reconstructing it from seven task reports.
    header, and it hands the question to whoever answers the banner's missing
    terminal state, since `EventSource`'s fixed, no-backoff `retry:` cannot
    express a retry policy anyway.
-4. **`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
+4. ~~**`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
    shell, now carrying its first marker. `meeting.byTown` is not a drop-in: it
    selects no `started_at`, which is the ordering column, and returns every
-   non-cancelled meeting where this needs the single most recently started one.
+   non-cancelled meeting where this needs the single most recently started
+   one.~~ — **closed in wave 6** (Task 2 built `meeting.liveByTown`, Task 5
+   wired it). The "not a drop-in" call was correct and is what stopped a
+   `byTown` reuse; see the struck bullet in "Wave 5, Task 6's own open items"
+   above for the detail.
 5. **`getMutationErrorMessage` has zero production call sites**, and three of
    its five categories (`validation`, `conflict`, `unknown`) have no reader at
    all. Wiring them is a UX decision about copy at 24 files' worth of call
@@ -4605,3 +4831,203 @@ address, all of which wave 5 hit and worked around locally:
   live screen, the mismatch defence (`assertMatchesAuthorizedBoard`) is what
   makes it safe, and item 2 mentions the cost in passing without ever making the
   defence a required half of the pattern.
+
+---
+
+## What Phase E taught that the spec could not have known
+
+Written at the phase's close-out (wave 6, Task 7). The spec
+(`docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md`) got its
+central premise right — the web data layer was already dead, so there was no
+parity baseline — and it is worth recording where that premise led somewhere it
+could not have predicted, and where the plan built on it was simply wrong.
+
+### 1. The migration's largest yield was not migration. It was reading the code.
+
+A restoration forces someone to read every query it replaces. That is how this
+phase found a run of shipped controls that had **never worked** — not
+regressions, not migration damage, code that could never have done the thing it
+appeared to do, in some cases since it was written. By class, each verified
+against `packages/api/drizzle/0000_baseline.sql` rather than against a type:
+
+- **`board` has no `updated_at` column.** `MinutesWorkflowEditor.saveMutation`
+  and `ArchiveBoardDialog.archiveMutation` both sent it. PostgREST rejects an
+  unknown column outright, so **saving a board's minutes-workflow settings and
+  archiving a board had never persisted anything** — and the archive dialog had
+  no error state at all, so it just left the button re-enabled. This is the
+  third and fourth instance of the identical shape: wave 1 found
+  `EditGovTitleDialog` writing `updated_at` to `user_account`, wave 2 found
+  `EditBoardDialog` writing it to `board`.
+- **Seven phantom keys on the minutes surface.** `SourceDataPanel` did
+  `select("*")` five times into `Record<string, unknown>`; `moved_by_name`,
+  `seconded_by_name`, `yeas`/`nays`/`abstentions`, `member_name` and
+  `transition_type` are none of them columns of the tables they were read from.
+  The "Moved: …"/"Seconded: …" line and all three vote badges had never
+  rendered, and each individual vote rendered as a bare colon.
+- **A Download button gated on a column that does not exist.**
+  `minutes.tsx` rendered its PDF link behind `minutesDoc.pdf_url`; the column is
+  `pdf_storage_path`. `pdf_url` is a field the Fastify route SYNTHESISES in its
+  JSON response — which is exactly why it looked real.
+- **A live-meeting indicator filtering on a value absent from its own enum.**
+  `AppShell`'s `useLiveMeetingId` filtered `status` on `'in_progress'`;
+  `meeting_status` is `draft, noticed, open, adjourned, minutes_draft, approved,
+cancelled`. The sidebar indicator had been silently null on every poll.
+  `'published'`, borrowed from `minutes_document_status`, is dead the same way in
+  `MeetingLifecycle.tsx` — see `docs/backlog.md` item 9.
+- **A notification that reaches nobody.** `approveMinutesForPassedMotion` queues
+  `minutes_approved` with no `board_id`, and
+  `NotificationService.getSubscribersForEvent` returns NO subscribers without
+  one. The email queued when a board votes minutes through in a live meeting has
+  never been delivered. Still live at `be61cfa`, now named in the payload itself.
+
+**The root cause of the whole class is one line.** `lib/supabase.ts` exported
+`createClient` typed `SupabaseClient` — with **no `Database` generic** — so
+every `.from(…).update({…})` payload and every `select("*")` row was
+structurally unchecked. `any` at the transport boundary does not announce
+itself; it produces controls that compile, render, and do nothing. The tRPC
+replacement is end-to-end typed, so the same mistakes are `TS2353` now. **The
+generalisable lesson is not about Supabase:** an untyped client is a standing
+licence for the schema and the UI to drift apart silently, and the drift is
+invisible in exactly the way that survives review.
+
+### 2. A defect is a population, not an instance. Fix the twin in the same commit.
+
+Six times this wave a defect was found, fixed and pinned on one site while its
+sibling shipped unchanged — the `updated_at` writes (two files, and two earlier
+waves had already fixed two others), the two dialogs sharing the `actionError`
+bleed Task 3 had just fixed on a third, the two writers of `future_item_queue`
+that each invalidated three routers and silently omitted the fourth. The habit
+this phase converged on: **when you find a defect, grep for its SHAPE before
+you fix the instance**, and put the twin in the same commit. A fix with a pin on
+one of two sites reads, to every later grep, exactly like a solved problem.
+
+### 3. Every mechanised check here has a blind spot, and not the one you would guess
+
+Two cache checks, three distinct blind spots, all found by hand:
+
+- `cache-key-parity.test.ts` could not see a writer whose table **never had a
+  legacy key** — `future_item_queue` is written only server-side, so item 7's
+  prescribed procedure (grep the legacy key, check every invalidation) has no
+  input to start from (`docs/backlog.md` item 8).
+- It could not see **two namespaces over one table** — `queryKeys.minutes` and
+  `queryKeys.minutesDocuments` are different keys on the same row, and neither
+  invalidates the other.
+- `pathfilter-pin-coverage.test.ts` credits a writer FILE, not a call, so a
+  second `pathFilter()` call in an already-pinned file rides free.
+
+And two mechanisms that lie outright, both added to item 13 this phase: branch
+coverage inside an always-mounted dialog (the branch is executed, so coverage is
+satisfied, while nothing asserts it), and `turbo run test` reporting green
+per-file `Tests` lines under an exit-1 task. A third was found by this very
+task: **the `pathFilter()` deletion sweep's own verdict predicate** — deciding
+RED-versus-GREEN by grepping for `Test Files … failed` makes a mis-scoped run,
+which prints no such line, read as a passing site. The pattern across all of
+them is the same and is worth stating once: **a green summary is a claim about
+what ran, not about what was checked.** Read the exit code.
+
+### 4. Briefs are evidence, not authority.
+
+Six of this wave's own task briefs asserted something false about the code —
+scope counts, which files carried markers, which claims a document made — and
+each was caught by an implementer who checked instead of trusting. That is not
+a complaint about the briefs; it is the phase's most transferable operating
+rule, and it is the same rule item 11 states for numbers ("quote the grep") and
+item 14 states for prose. **A dispatch's restatement of a plan is a secondary
+source. Re-derive before acting on it.**
+
+### 5. What the spec's own definition of done was worth.
+
+Amended in the spec itself, and repeated here because it is the phase's central
+design idea: the deletion is a **ratchet and a backstop**, not a sweep. Ordered
+last, after five waves of migration, it was structurally incapable of failing —
+and it is still worth having, because reintroducing the client is now a compile
+error, and because it would have fired if a wave had skipped a FILE. What it
+cannot see is a `vi.mock` specifier (item 13). **Deletion proves the absence of
+imports, not the absence of dependence.**
+
+---
+
+## What Phase F inherits, and what item 2 still does not say for it
+
+Phase F retires the Supabase stack itself. Written at Phase E's close-out
+because nothing else is positioned to: this document is scoped to Phase E, and
+the facts below were measured while finishing it.
+
+**What is already gone, so Phase F does not have to plan for it.**
+`packages/web` has no Supabase dependency of any kind at `be61cfa` — no module,
+no package entry, no env variable, no import (see the "Definition of done"
+section of the spec, and item 11's final countdown entry). And the API's
+"remaining service-role usage" that the spec defers to D1f is **already gone
+too**, which the spec does not say and which D1f's own record states only in
+passing:
+
+```
+$ git grep -n "@supabase/supabase-js" -- . ':!pnpm-lock.yaml' ':!docs' ':!.superpowers'
+packages/api/package.json:34:    "@supabase/supabase-js": "^2.99.0",
+packages/api/src/auth/fastify.ts:56: * `@supabase/supabase-js` is imported nowhere in `src/` outside tests.
+
+$ grep -rn "SUPABASE" packages/api/src --include='*.ts'
+(empty, as of this task — the two test fixtures that set SUPABASE_URL /
+ SUPABASE_SERVICE_ROLE_KEY were dropped here; nothing read either)
+```
+
+So `packages/api`'s Supabase surface is **one unused dependency line in
+`package.json`**. Removing it is a `pnpm remove` plus a lockfile edit, not a
+migration — and wave 6, Task 6 recorded how to do that edit without letting a
+plain `pnpm install` re-resolve 40 unrelated lines of `better-auth`'s `zod`
+peer: edit the importer entry by hand and verify with
+`pnpm install --frozen-lockfile`.
+
+**What is actually left, by kind.** Not one job:
+
+1. **The local dev stack** — `docker/docker-compose.yml`'s nine services (`db`,
+   `kong`, `inbucket`, `auth`, `rest`, `realtime`, `storage`, `meta`, `studio`),
+   `docker/volumes/`, and `package.json`'s six `supabase:*` scripts. Only `db`
+   is load-bearing now; `auth`, `rest` and `realtime` are replaced (Better Auth,
+   tRPC, SSE) and `storage` is replaced by D1e's endpoints. **The trap is that
+   the persisted volume `docker/volumes/db/data` holds every local developer's
+   auth accounts** — it is not reproducible from `supabase/seed.sql`, which
+   creates no auth users. Decommissioning `db` is a data-migration question, not
+   a `docker compose down`.
+2. **The production stack** — `infrastructure/nginx/nginx.conf`'s public
+   `supabase.*` host and Studio host, `infrastructure/docker-compose.production.yml`,
+   `.env.production.example`'s two `VITE_SUPABASE_*` lines (kept deliberately at
+   wave 6, Task 6: they configure the stack that is still running), and
+   `infrastructure/scripts/{deploy,migrate,backup}.sh`. The nginx `supabase.*`
+   host exists to serve the BROWSER's supabase-js. Nothing in the browser speaks
+   to it any more, so that server block can go before the stack does — and it
+   should, because it is a publicly-routed PostgREST that no longer has a
+   legitimate client.
+3. **The migration history** — `supabase/migrations/` and `supabase/seed.sql`.
+   The seed is the one with a live consumer: `pnpm db:seed` and `db:reset`. Note
+   `0000_baseline.sql` is Drizzle's and is the authority for schema; the
+   `supabase/migrations/` tree is history.
+4. **Prose that outlived its subject** — `e2e/`'s four files tell a reader to
+   run `supabase start` and carry `supabase/seed.sql`'s UUIDs, `README.md`,
+   `docs/deployment.md`, and ~29 files under `packages/web/src` whose comments
+   narrate a migration that is finished. All harmless; all wrong.
+
+**What item 2 still does not say, for Phase F specifically.** Item 2 settles
+where a rule goes and which guard shape carries it. Three things it does not
+address that Phase F will hit immediately:
+
+- **It has nothing to say about a surface with NO tRPC procedure in front of
+  it.** Every rule in item 2 is attached to a procedure. The D1e document and
+  file endpoints, the portal routes, the minutes render/regenerate endpoints and
+  the notification sweep are Fastify routes, and three of them are what replaced
+  Supabase Storage. When the storage service is decommissioned, the
+  authorization question moves to routes item 2 does not describe. `rules.ts` is
+  shared; the guard shapes are not.
+- **It assumes the row is reachable through the tenant connection.** Phase F
+  removes the last components that ran OUTSIDE `withTenant` — anything still
+  reaching Postgres as a service role. Item 2's board-scoped forms all presume
+  `ctx.tenant`; a decommissioning task that has to touch data across towns (a
+  volume migration, a token rotation) has no shape in this document at all, and
+  should not invent one quietly.
+- **It is silent on what a DELETION of infrastructure has to prove.** Phase E's
+  answer was "delete the client and let `tsc` speak", and this document now
+  records exactly how far that goes (a ratchet and a backstop, blind to
+  `vi.mock`). A container is not type-checked by anything. Phase F needs its own
+  answer to "how do we know nothing still talks to this" **before** it stops a
+  service, and the honest starting point is that grep will not supply it: an
+  HTTP client with a URL in an env file leaves no import to find.

@@ -399,3 +399,122 @@ whichever caller (if any) genuinely needs the whole history.
 ```
 grep -n "byTown" packages/api/src/trpc/routers/meeting.ts
 ```
+
+---
+
+## 11. Two live defects in generated legal minutes, assigned to Phase E wave 6 and never decided
+
+**Where:** `packages/api/src/trpc/routers/meeting.ts` (`performAdjournment`'s
+`jsonb_build_object`, `'adjourned_by', ${personId}`),
+`packages/api/src/services/minutes-assembler.ts` (`memberName(adjData.adjourned_by …)`),
+`packages/api/src/services/minutes-formatters.ts` (`formatAdjournmentText`'s
+`attendance.presiding_officer` fallback); and
+`packages/web/src/components/meeting/VotePanel.tsx` (the
+`POST /api/meetings/${meetingId}/minutes/render` inside the `data.adjourned`
+branch).
+
+**What the gaps are:**
+
+- **The record names the wrong adjourner.** `adjourned_by` is written as a
+  `person.id` and looked up in a `board_member.id` map, so it always resolves to
+  `null`; `formatAdjournmentText` treats null as "not recorded" and falls back to
+  the presiding officer. The field is never blank — when a clerk adjourns and the
+  chair presides, the generated PDF states that the chair adjourned the meeting,
+  and nothing flags it. `adjourned_by_name` is written and read by nothing.
+  **There is a deliberate tripwire:** `meeting.test.ts` asserts
+  `adjourned_by: operator.personId`, pinning the DEFECTIVE shape. A correct fix
+  turns it red on purpose. A fix also needs `performAdjournment` to resolve the
+  actor's `board_member.id` on that board — it does not today — and a decision
+  about existing rows.
+- **The DRAFT watermark is never removed.** `VotePanel` posts the LIVE meeting's
+  id to a meeting-keyed render route, while the approved document belongs to an
+  EARLIER meeting (reached through `agenda_item.source_minutes_document_id`). The
+  request 404s into a swallowed `.catch(() => {})`, so the un-watermarked
+  re-render has never once happened. `approveMinutesForPassedMotion` already has
+  the right `documentId` in hand; a fix needs a document-keyed route or a
+  `document_id` param, plus a decision about which board the R5/R1 check derives
+  from when the two meetings differ. No pin of any kind exists today.
+
+**Why it wasn't closed in Phase E:** wave 5 deliberately preserved both rather
+than change a legal record inside a migration, and the wave-6 plan assigned the
+DECISION to wave 6 in bold ("Wave 6 owns the reading surface, so this is where
+they get decided"). The two tasks positioned to make it — Task 3 (`minutes.tsx`)
+and Task 4 (`review.tsx`) — both judged it out of scope, correctly: each is a
+product decision about what a legal record says, not a wiring question, and
+neither task's brief covered it. No later task owned it, and the phase ended.
+Recorded here at the close-out so the decision does not die with the
+phase-scoped plan document that assigned it. **Both defects re-verified as live
+at `be61cfa`.**
+
+**Verification commands:**
+
+```
+grep -n "adjourned_by" packages/api/src/trpc/routers/meeting.ts
+grep -n "memberName(adjData" packages/api/src/services/minutes-assembler.ts
+grep -n "minutes/render" packages/web/src/components/meeting/VotePanel.tsx
+```
+
+---
+
+## 12. The "minutes approved" email queued from a live meeting reaches nobody
+
+**Where:** `packages/api/src/trpc/routers/minutes-document.ts`
+(`approveMinutesForPassedMotion`'s `INSERT INTO notification_event`) and
+`packages/api/src/services/notification-service.ts`
+(`getSubscribersForEvent`).
+
+**What the gap is:** `getSubscribersForEvent` reads `payload.board_id` and
+returns NO subscribers without it. `approveMinutesForPassedMotion` queues
+`{minutes_document_id, meeting_id, approved_by_motion_id}` — no `board_id` — so
+the notification raised when a board votes its minutes through during a live
+meeting is delivered to nobody. The three procedures wave 6 Task 1 built
+(`submitForReview`, `approve`, `publish`) all carry `board_id` for exactly this
+reason, and three tests assert it; this one path does not.
+
+**Why it wasn't closed in Phase E:** it was found in wave 6 Task 1 while
+building the sibling procedures, in a function that belongs to wave 5's diff and
+sat outside every subsequent task's file list. The fix is probably one line, but
+it changes who receives mail about an adopted legal record, and it needs a test
+that proves delivery rather than one that proves the row was written — which is
+what the existing coverage proves. The defect is named in the payload itself so
+it is not rediscovered a third time.
+
+**Verification command:**
+
+```
+# the queued payload — three keys, no board_id:
+grep -n "'minutes_approved'," -A 6 packages/api/src/trpc/routers/minutes-document.ts
+# the reader — minutes_approved shares the branch that returns [] without one:
+grep -n 'case "minutes_approved"' -A 9 packages/api/src/services/notification-service.ts
+```
+
+---
+
+## 13. Phase F's inherited surface is written down in a phase-scoped document
+
+**Where:** `docs/superpowers/plans/phase-e-conventions.md`, the closing sections
+"What Phase E taught that the spec could not have known" and "What Phase F
+inherits, and what item 2 still does not say for it".
+
+**What the gap is:** Phase E's close-out measured what is actually left of the
+Supabase stack and sorted it into four kinds of work (the local dev stack, the
+production stack, the migration history, and prose that outlived its subject),
+along with three authorization questions item 2 does not cover for a
+decommissioning phase. That material is correct and current as of `be61cfa`, and
+it lives in a document this file's own preamble says nothing reads once Phase E
+ends. This entry exists so Phase F's plan finds it.
+
+**Two facts from it worth repeating here, because they change the shape of the
+work:** `packages/api`'s entire remaining Supabase surface is **one unused
+dependency line in `package.json`** (nothing under `packages/api/src` imports the
+package or reads a `SUPABASE_*` variable); and the persisted volume
+`docker/volumes/db/data` holds every local developer's auth accounts, which
+`supabase/seed.sql` does not recreate — so retiring the `db` service is a data
+question, not a `docker compose down`.
+
+**Verification command:**
+
+```
+git grep -n "@supabase/supabase-js" -- . ':!pnpm-lock.yaml' ':!docs' ':!.superpowers'
+grep -rn "SUPABASE" packages/api/src --include='*.ts'
+```
