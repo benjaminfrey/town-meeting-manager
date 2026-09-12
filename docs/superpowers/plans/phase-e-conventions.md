@@ -3819,6 +3819,23 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   fixture with `gen_random_uuid()`. Nothing is broken in production — the seed
   is a development artefact — but "run the app against the seed" has been
   impossible since the first `z.string().uuid()` landed, and nobody had tried.
+  **FIXED in Task 7's fix round**: all 27 offending ids gained a `4` and an `8`
+  in the two positions that matter (`bbbb1111-bbbb-4bbb-8bbb-bbbbbbbbbbbb`),
+  which keeps them mnemonic and keeps them distinct, and `seed.sql`'s header now
+  says why so the shape is not reintroduced. Verified by rebuilding a scratch
+  database with `scripts/build-db-from-repo.sh` (27 tables, 27 enabled, 27
+  forced) and by running every id in the file through the repo's own
+  `z.string().uuid()`: 27 total, 0 invalid.
+
+  **Not fixed, and a different job: the five shipped `permission_template` ids
+  have the same defect and live in a MIGRATION.** `aaaa0001-0000-0000-0000-000000000000`
+  through `aaaa0005-…` (`packages/api/drizzle/0000_baseline.sql`, and the
+  historical `supabase/migrations/20260308000026_seed_permission_templates.sql`)
+  have a version nibble of `0` and a variant nibble of `0`. Those rows exist in
+  every database the repo has ever built, so changing the literal is a data
+  migration with a foreign-key rewrite behind it, not an edit. It matters only
+  where a template id reaches a `z.uuid()` procedure — wave 6 should check the
+  template pickers before assuming it does not.
 
 ---
 
