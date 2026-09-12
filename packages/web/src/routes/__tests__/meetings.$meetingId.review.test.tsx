@@ -754,6 +754,29 @@ describe("PostMeetingReviewPage — minutes generation", () => {
     expect(dialog).toContainElement(alert);
   });
 
+  // Two refusal SITES for ONE write: `generateError` is one piece of state
+  // rendered inside BOTH generation dialogs, and only one of them is open at
+  // a time. A single test on the generate dialog leaves the regenerate
+  // dialog's `role="alert"` unpinned — and branch coverage cannot tell you
+  // so, because React evaluates a closed Radix dialog's children eagerly, so
+  // the `generateError &&` branch reads as HIT without ever rendering.
+  it("renders a regenerate refusal inside the regenerate dialog, and only there", async () => {
+    server.minutesDoc = { id: "md-1", status: "draft" };
+    apiJson.mockRejectedValueOnce(new Error("Regeneration failed"));
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: /regenerate/i }));
+    await user.click(await screen.findByRole("button", { name: /overwrite & regenerate/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Regeneration failed");
+    expect(screen.getByRole("dialog")).toContainElement(alert);
+    // Counted off the DOM, not through the accessibility tree: a duplicate
+    // rendered behind the open dialog would be `aria-hidden` and invisible to
+    // `getAllByRole`.
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+  });
+
   it("posts to the regenerate route from the regenerate dialog", async () => {
     server.minutesDoc = { id: "md-1", status: "draft" };
     const { user } = renderRoute();

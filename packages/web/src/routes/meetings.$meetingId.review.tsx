@@ -249,9 +249,10 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
 
   const boardId = meeting?.board_id ?? "";
 
-  // `enabled: !!boardId` on the three board-scoped reads: every input below
-  // is `z.string().uuid()`, so an empty id is a BAD_REQUEST rather than a
-  // query that quietly returns nothing.
+  // `enabled: !!boardId` on the two board-scoped reads: their input is
+  // `z.string().uuid()`, so an empty id is a BAD_REQUEST rather than a query
+  // that quietly returns nothing. `town.detail` needs no gate — it takes no
+  // input at all and reads `ctx.tenant.townId`.
   const { data: board } = useQuery({
     ...trpc.board.detail.queryOptions({ boardId }),
     enabled: !!boardId,
