@@ -543,6 +543,18 @@ export const meetingRouter = router({
    * `meeting.test.ts`'s "returns the agenda-packet and meeting-notice
    * document columns" for the `typeof`/shape assertion pinning this, the
    * same treatment `scheduled_date` gets above.
+   *
+   * **`adjournment` ADDED in wave 6, Task 4, for a THIRD screen.**
+   * `routes/meetings.$meetingId.review.tsx` renders the "Adjourned by motion
+   * / without objection" badge off `adjournment.method` and hands the whole
+   * object to `buildStructuredMeetingRecord`, the exported meeting record.
+   * Same "add it back the day something does" as the four above. Typed
+   * `unknown`, matching every other `jsonb` column this codebase returns
+   * (`motion.vote_summary`, `executiveSession.post_session_action_motion_ids`):
+   * nothing here validates its shape, and `unknown` is the honest declaration
+   * for a value the database does not constrain. Its five keys and the
+   * `adjourned_by` misattribution they carry are documented on `adjourn`
+   * below — a reader of this column should start there.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
@@ -567,13 +579,14 @@ export const meetingRouter = router({
           agenda_packet_generated_at: string | null;
           meeting_notice_url: string | null;
           meeting_notice_generated_at: string | null;
+          adjournment: unknown;
         }>(
           await tx.execute(sql`
             SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
                    scheduled_time, location, presiding_officer_id, recording_secretary_id,
                    current_agenda_item_id,
                    started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
-                   meeting_notice_url, meeting_notice_generated_at
+                   meeting_notice_url, meeting_notice_generated_at, adjournment
             FROM meeting WHERE id = ${input.meetingId}
           `),
           (message) => new Error(`meeting.detail: ${message}`),

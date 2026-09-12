@@ -445,6 +445,47 @@ describe("meeting.detail", () => {
     });
   });
 
+  // Wave 6, Task 4. `routes/meetings.$meetingId.review.tsx` renders the
+  // "Adjourned by motion / without objection" badge off `adjournment.method`
+  // and hands the whole object to `buildStructuredMeetingRecord`. Two
+  // assertions rather than one: that the column comes back at all, and that
+  // it arrives as a parsed OBJECT rather than the JSON TEXT the screen it
+  // replaces used to receive from PostgREST — the screen's own
+  // `normalizeJsonString` helper branches on exactly that, so which side of
+  // the branch this value lands on is behaviour, not a detail.
+  it("returns the adjournment JSONB, parsed, not as text", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Annual Meeting",
+          scheduledDate: "2026-03-14",
+        });
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const before = await caller.meeting.detail({ meetingId });
+        expect(before.adjournment).toBeNull();
+
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            UPDATE meeting
+            SET adjournment = jsonb_build_object('method', 'motion', 'motion_id', 'm-1')
+            WHERE id = ${meetingId}
+          `);
+        });
+
+        const after = await caller.meeting.detail({ meetingId });
+        expect(typeof after.adjournment).toBe("object");
+        expect(after.adjournment).toMatchObject({ method: "motion", motion_id: "m-1" });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("answers NOT_FOUND for a meeting in another town", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
