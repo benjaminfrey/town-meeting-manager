@@ -6,21 +6,29 @@
  *
  * @see docs/advisory-resolutions/3.5-minutes-approval-workflow-config.md §6.2
  *
- * TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
- * `supabase.from("board").update(...)` — no `requireBoardPermission` /
- * `requireBoardActor` stands between a caller and this board's minutes
- * workflow settings. Recorded rather than fixed in the single fix wave after
- * wave 5's review (finding L8): item 11's completeness sweep reads this file
- * as done because it carries no `TODO(phase-e-wave-*)` marker of its own,
- * which is the exact hole item 11 exists to close.
+ * ~~TODO(phase-e-wave-6): `saveMutation` below is still a raw, unauthorized
+ * `supabase.from("board").update(...)`~~ — closed in wave 6, Task 5.
+ *
+ * The write is `trpc.board.updateMinutesWorkflow` now, guarded by
+ * `requireActor(assertCanUpdateBoard)` before `.input()`. Not `board.update`:
+ * see that new procedure's own doc comment for why a nine-field schema this
+ * editor does not hold was the wrong place to put a five-column save.
+ *
+ * **It also never worked.** The raw update sent `updated_at: new
+ * Date().toISOString()` and `board` has no `updated_at` column (confirmed
+ * against a live database and `0000_baseline.sql`), so PostgREST rejected
+ * every save and `if (error) throw error` turned it into the red "Error
+ * saving" text below. No board-level minutes-workflow setting has ever been
+ * persisted. That text is now a real refusal message via `refusalMessage`
+ * (conventions item 5) rather than a fixed string that could only ever mean
+ * one thing.
  */
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Save, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { refusalMessage, trpc } from "@/lib/trpc";
 import { AUDIO_RETENTION_LABELS, type AudioRetentionPolicy } from "@town-meeting/shared";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,32 +90,40 @@ export function MinutesWorkflowEditor({
 
   const [dirty, setDirty] = useState(false);
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("board")
-        .update({
-          minutes_consent_agenda: consentAgenda,
-          minutes_requires_second: requiresSecond,
-          r4_board_member_default: r4Default,
-          audio_retention_policy_override: overrideRetention ? retentionValue : null,
-          auto_publish_on_approval_override: overrideAutoPublish ? autoPublishValue : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", boardId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.boards.detail(boardId),
-      });
-      // See ArchiveBoardDialog's comment on the matching line: the legacy
-      // key no longer reaches BoardDetailPage's tRPC-backed board.detail
-      // read, so both invalidations run during the transition.
-      void queryClient.invalidateQueries(trpc.board.pathFilter());
-      setDirty(false);
-    },
-  });
+  const saveMutation = useMutation(
+    trpc.board.updateMinutesWorkflow.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.boards.detail(boardId),
+        });
+        // See `ArchiveBoardDialog`'s comment on the matching line: the legacy
+        // `queryKeys.boards.detail` key has no reader left anywhere, and is
+        // kept for `docs/backlog.md` entry 7's batch rather than deleted
+        // piecemeal here.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
+        setDirty(false);
+      },
+    }),
+  );
+
+  const save = () =>
+    saveMutation.mutate({
+      boardId,
+      minutes_consent_agenda: consentAgenda,
+      minutes_requires_second: requiresSecond,
+      r4_board_member_default: r4Default,
+      // The procedure's enum is the `board_audio_retention_policy_override_check`
+      // CHECK constraint's own four values; `RETENTION_OPTIONS` above is the
+      // same list, so the cast names a fact the select box already enforces.
+      audio_retention_policy_override: overrideRetention
+        ? (retentionValue as
+            | "purge_on_approval"
+            | "retain_30_days"
+            | "retain_90_days"
+            | "retain_indefinitely")
+        : null,
+      auto_publish_on_approval_override: overrideAutoPublish ? autoPublishValue : null,
+    });
 
   const markDirty = () => setDirty(true);
 
@@ -269,11 +285,7 @@ export function MinutesWorkflowEditor({
 
         {/* ─── Save ──────────────────────────────────────────── */}
         <div className="flex items-center gap-3 border-t pt-4">
-          <Button
-            size="sm"
-            onClick={() => saveMutation.mutate()}
-            disabled={!dirty || saveMutation.isPending}
-          >
+          <Button size="sm" onClick={save} disabled={!dirty || saveMutation.isPending}>
             {saveMutation.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -282,7 +294,14 @@ export function MinutesWorkflowEditor({
             Save
           </Button>
           {saveMutation.isSuccess && <span className="text-sm text-green-600">Saved</span>}
-          {saveMutation.isError && <span className="text-sm text-red-600">Error saving</span>}
+          {/* A refusal is reachable for the first time (there was no guard
+              before this migration), so the message has to be able to say
+              which failure it was — conventions item 5. */}
+          {saveMutation.isError && (
+            <span role="alert" aria-live="assertive" className="text-sm text-destructive">
+              {refusalMessage(saveMutation.error, "change this board's minutes workflow")}
+            </span>
+          )}
         </div>
       </CardContent>
     </Card>

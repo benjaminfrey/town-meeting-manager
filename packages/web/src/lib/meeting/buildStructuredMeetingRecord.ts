@@ -47,7 +47,16 @@ interface AttendanceInput {
   status: string;
   arrived_at: string | null;
   departed_at: string | null;
-  is_recording_secretary: number;
+  /**
+   * A `boolean`, which is what the column is.
+   *
+   * Declared `number` until Phase E wave 6, Task 4, and compared `=== 1`
+   * below — so `routes/meetings.$meetingId.review.tsx`, this function's only
+   * caller, converted a real boolean to `0`/`1` on the way in. Two wrong
+   * types cancelling is the pair wave 5, Task 5 named as surviving in these
+   * two files; the exported JSON is unchanged either way.
+   */
+  is_recording_secretary: boolean;
 }
 
 interface AgendaItemInput {
@@ -213,7 +222,7 @@ export function buildStructuredMeetingRecord(
         status: att?.status ?? "absent",
         arrived_at: att?.arrived_at ?? null,
         departed_at: att?.departed_at ?? null,
-        is_recording_secretary: att?.is_recording_secretary === 1,
+        is_recording_secretary: att?.is_recording_secretary === true,
       };
     }),
     quorum_status: {

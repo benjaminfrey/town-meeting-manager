@@ -4,6 +4,27 @@
  * Every meeting moves Draft → Noticed → In meeting → Minutes → Published.
  * Showing this (with live counts) is the clearest signal of what the app does.
  * Reused on Home (counts) and on the meeting sub-nav header (current stage).
+ *
+ * ─── A dead status vocabulary, audited rather than missed ────────────────
+ *
+ * `"in_progress"` (the `meeting` stage) and `"published"` (the `published`
+ * stage) below are not `meeting_status` values: the enum is
+ * `draft, noticed, open, adjourned, minutes_draft, approved, cancelled`
+ * (`0000_baseline.sql`), and `SELECT 'in_progress'::meeting_status` raises
+ * "invalid input value for enum meeting_status" against a live database.
+ * `"published"` is a `minutes_document_status`, borrowed by mistake. Both are
+ * inert — no row has ever matched either — but this is the one file of the
+ * three that carry them where the dead values are user-visible, not merely
+ * unreachable: the `published` stage below renders a "Published" pill no
+ * meeting can ever reach, and `components/meetings/meeting-labels.ts`'s
+ * `MEETING_STATUS_LABELS` has no entry for `in_progress` or for the
+ * `approved`+`published` pair this stage's `statuses` matches on, so a row
+ * that somehow got there would render with no label. `home.tsx` and
+ * `meetings.tsx` both carry the identical two values and both NAME them in a
+ * header comment (wave 6, Task 5) rather than delete them, because the real
+ * fix is a product decision (what should this stage actually show) shared
+ * across all three files, not something to smuggle into a transport task —
+ * see `docs/backlog.md` entry 9 for the retirement condition.
  */
 
 import { cn } from "@/lib/utils";

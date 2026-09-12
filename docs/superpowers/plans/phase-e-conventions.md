@@ -322,7 +322,8 @@ subject-carrying rule like `assertCanUpdateUserAccount`. The FIRST version of th
 `cancel` a local, one-off middleware (`requireCanUpdateMeeting`) for exactly this — but the review
 round that found this item's own count inconsistency also asked why it should stay local: a full
 audit of `rules.ts`'s `BoardScope` rules — **eighteen** at the time, nineteen since wave 4's Task 2
-added `assertCanPublishAgenda`, twenty-nine since wave 5's Task 2 added ten more; quote the grep
+added `assertCanPublishAgenda`, twenty-nine since wave 5's Task 2 added ten more, THIRTY since
+wave 6's Task 1 added `assertCanPublishMinutes`; quote the grep
 below, not any of the three numbers — found
 `assertCanUpdateMeeting` is not alone.
 ~~All but two~~ **All but THREE, as of wave 5** ARE exactly one `assertPermission` call — use
@@ -354,6 +355,16 @@ $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
      # that had no rule at all (executive_session M6, guest_speaker M7,
      # agenda_item_transition M1, future_item_queue M1), the missing
      # vote_record DELETE (M3), and assertCanUpdateAgendaItemProgress
+30   # at f6a7ecf, after wave 6 Task 1 added assertCanPublishMinutes — R5,
+     # publish_approved_minutes, the THIRD consecutive wave to find a defined
+     # code enforced nowhere, and the first whose absence WIDENS rather than
+     # simply leaving a write unguarded: the nearest existing minutes-write
+     # rule is R1, and TEMPLATE_RECORDING_SECRETARY grants R1 without R5 by
+     # design, so migrating publish behind it would have compiled, stayed
+     # green, and handed a recording secretary the public portal. The same
+     # task decided R6 (export_minutes) gets NO rule; the reasoning is beside
+     # rule 13a in rules.ts, so that a fourth sweep finds a decision rather
+     # than re-deriving one.
 ```
 
 `rules.ts`'s own header said **SIXTEEN** from Stage 1 until that commit, three counts out of date —
@@ -691,6 +702,62 @@ field names the untaken branch by line number directly. This costs one extra fla
 already being run and reads output the author already knows how to interpret, without the
 manifest-maintenance or repo-wide-noise costs above.
 
+**Caveat, found in wave 6 Task 4's fix round, and it is scoped rather than general: branch coverage
+only names a refusal unpinned when the conditional sits behind a MOUNT GUARD.** The worked example
+above (`AgendaSection.tsx:167`, `{confirmDelete && (<AlertDialog …>`) is a mount guard — the whole
+dialog, refusal included, is absent from the tree until `confirmDelete` is true — so `BRDA:178,6,1,0`
+correctly named it unpinned. `routes/meetings.$meetingId.review.tsx`'s two minutes-generation dialogs
+are NOT mount-guarded: both `<Dialog open={...}>` components are always in the tree, and Radix
+suppresses the closed one's rendering downstream (`display: none` under the hood), which React does
+not treat as "unevaluated" — a closed dialog's children, including a `{generateError && <p
+role="alert">…}` inside it, are evaluated on every render regardless of `open`. Measured directly:
+against this screen's un-mounted-guard code plus the pre-fix test file (`75affd1`, 34 tests, no test
+that ever exercises the regenerate dialog's error state), `--coverage.include` on the file reports
+`BRDA:1119,104,0,102` `BRDA:1119,104,1,1` — the truthy (refusal) arm reads HIT once, with nothing
+ever rendered to a user, because the dialog mounts (with `generateError` null) whenever a nearby test
+opens it. Wrapping that same dialog in a mount guard (`{regenerateDialogOpen && (<Dialog …>`) and
+re-running one isolated, unrelated test (`-t "renders the meeting header…"`, which never opens the
+regenerate dialog at all) reports `BRDA:1120,105,0,0` `BRDA:1120,105,1,0` for the same conditional —
+both arms genuinely zero, because the guard keeps the dialog out of the tree entirely when it is
+closed. Same conditional, same missing test coverage; the mount guard is what makes the branch
+report the truth. **What to do instead when a refusal conditional sits inside an always-mounted
+`<Dialog open={...}>` (or anything else hidden only downstream — `hidden`, `aria-hidden`, CSS,
+Radix's own portal suppression): do not trust a nonzero hit count on that branch as proof the refusal
+was reached. Reason about reachability directly — is there a test that actually opens/reveals this
+specific container and asserts on `role="alert"` (or whatever the refusal renders) from inside it —
+and write that test if it does not exist, independent of what the branch counter says.** This matters
+because item 2's coverage procedure was adopted in wave 4 specifically to catch unpinned refusal
+branches, over a CI gate; a false positive on exactly the case it was chosen for is worse than the
+procedure not existing, since it reads as confirmation rather than as silence.
+
+**A shared error `useState` rendered into more than one dialog is a defect shape in itself, not
+just a coverage gap.** Two confirmed instances, both wave 6 Task 3/4, both the identical shape:
+`meetings.$meetingId.minutes.tsx`'s `actionError` fed four render sites (the outer paragraph plus
+the submit/publish/return dialogs) and `meetings.$meetingId.review.tsx`'s `generateError` fed two
+(the generate and regenerate dialogs). In both, the state was cleared only by each dialog's own
+Cancel button — never by opening a DIFFERENT dialog, and never by Radix's own close paths (Escape,
+an outside click) on the SAME one. A refusal from one write survives to be shown, accurately
+worded, inside a different action's dialog — worse than useless, because it reads as a refusal of
+the action the user is currently attempting. `minutes.tsx` was fixed first (fix round 1, fresh
+`onOpenChange` handlers that clear the shared error whenever a dialog OPENS, wired to both the
+trigger buttons and each `Dialog`/`AlertDialog`'s own `onOpenChange`); `review.tsx` had the
+identical shape, unnoticed by an implementer and a reviewer who had both just read that fix,
+until a coverage dispute forced a second look at the surrounding lines (task-4 fix round 2). Fixed
+the same way there. **Neither instance was split into per-dialog state** — clearing on open is
+still required per dialog even with separate variables (reopening the SAME dialog after a failed
+attempt must not show the stale message either), and once that clear is in place a shared error
+can no longer leak across dialogs, so a second variable would add nothing a case depends on.
+**Check for this shape whenever a screen has more than one dialog and one `useState` error feeds
+more than one `role="alert"` site** — grep the file for `useState<string | null>` (or similar)
+names ending in `Error`, then count how many `role="alert"` blocks read that same name. **Not
+proposed as a mechanical gate**: the two known instances are both files this document already
+names as reviewed line by line, so the population it would run against is small, and a grep for
+"one error name feeding N alert blocks" would also flag the ordinary, correct case of one error
+rendered at one site read by two tests (no leak at all) — false-positive rate not measured because
+no third instance has yet turned up to justify building it; if one does, measure the grep's hit
+rate against every dialog-bearing screen in the phase before treating it as a gate, the same way
+the branch-coverage-threshold idea above was measured and rejected rather than assumed.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`
@@ -990,7 +1057,7 @@ re-recorded rather than carried forward silently a second wave.**
    below is now **three** of seven with no override-specific pin (`reorder`, `delete`,
    `instantiateFromTemplate`), not five.
    ```
-   $ grep -cE '^\s+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
+   $ grep -cE '^[[:space:]]+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
    7   # at fb3a5cd
    5   # at 18bad5f
    ```
@@ -1206,6 +1273,27 @@ No regex needed widening: five new router files were picked up with no change to
 `AWAITING_PUBLISH` went 11 → 0, and the inventory gained one assertion it needs now that the ledger
 is empty — that `publishes` is really being read off the source for its two named canaries, since a
 `publishes` stuck at `true` would make an empty-ledger check green for the wrong reason.
+
+**Correction (wave 6, Task 2, fix round 1) — the per-file guard does not reach every router file,
+only every router file that writes a live-meeting table.** A wave-6 brief asserted the new
+`future-item.ts` "must be reachable by the publish inventory's per-file canary, which fails by file
+name if a router becomes unscannable," and directed re-indenting `byMeeting:` from two spaces to
+four to demonstrate it, exactly as done to `guest-speaker.ts` above. It stayed green — all 5 tests
+in `router-wiring.test.ts`. The scan itself explains why: `future_item_queue` is not one of the
+eight `LIVE_MEETING_TOPICS`, and the per-file loop skips any file with no live-meeting write before
+it ever asks whether the file is scannable —
+
+```
+if (liveTablesWrittenIn(source).length === 0) continue; // this file touches no live table
+```
+
+(`trpc/__tests__/router-wiring.test.ts:552`). So the guard's own name — "every router file … is
+represented in the scan" — is true only of the subset that writes one of the eight tables; a
+read-only router, or one scoped to a different table entirely, can go unscannable with nothing
+failing. Whether that scope is the right one is a separate question (a router with nothing to
+publish has nothing the canary needs to protect), but the boundary itself is real and worth stating
+plainly next to the canary's own description, since "it protects every router" is exactly the
+over-reading its name invites.
 
 **4. The inventory is a boolean per mutation, so a COMPOSITE needs a topic-set test of its own.**
 The check asks "does this mutation call `publishRealtimeEvent` at all". Three of this wave's
@@ -1593,6 +1681,28 @@ a foreign key whose target table is tenant-scoped. Verify the gap the way it was
 the existence check, attempt the cross-tenant write, and confirm it is refused (NOT_FOUND) rather
 than silently succeeding.
 
+**Scope correction (wave 6, Task 1, reproduced against a real database): this hazard is INSERT-side
+specifically, not a general property of writes on an RLS-covered table.** Every one of the nine
+reproductions above is an INSERT taking a foreign key from client input. Probed directly, tenant
+context town A targeting town B's `minutes_document`:
+
+```
+UPDATE minutes_document SET status = 'published' WHERE id = <town B's document>  →  0 rows, no write
+SELECT the same row as town A                                                    →  [] (invisible)
+the row read back as town B, unchanged                                           →  still 'approved'
+INSERT carrying an FK to town B's invisible row (the shape above)                →  SUCCEEDED, silently
+```
+
+`FOR ALL USING (town_id = get_current_town_id())` covers `UPDATE` the same way it covers `SELECT` —
+there is no constraint-enforcement bypass on the write path itself, only on the FK's target lookup.
+So an existence check guarding an UPDATE's target row buys the **honest `NOT_FOUND`**, not the
+prevention of a write that RLS was already stopping: removing `resolveMinutesDocumentScope`'s
+`if (!row)` still turns every cross-tenant test on `minutesDocument`'s six status transitions red,
+but the four board-scoped ones answer FORBIDDEN (the mismatch defence comparing against an empty
+board id) and the two administrator-gated ones, with no mismatch defence behind them, report success
+or `INTERNAL_SERVER_ERROR` for a transition that changed nothing — never a cross-tenant write. Do
+not carry "any unguarded cross-tenant write succeeds silently" into a brief; say INSERT.
+
 ---
 
 ## 4. The client call shape
@@ -1968,7 +2078,64 @@ round:** `AddBoardDialog.tsx`, pinned in `__tests__/AddBoardDialog.test.tsx`, an
 — both had shipped their `pathFilter()` call without the pin and were caught in review; both
 verified the identical way. Six writers carry the pin as of `2d78964`. That roster is what goes
 stale first, not the pin discipline itself — re-run `grep -rl "\.pathFilter()" packages/web/src`
-rather than trust the count above staying current.
+rather than trust the count above staying current. (It answers **113** at `43c2963`, wave 6 Task 5's
+close, against 6 when the roster above was written — which is the whole argument for re-running it.)
+
+**Wave 6, Task 5 found a `pathFilter()` obligation that no grep of any kind could have surfaced, and
+this is the shape to watch for.** Migrating a READ can create a new obligation for a writer in a
+different file, with no legacy key involved on either side. `EditBoardDialog`'s "does this board have
+meetings" check moved from a raw `meeting` head-count onto `trpc.board.stats` — a procedure on a
+DIFFERENT router from the table the count reads. `CreateMeetingDialog` was already invalidating
+`trpc.meeting.pathFilter()`, correctly, and that call does not match a `board.*` key, so creating a
+meeting silently stopped re-enabling the name field for the full 60s `staleTime`. Item 7's prescribed
+procedure ("grep `queryKeys.<entity>`, check every `invalidateQueries` hit") finds this only by
+accident, because the legacy key it points at (`queryKeys.meetings.byBoard`) names `meeting`, not
+`board`; `cache-key-parity.test.ts` cannot see it either, since the file DOES call a `pathFilter()`
+and the check is per-file-and-namespace, not per-procedure. This is the read-side twin of backlog
+entry 8's write-side blind spot. **The question to ask is not "which legacy key did this abandon"
+but "which ROUTER does the procedure live on, and does every writer that changes what it returns
+invalidate THAT router" — and those are different answers whenever a procedure aggregates across
+tables** (`board.stats`, `board.list`'s `active_member_count`, `boardMember.memberCount`). This is
+NOT only a question to ask at the moment you migrate a read: `EditBoardDialog`'s case above was
+triggered by a read migration, but the next occurrence, one commit later, was standing writer debt
+with no migration on either side — widen the framing accordingly. Found by hand, fixed with its pin
+in the same commit.
+
+**Chasing the same shape one step further (wave 6, Task 5, `dc1b035`) found five more writers, none
+of them touched by a read migration at all.** `board.stats.active_members`
+(`boards.$boardId.tsx`'s Overview) and `board.list.active_member_count` (`/boards`) are the
+identical cross-router aggregate over `board_member` rows, and had been since `board.stats` and
+`board.list` first shipped — `boards.$boardId.tsx` moved to `board.stats` in unit 0, `/boards` to
+`board.list` in wave 2, both waves before this one. Five mutations changed what those two columns
+report and invalidated `trpc.boardMember.pathFilter()` instead of `trpc.board.pathFilter()`:
+`AddMemberDialog`'s `boardMember.addBoardMember`, `MemberArchiveDialog`'s
+`boardMember.archiveMembership`, and `MemberTransitionDialog`'s `archiveMembership`, `addToBoard`
+and `convertToStaff`. Seating or retiring a member left the Overview's member count and `/boards`'s
+"N / M" cell stale for up to the full 60s `staleTime`, on every affected screen, since before wave
+6 started. Found by hand (the same "which router does the aggregate live on" question, asked of
+`boardMember`'s own writers rather than at a read's call site), fixed with three pins in the same
+commit, each verified by deletion.
+
+**The sweep this shape calls for is now complete for the whole API, not partial — verified by
+scanning every `count(*)` on every router, not only `board`'s:**
+
+```
+$ grep -rn "count(\*)" packages/api/src/trpc/routers/*.ts
+```
+
+Five procedures aggregate across a foreign-key boundary in some sense, but only three of them are
+cross-ROUTER: `board.stats` (counts `board_member` and `meeting`, on the `board` router) and
+`board.list`'s `active_member_count` (counts `board_member`, also on `board`) — both closed above.
+The other four are same-noun: `agendaTemplate.countForBoard` counts `agenda_template` on the
+`agendaTemplate` router, `agendaItem.countByMeeting` counts `agenda_item` on `agendaItem`,
+`meetingAttendance.countByMeeting` counts `meeting_attendance` on `meetingAttendance`, and
+`boardMember.memberCount` counts `board_member` on `boardMember` itself — each router matches the
+table it counts, so `pathFilter()` on that router covers its own aggregate by construction, and the
+cross-router shape cannot occur there. There is no sixth router with a `count(*)` this scan missed
+(19 router files, this grep's the whole list). So the hazard this item names is real and was worth
+naming, but it does not generalize past the three `board.ts` procedures already fixed — the next
+wave should not spend a task re-deriving that, only re-run the grep above if a new cross-table
+`count(*)` is added to any router.
 
 **Write the pin the same commit a writer's `pathFilter()` call lands, not on a later wave.** These
 six calls already exist and already serve an already-migrated screen; deferring the pin to
@@ -2187,9 +2354,38 @@ grep that isolates real markers — anchored so the comment's own first word mus
 sentence mentioning it — answers 8:
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 8
 ```
+
+**Written with `[[:space:]]`, not `\s` — every quoted grep in this document that anchors on
+leading whitespace now is, and this is why.** `\s` is a GNU/PCRE extension; POSIX ERE (what `git
+grep -E` implements) does not recognise it as a shorthand class, so it matches the literal
+characters `s` or backslash-then-`s` depending on the tool, which in practice means it matches
+nothing useful for this pattern. Measured on this exact command, at this exact commit:
+
+```
+$ grep -rnE   "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l    # GNU grep, \s
+8
+$ git grep -nE "^\s*(//|\*) TODO\(phase-e-wave" -- packages/web/src | wc -l # git grep, \s
+1
+$ git grep -nE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" -- packages/web/src | wc -l
+8
+```
+
+`git grep -E` silently undercounts by 8× — a reader who runs the `\s` form through `git grep`
+(the more common way to reproduce a count in this repo) would conclude the phase is nearly done
+when 8 markers remain, not 1. This single character has now produced **nine** wrong counts in this
+project's history (the eight the `TODO(phase-e-wave` grep itself produced before this fix, plus the
+board-scoped-guard census below, which carried the identical `\s` and was never itself run through
+`git grep` to notice). `[[:space:]]` is honoured by both POSIX ERE and GNU/PCRE, answers
+identically under `grep -E` and `git grep -E`, and is what every quoted grep in this document uses
+from this point on — including the two `requireBoardPermission`/`requireBoardActor` census
+commands later in this item, which carried the same `\s` and are fixed the same way. wave 5, Task 7
+had already caught this once, locally, for one grep (the `AppShell.tsx` re-run below already notes
+it) but the fix was never propagated to the canonical pattern this item opens with, or to the other
+`\s`-anchored greps in the document — exactly the kind of drift item 14 exists to catch, found here
+by re-deriving the count rather than trusting the prose.
 
 **Stale as of wave 2's own final fix round — corrected here, and timestamped the way item 9
 timestamps its greps (item 9: "current as of `2d78964`"); this enumeration read as current and was
@@ -2201,7 +2397,7 @@ written), `StaffAccountFlow.tsx`'s `board.listByTown` marker closed the same way
 so). Re-run at HEAD, this fix round's own commit (`bb60e295b8ebc81e26a03206dcac6aaa6548c8ed`):
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 6
 ```
 
@@ -2221,7 +2417,7 @@ correct as of `bb60e295` but the review's own new markers moved it before this p
 updated — the identical drift item 14 exists to catch, one wave later.**
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 22
 ```
 
@@ -2244,7 +2440,7 @@ paragraph stopped at Task 1's fix round and was never updated across Task 2, eve
 own progress note already recorded the numbers.**
 
 ```
-$ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+$ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
 11   # at c34b987 — Task 2 closed CancelMeetingDialog.tsx's and meetings.tsx's raw-write
      # authorization holes (both markers named `updateStatus`/the kanban gap above)
 20   # at 1b1d635 — Task 2's fix round re-tagged four writers newly implicated by adding
@@ -2278,7 +2474,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # round re-tagged.
 13   # at the end of Phase E wave 4, Task 0 — down from 18, and now with
      # ZERO `phase-e-wave-2` markers left in the tree
-     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-2\)" packages/web/src`
+     # (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-2\)" packages/web/src`
      # answers empty). Task 0 closed all four of wave 2's leftover markers —
      # `boards.$boardId.tsx` (`town.detail`), `people.tsx`
      # (`boardMember.listByTown`), `AddPersonDialog.tsx` (`invitation.insert`,
@@ -2311,7 +2507,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # item exists to close, found by a task brief rather than by the grep.
  6   # at cd10b54, the close of Phase E wave 4, Task 4 — DOWN six from
      # Task 3's 12, and now with ZERO `phase-e-wave-4` markers left in the
-     # tree (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-4\)" packages/web/src`
+     # tree (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-4\)" packages/web/src`
      # answers empty; the 6 that remain are all wave-5/6). The six removed
      # are exactly the six on this task's own two files:
      # `CreateMeetingDialog.tsx` carried FOUR (a header line plus three
@@ -2346,7 +2542,7 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # meetings.$meetingId.minutes.tsx (all wave-6).
  4   # at 01ff3ab, the close of Phase E wave 5, Task 5 — DOWN two, and now
      # with ZERO `phase-e-wave-5` markers left in the tree
-     # (`grep -rnE "^\s*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
+     # (`grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave-5\)" packages/web/src`
      # answers empty; all 4 that remain are wave-6). The two removed are
      # exactly the two this task's own files carried,
      # `MeetingStartFlow.tsx` and `meetings.$meetingId.live.tsx`, and both
@@ -2388,7 +2584,186 @@ $ grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Re-derived against `git archive 670d9df`, not against the working tree
      # and not from any task report — which matters this time, because this
      # task's Part 1 temporarily edited two tracked files and restored them.
+ 0   # at 43c2963, the close of Phase E wave 6, Task 5 — ZERO, for the first
+     # time since this countdown was written. Re-derived, not carried over:
+     # the wave's base (`e2cae4a`) had SEVEN lines, not the five this log
+     # listed at 670d9df — the three board writers below acquired theirs in
+     # the fix round after wave 5's review (finding L8), after this entry was
+     # written, and `meetings.tsx` carries two lines for one gap:
+     #   $ git grep -nE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" e2cae4a -- packages/web/src
+     #   ArchiveBoardDialog.tsx  MinutesWorkflowEditor.tsx
+     #   NoticeTemplateEditor.tsx  AppShell.tsx  home.tsx  meetings.tsx x2
+     # All seven are Task 5's own files and all seven are discharged. Each is
+     # struck through in place (`~~TODO(...)~~ — closed in wave 6, Task 5`)
+     # rather than deleted; the anchored grep correctly does not count a
+     # `~~TODO(` line, which is the distinction the anchor exists to make (see
+     # the 01ff3ab entry above). No marker was ADDED: all twelve of Task 5's
+     # files reach zero raw Supabase calls.
+     #
+     # **Zero markers is NOT the definition of done, and this countdown is
+     # the wrong measure to celebrate it with** — Task 0 of this wave found
+     # seven files with real, unmarked Supabase code that the countdown was
+     # structurally incapable of seeing, and Task 5 closed exactly those
+     # seven (plus five more). The measure that matters is the IMPORT grep
+     # below:
+     #   $ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' \
+     #       -- packages/web/src | wc -l   -> 2  (17 at e5250ad)
+     # and the two are `lib/supabase.ts` and `hooks/useSupabase.ts`
+     # themselves, which Task 6 deletes. The other two greps this item
+     # tracks, for continuity:
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l      -> 5   (14 at 670d9df)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 11  (23 then)
+     # Both residues are comment-only prose plus the two modules — the
+     # comment-versus-code hazard this item names two paragraphs down, now
+     # the ONLY thing either mention grep is still counting.
+ 0   # at be61cfa, the close of Phase E wave 6, Task 7 — the LAST entry in this
+     # countdown, and the phase ends here. Re-derived against
+     # `git archive be61cfa`, not against the working tree and not from any
+     # task report, because this task ran mutation sweeps that edited eleven
+     # tracked files and restored them. Unchanged at zero since 43c2963; Task
+     # 6 added no marker and removed none.
+     #
+     # The mention/marker gap this item spent six waves describing is now the
+     # WHOLE of the residue, and it is worth quoting once at the end rather
+     # than summarising, because it is the clearest specimen the phase
+     # produced:
+     #   $ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
+     #   0
+     #   $ grep -rn "TODO(phase-e-wave" packages/web/src | wc -l
+     #   25
+     # Twenty-five lines mention a marker; ZERO lines are one. Every one of the
+     # 25 is prose — a struck-through `~~TODO(`, a header narrating a closed
+     # gap, a test comment citing the marker it discharged. An unanchored count
+     # would report this finished phase as having twenty-five open gaps.
+     # The other three greps this item tracks, at the same commit:
+     #   $ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' \
+     #       -- packages/web/src | wc -l                       -> 0  (2 at 43c2963, 17 at e5250ad)
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l                      -> 4  (5 at 43c2963)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 10 (11 then)
+     # The import grep — the only one that answers "does anything still depend
+     # on the client" — is the one that reached zero. The other two are
+     # counting ten files' worth of comments: `test/render.ts`,
+     # `MeetingStartFlow.tsx`, `AddPersonDialog.tsx`, `EditPersonDialog.tsx`,
+     # `useQuorumCheck.ts`, `CreateMeetingDialog.tsx`, `lib/trpc.ts`,
+     # `meetings.$meetingId.live.tsx`, `meetings.$meetingId.agenda.tsx`,
+     # `meetings.$meetingId.minutes.tsx`. None of them imports anything.
 ```
+
+**Wave 6, Task 0 — the marker grep is not the measure that matters, and re-deriving the "23 files"
+headline by hand found the sweep is wrong in three different directions at once.** The task's own
+brief quoted item 11's SECOND grep (the "honest denominator," `lib/supabase\|useSupabase`) at **23**
+remaining files. Re-run at HEAD (`e5250ad`):
+
+```
+$ grep -rl "lib/supabase\|useSupabase" packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+23
+```
+
+Confirmed. But 23 answers "how many files mention the string," which is not "how many files still
+depend on the client," and not "how many gaps item 11's own token sweep is silently missing" either
+— three different questions this one number gets asked to answer.
+
+1. **One of the 23 is comment-only prose in a file the anchored TOKEN grep never claims to cover:**
+   `src/test/render.ts` matches only because its own doc comment quotes
+   `vi.mock("@/lib/supabase")` as an example for other files to copy (line 142) — it imports nothing
+   from either module itself.
+2. **Six more are comment-only prose in files that HAVE been migrated**, each carrying a header that
+   narrates the fact rather than a live import: `MeetingStartFlow.tsx` ("this file's writes are all
+   still raw Supabase … this" — struck through, in its own header), `CreateMeetingDialog.tsx`
+   ("`lib/supabase.ts`'s own header"), `useQuorumCheck.ts` ("migrated off `@/lib/supabase` onto
+   tRPC"), `lib/trpc.ts` ("`lib/supabase.ts` is being removed"),
+   `routes/meetings.$meetingId.agenda.tsx` ("`@/lib/supabase` is gone from it"), and
+   `routes/meetings.$meetingId.live.tsx` ("`useSupabase`, and the adjournment write's total
+   absence…"). Verified individually, not assumed from the grep alone: each file's only match is a
+   prose sentence, confirmed by reading it. So 22 of the 23 have a live dependency; 16 do, once the
+   six migrated headers are also excluded.
+3. **Four of the remaining sixteen carry no `TODO(phase-e-wave` token at all, despite live, unwrapped
+   Supabase code — the exact hole this item exists to close, still open at HEAD:**
+   `CommandPalette.tsx` and `MeetingSubnavHeader.tsx` (`import { supabase } from "@/lib/supabase"`,
+   live reads, no marker, no header comment mentioning Phase E at all), `EditBoardDialog.tsx` (a raw
+   `count` query against `meeting` at its own line 82, sitting in a file whose header otherwise
+   narrates a `board.update` migration as if the file were fully converted), and
+   `boards.$boardId.templates.$templateId.edit.tsx` (a raw `board` name lookup at its own line 73,
+   in the exact file this item's own log above records as "**closed** in Phase E wave 4, Task 0" —
+   that entry closed the template read/write pair and never re-checked the file for anything else).
+   Anchored `grep -n "TODO(phase-e-wave" <file>` answers empty for all four, confirmed directly, not
+   inferred from the countdown.
+
+   **Re-deriving this by hand past the brief's own four found three more of the identical shape it
+   did not name**, because the brief's own diagnosis is limited to the files it happened to sample:
+   `AddPersonDialog.tsx` and `EditPersonDialog.tsx` each carry a live raw `person` table read (an
+   email-uniqueness check, `.eq("email", email).limit(1)`) behind a `useSupabase()` call with no
+   marker, sitting in files whose own header comments narrate their WRITES as migrated
+   (`person.insert`/`person.insertStaffAccount`/`invitation.insert` for the first,
+   `person.update` for the second) and say nothing about the read that remains; and
+   `SourceDataPanel.tsx` is unwrapped raw Supabase for every one of its reads, with no header comment
+   at all — **this item's own section mentions the file zero times, not once as first written here.**
+   (`git show e5250ad:docs/superpowers/plans/phase-e-conventions.md | grep -n SourceDataPanel` finds
+   two pre-task mentions, and both sit outside item 11 entirely: one in item 14's wave-5 close-out
+   history, one in the Known-gaps list below — neither is "an unrelated context within item 11,"
+   because neither is within item 11 at all.) So it was never named as an unmigrated screen anywhere
+   in this document, in or out of item 11, until now. **The corrected count is seven files, not four**,
+   all confirmed by reading the file
+   directly rather than trusted from either number: `CommandPalette.tsx`, `MeetingSubnavHeader.tsx`,
+   `EditBoardDialog.tsx`, `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+   `EditPersonDialog.tsx`, `SourceDataPanel.tsx`. An eighth candidate,
+   `routes/meetings.$meetingId.review.tsx`, carries the same no-token, all-raw shape but is not
+   counted with the other seven, because it is not silent the way they are — this document names it
+   as a still-raw, wave-6-owned screen in at least four other places (item 7's "the legacy line
+   stays," item 8's `pathfilter-pin-coverage` discussion, and two of Task 3's own open-items lists) —
+   so a reader of this DOCUMENT, as opposed to a reader of only its token countdown, already knows.
+   The other seven have no such standing mention anywhere in this file; the token sweep is the only
+   place a reader would look, and it says nothing.
+
+   **All seven are closed, and so is the eighth — re-checked at the phase's close-out (wave 6,
+   Task 7) against `git archive be61cfa`, file by file rather than by count.** Task 3 took
+   `SourceDataPanel.tsx`; Task 4 took `meetings.$meetingId.review.tsx`; Task 5 took the other six
+   (`CommandPalette.tsx`, `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`,
+   `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+   `EditPersonDialog.tsx`). The paragraphs above keep the present tense they were written in
+   because they are anchored to `e5250ad` and are the record of HOW the hole was found; read them
+   as history, not as status. **The finding that outlives them is the method, not the list:** seven
+   files with live, unwrapped Supabase code hid in the gap between a mention grep and a token grep
+   for five waves, and nothing but checking the two against each other would have shown them.
+
+**Why a mention grep and an import grep disagree, and why that gap is exactly where the four (now
+seven) unmarked files hide.** `grep -rl "lib/supabase\|useSupabase"` matches the STRING anywhere in
+a file — a doc comment quoting the module name, a header narrating a past migration, a real `import`
+— and cannot distinguish them; that is what items 1 and 14 call the comment-versus-code hazard for
+every other grep in this document, and it applies here with the same force. **The measure that
+answers "does this file still depend on the client" is an import grep**, because an import is the
+one thing the phase's own definition of done (`lib/supabase.ts` deleted turns any remaining
+dependency into a build error) actually cares about:
+
+```
+$ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' -- packages/web/src | wc -l
+17
+```
+
+17, not 23 — 16 real consumers plus `lib/supabase.ts` itself (which necessarily imports
+`@supabase/supabase-js`; it is the module the other 16 import FROM, not a 17th dependent). Of those
+16, this item's anchored token grep already knows about 7 (the files carrying a live
+`TODO(phase-e-wave` marker: `ArchiveBoardDialog.tsx`, `MinutesWorkflowEditor.tsx`,
+`NoticeTemplateEditor.tsx`, `AppShell.tsx`, `home.tsx`, `meetings.$meetingId.minutes.tsx`,
+`meetings.tsx`) and one more this document names in prose elsewhere without a token
+(`meetings.$meetingId.review.tsx`). **The remaining eight account for the rest: the seven real,
+silent gaps this task found, plus `useSupabase.ts` itself**, which is infrastructure rather than a
+screen and needs no marker of its own, the same as `lib/supabase.ts`. An import grep cannot tell you
+WHICH lines are unmigrated inside a partially-converted file (that is what the token exists for,
+scoped per-gap rather than per-file); a mention grep cannot tell you whether a file has any live
+dependency at all. Between them, an import grep is the correct DENOMINATOR (how many files still
+truly depend on the client) and the token grep is the correct NUMERATOR only for the files that
+bothered to mark themselves — which is exactly why a file with real, unmarked code invisibly drops
+out of the numerator while staying in a correct denominator, and why checking the two against each
+other is what surfaces it. None of the seven newly-named files had a token to begin with, so none of
+item 11's own countdown numbers above are wrong on their own terms — the countdown was always
+counting real markers correctly; it was never capable of noticing a file with no marker to count,
+which is the same class of blind spot item 14 names for prose claims and this item now names for
+itself.
 
 Whether the count is 22, 20, 17, 13, or something else by the time this is read depends entirely on
 what closed since — quote the grep, not the number, still the rule four tasks later.
@@ -2402,10 +2777,17 @@ paragraph); tracking it per-task is for visibility, not for proving progress eve
 The second is the honest denominator: `useSupabase()` is a one-line re-export of the same client,
 and a file reaching it that way is no more migrated than one importing directly.
 
-Track `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at
+~~Track `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at
 the same moment `packages/web/src/lib/supabase.ts` is deleted, which is the phase's real
 definition of done — with the client gone, a screen that still depends on it is a build error
-rather than a silent zero-row read.
+rather than a silent zero-row read.~~ — **falsified by the phase's own close-out, and it is this
+item's opening sentence that gets it wrong, in the document that spends four pages warning about
+exactly this.** That UNANCHORED grep answers **25** at `be61cfa`, with `lib/supabase.ts` deleted,
+every marker discharged and the import grep at zero. All 25 are prose. Track the ANCHORED form
+(`^[[:space:]]*(//|\*) TODO\(phase-e-wave`) for markers, and the IMPORT grep for the definition of
+done; the unanchored form is a mention count and was never a countdown. And the deletion is a
+ratchet and a backstop, not a sweep — see the design spec's own amended "Definition of done", and
+item 13 for the boundary it does not cover (`vi.mock`).
 
 ---
 
@@ -2526,6 +2908,22 @@ before the kill, so the count itself is not diagnostic — the query is. Every f
 `turbo run test`, in wave 6 and beyond, leaks the same way; check `pg_database`, not the backend
 count, every time.
 
+**A turbo test run can go red at exit 1 while every assertion in it passed, and this is a third
+hazard of exactly this species, not a wave-6 anecdote either.** Wave 6, Task 5 shipped
+`ArchiveBoardDialog.handleArchive` and `EditBoardDialog.handleSave` calling `await mutateAsync(...)`
+inside a handler the button invoked as `void handler()` — the returned promise was discarded, so a
+refusal (or any rejection) inside either handler became an unhandled promise rejection. `npx vitest
+run` on the single file prints "2 errors" underneath its own green `Tests … passed` summary line —
+easy to miss, since the line a developer's eye goes to first is still green. `npx turbo run test`,
+run across the whole monorepo the way the gates require, reports the same thing as a **failed
+task** at process exit 1, with `Tasks: N successful, M total` naming one fewer success than the
+task count — the number the CI-order gate list singles out for exactly this reason. Grepping a
+turbo run's output for `Tests |Test Files ` and calling that green is not a sufficient check: both
+of those lines can read entirely clean while the task itself exited red. Read the `Tasks:` line, or
+the process exit code, not only the per-file test counts — a third mechanism, alongside the leaked
+scratch database just above, that produces the same "the summary you'd normally check reads green
+and the run is not" shape for a different underlying reason.
+
 **A retry policy is a harness hazard too, not only a mock — it can mask a real defect as
 completely as any of the above, with no test and no mock involved at all.** Wave 5, Task 7 found
 Fastify's default `maxParamLength` (100) 404ing the live meeting screen's six-procedure
@@ -2547,6 +2945,57 @@ fix is the same discipline item 13 already asks for: drive the real transport di
 Fastify server, a real batched `fetch`, as `http-batch.test.ts` and `sse-bounds.test.ts` both do),
 because a retry-smoothed browser check and a stubbed-transport unit test fail to see this defect
 for the same underlying reason — neither one drives the real request shape past the real server.
+
+**A `vi.mock` specifier is a string nothing resolves — a fifth hazard of the same species, and the
+one that sits closest to this phase's own definition of done.** An `import` is covered TWICE: `tsc`
+answers `TS2307` for a path that does not exist, and vitest's transform answers "Failed to resolve
+import … Does the file exist?". A `vi.mock` specifier is covered **zero** times. Measured at wave 6,
+Task 7 on a throwaway test file, all three cases in the same package:
+
+```
+vi.mock("./does-not-exist-at-all", () => ({ … }));   →  1 passed   (silent)
+vi.mock("./does-not-exist-at-all");                  →  1 passed   (silent)
+import { thing } from "./does-not-exist-at-all";     →  vitest: Failed to resolve import
+                                                        tsc:    TS2307 Cannot find module
+```
+
+**Both forms are silent, and the second is the one that matters** — "just drop the factory and
+vitest will resolve it for real" is the obvious mitigation and it does not work. Wave 6, Task 6
+measured the factory form on the two DELETED Supabase modules (three test files went on mocking
+them, 693 tests green); the factory-less form was measured here, which closes the mitigation off.
+So the phase's deletion step proves the absence of **imports**, not the absence of **dependence** —
+recorded in the design spec's own "Definition of done" as well, because that is where a reader looks
+for the guarantee.
+
+A mock can also be silent because its subject **never had a runtime existence**, not only because it
+was deleted. The in-tree instance, found by resolving all 124 comment-stripped `vi.mock` specifiers
+across 42 files:
+
+```
+packages/web/src/routes/meetings.$meetingId.live.test.tsx:73   (at be61cfa, now removed)
+  vi.mock("./+types/meetings.$meetingId.live", () => ({}));
+```
+
+React Router generates that module under `.react-router/types/`, reachable only through tsconfig's
+`rootDirs` — a TYPE-level mechanism vitest does not honour — and the route consumes it as
+`import type`, so nothing survives to runtime to be mocked. Inert and harmless. **Deleted rather
+than annotated in place**, with a comment at the site saying why there is none and not to re-add it:
+an inert mock that looks load-bearing is a line the next author copies into a new route test, and
+the comment is the only thing that stops that. Fourteen non-test modules under `packages/web/src`
+import a `./+types/…` sibling (`grep -rln 'from "\./+types/' src --include='*.tsx' --include='*.ts' | grep -v '\.test\.'`)
+and this was the only mock of one anywhere in the tree, which is what makes deletion the consistent
+choice rather than a local preference.
+
+**The check is a resolver sweep, not a grep.** Extract every `vi.mock` specifier from
+comment-stripped sources (multiline-safe — `vi.mock(\n  "…"` is common), resolve `@/` against
+`src/`, `./`/`../` against the file, and bare specifiers through the package's own resolution, then
+report what does not land on a file. `packages/web/src/lib/__tests__/pathfilter-pin-coverage.test.ts`
+already carries `stripComments` and `resolveSpecifier` to copy from. Two false-positive modes to
+expect, both hit on the first run of this sweep: a specifier inside a FIXTURE string literal (that
+check's own `@/components/Widget` fixtures), and a bare workspace package whose `exports` map has no
+`require` condition (`@town-meeting/shared` fails `require.resolve` and resolves fine under
+`import.meta.resolve`) — resolve bare specifiers the way the runtime will, not the way `require`
+would.
 
 ---
 
@@ -2628,6 +3077,13 @@ of this document as well as against the tree — if another section narrates the
 it.** The cheapest form of this is a grep of this file for the symbol a bullet's claim turns on
 (here, `trpc.test.ts`), which would have surfaced the contradiction immediately.
 
+**Widened a third time in wave 6, Task 0's fix round: a claim that a file is absent from "any"
+list in a multi-section document needs a grep of the WHOLE of that document for the filename, not
+a read of the one section already open.** See wave 6, Task 0's own fix-round paragraph below for
+the incident that found it, and for the more useful finding underneath it — whether either of the
+two widenings above should already have caught this, and why the answer turns out to be no for a
+reason worth knowing rather than a reason to shrug at.
+
 **Wave 5, Task 0 — run now, before any wave-5 code, per this task's own brief ("now, not at the
 end").** Method: walked every Known-gaps bullet and every present-tense status claim in items 2, 9
 and 11 for the specific ASSERTION it makes (not for whether it names a file this task touched — the
@@ -2635,7 +3091,7 @@ mistake this step exists to catch), and re-ran the grep or read the code each as
 anchored to `fb3a5cd` (this task's base) and, where a fix landed in this task, to `1ef127a`. Checked
 and held, unchanged:
 
-- Item 11's marker countdown — `grep -rnE "^\s*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l`
+- Item 11's marker countdown — `grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l`
   answers **6** at `fb3a5cd`, the same 6 lines recorded at the end of wave 4 (`cd10b54`) and unchanged
   since — see item 11's own re-run below for the full list.
 - Item 2's board-scoped guard census — `requireBoardPermission` **9**, `requireBoardActor` **3**,
@@ -2778,8 +3234,8 @@ findings below name files this task never opened. What moved:
 
 Checked and still true, unchanged: item 2's board-scoped census moved for the
 ordinary reason and is quoted rather than counted
-(`grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l`
-answers **20**, `grep -rnE "^\s+\.use\(requireBoardActor\(" …` answers **9**,
+(`grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l`
+answers **20**, `grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" …` answers **9**,
 `grep -cE ": BoardScope" rules.ts` answers **29** — the first two grew in wave
 5 Task 3 and this task added no rule and no guard, only callers); item 9's
 `useMockAuth`/`MockAuthProvider` claims (this task rewrote eleven test files
@@ -2894,6 +3350,170 @@ for this exact reason; the bullet's substance is correct and was re-verified
 through a `board_member.id` map, `formatAdjournmentText` falls back to
 `attendance.presiding_officer`).
 
+**Wave 6, Task 0 — run before any wave-6 code, per this task's own brief and
+wave 5 Task 0's precedent ("now, not at the end").** Method: the codebase
+itself moved almost not at all since the last sweep (`c2b4b25`) —
+`git diff --stat c2b4b25 e5250ad` touches only the new wave-6 plan document and
+a five-line doc-comment edit in `meeting.ts` (replacing two line-number
+citations with symbol references, item 1's own rule, in the `adjourned_by` and
+cache-comment paragraphs — no claim in THIS document depends on either
+citation) — so this pass is a genuine re-verification, not a search for drift
+a large diff would make obvious. Walked every Known-gaps bullet and every
+numbered item's prose in items 1, 2, 7, 8, 9, 11, 12 and 14 for present-tense
+assertions, re-ran the grep or read the code behind each, and — per the
+widened lens — checked whether any OTHER section of this document contradicts
+it. Re-verified directly rather than assumed:
+
+- Item 2's board-scoped census: `: BoardScope` in `rules.ts` **29**,
+  `requireBoardPermission` (anchored) **20**, `.use(requireBoardActor(` **9** —
+  all three unchanged since `670d9df`.
+- Item 8's `pathFilter()` file/call census: **53** files, **88** calls,
+  unchanged.
+- Item 9's `MockAuthProvider` ("directly named in 4 files") and `useMockAuth`
+  ("zero callers outside its own module") — both hold exactly.
+- Item 1's `exhibit_count` grep — **9** lines, unchanged, all comments/tests as
+  the doc already says.
+- The Known-gaps bullet on `assertCanSelectTownNotificationConfig` and its two
+  siblings — still zero procedure callers, only their own definitions in
+  `rules.ts`.
+- Wave 5, Task 5's own open item 1 (`executiveSession.markEntered`/`discard`
+  have no caller) — still true, zero non-test references outside
+  `executive-session.ts` itself.
+- Wave 5, Task 5's own open item 2 (`VotePanel.tsx`'s minutes re-render posts
+  the LIVE meeting's id, not the approved document's) — still true at its
+  current call site (`VotePanel.tsx`, `/api/meetings/${meetingId}/minutes/render`).
+- Wave 5/6's `getMutationErrorMessage` and `isPaused` bullets — re-verified as
+  part of this same task's item-2 clearing above (see "Carried forward" items
+  5 and 6): both claims hold exactly as worded, and are now marked with an
+  explicit outlives-Phase-E decision rather than re-carried silently.
+
+**One false claim found, and it is this item's own headline number, not a
+Known-gaps bullet — exactly the shape this item's widened lens exists to
+catch.** Item 11's "23 remaining files" was presented as a clean, current
+count; cross-checked against the rest of item 11's own history and against the
+files themselves, it undercounts by omitting one bare grep-versus-import
+distinction (comment mentions counted as dependencies) and overstates
+completeness by four files with live, unmarked code — corrected in place at
+item 11 above, in the same task that found it, per this item's own rule
+("retire ... any bullet this wave's work closed, whether or not the task that
+closed it was the one that wrote the bullet"). No second instance of the
+"another section of this document falsifies a claim" shape (wave 5 Task 6's
+finding) was found: the SSE/subscription sections, the guard-shape census, and
+the Known-gaps list all agree with each other and with the code at HEAD.
+
+**No other false claim found.** Stated with the method above rather than as a
+bare assertion, per this item's own standing rule that an unstated method is
+what produced two of this project's five sweep failures.
+
+**Wave 6, Task 0's fix round — this same task's own sweep, immediately above, produced a false
+absence claim, and it is the incident behind this item's third widening.** The sweep's Known-gaps
+bullet (`2d5a704`) asserted `SourceDataPanel.tsx` "is not on any wave-6 task's file list ... not
+Task 5, and not Task 3/4." That is false: Task 3's own file list, in the wave-6 plan document
+(`docs/superpowers/plans/2026-09-12-phase-e-wave-6-minutes-and-completion.md`), names the file
+directly ("`routes/meetings.$meetingId.minutes.tsx`, `components/minutes/SourceDataPanel.tsx`, and
+whatever `MinutesEditor` needs"), eight lines from the Task 5 text the sweep had just quoted. The
+claim was produced by reading Task 5's twelve-file list, seeing the name absent from those twelve,
+and stopping there — writing "not Task 3/4" as if that had been checked the same way, when it had
+not been grepped at all.
+
+Neither of this item's first two widenings would have caught it, and the reason is more useful
+than the miss. The first widening (every numbered item's own prose, not only Known-gaps bullets)
+is about WHERE in `phase-e-conventions.md` a present-tense claim can hide; the false claim here
+was already sitting inside a Known-gaps bullet, the one shape every version of this step has
+always read, so that widening was never in play. The second widening — check each assertion
+against the rest of THIS document, because another section can contradict it — comes closer, but
+its own text scopes the check to another section of THIS FILE, `phase-e-conventions.md`, and its
+worked example is accordingly a code-claim contradicted by this file's own section on the SSE
+test. The contradiction here lived in a different file entirely: the wave-6 plan document, which
+a claim about "any wave-6 task's file list" is _about_ but which is not a section of
+`phase-e-conventions.md` for the second widening's check to reach. So this is a genuine scope gap
+in what the second widening's text covers, not only an execution lapse inside an already-adequate
+rule — a claim whose subject is another document's contents needs THAT document searched, and
+nothing above ever named the plan document as something to grep.
+
+**The method that works: before writing that a file, symbol, or claim is absent from every list or
+section of a document, `grep -n "<the exact string>" <that document>` for it — the whole document,
+not only the one section already open — and write "absent" only once that grep comes back empty.**
+Applied here, `grep -n "SourceDataPanel" docs/superpowers/plans/2026-09-12-phase-e-wave-6-minutes-and-completion.md`
+surfaces Task 3's line immediately. This is the same discipline item 11's own corrected count (a
+few sections above, from this same task) already used for a claim about the CODE — reading each
+candidate file directly rather than trusting a grep's mention count — applied to a claim about a
+PLAN DOCUMENT instead of the codebase.
+
+**Wave 6, Task 7 — the phase close-out. Run over every Known-gaps bullet and every numbered item's
+prose, with all three widenings in play, and NOT selected by which files this task touched.** Method:
+walked items 1, 2, 7, 8, 9, 11, 12, 13 and 14 paragraph-by-paragraph plus the whole Known-gaps list
+and the "What wave 6 inherits" list; took each present-tense ASSERTION; re-ran the grep or read the
+code behind it against `git archive be61cfa` rather than the working tree (this task ran eleven
+mutation sweeps that edited tracked files and restored them); then, per widenings two and three,
+grepped THIS file and the wave-6 plan document and `docs/backlog.md` for the symbol each surviving
+claim turns on. **Six claims moved, and the third widening earned its keep twice.**
+
+- **"Wave 4, Task 3's own open items" #3 — the legacy `queryKeys.exhibits.*` bullet — has a false
+  PREMISE and a true conclusion.** `review.tsx` was its named last legacy reader; wave 6, Task 4
+  migrated it, and that file now has zero `queryKeys.exhibits` reads and zero Supabase. Two other
+  places in this repository already said so — `ExhibitUploader.tsx`'s own comment and
+  `cache-key-parity.test.ts`'s header, which had struck the claim through — while this bullet went
+  on asserting it. **Fourth instance of "another section falsifies it", and the first where the
+  contradicting section is in the CODE rather than in this document.** Corrected in place.
+- **The `routes/meetings.$meetingId.minutes.tsx` bullet's three closing claims are all false**
+  ("the legacy line stays", "still raw Supabase on that key", "no procedure exists for any of the
+  six transitions"). Wave 6 Task 1 built the six transitions plus `detail`, Task 3 migrated the
+  screen. Struck, with what closed each.
+- **"Wave 5, Task 6's own open items" #3 and "Carried forward" #4 — `AppShell.tsx`'s
+  `useLiveMeetingId` — are false**, and the bullets' "`meeting.byTown` is not a drop-in" diagnosis
+  is exactly why: Task 2 built `meeting.liveByTown` instead of reusing it. Both struck.
+- **Item 11's own opening instruction is false, at the phase's own finish line.** "Track
+  `grep -rn "TODO(phase-e-wave" packages/web/src` as a countdown to zero. It reaches zero at the
+  same moment `lib/supabase.ts` is deleted." The client is deleted, every marker is discharged, the
+  import grep is zero — and that unanchored grep answers **25**. Struck and corrected in place.
+  Worth its own line because the sentence sits in the item that exists to warn about unanchored
+  greps, three paragraphs above the anchored form it should have used.
+- **"Carried forward" #2, the two minutes-surface defects, is the one this sweep could not close
+  and should not have had to.** The wave's plan assigned the DECISION to wave 6 in bold; wave 6
+  ended without making it, because the only two tasks positioned to (3 and 4) correctly judged it
+  out of scope and no later task owned it. Both defects re-verified as live at `be61cfa`. Moved to
+  `docs/backlog.md` (item 11) rather than left in a phase-scoped document — the failure mode here
+  is not a stale claim but a live decision with no owner after the phase ends, which no version of
+  this step was looking for.
+- **Wave 5, Task 7's `permission_template` id question — "wave 6 should check the template pickers
+  before assuming it does not [reach a `z.uuid()` procedure]" — is now answered: it does not.**
+  Recorded at the bullet with the grep. An open question handed forward is the same hazard as a
+  stale claim; it just fails quietly by never being asked again.
+
+Checked and still true, unchanged: item 9's `useMockAuth` ("zero callers outside its own module")
+and `MockAuthProvider` ("directly named in 4 files" — still `test/render.ts`,
+`test/mocks/auth-mock.ts`, `PermissionGate.test.tsx`, `boards.$boardId.test.tsx`); item 1's
+`exhibit_count` grep (**9** lines, all comments and assertions); the
+`assertCanSelectTownNotificationConfig` trio (still zero procedure callers); wave 5 Task 5's open
+item 1 (`executiveSession.markEntered`/`discard` still have no production caller); item 7's
+`initConnectionErrorHandler` carve-out (the anchored bare-`invalidateQueries()` grep still answers
+empty); `docs/backlog.md` items 1–10, each re-run against its own stated verification command —
+`getMutationErrorMessage` still has zero production callers, `isPaused` still appears nowhere,
+`normalisePermissionsMatrix` still has no web caller outside a mock, `MeetingLifecycle.tsx` still
+carries both dead statuses, `minutes_addendum` still has zero application code; and the
+`SetPortalAddressModal` one-door bullet, which a mention grep makes look CLOSED (`grep -rln`
+now finds it in six files including `settings.town.tsx`) and which reading the code shows is not —
+that route only hosts the dialog and passes `onSetPortalAddressClick` down to `ProgressChecklist`,
+still the only opener. The same mention-versus-code hazard item 11 documents, met while running the
+sweep that exists to catch it.
+
+**Two censuses moved, both for ordinary reasons, and both quoted rather than counted:**
+
+```
+$ grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
+22    # 20 at 670d9df — wave 6 Task 1's minutes transitions
+$ grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
+9     # unchanged
+$ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
+30    # 29 at 670d9df — rule 13a, R5's own rule
+```
+
+One imprecision, recorded rather than chased: this item's own wave-5 Task 7 paragraph cites
+`useLiveMeetingEvents.ts` "line 384's `setStatus("stopped")`", which is at 385 at `be61cfa` — a
+comment-only edit in wave 6 moved it. Item 1 already says not to cite line numbers for exactly this
+reason; the substance holds and `docs/backlog.md` item 3 carries the claim without the citation.
+
 ---
 
 ## Files to copy from
@@ -2929,9 +3549,9 @@ through a `board_member.id` map, `formatAdjournmentText` falls back to
   **re-run at `5d11393` (wave 4, Task 2's close-out); quote the grep, not the number:**
 
   ```
-  $ grep -rnE "^\s+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
+  $ grep -rnE "^[[:space:]]+requireBoardPermission\(" packages/api/src/trpc/routers/*.ts | wc -l
   9    # agendaItem's seven writes (Task 1), meeting.insert, meeting.publishAgenda (Task 2)
-  $ grep -rnE "^\s+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
+  $ grep -rnE "^[[:space:]]+\.use\(requireBoardActor\(" packages/api/src/trpc/routers/*.ts | wc -l
   3    # meeting.cancel, meeting.updateStatus, exhibit.link (Task 2)
   ```
 
@@ -3074,6 +3694,47 @@ does not exist in type 'Record<TestErrorCode, number>'` in `test/trpc.ts` itself
   **28 sites, 28 RED**, each naming a test, each restored from a copy. The sweep was run in two
   passes, one per commit, scoped to the touched directory rather than the whole web suite (~10s a
   site rather than ~12s), which is what makes it affordable per-task rather than per-wave.
+
+  **Re-measured at `be61cfa` (wave 6, Task 7 — the phase's close-out): raw 53 files, 97 calls.**
+  The FILE count is unchanged from `01ff3ab`; the CALL count moved 88 → 97, and all nine of the
+  added calls are wave 6's. **Derived against `git archive e5250ad` (the wave's base) rather than
+  from a diff, and the two methods disagree.** `git diff e5250ad..be61cfa | grep -c "^+.*pathFilter"`
+  answers **21**; filtered to non-test files it answers **13**, against **9** genuinely new sites.
+  The gap is four lines in `ArchiveBoardDialog.tsx` (×2), `MinutesWorkflowEditor.tsx` and
+  `NoticeTemplateEditor.tsx` that were REWRITTEN in place — removed and re-added in the same
+  file, same count either side. A diff counts a moved or reworded line as added; only a
+  before-and-after census counts sites. Sweep the census, not the diff:
+
+  ```
+  $ grep -rn "invalidateQueries(trpc\..*\.pathFilter())" packages/web/src \
+      | grep -v __tests__ | grep -v '\.test\.' | wc -l
+  97     # at be61cfa;  88 at e5250ad
+  ```
+
+  **All nine swept by deletion: 9 sites, 9 RED**, each naming one test, each restored from a copy
+  and confirmed byte-identical by an empty `git diff`:
+
+  | Site                                                         | Test that went red                                                             |
+  | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+  | `components/meeting/VotePanel.tsx` (`futureItem`)            | invalidates all FOUR routers the adjournment touches…                          |
+  | `components/meetings/CreateMeetingDialog.tsx` (`board`)      | invalidates `trpc.board.pathFilter()` — EditBoardDialog's meeting-count check… |
+  | `components/members/AddMemberDialog.tsx` (`board`)           | …after adding a board member — `board.stats` counts active seats               |
+  | `components/members/MemberArchiveDialog.tsx` (`board`)       | …— `board.stats` counts active seats                                           |
+  | `components/members/MemberTransitionDialog.tsx` ×3 (`board`) | …for all three writes (one test covers all three sites)                        |
+  | `routes/meetings.$meetingId.live.tsx` (`futureItem`)         | …when adjourning — the review page's queue                                     |
+  | `routes/meetings.$meetingId.minutes.tsx` (`minutesDocument`) | …after a regenerate                                                            |
+
+  **One methodological finding, and it is the sweep's own verdict predicate that lied.** The first
+  run of the `live.tsx` site reported GREEN. The site was fine; the scope path was wrong
+  (`src/routes/__tests__/meetings.$meetingId.live` — that file lives at `src/routes/`, not under
+  `__tests__/`). Vitest was honest about it — "No test files found, exiting with code 1" — but the
+  sweep script decided RED-versus-GREEN by grepping the output for `Test Files … failed`, and a run
+  that found no files prints no such line. **Decide a sweep's verdict on the exit code, never on the
+  presence of a failure line**: this is the same shape as item 13's turbo `Tasks:` hazard and its
+  leaked-scratch-database sibling — a summary that reads clean over a run that is not what you
+  think it is — arriving this time in the very tool built to catch that class of defect. A per-site
+  scope that matches zero files reads as a passing site, which is the worst possible failure for a
+  check whose entire output is "did something go red."
 
   **Re-measured at `cd10b54` (wave 4, Task 4): raw 45, stripped 41 — and the gap is now FOUR files,
   not three.** The single new raw match is `routes/templates.tsx`, and it is comment-only: that
@@ -3451,11 +4112,16 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   `MIGRATED` now; adding it surfaced exactly one violation (that helper), fixed in the same commit,
   with a real pin (`meetings.$meetingId.minutes.test.tsx`) verified by deletion. `home.tsx`'s
   `queryKeys.minutes.byMeeting("__home_pending__")` is a `useQuery` key, not an `invalidateQueries`
-  call, so the check does not reach it. The legacy line stays — this screen's own `minutesDoc` read is
+  call, so the check does not reach it. ~~The legacy line stays — this screen's own `minutesDoc` read is
   still raw Supabase on that key. What remains open is the file itself, now carrying a marker that
   says so: `TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes` — the
   `minutesDocument` router has `byMeeting` only, and no procedure exists for any of the six
-  transitions.
+  transitions.~~ — **all three claims closed in wave 6**, re-checked at the phase's close-out (Task
+  7). Task 1 built `minutesDocument.detail` and all six transitions as real procedures (each with a
+  guard — `R5` got its own rule in the same task rather than being folded onto `R1`); Task 3
+  migrated the screen onto them, so the raw read and the `minutes` legacy key are both gone from it;
+  and the marker is discharged. The residual `queryKeys.minutes` invalidation lines in other writers
+  belong to `docs/backlog.md` item 7's deferred batch.
 
 - **Wave 4, Task 2's own open items, named rather than left silent.** Four, all inherited by Task 3
   or later, none of them a defect this task introduced (fix round 1 corrected the scope of #2 and
@@ -3547,10 +4213,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      Both were unauthorized before — `agenda_item_tenant_isolation` is tenancy-only — so FORBIDDEN
      became newly reachable and each write now renders an inline `role="alert"` refusal beside its own
      control, pinned per item 13.
-  3. **The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
+  3. ~~**The legacy `queryKeys.exhibits.*` lines stay**, per item 7's "the legacy line goes when the
      last legacy reader does": `routes/meetings.$meetingId.review.tsx` still reads
      `[...queryKeys.exhibits.byMeeting(meetingId), townId]` on raw Supabase, and that file is wave
-     6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.
+     6's. The four writers now carry both the legacy key and `trpc.exhibit.pathFilter()`.~~ —
+     **the PREMISE is false as of wave 6, Task 4; the CONCLUSION still stands, for a different
+     reason.** `review.tsx` has zero `queryKeys.exhibits` reads and zero Supabase at `be61cfa`
+     (`grep -c supabase` on that file answers 0), so `queryKeys.exhibits.*` has no reader left
+     anywhere — `ExhibitUploader.tsx`'s own comment already said so, and so does
+     `cache-key-parity.test.ts`'s header, which struck this claim through while this bullet went on
+     asserting it. Two sections of this file disagreeing about the same key, again. The four
+     writers' legacy lines nonetheless stay, now as part of the deliberate ~80-line batch deferred
+     in `docs/backlog.md` item 7, not because a reader survives. Re-checked at the phase's
+     close-out (wave 6, Task 7).
 
 - **Wave 4, Task 4 — a client flow that spans TWO guarded procedures, which item 2 does not cover
   and waves 5 and 6 both inherit.** Every write this document discusses is one procedure with one
@@ -3691,12 +4366,19 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
      the only local signal and it never resolves. Nothing in this repo renders
      `isPaused`. Named because the fix is per-form, not global, and a reader of
      the pill will reasonably assume it was covered.
-  3. **`layouts/AppShell.tsx`'s `useLiveMeetingId` is still a raw Supabase
+  3. ~~**`layouts/AppShell.tsx`'s `useLiveMeetingId` is still a raw Supabase
      read**, now carrying a `TODO(phase-e-wave-6)` marker it did not have
      through four waves. `meeting.byTown` is not a drop-in — it selects no
      `started_at`, which is that query's ordering column, and it returns every
      non-cancelled meeting where this needs the single most recently started
-     `open`/`in_progress` one.
+     `open`/`in_progress` one.~~ — **closed in wave 6**, and the "not a
+     drop-in" diagnosis was right, which is why it is worth recording rather
+     than only striking. Task 2 built a PURPOSE-BUILT procedure,
+     `meeting.liveByTown`, instead of reusing `byTown`; Task 5 wired it
+     (`useLiveMeetingId` is `trpc.meeting.liveByTown` with a 30 s
+     `refetchInterval`) and discharged the marker. The `in_progress` half of
+     the old predicate turned out not to be a `meeting_status` enum value at
+     all — see `docs/backlog.md` item 9.
   4. ~~**The banner has never been seen in a browser.** Its states are pinned by
      jsdom tests and its INPUT — the transport's own `status` — is driven by a
      mock, so what is untested is the same seam bullet 4 above narrows to: a
@@ -3843,6 +4525,26 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
     is no elapsed time after which the banner tells an operator to reload**, and
     a wave-6 reader should decide whether that is the intended ceiling.
 
+  **Decided at wave 6, Task 0, rather than left for a "wave-6 reader" a second
+  time.** Re-checked against HEAD: `useLiveMeetingEvents.ts`'s `stopped` state
+  is still reachable only from a real `TRPCError` or `event: return` (line
+  384's `setStatus("stopped")` and its own doc comment, "`"idle"` is also
+  `"stopped"`, and is not reachable today"), and nothing in the file adds a
+  time-based ceiling on top of that. **This outlives Phase E.** Giving
+  "reconnecting" a terminal timeout is a retry/backoff policy decision — how
+  long is long enough, whether it should differ for a public portal kiosk
+  versus a clerk's laptop, whether the server should start sending
+  `EventSource`'s `retry:` field at all (`routers/realtime.ts`'s header already
+  declines to, for reasons orthogonal to this) — and none of wave 6's seven
+  tasks (`minutesDocument`, `futureItem`/`meeting.liveByTown`, the minutes and
+  review screens, the ten strays, the deletion, close-out) touches the live
+  transport at all. Recording the decision here, rather than repeating "a
+  wave-6 reader should decide" a second time with no wave-6 task positioned to
+  decide it, is what stops this from becoming a third wave's carry-over by
+  default. **Also recorded in `docs/backlog.md` (item 3)**, because this
+  document is scoped to Phase E's own lifecycle and nothing reads it once the
+  phase ends.
+
 - **Wave 5, Task 7 — `supabase/seed.sql`'s ids are not RFC-valid UUIDs, so the
   seeded database cannot be used to exercise ANY migrated screen.** The
   placeholders (`bbbb1111-bbbb-bbbb-bbbb-bbbbbbbbbbbb`,
@@ -3870,8 +4572,46 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   have a version nibble of `0` and a variant nibble of `0`. Those rows exist in
   every database the repo has ever built, so changing the literal is a data
   migration with a foreign-key rewrite behind it, not an edit. It matters only
-  where a template id reaches a `z.uuid()` procedure — wave 6 should check the
-  template pickers before assuming it does not.
+  where a template id reaches a `z.uuid()` procedure — ~~wave 6 should check the
+  template pickers before assuming it does not.~~ **Checked at wave 6, Task 7,
+  and the answer is that it does not reach one:**
+
+  ```
+  $ grep -rn "permissionTemplate\|permission_template" packages/api/src/trpc packages/web/src \
+      --include='*.ts' --include='*.tsx' | grep -v __tests__
+  packages/api/src/trpc/trpc.ts:286: * Known limitation: `permission_template` rows a town writes …
+  ```
+
+  One comment, and nothing else — no procedure takes a `permission_template.id`
+  as input and no web file names the table or the ids. The `templateId:
+z.string().uuid()` inputs in `agenda-template.ts` and `agenda-item.ts` are
+  AGENDA templates, a different table whose ids are `gen_random_uuid()`. So the
+  five malformed ids are inert today, and the migration-plus-FK-rewrite stays
+  unnecessary until something builds a permission-template picker. Whoever does
+  build one inherits this as its first constraint.
+
+- **CORRECTED in wave 6, Task 0's fix round: the bullet originally recorded here claimed
+  `SourceDataPanel.tsx` was missing from every wave-6 task's file list. That was false — it
+  is on Task 3's list.** The wave-6 plan's own Task 3 section names it directly, eight lines
+  from where the original bullet quoted Task 5: "**Files:** `routes/meetings.$meetingId.minutes.tsx`,
+  `components/minutes/SourceDataPanel.tsx`, and whatever `MinutesEditor` needs," and the next
+  line: "`SourceDataPanel`'s five reads all map to procedures that already exist; it is imported
+  by `MinutesEditor`, which `minutes.tsx` renders." The original pass read Task 5's file list in
+  isolation, noticed `SourceDataPanel.tsx` was absent from it, and concluded no task named the
+  file — without searching the rest of the plan for the filename first. It should have.
+
+  **The actual defect is narrower, and it belongs to the plan, not the code: Task 5's own
+  heading said "The ten strays" while its file list names twelve** —
+  `home.tsx`, `meetings.tsx`, `AppShell.tsx`, `CommandPalette.tsx`,
+  `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`, `ArchiveBoardDialog.tsx`,
+  `MinutesWorkflowEditor.tsx`, `NoticeTemplateEditor.tsx`,
+  `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
+  `EditPersonDialog.tsx`. **FIXED** in the plan itself: the heading now reads "The twelve
+  strays." With that correction, every one of item 11's seven newly-named unmarked files is
+  accounted for on some wave-6 task's list — six of them by Task 5, and the seventh,
+  `SourceDataPanel.tsx`, by Task 3. Task 6's deletion step (`lib/supabase.ts`/
+  `hooks/useSupabase.ts` deleted, build fails on any straggler) remains the backstop it was always
+  meant to be, not a missing-file catcher — no file needs to be added to any task's list.
 
 ---
 
@@ -3915,6 +4655,26 @@ one list rather than reconstructing it from seven task reports.
    is exactly the "found me" a wave-6 implementer should want from this test
    rather than a silent pass either way. The second defect (the DRAFT
    watermark) genuinely has no pin of any kind today.
+
+   **Wave 6 ended without deciding either, and this needs saying plainly
+   because the wave's own plan assigned the decision to it** ("Wave 6 owns the
+   reading surface, so this is where they get decided … Fixing either changes a
+   legal record. Decide deliberately and state the reasoning; if the product
+   question is genuinely open, say so rather than choosing"). Task 3 owned
+   `minutes.tsx` and Task 4 owned `review.tsx` — the two readers — and both
+   correctly declined on scope; Task 4's report says so in as many words
+   ("neither is in this task's scope"). No later task was positioned to pick it
+   up. Re-verified at the close-out (wave 6, Task 7): `meeting.ts`'s
+   `performAdjournment` still writes `'adjourned_by', ${personId}` and
+   `minutes-assembler.ts` still resolves it through a `board_member.id` map;
+   `VotePanel.tsx` still POSTs `/api/meetings/${meetingId}/minutes/render` with
+   the live meeting's id into a swallowed `.catch`. **Both are now
+   `docs/backlog.md` item 11**, because this document is scoped to Phase E and
+   nothing reads it once the phase ends — which is exactly how a decision
+   assigned to a wave dies with the wave. The product question is genuinely
+   open: both change what a generated legal record says, and neither has an
+   answer a migration task could have supplied.
+
 3. ~~**The quiet-stream resume gap (Task 7 finding 2).**~~ **FIXED in wave 5,
    Task 7's fix round**, alongside the batch defect and for the same reason —
    the owner asked for both before merge. `realtime.onMeetingChange` now yields
@@ -3931,20 +4691,52 @@ one list rather than reconstructing it from seven task reports.
    header, and it hands the question to whoever answers the banner's missing
    terminal state, since `EventSource`'s fixed, no-backoff `retry:` cannot
    express a retry policy anyway.
-4. **`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
+4. ~~**`AppShell.tsx`'s `useLiveMeetingId`** — the last raw Supabase read in the
    shell, now carrying its first marker. `meeting.byTown` is not a drop-in: it
    selects no `started_at`, which is the ordering column, and returns every
-   non-cancelled meeting where this needs the single most recently started one.
+   non-cancelled meeting where this needs the single most recently started
+   one.~~ — **closed in wave 6** (Task 2 built `meeting.liveByTown`, Task 5
+   wired it). The "not a drop-in" call was correct and is what stopped a
+   `byTown` reuse; see the struck bullet in "Wave 5, Task 6's own open items"
+   above for the detail.
 5. **`getMutationErrorMessage` has zero production call sites**, and three of
    its five categories (`validation`, `conflict`, `unknown`) have no reader at
    all. Wiring them is a UX decision about copy at 24 files' worth of call
    sites, which is why the transport task did not make it. `errorMessage`'s
-   CONFLICT-verbatim behaviour is the obvious first fold-in.
+   CONFLICT-verbatim behaviour is the obvious first fold-in. **Decided at wave
+   6, Task 0, re-verified against HEAD rather than carried forward unchanged a
+   second wave** (`git grep -n "getMutationErrorMessage" -- packages/web/src`
+   still answers only the definition, its own doc comment and
+   `trpc.test.ts` — zero production callers): **this outlives Phase E.** None
+   of wave 6's seven tasks (the `minutesDocument`/`futureItem`/`meeting.liveByTown`
+   reads, the minutes and review screens, the ten strays, or the deletion)
+   touch mutation error copy, and picking which of `validation`/`conflict`/`unknown`
+   gets its own wording at which of the 24 call sites is a product decision
+   about USER-FACING TEXT, not a migration-completeness question this phase's
+   definition of done (`lib/supabase.ts` deleted) turns on. Recording it here,
+   explicitly out of scope, is what stops a third wave from inheriting it
+   silently — the alternative is exactly the drift item 14 exists to catch,
+   just aimed at a decision instead of a claim. **Also recorded in
+   `docs/backlog.md` (item 1)**, because this document is scoped to Phase E's
+   own lifecycle and nothing reads it once the phase ends.
 6. **An offline device pauses its mutations silently at the form.** The shell's
    pill states the app-global fact; nothing anywhere renders `isPaused`, so the
    Save the user just pressed shows a spinner that never resolves. The fix is
    per-form, not global — which is why a reader of the pill will wrongly assume
-   it was covered.
+   it was covered. **Decided at wave 6, Task 0, re-verified against HEAD**
+   (`git grep -n "isPaused" -- packages/web/src` answers **nothing at all** —
+   not a production reader, not a test, not a comment): **this also outlives
+   Phase E.** Closing it well means a per-form design for "queued, not failed"
+   — a different affordance from the error and loading states item 5 of THIS
+   document already requires, not a variant of them — and no wave 6 task
+   proposes one. Wave 6 adds more mutations behind more forms (the minutes and
+   review screens, the ten strays' writes), each of which inherits this gap
+   unchanged; none of them is positioned to invent the pattern the other ~70
+   already-migrated forms would also need. Recorded as a standing product gap
+   for whichever initiative owns offline UX after Phase E, not reopened as a
+   wave-6 task. **Also recorded in `docs/backlog.md` (item 2)**, because this
+   document is scoped to Phase E's own lifecycle and nothing reads it once the
+   phase ends.
 
 ### For the merge notes: a production bug this wave fixed incidentally
 
@@ -3995,7 +4787,12 @@ about the development topology:
   `useSubscription` never leaves `connecting` and the banner never leaves amber.
   The three-state vocabulary is honest but has no terminal state for the most
   likely real outage, and no elapsed time at which it tells an operator to
-  reload.
+  reload. **Decided at wave 6, Task 0** (see the "Wave 5, Task 7 — the browser
+  check" finding (c) above for the full reasoning): this outlives Phase E — no
+  wave 6 task touches the live transport, and a timeout ceiling is a
+  retry/backoff policy decision, not a migration-completeness one. **Also
+  recorded in `docs/backlog.md` (item 3)**, because this document is scoped to
+  Phase E's own lifecycle and nothing reads it once the phase ends.
 - **An intermediary can keep a dead stream looking alive.** Measured: with the
   API killed, a stream direct to it ends at once and a stream through the Vite
   dev proxy stays open indefinitely. Whatever sits between the browser and the
@@ -4034,3 +4831,209 @@ address, all of which wave 5 hit and worked around locally:
   live screen, the mismatch defence (`assertMatchesAuthorizedBoard`) is what
   makes it safe, and item 2 mentions the cost in passing without ever making the
   defence a required half of the pattern.
+
+---
+
+## What Phase E taught that the spec could not have known
+
+Written at the phase's close-out (wave 6, Task 7). The spec
+(`docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md`) got its
+central premise right — the web data layer was already dead, so there was no
+parity baseline — and it is worth recording where that premise led somewhere it
+could not have predicted, and where the plan built on it was simply wrong.
+
+### 1. The migration's largest yield was not migration. It was reading the code.
+
+A restoration forces someone to read every query it replaces. That is how this
+phase found a run of shipped controls that had **never worked** — not
+regressions, not migration damage, code that could never have done the thing it
+appeared to do, in some cases since it was written. By class, each verified
+against `packages/api/drizzle/0000_baseline.sql` rather than against a type:
+
+- **`board` has no `updated_at` column.** `MinutesWorkflowEditor.saveMutation`
+  and `ArchiveBoardDialog.archiveMutation` both sent it. PostgREST rejects an
+  unknown column outright, so **saving a board's minutes-workflow settings and
+  archiving a board had never persisted anything** — and the archive dialog had
+  no error state at all, so it just left the button re-enabled. This is the
+  third and fourth instance of the identical shape: wave 1 found
+  `EditGovTitleDialog` writing `updated_at` to `user_account`, wave 2 found
+  `EditBoardDialog` writing it to `board`.
+- **Seven phantom keys on the minutes surface.** `SourceDataPanel` did
+  `select("*")` five times into `Record<string, unknown>`; `moved_by_name`,
+  `seconded_by_name`, `yeas`/`nays`/`abstentions`, `member_name` and
+  `transition_type` are none of them columns of the tables they were read from.
+  The "Moved: …"/"Seconded: …" line and all three vote badges had never
+  rendered, and each individual vote rendered as a bare colon.
+- **A Download button gated on a column that does not exist.**
+  `minutes.tsx` rendered its PDF link behind `minutesDoc.pdf_url`; the column is
+  `pdf_storage_path`. `pdf_url` is a field the Fastify route SYNTHESISES in its
+  JSON response — which is exactly why it looked real.
+- **A live-meeting indicator filtering on a value absent from its own enum.**
+  `AppShell`'s `useLiveMeetingId` filtered `status` on `'in_progress'`;
+  `meeting_status` is `draft, noticed, open, adjourned, minutes_draft, approved,
+cancelled`. The sidebar indicator had been silently null on every poll.
+  `'published'`, borrowed from `minutes_document_status`, is dead the same way in
+  `MeetingLifecycle.tsx` — see `docs/backlog.md` item 9.
+- **A notification that reaches nobody.** `approveMinutesForPassedMotion` queues
+  `minutes_approved` with no `board_id`, and
+  `NotificationService.getSubscribersForEvent` returns NO subscribers without
+  one. The email queued when a board votes minutes through in a live meeting has
+  never been delivered. Still live at `be61cfa`, now named in the payload itself.
+
+**The root cause of the whole class is one line.** `lib/supabase.ts` exported
+`createClient` typed `SupabaseClient` — with **no `Database` generic** — so
+every `.from(…).update({…})` payload and every `select("*")` row was
+structurally unchecked. `any` at the transport boundary does not announce
+itself; it produces controls that compile, render, and do nothing. The tRPC
+replacement is end-to-end typed, so the same mistakes are `TS2353` now. **The
+generalisable lesson is not about Supabase:** an untyped client is a standing
+licence for the schema and the UI to drift apart silently, and the drift is
+invisible in exactly the way that survives review.
+
+### 2. A defect is a population, not an instance. Fix the twin in the same commit.
+
+Six times this wave a defect was found, fixed and pinned on one site while its
+sibling shipped unchanged — the `updated_at` writes (two files, and two earlier
+waves had already fixed two others), the two dialogs sharing the `actionError`
+bleed Task 3 had just fixed on a third, the two writers of `future_item_queue`
+that each invalidated three routers and silently omitted the fourth. The habit
+this phase converged on: **when you find a defect, grep for its SHAPE before
+you fix the instance**, and put the twin in the same commit. A fix with a pin on
+one of two sites reads, to every later grep, exactly like a solved problem.
+
+### 3. Every mechanised check here has a blind spot, and not the one you would guess
+
+Two cache checks, three distinct blind spots, all found by hand:
+
+- `cache-key-parity.test.ts` could not see a writer whose table **never had a
+  legacy key** — `future_item_queue` is written only server-side, so item 7's
+  prescribed procedure (grep the legacy key, check every invalidation) has no
+  input to start from (`docs/backlog.md` item 8).
+- It could not see **two namespaces over one table** — `queryKeys.minutes` and
+  `queryKeys.minutesDocuments` are different keys on the same row, and neither
+  invalidates the other.
+- `pathfilter-pin-coverage.test.ts` credits a writer FILE, not a call, so a
+  second `pathFilter()` call in an already-pinned file rides free.
+
+And two mechanisms that lie outright, both added to item 13 this phase: branch
+coverage inside an always-mounted dialog (the branch is executed, so coverage is
+satisfied, while nothing asserts it), and `turbo run test` reporting green
+per-file `Tests` lines under an exit-1 task. A third was found by this very
+task: **the `pathFilter()` deletion sweep's own verdict predicate** — deciding
+RED-versus-GREEN by grepping for `Test Files … failed` makes a mis-scoped run,
+which prints no such line, read as a passing site. The pattern across all of
+them is the same and is worth stating once: **a green summary is a claim about
+what ran, not about what was checked.** Read the exit code.
+
+### 4. Briefs are evidence, not authority.
+
+Six of this wave's own task briefs asserted something false about the code —
+scope counts, which files carried markers, which claims a document made — and
+each was caught by an implementer who checked instead of trusting. That is not
+a complaint about the briefs; it is the phase's most transferable operating
+rule, and it is the same rule item 11 states for numbers ("quote the grep") and
+item 14 states for prose. **A dispatch's restatement of a plan is a secondary
+source. Re-derive before acting on it.**
+
+### 5. What the spec's own definition of done was worth.
+
+Amended in the spec itself, and repeated here because it is the phase's central
+design idea: the deletion is a **ratchet and a backstop**, not a sweep. Ordered
+last, after five waves of migration, it was structurally incapable of failing —
+and it is still worth having, because reintroducing the client is now a compile
+error, and because it would have fired if a wave had skipped a FILE. What it
+cannot see is a `vi.mock` specifier (item 13). **Deletion proves the absence of
+imports, not the absence of dependence.**
+
+---
+
+## What Phase F inherits, and what item 2 still does not say for it
+
+Phase F retires the Supabase stack itself. Written at Phase E's close-out
+because nothing else is positioned to: this document is scoped to Phase E, and
+the facts below were measured while finishing it.
+
+**What is already gone, so Phase F does not have to plan for it.**
+`packages/web` has no Supabase dependency of any kind at `be61cfa` — no module,
+no package entry, no env variable, no import (see the "Definition of done"
+section of the spec, and item 11's final countdown entry). And the API's
+"remaining service-role usage" that the spec defers to D1f is **already gone
+too**, which the spec does not say and which D1f's own record states only in
+passing:
+
+```
+$ git grep -n "@supabase/supabase-js" -- . ':!pnpm-lock.yaml' ':!docs' ':!.superpowers'
+packages/api/package.json:34:    "@supabase/supabase-js": "^2.99.0",
+packages/api/src/auth/fastify.ts:56: * `@supabase/supabase-js` is imported nowhere in `src/` outside tests.
+
+$ grep -rn "SUPABASE" packages/api/src --include='*.ts'
+(empty, as of this task — the two test fixtures that set SUPABASE_URL /
+ SUPABASE_SERVICE_ROLE_KEY were dropped here; nothing read either)
+```
+
+So `packages/api`'s Supabase surface is **one unused dependency line in
+`package.json`**. Removing it is a `pnpm remove` plus a lockfile edit, not a
+migration — and wave 6, Task 6 recorded how to do that edit without letting a
+plain `pnpm install` re-resolve 40 unrelated lines of `better-auth`'s `zod`
+peer: edit the importer entry by hand and verify with
+`pnpm install --frozen-lockfile`.
+
+**What is actually left, by kind.** Not one job:
+
+1. **The local dev stack** — `docker/docker-compose.yml`'s nine services (`db`,
+   `kong`, `inbucket`, `auth`, `rest`, `realtime`, `storage`, `meta`, `studio`),
+   `docker/volumes/`, and `package.json`'s six `supabase:*` scripts. Only `db`
+   is load-bearing now; `auth`, `rest` and `realtime` are replaced (Better Auth,
+   tRPC, SSE) and `storage` is replaced by D1e's endpoints. **The trap is that
+   the persisted volume `docker/volumes/db/data` holds every local developer's
+   auth accounts** — it is not reproducible from `supabase/seed.sql`, which
+   creates no auth users. Decommissioning `db` is a data-migration question, not
+   a `docker compose down`.
+2. **The production stack** — `infrastructure/nginx/nginx.conf`'s public
+   `supabase.*` host and Studio host, `infrastructure/docker-compose.production.yml`,
+   `.env.production.example`'s two `VITE_SUPABASE_*` lines (kept deliberately at
+   wave 6, Task 6: they configure the stack that is still running), and
+   `infrastructure/scripts/{deploy,migrate,backup}.sh`. The nginx `supabase.*`
+   host exists to serve the BROWSER's supabase-js. Nothing in the browser speaks
+   to it any more, so that server block can go before the stack does — and it
+   should, because it is a publicly-routed PostgREST that no longer has a
+   legitimate client.
+3. **The migration history** — `supabase/migrations/` and `supabase/seed.sql`.
+   The seed is the one with a live consumer: `pnpm db:seed` and `db:reset`. Note
+   `0000_baseline.sql` is Drizzle's and is the authority for schema; the
+   `supabase/migrations/` tree is history.
+4. **Prose that outlived its subject** — `e2e/`'s four files tell a reader to
+   run `supabase start` and carry `supabase/seed.sql`'s UUIDs, `README.md`,
+   `docs/deployment.md`, and — depending on how you grep — **29 or 105** files
+   under `packages/web/src` whose comments narrate a migration that is finished
+   (`grep -rl "supabase" packages/web/src` answers 29; `grep -rli` answers 105,
+   the difference being prose that capitalises the product name). Every one of
+   the 105 is a comment and the import grep is zero, so this is one last
+   specimen of the mention-versus-code hazard item 11 spent the phase
+   documenting — produced by the close-out that was checking for it. All
+   harmless; all wrong.
+
+**What item 2 still does not say, for Phase F specifically.** Item 2 settles
+where a rule goes and which guard shape carries it. Three things it does not
+address that Phase F will hit immediately:
+
+- **It has nothing to say about a surface with NO tRPC procedure in front of
+  it.** Every rule in item 2 is attached to a procedure. The D1e document and
+  file endpoints, the portal routes, the minutes render/regenerate endpoints and
+  the notification sweep are Fastify routes, and three of them are what replaced
+  Supabase Storage. When the storage service is decommissioned, the
+  authorization question moves to routes item 2 does not describe. `rules.ts` is
+  shared; the guard shapes are not.
+- **It assumes the row is reachable through the tenant connection.** Phase F
+  removes the last components that ran OUTSIDE `withTenant` — anything still
+  reaching Postgres as a service role. Item 2's board-scoped forms all presume
+  `ctx.tenant`; a decommissioning task that has to touch data across towns (a
+  volume migration, a token rotation) has no shape in this document at all, and
+  should not invent one quietly.
+- **It is silent on what a DELETION of infrastructure has to prove.** Phase E's
+  answer was "delete the client and let `tsc` speak", and this document now
+  records exactly how far that goes (a ratchet and a backstop, blind to
+  `vi.mock`). A container is not type-checked by anything. Phase F needs its own
+  answer to "how do we know nothing still talks to this" **before** it stops a
+  service, and the honest starting point is that grep will not supply it: an
+  HTTP client with a URL in an env file leaves no import to find.

@@ -168,6 +168,16 @@ export function MemberTransitionDialog({
         // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
         // (Phase E, wave 2, Task 3) — this mutation changes that row's status.
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        // Seating or retiring a member changes three BOARD-level aggregates —
+        // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+        // `board.list.active_member_count` (`/boards`) and
+        // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+        // live on the `board` router, which `trpc.boardMember.pathFilter()`
+        // does not match. Found in wave 6, Task 5; see conventions item 8's
+        // "a `pathFilter()` obligation no grep could have surfaced" for why
+        // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+        // this class of miss.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
         onOpenChange(false);
       },
       onError: (err) => {
@@ -187,6 +197,16 @@ export function MemberTransitionDialog({
         // not per-board, per conventions item 7 ("a writer should not have to
         // know which procedures some screen happens to call").
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        // Seating or retiring a member changes three BOARD-level aggregates —
+        // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+        // `board.list.active_member_count` (`/boards`) and
+        // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+        // live on the `board` router, which `trpc.boardMember.pathFilter()`
+        // does not match. Found in wave 6, Task 5; see conventions item 8's
+        // "a `pathFilter()` obligation no grep could have surfaced" for why
+        // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+        // this class of miss.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
         onOpenChange(false);
       },
       onError: (err) => {
@@ -211,6 +231,16 @@ export function MemberTransitionDialog({
         // Archives the board seat AND writes `user_account` — both roster
         // fields `boardMember.roster` selects.
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        // Seating or retiring a member changes three BOARD-level aggregates —
+        // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+        // `board.list.active_member_count` (`/boards`) and
+        // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+        // live on the `board` router, which `trpc.boardMember.pathFilter()`
+        // does not match. Found in wave 6, Task 5; see conventions item 8's
+        // "a `pathFilter()` obligation no grep could have surfaced" for why
+        // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+        // this class of miss.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
         onOpenChange(false);
       },
       onError: (err) => {

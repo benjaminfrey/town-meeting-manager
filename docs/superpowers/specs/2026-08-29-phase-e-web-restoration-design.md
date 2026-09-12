@@ -164,9 +164,37 @@ server re-checks — but it is the same bug and it should die with its twin.
   `.github/workflows/ci.yml`
 - no import of any Supabase symbol anywhere in `packages/web/src`
 
-Removal is the completeness proof. With the client deleted, a screen that still depends on it is a
-**build error** rather than a silent zero-row read — which is exactly the failure mode this phase
-exists to end. Completeness resting on grep is what let 82 files drift this far.
+Removal is a **ratchet and a backstop**, not a sweep. With the client deleted, a screen that still
+depends on it is a **build error** rather than a silent zero-row read — which is exactly the failure
+mode this phase exists to end, and completeness resting on grep is what let 82 files drift this far.
+But read the mechanism precisely, because as originally worded ("removal is the completeness proof")
+this paragraph invited a reader to expect the deletion to _find_ stragglers, and under the task
+ordering the phase actually used it could only ever _confirm_ there were none.
+
+**Amended at the phase's close-out (wave 6, Task 7), from measurement.** The deletion happened in
+wave 6, Task 6, after Tasks 1–5 had already moved every production import. At that commit
+(`f47d29a`) the import grep returned exactly two hits, and both were the two doomed modules
+importing each other and the package:
+
+```
+f47d29a:packages/web/src/hooks/useSupabase.ts:9:import { supabase } from "@/lib/supabase";
+f47d29a:packages/web/src/lib/supabase.ts:22:import { createClient, … } from "@supabase/supabase-js";
+```
+
+No third file imported either, so deleting both removed their own imports with them and `tsc` had
+nothing left to fail on. The build was **structurally incapable of breaking**, and it was green on
+the first run. That is not a reason to drop the step; it is a reason to state what the step buys:
+
+1. **A permanent ratchet.** Reintroducing the client is now a compile error (`TS2307`) _and_ a vitest
+   transform failure — both measured at close-out. The module cannot come back quietly.
+2. **A backstop against a skipped _file_.** It fires only if a wave ships an unmigrated screen — that
+   is, it catches a failure of the **plan**, not of the last task. Sequenced last, it can never be
+   the thing that discovers a straggler the plan already accounted for.
+
+And one boundary it does not cover, measured in the same task: **deletion proves the absence of
+_imports_, not the absence of _dependence_.** A `vi.mock("…")` specifier is a string nothing
+resolves — silent in both the factory and factory-less forms — so three test files went on mocking
+both deleted modules with 693 tests green. See conventions item 13.
 
 ## Risks
 

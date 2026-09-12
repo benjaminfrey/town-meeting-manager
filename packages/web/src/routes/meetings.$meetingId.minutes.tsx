@@ -5,23 +5,79 @@
  * action buttons (edit, submit, approve, publish), amendment history,
  * and inline dialogs for status transitions.
  *
- * TODO(phase-e-wave-6): minutesDocument.detail / the minutes status writes —
- * every read and write on this screen is still raw Supabase. `minutesDocument`
- * exists (wave 3, Task 3) but carries `byMeeting` only, which answers the
- * shell's status pill, not this screen's full document; and no procedure
- * exists for any of the six status transitions below. Wave 6 owns this file
- * per the wave-3 plan's own "Out of scope" note.
+ * ─── Phase E, wave 6, Task 3 — the wiring ─────────────────────────────────
  *
- * What DID land here in wave 3's whole-branch fix round is only the
- * invalidation half — see `invalidateMinutes` for why the shell's pill went
- * stale without it, and why a `minutes`-namespace writer slipped past
- * `lib/__tests__/cache-key-parity.test.ts`. Pinned in
- * `meetings.$meetingId.minutes.test.tsx`.
+ * Task 1 built `minutesDocument`'s two reads and six writes and nothing
+ * called them. This screen does. Every read and every write here is tRPC and
+ * `@/lib/supabase` is gone from this file.
+ *
+ *   - `minutesDocument.detail` replaces `select("*").eq("meeting_id", …)`.
+ *     It applies rule 9 (R4 for this board, or the document is approved or
+ *     published), which the raw read did not — a FORBIDDEN from it renders
+ *     the same "Access Denied" card this screen's own `canView` gate already
+ *     rendered, which is what that gate was expressing with nothing behind it.
+ *   - `meeting.detail` (wave 3) replaces the meeting `select("*")` and is the
+ *     ONE source of `board_id` on this screen: the four board-scoped writes
+ *     below and `SourceDataPanel`'s roster read all take it as a prop or an
+ *     argument rather than re-deriving it.
+ *   - `board.detail` (unit 0) — the board's name in the header. Nothing else
+ *     on this screen reads the board.
+ *   - The six writes are `saveDraft`, `submitForReview`, `approve`,
+ *     `publish`, `returnForAmendments` and `unpublish`. FIVE of them were raw
+ *     `minutes_document` UPDATEs with NO authorization check of any kind, so
+ *     FORBIDDEN is reachable here for the first time and every one of them
+ *     surfaces its refusal — see "Where a refusal renders" below.
+ *
+ * `POST /api/meetings/:id/minutes/render` and `/regenerate` stay on
+ * `apiJson`/`apiFetch`: both are Puppeteer routes no procedure replaces.
+ * `/submit` and `/approve` are GONE from this screen — `submitForReview` and
+ * `approve` each do the status change AND queue the notification in one
+ * transaction, where the browser used to write the status itself and then
+ * fire a second request whose failure it swallowed.
+ *
+ * ─── A behaviour change, stated: the town read is gone ────────────────────
+ *
+ * Fix round 1 correction: the `town` query's `data` fed nothing at all — it
+ * was never read anywhere in this file. The `townId` local that DID feed the
+ * `minutes_published` notification's request body came from
+ * `meeting?.town_id`, not from this read. Both were dead for the same
+ * reason (neither was consulted), just not the same overstatement, and both
+ * are removed rather than carried forward. `minutesDocument.publish` queues
+ * that event server-side from `ctx.tenant.townId` (conventions item 1).
+ *
+ * ─── Two live defects, both fixed here (see the `task-3-brief.md` list) ───
+ *
+ *   1. **The Download button had never rendered.** It gated on
+ *      `minutesDoc.pdf_url`, and `minutes_document` has no `pdf_url` column —
+ *      checked against `packages/api/drizzle/0000_baseline.sql`, where the
+ *      column is `pdf_storage_path`; `pdf_url` occurs only in three
+ *      `routes/minutes.ts` RESPONSE bodies, where it is computed as
+ *      `/api/files/minutes/:id`. So `canExport && minutesDoc.pdf_url` was
+ *      always falsy. `minutesDocument.detail` returns `has_pdf` instead, and
+ *      the href is built from the id this screen already has — the same URL
+ *      those three responses compute, and a route that applies rule 9 on
+ *      every fetch.
+ *   2. **The "Generated" timeline step read `generated_at`**, which is not a
+ *      column either, so the step has always rendered without its date.
+ *      `created_at` is what records it and is what `detail` returns.
+ *
+ * ─── Where a refusal renders, and why there are two places ────────────────
+ *
+ * Radix marks everything outside an open `AlertDialog`/`Dialog`
+ * `aria-hidden`, and a refused write leaves the dialog open (the close lives
+ * in `onSuccess`). So an error rendered beside the action bar is invisible
+ * for exactly the case it exists for — conventions item 2's "render a refusal
+ * INSIDE the confirmation dialog that triggered it", and the same two-site
+ * shape `AgendaSection.tsx` carries. `submitForReview`, `publish` and
+ * `returnForAmendments` reach the in-dialog site; `approve`, `unpublish` and
+ * the editor's `saveDraft` have no dialog and reach the outer one. Both sites
+ * are pinned in this route's own test file.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { isTRPCClientError } from "@trpc/client";
 import {
   AlertTriangle,
   Check,
@@ -45,7 +101,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -62,24 +117,40 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { hasPermission, type PermissionsMatrix } from "@town-meeting/shared";
+import { hasPermission } from "@town-meeting/shared";
 import type { MinutesContentJson } from "@town-meeting/shared/types";
 import { MinutesEditor } from "@/components/minutes/MinutesEditor";
 import { TrackedChanges } from "@/components/minutes/TrackedChanges";
-import { supabase } from "@/lib/supabase";
-import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { queryClient } from "@/lib/queryClient";
+import { trpc, errorMessage, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { apiFetch, apiJson } from "@/lib/api-client";
 
 // ─── Route Loader ─────────────────────────────────────────────────
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { meetingId: params.meetingId };
+  const meetingId = params.meetingId;
+
+  // Not wrapped in try/catch: a nonexistent or foreign meeting answers
+  // NOT_FOUND and letting that reject routes to `RouteErrorBoundary` below
+  // (conventions item 12), rather than the indefinite "Loading meeting
+  // data..." the old `select("*").limit(1)` produced — an empty array is
+  // neither an error nor a meeting.
+  //
+  // `minutesDocument.detail` is deliberately NOT primed here. It can answer
+  // FORBIDDEN (rule 9) for a draft this caller may not read, and a loader
+  // rejection would replace this screen's "Access Denied" card with the route
+  // error boundary. The component below owns that branch instead.
+  await queryClient.ensureQueryData(trpc.meeting.detail.queryOptions({ meetingId }));
+
+  return { meetingId };
 }
 
 // ─── Constants ────────────────────────────────────────────────────
 
 type MinutesStatus = "draft" | "review" | "approved" | "published";
+
+/** The document this screen renders, as the procedure returns it. */
+type MinutesDetail = NonNullable<RouterOutputs["minutesDocument"]["detail"]>;
 
 interface AmendmentEntry {
   round: number;
@@ -111,18 +182,52 @@ const STATUS_BADGE_CONFIG: Record<
   },
 };
 
-const TIMELINE_STEPS = [
-  { key: "generated", label: "Generated", field: "generated_at" },
+/**
+ * `field` is a key of `MinutesDetail`, so a column the procedure stops
+ * returning is a compile error here rather than a step that silently loses
+ * its date. That is the whole of defect 2 in this file's header: "generated"
+ * read `generated_at`, which has never been a column on `minutes_document`,
+ * and a `Record<string, unknown>` index made it compile.
+ */
+const TIMELINE_STEPS: ReadonlyArray<{
+  key: string;
+  label: string;
+  field: "created_at" | "submitted_for_review_at" | "approved_at" | "published_at";
+}> = [
+  { key: "generated", label: "Generated", field: "created_at" },
   { key: "submitted", label: "Submitted", field: "submitted_for_review_at" },
   { key: "approved", label: "Approved", field: "approved_at" },
   { key: "published", label: "Published", field: "published_at" },
-] as const;
+];
+
+/**
+ * What to tell the clerk when a write does not happen.
+ *
+ * `refusalMessage` alone is not enough on this screen, and the reason arrived
+ * with the migration: three of the six procedures added a STATUS PRECONDITION
+ * that did not exist before (`saveDraft` requires `draft`, `publish` requires
+ * `approved`, `unpublish` requires `published` — `minutes-document.ts`'s
+ * header states all three as behaviour changes). Those answer CONFLICT, and
+ * their message is written to be read by a clerk: "These minutes are approved,
+ * not draft, so they cannot be edited." `refusalMessage` would replace it with
+ * "Couldn't save these minutes. Try again." — advice that cannot work, because
+ * another clerk moved the document on and retrying changes nothing.
+ *
+ * `errorMessage` is the house helper for exactly the CONFLICT half, so the two
+ * are COMPOSED rather than a third being written: `errorMessage` returns the
+ * server's message verbatim for a CONFLICT and its fallback otherwise, and the
+ * fallback here is what `refusalMessage` would have said (see `lib/trpc.ts`'s
+ * own doc comments on both, and conventions item 2's carry-over note about not
+ * growing a fourth copy of this branch).
+ */
+function writeError(err: unknown, action: string): string {
+  return errorMessage(err, refusalMessage(err, action));
+}
 
 // ─── Component ────────────────────────────────────────────────────
 
 export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) {
   const { meetingId } = loaderData;
-  const queryClient = useQueryClient();
   const user = useCurrentUser();
 
   // ─── State ──────────────────────────────────────────────────────
@@ -134,73 +239,39 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   const [regenerating, setRegenerating] = useState(false);
   const [amendmentsExpanded, setAmendmentsExpanded] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  /** The last write's refusal or failure. See this file's header. */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // ─── Queries ────────────────────────────────────────────────────
-  const { data: minutesDoc } = useQuery({
-    queryKey: queryKeys.minutes.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("minutes_document")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .limit(1)
-        .throwOnError();
-      return (data ?? [])[0] ?? null;
-    },
-  });
+  const {
+    data: minutesDoc,
+    isPending: isMinutesPending,
+    isError: isMinutesError,
+    error: minutesError,
+  } = useQuery(trpc.minutesDocument.detail.queryOptions({ meetingId }));
 
-  const { data: meeting } = useQuery({
-    queryKey: queryKeys.meetings.detail(meetingId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("*")
-        .eq("id", meetingId)
-        .limit(1)
-        .throwOnError();
-      return (data ?? [])[0] ?? null;
-    },
-  });
+  const {
+    data: meeting,
+    isLoading: isMeetingLoading,
+    isError: isMeetingError,
+    error: meetingError,
+  } = useQuery(trpc.meeting.detail.queryOptions({ meetingId }));
 
-  const boardId = (meeting?.board_id as string) ?? "";
-  const townId = (meeting?.town_id as string) ?? "";
+  const boardId = meeting?.board_id ?? "";
 
   const { data: board } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("*")
-        .eq("id", boardId)
-        .limit(1)
-        .throwOnError();
-      return (data ?? [])[0] ?? null;
-    },
+    ...trpc.board.detail.queryOptions({ boardId }),
     enabled: !!boardId,
   });
 
-  const { data: town } = useQuery({
-    queryKey: queryKeys.towns.detail(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("town")
-        .select("*")
-        .eq("id", townId)
-        .limit(1)
-        .throwOnError();
-      return (data ?? [])[0] ?? null;
-    },
-    enabled: !!townId,
-  });
-
   // ─── Derived values ────────────────────────────────────────────
-  const docId = (minutesDoc?.id as string) ?? "";
-  const status = ((minutesDoc?.status as string) ?? "draft") as MinutesStatus;
-  const htmlRendered = (minutesDoc?.html_rendered as string) ?? "";
+  const docId = minutesDoc?.id ?? "";
+  const status = (minutesDoc?.status ?? "draft") as MinutesStatus;
+  const htmlRendered = minutesDoc?.html_rendered ?? "";
 
-  const boardName = (board?.name as string) ?? "";
-  const meetingDate = (meeting?.scheduled_date as string) ?? "";
-  const meetingType = (meeting?.meeting_type as string) ?? "regular";
+  const boardName = board?.name ?? "";
+  const meetingDate = meeting?.scheduled_date ?? "";
+  const meetingType = meeting?.meeting_type ?? "regular";
 
   const formattedDate = useMemo(() => {
     if (!meetingDate) return "";
@@ -213,303 +284,249 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   }, [meetingDate]);
 
   const amendmentsHistory = useMemo((): AmendmentEntry[] => {
-    if (!minutesDoc?.amendments_history) return [];
-    // Supabase returns JSONB as parsed objects directly
-    const raw = minutesDoc.amendments_history;
-    if (Array.isArray(raw)) return raw as AmendmentEntry[];
-    try {
-      return JSON.parse(raw as string);
-    } catch {
-      return [];
-    }
+    // `amendments_history` is nullable JSONB, so the procedure declares it
+    // `unknown` and this narrows exactly as the server's own `amendmentsOf`
+    // helper does. The old `JSON.parse(raw as string)` branch is gone: the
+    // column has never held a JSON STRING, and a tRPC payload is already
+    // parsed by the time it gets here.
+    const raw = minutesDoc?.amendments_history;
+    return Array.isArray(raw) ? (raw as AmendmentEntry[]) : [];
   }, [minutesDoc?.amendments_history]);
 
   const contentJson = useMemo((): MinutesContentJson | null => {
-    if (!minutesDoc?.content_json) return null;
-    // Supabase returns JSONB as parsed objects directly
-    const raw = minutesDoc.content_json;
-    if (typeof raw === "object" && raw !== null) return raw as MinutesContentJson;
-    try {
-      return JSON.parse(raw as string) as MinutesContentJson;
-    } catch {
-      return null;
-    }
+    const raw = minutesDoc?.content_json;
+    return typeof raw === "object" && raw !== null ? (raw as MinutesContentJson) : null;
   }, [minutesDoc?.content_json]);
 
   const originalContentJson = useMemo((): MinutesContentJson | null => {
-    if (!minutesDoc?.original_content_json) return null;
-    // Supabase returns JSONB as parsed objects directly
-    const raw = minutesDoc.original_content_json;
-    if (typeof raw === "object" && raw !== null) return raw as MinutesContentJson;
-    try {
-      return JSON.parse(raw as string) as MinutesContentJson;
-    } catch {
-      return null;
-    }
+    const raw = minutesDoc?.original_content_json;
+    return typeof raw === "object" && raw !== null ? (raw as MinutesContentJson) : null;
   }, [minutesDoc?.original_content_json]);
 
   // ─── Permissions ────────────────────────────────────────────────
-  const canEditDraft = user
-    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "edit_draft_minutes")
-    : false;
-  const canSubmitForReview = user
-    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "submit_minutes_review")
-    : false;
-  const canGenerateAi = user
-    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "generate_ai_minutes")
-    : false;
-  const canPublish = user
-    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "publish_approved_minutes")
-    : false;
-  const canExport = user
-    ? hasPermission(user.permissions as unknown as PermissionsMatrix, "export_minutes")
-    : false;
+  //
+  // `boardId` and `role` are ADDED arguments (conventions item 1). Every call
+  // here used to be `hasPermission(matrix, action)` with neither, which means
+  // the browser resolved a DIFFERENT question from the one the server now
+  // answers: it ignored this board's overrides, and it refused a town
+  // administrator whose own matrix is empty — while `resolvePermission` on the
+  // server short-circuits `role === "admin"` to true for every code. So the
+  // buttons below now appear for exactly the callers the procedures admit,
+  // which is the point of reading a permission on the client at all
+  // (`router.ts`'s `permissions` doc comment). `role` is `null` for an
+  // identity with no town yet; `hasPermission` takes `undefined` for "no role
+  // known" and both mean deny, the same conversion `live.tsx` makes.
+  const role = user?.role ?? undefined;
+  const permissions = user?.permissions ?? null;
+  const canEditDraft = hasPermission(permissions, "edit_draft_minutes", boardId || undefined, role);
+  const canSubmitForReview = hasPermission(
+    permissions,
+    "submit_minutes_review",
+    boardId || undefined,
+    role,
+  );
+  const canGenerateAi = hasPermission(
+    permissions,
+    "generate_ai_minutes",
+    boardId || undefined,
+    role,
+  );
+  const canPublish = hasPermission(
+    permissions,
+    "publish_approved_minutes",
+    boardId || undefined,
+    role,
+  );
+  const canExport = hasPermission(permissions, "export_minutes", boardId || undefined, role);
   const isAdmin = user?.role === "admin" || user?.role === "sys_admin";
 
   // ─── Permission gate ───────────────────────────────────────────
+  //
+  // Kept, and now backed: `minutesDocument.detail` applies the same rule 9 on
+  // the server, so this is the no-flash half of an answer the API also gives.
+  // A caller who gets past this gate and is still refused lands in the
+  // FORBIDDEN branch below, which renders the same card.
   const canView = useMemo(() => {
     if (!user) return false;
     if (status === "approved" || status === "published") return true;
     if (isAdmin) return true;
-    return hasPermission(user.permissions as unknown as PermissionsMatrix, "view_draft_minutes");
-  }, [user, status, isAdmin]);
+    return hasPermission(permissions, "view_draft_minutes", boardId || undefined, role);
+  }, [user, status, isAdmin, permissions, boardId, role]);
 
   // ─── Mutations ────────────────────────────────────────────────
 
-  // Every mutation on this screen funnels through here, so both keys are
-  // invalidated once rather than seven times.
+  // Every write on this screen funnels through here.
   //
-  // The legacy `queryKeys.minutes` line STAYS: this screen's own
-  // `minutesDoc` read (above) is still a raw Supabase query on that key, and
-  // `home.tsx` derives a key from the same namespace. It goes when the last
-  // legacy reader does, not before (conventions item 7).
+  // The legacy `queryKeys.minutes.byMeeting(meetingId)` line is GONE, not
+  // merely unused: this screen's own `minutesDoc` read was its only reader,
+  // and it has moved to `trpc.minutesDocument.detail` above (conventions item
+  // 7 — the legacy line goes when the last legacy reader does). `home.tsx`
+  // still reads the `minutes` NAMESPACE, but under a different key
+  // (`byMeeting("__home_pending__")` plus a town id), which this line never
+  // matched and therefore never invalidated; it moves to
+  // `minutesDocument.pendingByTown` in its own task and is reached by the
+  // `pathFilter()` below from that moment on.
   //
-  // The `pathFilter()` line was MISSING until the whole-branch fix round.
-  // `routes/meetings.$meetingId.tsx`'s shell renders the minutes status pill
-  // from `trpc.minutesDocument.byMeeting`, and this file writes
-  // `minutes_document.status` at six sites (submit, approve, publish, return
-  // for amendments, unpublish, regenerate) — so publishing minutes and
-  // returning to the meeting detail showed a stale pill for up to the 60s
-  // `staleTime`. Identical to the regression the previous fix round closed
-  // for eight other files; it survived only because the mechanical check
-  // (`lib/__tests__/cache-key-parity.test.ts`) keyed on the
-  // `minutesDocuments` namespace and this writer uses `minutes` — two
-  // namespaces over one table. Both are in `MIGRATED` now.
+  // `trpc.minutesDocument.pathFilter()` covers this screen's `detail` read AND
+  // the status pill `routes/meetings.$meetingId.tsx`'s shell renders from
+  // `byMeeting` — the regression the wave 3 fix round closed here, unchanged.
   const invalidateMinutes = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.minutes.byMeeting(meetingId) });
     void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
   };
 
-  const saveDraftMutation = useMutation({
-    mutationFn: async (updatedContentJson: MinutesContentJson) => {
-      const now = new Date().toISOString();
-      await supabase
-        .from("minutes_document")
-        .update({ content_json: updatedContentJson, updated_at: now })
-        .eq("id", docId)
-        .throwOnError();
+  /** Clear the previous refusal when a new attempt starts. */
+  const beginWrite = () => setActionError(null);
 
-      // Re-render HTML/PDF server-side. Non-critical: the content itself is
-      // already saved, and the render can be retried from the toolbar.
+  /**
+   * A refused write's `actionError` is not scoped to the action that produced
+   * it — one piece of state feeds all four render sites (the outer paragraph
+   * plus the three in-dialog copies). Opening a DIFFERENT dialog while a
+   * refusal from another write is still standing must not carry that message
+   * in: at `status === "review"`, Approve (no dialog) and Return for
+   * Amendments (a dialog) sit on screen together, and a clerk refused on
+   * Approve who then opens Return was shown "You don't have permission to
+   * approve these minutes" INSIDE the Return dialog — accurate for the wrong
+   * action, which reads as a refusal of the action they are currently
+   * attempting. So every dialog's open transition clears the stale error
+   * first; this same handler is what OPENS the dialog (the trigger buttons
+   * call it with `true` instead of setting state directly), so the clear
+   * happens on the one path that actually opens each dialog, not only on
+   * Radix's own close events.
+   */
+  const handleSubmitDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setSubmitDialogOpen(open);
+  }, []);
+
+  const handlePublishDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setPublishDialogOpen(open);
+  }, []);
+
+  const handleReturnDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setActionError(null);
+    setReturnDialogOpen(open);
+  }, []);
+
+  const saveDraftMutation = useMutation(
+    trpc.minutesDocument.saveDraft.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+      },
+      onError: (err) => setActionError(writeError(err, "save these minutes")),
+    }),
+  );
+
+  const handleEditorSave = useCallback(
+    async (updatedContentJson: MinutesContentJson) => {
+      await saveDraftMutation.mutateAsync({
+        boardId,
+        minutesDocumentId: docId,
+        // `MinutesContentJson` is an interface, so it has no implicit index
+        // signature and is not assignable to the procedure's
+        // `Record<string, unknown>`. The VALUE is a plain JSON object either
+        // way — this is a structural conversion, not a claim about the shape.
+        contentJson: updatedContentJson as unknown as Record<string, unknown>,
+      });
+
+      // Re-render HTML/PDF server-side. Non-critical and deliberately outside
+      // the mutation: it is a Puppeteer route that cannot join the write's
+      // transaction, the content is already saved when it runs, and it can be
+      // retried from the toolbar.
       await apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
         method: "POST",
         json: { is_draft: true },
       }).catch(() => {});
     },
-    onSuccess: () => {
-      invalidateMinutes();
-    },
-  });
-
-  const handleEditorSave = useCallback(
-    async (updatedContentJson: MinutesContentJson) => {
-      await saveDraftMutation.mutateAsync(updatedContentJson);
-    },
-    [saveDraftMutation],
+    [saveDraftMutation, boardId, docId, meetingId],
   );
 
-  const submitForReviewMutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
+  const submitForReviewMutation = useMutation(
+    trpc.minutesDocument.submitForReview.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+        setSubmitDialogOpen(false);
+        toast.success("Minutes submitted for board review");
+      },
+      onError: (err) => setActionError(writeError(err, "submit these minutes for review")),
+    }),
+  );
 
-      // If there are pending amendments, mark the latest as resubmitted
-      if (amendmentsHistory.length > 0) {
-        const updated = [...amendmentsHistory];
-        const latest = updated[updated.length - 1];
-        if (latest && !latest.resubmitted_at) {
-          updated[updated.length - 1] = { ...latest, resubmitted_at: now };
-          await supabase
-            .from("minutes_document")
-            .update({
-              status: "review",
-              submitted_for_review_at: now,
-              amendments_history: updated,
-              updated_at: now,
-            })
-            .eq("id", docId)
-            .throwOnError();
-        } else {
-          await supabase
-            .from("minutes_document")
-            .update({
-              status: "review",
-              submitted_for_review_at: now,
-              updated_at: now,
-            })
-            .eq("id", docId)
-            .throwOnError();
-        }
-      } else {
-        await supabase
-          .from("minutes_document")
-          .update({
-            status: "review",
-            submitted_for_review_at: now,
-            updated_at: now,
-          })
-          .eq("id", docId)
-          .throwOnError();
-      }
+  const approveMutation = useMutation(
+    trpc.minutesDocument.approve.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+        toast.success("Minutes approved");
+      },
+      onError: (err) => setActionError(writeError(err, "approve these minutes")),
+    }),
+  );
 
-      // Sets status="review" and fires the minutes_review notification.
-      // Non-critical: the status change above already committed.
-      await apiFetch(`/api/meetings/${meetingId}/minutes/submit`, { method: "POST" }).catch(
-        () => {},
-      );
-    },
-    onSuccess: () => {
-      invalidateMinutes();
-      setSubmitDialogOpen(false);
-      toast.success("Minutes submitted for board review");
-    },
-  });
+  const publishMutation = useMutation(
+    trpc.minutesDocument.publish.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+        setPublishDialogOpen(false);
+        toast.success("Minutes published to public portal");
+      },
+      onError: (err) =>
+        setActionError(writeError(err, "publish these minutes to the public portal")),
+    }),
+  );
 
-  const approveMutation = useMutation({
-    mutationFn: async () => {
-      await apiJson(`/api/meetings/${meetingId}/minutes/approve`, { method: "POST" });
-    },
-    onSuccess: () => {
-      invalidateMinutes();
-      toast.success("Minutes approved");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to approve minutes");
-    },
-  });
+  const returnForAmendmentsMutation = useMutation(
+    trpc.minutesDocument.returnForAmendments.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+        setReturnDialogOpen(false);
+        setReturnReason("");
+        toast.success("Minutes returned for amendments");
+      },
+      onError: (err) => setActionError(writeError(err, "return these minutes for amendments")),
+    }),
+  );
 
-  const publishMutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-      await supabase
-        .from("minutes_document")
-        .update({
-          status: "published",
-          published_at: now,
-          updated_at: now,
-        })
-        .eq("id", docId)
-        .throwOnError();
-
-      // Fire the minutes_published notification (best effort).
-      //
-      // `town_id` is still sent, but the API no longer trusts it: since Task
-      // G1 a value that disagrees with the caller's own town is a 403 rather
-      // than a silent cross-town fan-out.
-      await apiFetch("/api/notifications/events", {
-        method: "POST",
-        json: {
-          event_type: "minutes_published",
-          town_id: townId,
-          payload: {
-            meeting_id: meetingId,
-            board_id: boardId,
-            minutes_document_id: docId,
-          },
-        },
-      }).catch(() => {});
-    },
-    onSuccess: () => {
-      invalidateMinutes();
-      setPublishDialogOpen(false);
-      toast.success("Minutes published to public portal");
-    },
-  });
-
-  const returnForAmendmentsMutation = useMutation({
-    mutationFn: async (reason: string) => {
-      const now = new Date().toISOString();
-
-      const updatedHistory: AmendmentEntry[] = [
-        ...amendmentsHistory,
-        {
-          round: amendmentsHistory.length + 1,
-          returned_at: now,
-          reason: reason.trim(),
-          returned_by: user?.id ?? "",
-          resubmitted_at: null,
-        },
-      ];
-
-      await supabase
-        .from("minutes_document")
-        .update({
-          status: "draft",
-          amendments_history: updatedHistory,
-          submitted_for_review_at: null,
-          updated_at: now,
-        })
-        .eq("id", docId)
-        .throwOnError();
-    },
-    onSuccess: () => {
-      invalidateMinutes();
-      setReturnDialogOpen(false);
-      setReturnReason("");
-      toast.success("Minutes returned for amendments");
-    },
-  });
-
-  const unpublishMutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-      await supabase
-        .from("minutes_document")
-        .update({
-          status: "approved",
-          published_at: null,
-          updated_at: now,
-        })
-        .eq("id", docId)
-        .throwOnError();
-    },
-    onSuccess: () => {
-      invalidateMinutes();
-      toast.success("Minutes unpublished");
-    },
-  });
+  const unpublishMutation = useMutation(
+    trpc.minutesDocument.unpublish.mutationOptions({
+      onMutate: beginWrite,
+      onSuccess: () => {
+        invalidateMinutes();
+        toast.success("Minutes unpublished");
+      },
+      onError: (err) => setActionError(writeError(err, "take these minutes off the public portal")),
+    }),
+  );
 
   // ─── Handlers ──────────────────────────────────────────────────
 
   const handleSubmitForReview = useCallback(() => {
-    submitForReviewMutation.mutate();
-  }, [submitForReviewMutation]);
+    submitForReviewMutation.mutate({ boardId, minutesDocumentId: docId });
+  }, [submitForReviewMutation, boardId, docId]);
 
   const handleApprove = useCallback(() => {
-    approveMutation.mutate();
-  }, [approveMutation]);
+    approveMutation.mutate({ minutesDocumentId: docId });
+  }, [approveMutation, docId]);
 
   const handlePublish = useCallback(() => {
-    publishMutation.mutate();
-  }, [publishMutation]);
+    publishMutation.mutate({ boardId, minutesDocumentId: docId });
+  }, [publishMutation, boardId, docId]);
 
   const handleReturnForAmendments = useCallback(() => {
     if (!returnReason.trim()) return;
-    returnForAmendmentsMutation.mutate(returnReason);
-  }, [returnForAmendmentsMutation, returnReason]);
+    returnForAmendmentsMutation.mutate({
+      minutesDocumentId: docId,
+      reason: returnReason.trim(),
+    });
+  }, [returnForAmendmentsMutation, returnReason, docId]);
 
   const handleUnpublish = useCallback(() => {
-    unpublishMutation.mutate();
-  }, [unpublishMutation]);
+    unpublishMutation.mutate({ boardId, minutesDocumentId: docId });
+  }, [unpublishMutation, boardId, docId]);
 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
@@ -517,7 +534,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       await apiJson(`/api/meetings/${meetingId}/minutes/regenerate`, { method: "POST" });
 
       toast.success("Minutes regeneration started");
-      invalidateMinutes();
+      void queryClient.invalidateQueries(trpc.minutesDocument.pathFilter());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to regenerate minutes");
     } finally {
@@ -525,9 +542,68 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
     }
   }, [meetingId]);
 
-  // ─── Loading state ─────────────────────────────────────────────
+  // ─── Error states ──────────────────────────────────────────────
+  //
+  // A failure AFTER mount — a refetch, a `staleTime` expiry, or (for the
+  // minutes document, which the loader deliberately does not prime) the very
+  // first fetch. The loader covers the before-mount meeting case through
+  // `RouteErrorBoundary`; conventions item 12 requires both.
 
-  if (!meeting) {
+  if (isMeetingError) {
+    const notFound = isTRPCClientError(meetingError) && meetingError.data?.code === "NOT_FOUND";
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">
+            {notFound
+              ? "This meeting could not be found."
+              : "Something went wrong loading this meeting."}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {notFound
+              ? "It may have been deleted, or it belongs to another town."
+              : "Try reloading the page. If the problem continues, contact support."}
+          </p>
+          <Link to="/meetings" className="mt-4 inline-block text-sm text-primary hover:underline">
+            Back to Meetings
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (isMinutesError) {
+    // Rule 9 refused this caller the document's CONTENT. Same card the
+    // `canView` gate renders, because it is the same answer.
+    const forbidden = isTRPCClientError(minutesError) && minutesError.data?.code === "FORBIDDEN";
+    if (forbidden) return <AccessDeniedCard />;
+    return (
+      <div className="flex items-center justify-center p-12" role="alert" aria-live="assertive">
+        <div className="mx-auto max-w-md rounded-lg border bg-card p-6 text-center text-card-foreground shadow-sm">
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium">Something went wrong loading these minutes.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Try reloading the page. If the problem continues, contact support.
+          </p>
+          <Link
+            to={`/meetings/${meetingId}`}
+            className="mt-4 inline-block text-sm text-primary hover:underline"
+          >
+            Back to Meeting
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Loading state ─────────────────────────────────────────────
+  //
+  // Both reads, not just the meeting: "no document yet" and "the document has
+  // not arrived yet" are different answers and the empty state below claims
+  // the first one.
+
+  if (isMeetingLoading || !meeting || isMinutesPending) {
     return (
       <div className="flex items-center justify-center p-12">
         <p className="text-sm text-muted-foreground">Loading meeting data...</p>
@@ -538,20 +614,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   // ─── Permission denied ─────────────────────────────────────────
 
   if (!canView) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <Card className="max-w-md">
-          <CardHeader className="text-center">
-            <Lock className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-            <CardTitle>Access Denied</CardTitle>
-            <CardDescription>
-              You do not have permission to view draft minutes for this meeting. Contact your board
-              administrator for access.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
+    return <AccessDeniedCard />;
   }
 
   // ─── Empty state (no minutes generated) ─────────────────────────
@@ -581,8 +644,8 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
   // ─── Main render ────────────────────────────────────────────────
 
   const badgeConfig = STATUS_BADGE_CONFIG[status];
-  const approvedAt = (minutesDoc.approved_at as string) ?? null;
-  const publishedAt = (minutesDoc.published_at as string) ?? null;
+  const approvedAt = minutesDoc.approved_at;
+  const anyDialogOpen = submitDialogOpen || publishDialogOpen || returnDialogOpen;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -628,6 +691,19 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
         </div>
       )}
 
+      {/* A refused or failed write with no dialog of its own — `approve`,
+          `unpublish`, and the editor's `saveDraft`. Suppressed while a dialog
+          is open, because the dialog renders its own copy and everything out
+          here is `aria-hidden` then. */}
+      {actionError && !anyDialogOpen && (
+        <p
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {actionError}
+        </p>
+      )}
+
       {/* Action Bar */}
       <div className="flex flex-wrap items-center gap-2">
         {status === "draft" && canEditDraft && !isEditing && (
@@ -636,7 +712,7 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
           </Button>
         )}
         {status === "draft" && canSubmitForReview && (
-          <Button size="sm" onClick={() => setSubmitDialogOpen(true)}>
+          <Button size="sm" onClick={() => handleSubmitDialogOpenChange(true)}>
             <Send className="mr-1.5 h-4 w-4" />
             Submit for Review
           </Button>
@@ -659,25 +735,40 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
           </Button>
         )}
         {status === "review" && isAdmin && (
-          <Button variant="outline" size="sm" onClick={() => setReturnDialogOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => handleReturnDialogOpenChange(true)}>
             <Undo2 className="mr-1.5 h-4 w-4" />
             Return for Amendments
           </Button>
         )}
         {status === "approved" && canPublish && (
-          <Button size="sm" onClick={() => setPublishDialogOpen(true)}>
+          <Button size="sm" onClick={() => handlePublishDialogOpenChange(true)}>
             <Upload className="mr-1.5 h-4 w-4" />
             Publish to Portal
           </Button>
         )}
-        {status === "published" && isAdmin && (
-          <Button variant="outline" size="sm" onClick={() => handleUnpublish()}>
+        {/* `unpublish` is R5 on the server, not the administrator gate this
+            button used to carry — see `minutesDocument.unpublish`'s own doc
+            comment for the argument (undoing the act a code governs is that
+            code's). `isAdmin` stays as a second branch because
+            `resolvePermission` short-circuits `admin` to true for every code,
+            so dropping it would narrow the button below what the procedure
+            admits. */}
+        {status === "published" && (isAdmin || canPublish) && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleUnpublish()}
+            disabled={unpublishMutation.isPending}
+          >
             Unpublish
           </Button>
         )}
-        {canExport && minutesDoc.pdf_url && (
+        {/* `has_pdf`, not `pdf_url` — defect 1 in this file's header. The href
+            is the same one `routes/minutes.ts` computes for its own responses,
+            and that route applies rule 9 on every fetch. */}
+        {canExport && minutesDoc.has_pdf && (
           <Button variant="outline" size="sm" asChild>
-            <a href={minutesDoc.pdf_url as string} target="_blank" rel="noopener noreferrer">
+            <a href={`/api/files/minutes/${docId}`} target="_blank" rel="noopener noreferrer">
               <Download className="mr-1.5 h-4 w-4" />
               Download PDF
             </a>
@@ -697,8 +788,8 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       {/* Main Content */}
       {isEditing && contentJson ? (
         <MinutesEditor
-          minutesDocId={docId}
           meetingId={meetingId}
+          boardId={boardId}
           contentJson={contentJson}
           onSave={handleEditorSave}
         />
@@ -771,42 +862,60 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
       {/* ─── Dialogs ─────────────────────────────────────────────── */}
 
       {/* Submit for Review Dialog */}
-      <AlertDialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+      <AlertDialog open={submitDialogOpen} onOpenChange={handleSubmitDialogOpenChange}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Submit for Board Review</AlertDialogTitle>
             <AlertDialogDescription>
               Submit these minutes to board members for review before the next meeting? Board
               members with viewing permission will be able to view the draft.
+              {actionError && (
+                <span className="mt-2 block text-destructive" role="alert">
+                  {actionError}
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleSubmitForReview()}>
+            {/* Not `AlertDialogAction`: that closes the dialog on click, which
+                would take the refusal above with it. */}
+            <Button
+              onClick={() => handleSubmitForReview()}
+              disabled={submitForReviewMutation.isPending}
+            >
               Submit for Review
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Publish Dialog */}
-      <AlertDialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+      <AlertDialog open={publishDialogOpen} onOpenChange={handlePublishDialogOpenChange}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Publish to Portal</AlertDialogTitle>
             <AlertDialogDescription>
-              Publish these approved minutes to the public portal? They will be publicly accessible.
+              Publish these approved minutes to the public portal? They will be publicly accessible
+              to anyone, with no sign-in.
+              {actionError && (
+                <span className="mt-2 block text-destructive" role="alert">
+                  {actionError}
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handlePublish()}>Publish</AlertDialogAction>
+            <Button onClick={() => handlePublish()} disabled={publishMutation.isPending}>
+              Publish
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Return for Amendments Dialog */}
-      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+      <Dialog open={returnDialogOpen} onOpenChange={handleReturnDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Return for Amendments</DialogTitle>
@@ -826,6 +935,11 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
               value={returnReason}
               onChange={(e) => setReturnReason(e.target.value)}
             />
+            {actionError && (
+              <p className="mt-2 text-sm text-destructive" role="alert">
+                {actionError}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -837,12 +951,34 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
             >
               Cancel
             </Button>
-            <Button disabled={!returnReason.trim()} onClick={() => handleReturnForAmendments()}>
+            <Button
+              disabled={!returnReason.trim() || returnForAmendmentsMutation.isPending}
+              onClick={() => handleReturnForAmendments()}
+            >
               Return for Amendments
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ─── Access Denied ───────────────────────────────────────────────
+
+function AccessDeniedCard() {
+  return (
+    <div className="flex items-center justify-center p-12">
+      <Card className="max-w-md">
+        <CardHeader className="text-center">
+          <Lock className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+          <CardTitle>Access Denied</CardTitle>
+          <CardDescription>
+            You do not have permission to view draft minutes for this meeting. Contact your board
+            administrator for access.
+          </CardDescription>
+        </CardHeader>
+      </Card>
     </div>
   );
 }
@@ -854,7 +990,7 @@ function StatusTimeline({
   minutesDoc,
 }: {
   status: MinutesStatus;
-  minutesDoc: Record<string, unknown>;
+  minutesDoc: MinutesDetail;
 }) {
   const statusOrder: MinutesStatus[] = ["draft", "review", "approved", "published"];
   const currentIdx = statusOrder.indexOf(status);
@@ -863,7 +999,7 @@ function StatusTimeline({
     <div className="flex items-center justify-between rounded-md border bg-muted/30 px-6 py-4">
       {TIMELINE_STEPS.map((step, idx) => {
         const isPast = idx <= currentIdx;
-        const timestamp = (minutesDoc[step.field] as string) ?? null;
+        const timestamp = minutesDoc[step.field];
 
         return (
           <div key={step.key} className="flex items-center">

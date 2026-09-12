@@ -314,6 +314,62 @@ export const personRouter = router({
     }),
 
   /**
+   * "Somebody in this town already uses that email" — the live check three
+   * dialogs run while an admin is still typing: `AddMemberDialog.tsx`,
+   * `AddPersonDialog.tsx` and `EditPersonDialog.tsx`.
+   *
+   * ─── Moved here from `boardMember.personEmailExists` (wave 6, Task 5) ────
+   *
+   * It shipped on `boardMember` in wave 2 because `AddMemberDialog` was the
+   * only caller and that was the router that task owned. The query reads
+   * `person` and nothing else, so by conventions item 1 ("one router per
+   * domain noun") `person` is its home — the identical call
+   * `board.memberCount` → `boardMember.memberCount` made in wave 2, for the
+   * identical reason, recorded in `board.ts`'s own header. Task 5 needed the
+   * `excludePersonId` branch below for `EditPersonDialog`, and adding a second
+   * near-identical procedure on the correct noun while leaving the first on
+   * the wrong one would have left two answers to one question. The old name is
+   * gone, not deprecated; `AddMemberDialog.tsx` moved with it in the same
+   * commit.
+   *
+   * `excludePersonId` is what makes this usable from an EDIT form: a person
+   * keeping their own email must not be told it is taken. Optional, because
+   * the two CREATE callers have no id to exclude yet — and `undefined` is
+   * handled by branching the SQL rather than comparing against NULL (`id !=
+   * NULL` is NULL, not true, so a single statement with a null parameter would
+   * silently match nothing and report "not taken" for every email).
+   *
+   * No guard: a tenancy-only read of `person`, the same policy `list` and
+   * `detail` above carry. RLS scopes it to the caller's own town, which is
+   * also why it cannot be used to probe another town's directory.
+   *
+   * Returns a bare boolean, matching each client's own
+   * `emailExists = rows.length > 0`.
+   */
+  emailExists: protectedProcedure
+    .input(
+      z.object({
+        email: z.string().email(),
+        excludePersonId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const email = input.email.toLowerCase().trim();
+      const excluded = input.excludePersonId;
+      const rows = await ctx.withTenant(async (tx) =>
+        toRows<{ id: string }>(
+          await tx.execute(
+            excluded
+              ? sql`SELECT id FROM person WHERE email = ${email} AND id != ${excluded} LIMIT 1`
+              : sql`SELECT id FROM person WHERE email = ${email} LIMIT 1`,
+          ),
+          (message) => new Error(`person.emailExists: ${message}`),
+        ),
+      );
+      return rows.length > 0;
+    }),
+
+  /**
    * `AddPersonDialog`'s step 1: create the person, decoupled from any
    * board or account. `id` is database-generated (`person.id`'s own
    * `defaultRandom()`), not client-supplied — one less thing a caller

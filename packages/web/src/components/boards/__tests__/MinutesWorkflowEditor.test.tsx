@@ -13,29 +13,30 @@
  * boardId }).queryKey` — saves the workflow settings, and asserts that entry
  * was invalidated. Deleting the `pathFilter()` line from
  * `MinutesWorkflowEditor` turns this red.
+ *
+ * Wave 6, Task 5: the Supabase chain mock is gone — the write is
+ * `trpc.board.updateMinutesWorkflow`, so the transport stub carries it and the
+ * PAYLOAD is now assertable, which matters here because the raw write this
+ * replaced sent an `updated_at` column `board` does not have and therefore
+ * never succeeded at all.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import { trpc, type RouterInputs, type RouterOutputs } from "@/lib/trpc";
 
-const { updates } = vi.hoisted(() => ({ updates: [] as string[] }));
+const server = { refuses: false };
+const received: { save?: RouterInputs["board"]["updateMinutesWorkflow"] } = {};
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    from: (table: string) => {
-      const chain = {
-        update: () => chain,
-        eq: () => {
-          updates.push(table);
-          return Object.assign(Promise.resolve({ error: null }), chain);
-        },
-      };
-      return chain;
-    },
+const stub = installTRPCFetchStub({
+  "board.updateMinutesWorkflow": (input) => {
+    received.save = input;
+    if (server.refuses) trpcTestError("FORBIDDEN");
+    return { id: input.boardId };
   },
-}));
+});
 
 import { MinutesWorkflowEditor } from "../MinutesWorkflowEditor";
 
@@ -93,14 +94,47 @@ async function save() {
   // Toggling any switch is the cheapest way to flip `dirty` and enable Save.
   await user.click(screen.getAllByRole("switch")[0]!);
   await user.click(screen.getByRole("button", { name: /^save$/i }));
-  await waitFor(() => expect(updates).toContain("board"));
+  await waitFor(() => expect(stub.countFor("board.updateMinutesWorkflow")).toBe(1));
 
   return { detailKey };
 }
 
-describe("MinutesWorkflowEditor cache invalidation", () => {
+describe("MinutesWorkflowEditor", () => {
+  beforeEach(() => {
+    server.refuses = false;
+    received.save = undefined;
+  });
+
   it("invalidates the tRPC key the board detail screen reads under", async () => {
     const { detailKey } = await save();
     await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true));
+  });
+
+  it("sends the five minutes-workflow columns, and no phantom updated_at", async () => {
+    // The raw write this replaced sent `updated_at`, a column `board` does not
+    // have, so PostgREST rejected every save and nothing was ever persisted.
+    // `RouterInputs` makes an extra key a compile error, so this assertion is
+    // really about the five that ARE sent.
+    await save();
+    expect(received.save).toEqual({
+      boardId,
+      // The first switch is "Allow consent agenda approval", toggled on by
+      // `save()` to make the form dirty.
+      minutes_consent_agenda: true,
+      minutes_requires_second: true,
+      r4_board_member_default: true,
+      audio_retention_policy_override: null,
+      auto_publish_on_approval_override: null,
+    });
+  });
+
+  it("says why the save failed instead of a fixed 'Error saving'", async () => {
+    // `board.updateMinutesWorkflow` is the first version of this write that
+    // can be REFUSED — there was no guard at all before it.
+    server.refuses = true;
+    await save();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /don't have permission to change this board's minutes workflow/i,
+    );
   });
 });

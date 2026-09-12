@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { APP_NAME } from "@town-meeting/shared";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { ErrorFallback } from "@/components/ErrorFallback";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ConnectionStatusBar } from "@/components/ConnectionStatusBar";
@@ -59,34 +59,39 @@ const navItems: NavItem[] = [
 ];
 
 /**
- * Returns the id of an in-progress meeting for this town, or null.
+ * Returns the id of an open meeting for this town, or null.
  *
- * TODO(phase-e-wave-6): meeting.liveByTown — the sidebar's live-meeting
- * indicator is the last raw Supabase read in the app shell. `meeting.byTown`
- * exists but is not a drop-in: it selects no `started_at`, which is this
- * query's ordering column, and returns every non-cancelled meeting where this
- * needs the single most recently started `open`/`in_progress` one. Left rather
- * than widened inside a transport task; marked rather than left silent,
- * because conventions item 11's completeness sweep reads an unmarked file as
- * done and this one was unmarked through four waves.
+ * ~~TODO(phase-e-wave-6): meeting.liveByTown~~ — wired in wave 6, Task 5.
+ * `trpc.meeting.liveByTown` shipped in Task 2 of this wave; see that
+ * procedure's own doc comment for why `meeting.byTown` was not a drop-in and,
+ * more importantly, for the defect this migration fixes rather than
+ * reproduces: the raw query filtered `status IN ('open','in_progress')`, and
+ * `in_progress` is not a `meeting_status` value at all (`SELECT
+ * 'in_progress'::meeting_status` raises "invalid input value for enum
+ * meeting_status", re-run against a live database in this task). PostgREST
+ * rejected the whole filter, the `.in(...)` call carried no `.throwOnError()`,
+ * and `data` came back `undefined` on every 30-second poll — so this indicator
+ * has never lit up. `liveByTown` filters `status = 'open'`, which matches
+ * every row the original could ever have matched and no row it could not.
+ *
+ * `refetchInterval` stays at 30s, unchanged: the sidebar has no SSE
+ * subscription of its own (`realtime.onMeetingChange` is per-meeting, and this
+ * is a town-wide question asked from every screen), so polling is still how
+ * this one learns a meeting was opened elsewhere.
+ *
+ * An error here is deliberately silent — `data` stays undefined and the
+ * indicator simply does not render, which is the same thing it does when no
+ * meeting is live. A failed poll of an optional sidebar badge is not worth a
+ * `role="alert"` on every screen in the app; conventions item 5's requirement
+ * is scoped to a screen's own content, and this is neither.
  */
 function useLiveMeetingId(townId: string | null): string | null {
   const { data } = useQuery({
-    queryKey: ["live-meeting-indicator", townId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("id")
-        .eq("town_id", townId as string)
-        .in("status", ["open", "in_progress"])
-        .order("started_at", { ascending: false })
-        .limit(1);
-      return (data?.[0]?.id as string | undefined) ?? null;
-    },
+    ...trpc.meeting.liveByTown.queryOptions(),
     enabled: !!townId,
     refetchInterval: 30_000,
   });
-  return data ?? null;
+  return data?.id ?? null;
 }
 
 function Sidebar({

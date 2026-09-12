@@ -70,7 +70,14 @@ vi.mock("react-router", async () => {
   };
 });
 
-vi.mock("./+types/meetings.$meetingId.live", () => ({}));
+// There is deliberately NO `vi.mock("./+types/meetings.$meetingId.live")` here.
+// One used to sit at this line and it was inert: no runtime module of that name
+// exists anywhere. React Router generates the file under `.react-router/types/`
+// and it is reachable only through tsconfig's `rootDirs`, a TYPE-level mechanism
+// vitest does not honour, and the route consumes it as `import type`, so nothing
+// survives to runtime to be mocked. It passed for the same reason a mock of a
+// DELETED module passes (conventions item 13): a `vi.mock` specifier is resolved
+// by nothing, in either the factory or the factory-less form. Do not re-add it.
 
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: vi.fn(() => ({
@@ -221,7 +228,10 @@ vi.mock("@/components/RouteErrorBoundary", () => ({
 
 const queryClient = setupAppQueryClient();
 
-type Meeting = RouterOutputs["meeting"]["detail"];
+// `meeting` gained a JSONB column of its own in wave 6, Task 4
+// (`adjournment`), so it needs the same intersection the comment below
+// describes for the other three.
+type Meeting = RouterOutputs["meeting"]["detail"] & { adjournment: unknown };
 type AgendaItem = RouterOutputs["agendaItem"]["byMeeting"][number];
 // `board`, `executive_session` and `motion` each carry a JSONB column, and
 // `RouterOutputs` types those as `unknown` — which `TestHandlers` (built from
@@ -291,6 +301,10 @@ const baseMeeting: Meeting = {
   agenda_packet_generated_at: null,
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
+  adjournment: null,
+  // Wave 6, Task 5: `meeting.detail` joins `board` for
+  // `MeetingSubnavHeader`.
+  board_name: "Select Board",
 };
 
 const baseBoard = {
@@ -802,6 +816,25 @@ describe("LiveMeetingPage cache invalidation", () => {
     // `voteRecord.recordForMotion` now; this screen can only declare.
     expect(input).toMatchObject({ method: "without_objection", adjournMotionId: null });
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review"));
+  });
+
+  it("invalidates trpc.futureItem.pathFilter() when adjourning — the review page's queue", async () => {
+    // The adjournment COPIES the unreached and tabled items into
+    // `future_item_queue`, and this handler navigates straight to the page
+    // that reads them (`routes/meetings.$meetingId.review.tsx`, wave 6 Task
+    // 4). `future_item_queue` is not one of the eight `LIVE_MEETING_TOPICS`,
+    // so nothing else in this app would reach that key. This screen does not
+    // observe it, so `isInvalidated` is safe here.
+    const queueKey = trpc.futureItem.byMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(queueKey, []);
+    expect(queryClient.getQueryState(queueKey)?.isInvalidated).toBeFalsy();
+
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    await waitFor(() => expect(queryClient.getQueryState(queueKey)?.isInvalidated).toBe(true));
   });
 
   it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {

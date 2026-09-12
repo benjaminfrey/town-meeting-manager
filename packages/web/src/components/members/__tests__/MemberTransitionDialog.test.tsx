@@ -250,6 +250,45 @@ describe("MemberTransitionDialog", () => {
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
 
+  it("invalidates trpc.board.pathFilter() for all three writes — board.stats counts active seats", async () => {
+    // `board.stats.active_members` lives on the `board` router, which
+    // `trpc.boardMember.pathFilter()` does NOT match — see this mutation's own
+    // comment and conventions item 8.
+    const key = trpc.board.stats.queryOptions({ boardId: "b1" }).queryKey;
+
+    // 1. Archive the membership.
+    queryClient.setQueryData(key, { active_members: 3, meetings: 0 });
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+    let r = renderDialog(vi.fn());
+    await r.user.click(await screen.findByText("Archive board membership"));
+    await r.user.click(screen.getByRole("button", { name: /archive membership/i }));
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+    r.unmount();
+
+    // 2. Convert to staff (archives the seat too).
+    queryClient.setQueryData(key, { active_members: 3, meetings: 0 });
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBeFalsy();
+    r = renderDialog(vi.fn());
+    await r.user.click(await screen.findByText("Convert to staff"));
+    await r.user.click(screen.getByText("finish-staff"));
+    await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+    r.unmount();
+
+    // 3. Move to a different board — a NEW active seat on the target board,
+    //    so the TARGET board's stats go stale as well as this one's. A
+    //    router-level filter covers both without the writer knowing either id.
+    const targetKey = trpc.board.stats.queryOptions({ boardId: "b2" }).queryKey;
+    queryClient.setQueryData(key, { active_members: 3, meetings: 0 });
+    queryClient.setQueryData(targetKey, { active_members: 1, meetings: 0 });
+    expect(queryClient.getQueryState(targetKey)?.isInvalidated).toBeFalsy();
+    r = renderDialog(vi.fn());
+    await r.user.click(await screen.findByText("Add to different board"));
+    await r.user.click(screen.getByRole("combobox"));
+    await r.user.click(await screen.findByRole("option", { name: "Planning Board" }));
+    await r.user.click(screen.getByRole("button", { name: /add to board/i }));
+    await waitFor(() => expect(queryClient.getQueryState(targetKey)?.isInvalidated).toBe(true));
+  });
+
   /**
    * `trpcTestError("CONFLICT")` sets the envelope's `message` to the code
    * string itself (`test/trpc.ts`'s own `errorEnvelope`), not a realistic

@@ -13,29 +13,28 @@
  * boardId }).queryKey` — saves the template, and asserts that entry was
  * invalidated. Deleting the `pathFilter()` line from `NoticeTemplateEditor`
  * turns this red.
+ *
+ * Wave 6, Task 5: the Supabase chain mock is gone — the write is
+ * `trpc.board.updateNoticeTemplate`, which is also the first version of it
+ * that can be REFUSED (the raw write had no guard of any kind).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
+import { trpc, type RouterInputs, type RouterOutputs } from "@/lib/trpc";
 
-const { updates } = vi.hoisted(() => ({ updates: [] as string[] }));
+const server = { refuses: false };
+const received: { save?: RouterInputs["board"]["updateNoticeTemplate"] } = {};
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    from: (table: string) => {
-      const chain = {
-        update: () => chain,
-        eq: () => {
-          updates.push(table);
-          return Object.assign(Promise.resolve({ error: null }), chain);
-        },
-      };
-      return chain;
-    },
+const stub = installTRPCFetchStub({
+  "board.updateNoticeTemplate": (input) => {
+    received.save = input;
+    if (server.refuses) trpcTestError("FORBIDDEN");
+    return { id: input.boardId };
   },
-}));
+});
 
 import { NoticeTemplateEditor } from "../NoticeTemplateEditor";
 
@@ -81,14 +80,34 @@ async function save() {
   await user.click(screen.getByRole("button", { name: /add block/i }));
   await user.click(screen.getByRole("button", { name: /^spacer$/i }));
   await user.click(screen.getByRole("button", { name: /save template/i }));
-  await waitFor(() => expect(updates).toContain("board"));
+  await waitFor(() => expect(stub.countFor("board.updateNoticeTemplate")).toBe(1));
 
   return { detailKey };
 }
 
-describe("NoticeTemplateEditor cache invalidation", () => {
+describe("NoticeTemplateEditor", () => {
+  beforeEach(() => {
+    server.refuses = false;
+    received.save = undefined;
+  });
+
   it("invalidates the tRPC key the board detail screen reads under", async () => {
     const { detailKey } = await save();
     await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true));
+  });
+
+  it("sends the board id and the whole block list", async () => {
+    await save();
+    expect(received.save?.boardId).toBe(boardId);
+    expect(received.save?.blocks).toHaveLength(1);
+    expect(received.save?.blocks[0]).toMatchObject({ type: "spacer", order: 0 });
+  });
+
+  it("says why the save failed instead of 'Failed to save template. Please try again.'", async () => {
+    server.refuses = true;
+    await save();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /don't have permission to change this board's notice template/i,
+    );
   });
 });

@@ -98,10 +98,12 @@ export function ExhibitUploader({
   const [linkError, setLinkError] = useState<string | null>(null);
 
   /**
-   * The legacy per-item key plus the router filter (conventions item 7). The
-   * legacy line stays because `AgendaItemDetailPanel`-adjacent screens and
-   * `review.tsx` still read `queryKeys.exhibits.*`; the router filter is what
-   * reaches this screen's own `exhibit.byMeeting` read, added in this task.
+   * The legacy per-item key plus the router filter (conventions item 7).
+   * `queryKeys.exhibits.*` has no reader left — `review.tsx`, its last one,
+   * moved to `trpc.exhibit.byMeeting` in Phase E wave 6, Task 4. The line
+   * stays for the reason `cache-key-parity.test.ts`'s "Why a dead legacy
+   * line is not removed on sight" gives; the router filter is what reaches
+   * this screen's own `exhibit.byMeeting` read.
    */
   const invalidateExhibits = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.exhibits.byItem(agendaItemId) });

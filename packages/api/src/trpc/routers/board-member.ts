@@ -515,25 +515,17 @@ export const boardMemberRouter = router({
       });
     }),
 
-  /**
-   * `AddMemberDialog.tsx`'s live "a person with this email already exists"
-   * check, run while the admin is still typing a new person's email —
-   * replacing that component's fifth read (`person` filtered by exact
-   * email). Returns a bare boolean, matching the client's own `emailExists =
-   * emailCheckRows.length > 0`.
+  /*
+   * `personEmailExists` USED to live here — `AddMemberDialog.tsx`'s live "a
+   * person with this email already exists" check. Moved to
+   * `person.emailExists` in wave 6, Task 5: it reads `person` and nothing
+   * else, so `person` is its noun (conventions item 1), and Task 5 needed an
+   * `excludePersonId` branch for `EditPersonDialog` that would otherwise have
+   * produced a second, near-identical procedure on the correct router beside
+   * this one on the wrong router. See `person.ts`'s own doc comment there for
+   * the full reasoning; the same move `board.memberCount` →
+   * `boardMember.memberCount` made in wave 2, in the opposite direction.
    */
-  personEmailExists: protectedProcedure
-    .input(z.object({ email: z.string().email() }))
-    .query(async ({ ctx, input }) => {
-      const email = input.email.toLowerCase().trim();
-      const rows = await ctx.withTenant(async (tx) =>
-        toRows<{ id: string }>(
-          await tx.execute(sql`SELECT id FROM person WHERE email = ${email} LIMIT 1`),
-          (message) => new Error(`boardMember.personEmailExists: ${message}`),
-        ),
-      );
-      return rows.length > 0;
-    }),
 
   /**
    * `AddMemberDialog.tsx`'s board-member write: seat an EXISTING person on a

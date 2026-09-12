@@ -59,14 +59,20 @@ const stub = installTRPCFetchStub({
       current_agenda_item_id: null,
       started_at: null,
       ended_at: null,
-      // Added to `meeting.detail` in wave 4, Task 3 for the agenda builder;
-      // this shell reads none of the four, but `TestHandlers` infers a
-      // handler's return type from the real procedure, so a missing column is
-      // a typecheck error (conventions item 8).
+      // Added to `meeting.detail` in wave 4, Task 3 for the agenda builder
+      // (the first four) and wave 6, Task 4 for the review screen
+      // (`adjournment`); this shell reads none of the five, but
+      // `TestHandlers` infers a handler's return type from the real
+      // procedure, so a missing column is a typecheck error (conventions
+      // item 8).
       agenda_packet_url: null,
       agenda_packet_generated_at: null,
       meeting_notice_url: null,
       meeting_notice_generated_at: null,
+      adjournment: null,
+      // Wave 6, Task 5: `meeting.detail` joins `board` for
+      // `MeetingSubnavHeader`.
+      board_name: "Select Board",
     };
   },
   "board.detail": () => ({

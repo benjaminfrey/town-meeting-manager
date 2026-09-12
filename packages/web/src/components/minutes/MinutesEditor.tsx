@@ -12,8 +12,16 @@ import type {
 } from "@town-meeting/shared/types";
 
 interface MinutesEditorProps {
-  minutesDocId: string;
   meetingId: string;
+  /**
+   * The meeting's board, passed straight through to `SourceDataPanel`.
+   *
+   * Phase E, wave 6, Task 3. Read once on `minutes.tsx` from
+   * `meeting.detail.board_id` and threaded down rather than re-derived, the
+   * same single-source rule `meetings.$meetingId.agenda.tsx` follows for its
+   * own `boardId` prop. Nothing in this component reads it.
+   */
+  boardId: string;
   contentJson: MinutesContentJson;
   onSave: (updatedContentJson: MinutesContentJson) => Promise<void>;
 }
@@ -22,12 +30,7 @@ type SaveStatus = "saved" | "unsaved" | "saving";
 
 const AUTO_SAVE_INTERVAL_MS = 30_000;
 
-export function MinutesEditor({
-  minutesDocId,
-  meetingId,
-  contentJson,
-  onSave,
-}: MinutesEditorProps) {
+export function MinutesEditor({ meetingId, boardId, contentJson, onSave }: MinutesEditorProps) {
   const [editableContent, setEditableContent] = useState<MinutesContentJson>(() =>
     structuredClone(contentJson),
   );
@@ -341,6 +344,7 @@ export function MinutesEditor({
       <div className="w-[40%] bg-muted/30">
         <SourceDataPanel
           meetingId={meetingId}
+          boardId={boardId}
           selectedSectionIndex={selectedSectionIndex}
           contentJson={editableContent}
         />

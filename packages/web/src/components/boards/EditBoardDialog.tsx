@@ -11,14 +11,31 @@
  * rejected it). `board.update` correctly omits it, so this dialog no longer
  * sends it either; this is the second instance of this exact defect shape in
  * this codebase (wave 1 found `EditGovTitleDialog` writing `updated_at` to
- * `user_account`).
+ * `user_account`); wave 6, Task 5 found the third and fourth, both on `board`
+ * again, in `MinutesWorkflowEditor` and `ArchiveBoardDialog`.
+ *
+ * Phase E, wave 6, Task 5 — the meeting COUNT that disables the name field was
+ * this file's last raw Supabase call, and it carried no
+ * `TODO(phase-e-wave-*)` marker despite sitting in a header that narrated the
+ * `board.update` migration as if the file were fully converted. It reads
+ * `trpc.board.stats` now: that procedure's `meetings` is the same
+ * `count(*) FROM meeting WHERE board_id = …` with no status filter, which is
+ * exactly what the `select("*", {count: "exact", head: true})` here counted.
+ * A second procedure for the identical count would have been a duplicate of
+ * one this board's own detail screen already calls.
+ *
+ * `board.stats` does one thing the raw count did not: it runs
+ * `assertBoardExists` first, so a board in another town answers NOT_FOUND
+ * instead of `0`. Harmless here (this dialog is only ever rendered from a
+ * board the caller can already see) and strictly the more honest answer —
+ * `hasMeetings` falling to `false` on an error is the same permissive default
+ * `count ?? 0` already produced.
  */
 
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { refusalMessage, trpc, type RouterOutputs } from "@/lib/trpc";
 import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { calculateQuorum } from "@town-meeting/shared";
@@ -71,24 +88,16 @@ interface EditBoardDialogProps {
 }
 
 export function EditBoardDialog({ townId, town, board, open, onOpenChange }: EditBoardDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const boardId = board.id;
 
-  // Check if board has meetings (disables name editing)
-  const { data: meetingCount = 0 } = useQuery({
-    queryKey: [...queryKeys.meetings.byBoard(boardId), "count"],
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("meeting")
-        .select("*", { count: "exact", head: true })
-        .eq("board_id", boardId);
-      if (error) throw error;
-      return count ?? 0;
-    },
+  // Check if board has meetings (disables name editing) — see this file's
+  // header for why `board.stats` rather than a second counting procedure.
+  const { data: boardStats } = useQuery({
+    ...trpc.board.stats.queryOptions({ boardId }),
     enabled: !!boardId,
   });
-  const hasMeetings = meetingCount > 0;
+  const hasMeetings = (boardStats?.meetings ?? 0) > 0;
 
   const initial: EditBoardData = useMemo(
     () => ({
@@ -130,9 +139,9 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.boards.detail(boardId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.boards.byTown(townId) });
-        // See ArchiveBoardDialog's comment on the matching line: the legacy
-        // keys no longer reach BoardDetailPage's or /boards's tRPC-backed
-        // reads, so both invalidations run during the transition.
+        // See `ArchiveBoardDialog`'s comment on the matching line: both legacy
+        // keys have no reader left anywhere, and are kept for
+        // `docs/backlog.md` entry 7's batch rather than deleted piecemeal.
         void queryClient.invalidateQueries(trpc.board.pathFilter());
         onOpenChange(false);
       },
@@ -141,7 +150,11 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
 
   const isSaving = updateMutation.isPending;
 
-  const handleSave = useCallback(async () => {
+  // `mutate`, not `mutateAsync` — see `ArchiveBoardDialog`'s matching comment.
+  // `board.update` has been refusable since wave 2 and this call site has
+  // discarded its promise the whole time; the refusal test added with the
+  // `role="alert"` below is what made the unhandled rejection visible.
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
     // `board.update`'s schema wants `null`, not `""`, for "use the town
@@ -150,7 +163,7 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
     // needed: this form's own Zod schema keeps these two fields as bare
     // `z.string()` so the Select's `"__default__"` sentinel round-trips
     // through `setValue` cleanly.
-    await updateMutation.mutateAsync({
+    updateMutation.mutate({
       ...data,
       boardId,
       meeting_formality_override: (data.meeting_formality_override || null) as
@@ -167,7 +180,17 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
   }, [validate, updateMutation, boardId]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(val) => {
+        // Clear a stale refusal whenever the dialog OPENS — conventions
+        // item 2's shared-dialog-error paragraph. This component is never
+        // unmounted, so `useMutation`'s `error` otherwise survives a
+        // close/open cycle and greets the next attempt.
+        if (val) updateMutation.reset();
+        onOpenChange(val);
+      }}
+    >
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Board</DialogTitle>
@@ -384,11 +407,19 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
           </div>
         </div>
 
+        {/* `board.update` has been refusable since wave 2 and this dialog
+            said nothing when it did — conventions item 5. */}
+        {updateMutation.isError && (
+          <p role="alert" aria-live="assertive" className="text-sm text-destructive">
+            {refusalMessage(updateMutation.error, "change this board's settings")}
+          </p>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSave()} disabled={!isValid || isSaving}>
+          <Button onClick={handleSave} disabled={!isValid || isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Save Changes
           </Button>

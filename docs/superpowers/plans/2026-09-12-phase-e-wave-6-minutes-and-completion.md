@@ -24,7 +24,7 @@ The spec is explicit about why: _"With the client deleted, a screen that still d
 - **Read `phase-e-conventions.md` in full first.** Item 2 grew six times in wave 5 alone; item 14 was widened twice.
 - **Authorization is declared before `.input()`.** Every mutation carries a **deletion test and a reorder pin**. A refusal test asserts **`FORBIDDEN`** — one asserting `BAD_REQUEST` survives guard deletion while proving nothing.
 - **Resolve `ctx.actor()` BEFORE opening `ctx.withTenant`.**
-- **An FK from client input needs a tenant-scoped existence check.** Nine reproductions; every unguarded cross-tenant write succeeded _silently_.
+- **An FK from client input needs a tenant-scoped existence check — but this is an INSERT-side hazard, not a general property of writes on an RLS-covered table.** Nine reproductions, every one an INSERT taking a foreign key from client input (Postgres constraint enforcement bypasses row security, so the reference lands on a row the caller cannot see, and the write succeeds silently). An UPDATE on an RLS-covered table is not the same shape: probed directly against a real database in Task 1 (tenant context town A targeting town B's `minutes_document`), `UPDATE ... WHERE id = <town B's row>` matched zero rows and wrote nothing — RLS's `USING` clause covers UPDATE. Removing the existence check there still turns all six cross-tenant tests red, but for a different reason: it trades the honest `NOT_FOUND` for a FORBIDDEN-by-mismatch or an unguarded success/500, not for a silent cross-tenant write. Keep both shapes straight when writing this wave's tests.
 - **`minutes_document`, `minutes_section` and `minutes_addendum` all have tenancy-only RLS** — `FOR ALL USING (town_id = get_current_town_id())`, no board term, verified at `0000_baseline.sql:4059-4072`. Board scope is entirely the application's job.
 - **Do not authorize on `minutes_document.board_id`.** It exists but is **nullable and denormalised**, and two places in the codebase already warn against trusting it (`storage/documents.ts`, `rules.ts`'s `BoardScopedRow`). The authorization path is `minutes_document.meeting_id → meeting.board_id`. `agenda-item.ts` deliberately _does_ filter on `md.board_id` for a non-authorization list query and documents the divergence — do not copy that into a guard.
 - **The query you are replacing is a specification.** A dropped _or added_ clause is a behaviour change and must be stated.
@@ -191,7 +191,7 @@ It calls `/api/meetings/:meetingId/minutes/generate`, a Fastify route, **not** t
 
 ---
 
-## Task 5: The ten strays
+## Task 5: The twelve strays
 
 **Files:** `home.tsx`, `meetings.tsx`, `AppShell.tsx`, `CommandPalette.tsx`, `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`, `ArchiveBoardDialog.tsx`, `MinutesWorkflowEditor.tsx`, `NoticeTemplateEditor.tsx`, `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`, `EditPersonDialog.tsx`.
 

@@ -369,6 +369,16 @@ export const meetingRouter = router({
    * scopes this to the caller's town, and a redundant clause makes the
    * tenancy test vacuous — conventions item 2's "no redundant WHERE town_id
    * alongside RLS."
+   *
+   * **`started_at` ADDED in wave 6, Task 5, for a SECOND caller.**
+   * `routes/home.tsx`'s "Happening now" hero renders `started N min ago` off
+   * it, and that screen's `select("*")` used to supply it. Conventions item
+   * 1's "add it back the day something does", the same treatment
+   * `meeting.detail`'s own four packet/notice columns got in wave 4 — every
+   * other column `home.tsx` got from `SELECT *` (`town_id`, `location`,
+   * `created_by`, …) is still absent because nothing on either screen reads
+   * it. Invisible to `meetings.tsx`, which does not read it (`test/trpc.ts`'s
+   * "the gap runs one way").
    */
   byTown: protectedProcedure.query(async ({ ctx }) => {
     return ctx.withTenant(async (tx) =>
@@ -379,12 +389,13 @@ export const meetingRouter = router({
         meeting_type: string;
         scheduled_date: string;
         scheduled_time: string | null;
+        started_at: string | null;
         board_id: string;
         board_name: string;
       }>(
         await tx.execute(sql`
           SELECT m.id, m.title, m.status, m.meeting_type, m.scheduled_date, m.scheduled_time,
-                 m.board_id, b.name AS board_name
+                 m.started_at, m.board_id, b.name AS board_name
           FROM meeting m
           JOIN board b ON b.id = m.board_id
           WHERE m.status != 'cancelled'
@@ -393,6 +404,75 @@ export const meetingRouter = router({
         (message) => new Error(`meeting.byTown: ${message}`),
       ),
     );
+  }),
+
+  /**
+   * Phase E, wave 6, Task 2 — `AppShell.tsx`'s sidebar live-meeting indicator:
+   * the id of the town's most recently started `open` meeting, or `null`.
+   *
+   * ─── Why `byTown` above is not a drop-in — verified, not assumed ─────────
+   *
+   * The router's own `TODO(phase-e-wave-6)` on `useLiveMeetingId` says
+   * `byTown` "selects no `started_at`, which is this query's ordering
+   * column." True: `byTown`'s SELECT list four procedures up has no
+   * `started_at`, and it also lists every non-cancelled meeting rather than
+   * the one most recently opened — two reasons it cannot be reused, not one.
+   * The marker was accurate; three of this wave's eight markers named
+   * procedures that already existed, and this was not a fourth.
+   *
+   * ─── The raw query, and the one clause NOT carried over ──────────────────
+   *
+   * Replaces `useLiveMeetingId`'s `supabase.from("meeting").select("id")
+   * .eq("town_id", townId).in("status", ["open", "in_progress"])
+   * .order("started_at", {ascending: false}).limit(1)`. `'in_progress'` is
+   * DROPPED from the status filter rather than reproduced, and this is not a
+   * narrowing of real behaviour: `meeting_status`'s enum (`0000_baseline.sql`)
+   * has exactly `draft, noticed, open, adjourned, minutes_draft, approved,
+   * cancelled` — no `in_progress` — so no `meeting` row has ever been able to
+   * hold that value. Probed directly rather than inferred from the schema
+   * alone: `SELECT 'in_progress'::meeting_status` itself raises "invalid
+   * input value for enum meeting_status." Reproducing the literal filter as a
+   * typed comparison here (`status = ANY(ARRAY['open','in_progress']::
+   * meeting_status[])`) would make EVERY call to this procedure throw that
+   * same error — worse than the original, which silently degraded instead:
+   * the browser's `.in(...)` call carries no `.throwOnError()`, so
+   * PostgREST's identical rejection of the same invalid literal left `data`
+   * `undefined` and the hook falling to `null` on every 30-second poll,
+   * meaning the sidebar's live-meeting indicator has never actually lit up in
+   * production. `status = 'open'` matches every row the original filter
+   * could ever have matched (since `in_progress` matched none) and no row it
+   * could not — the honest form of the same intent, not a widened one.
+   *
+   * `NULLS LAST` on the DESC order for the reason `byBoard`'s own comment
+   * gives for its own DESC clause: Postgres's default for DESC is NULLS
+   * FIRST, which would let a stray `open` meeting with no `started_at` (a
+   * state nothing in this codebase should produce, but not one this router
+   * can assume against) shadow a real live one instead of sorting behind it.
+   *
+   * ─── No guard, no existence check ─────────────────────────────────────────
+   *
+   * `meeting_tenant_isolation` is tenancy-only (this file's header), and the
+   * raw Supabase read had no application-level check either — the same
+   * "protectedProcedure and no guard" shape `byTown` states just above.
+   * Unlike `byBoard`/`detail`, this takes no id from the caller at all: the
+   * only scope is the caller's own town, which RLS already enforces, so there
+   * is no foreign id for a correlated scan to hide behind an empty result —
+   * conventions item 3's hazard does not arise when there is nothing for the
+   * caller to name.
+   */
+  liveByTown: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.withTenant(async (tx) => {
+      const rows = toRows<{ id: string }>(
+        await tx.execute(sql`
+          SELECT id FROM meeting
+          WHERE status = 'open'::meeting_status
+          ORDER BY started_at DESC NULLS LAST
+          LIMIT 1
+        `),
+        (message) => new Error(`meeting.liveByTown: ${message}`),
+      );
+      return { id: rows[0]?.id ?? null };
+    });
   }),
 
   /**
@@ -474,6 +554,33 @@ export const meetingRouter = router({
    * `meeting.test.ts`'s "returns the agenda-packet and meeting-notice
    * document columns" for the `typeof`/shape assertion pinning this, the
    * same treatment `scheduled_date` gets above.
+   *
+   * **`adjournment` ADDED in wave 6, Task 4, for a THIRD screen.**
+   * `routes/meetings.$meetingId.review.tsx` renders the "Adjourned by motion
+   * / without objection" badge off `adjournment.method` and hands the whole
+   * object to `buildStructuredMeetingRecord`, the exported meeting record.
+   * Same "add it back the day something does" as the four above. Typed
+   * `unknown`, matching every other `jsonb` column this codebase returns
+   * (`motion.vote_summary`, `executiveSession.post_session_action_motion_ids`):
+   * nothing here validates its shape, and `unknown` is the honest declaration
+   * for a value the database does not constrain. Its five keys and the
+   * `adjourned_by` misattribution they carry are documented on `adjourn`
+   * below — a reader of this column should start there.
+   *
+   * **`board_name` ADDED in wave 6, Task 5, for a FOURTH caller**, and it is
+   * the first column here that is not a `meeting` column at all.
+   * `components/MeetingSubnavHeader.tsx` — the shared context header
+   * `MeetingLayout` renders above the agenda/live/review/minutes screens —
+   * shows the board's name beside the meeting title, and did it with its own
+   * raw `board:board_id(id, name)` PostgREST embed. The alternative was a
+   * dependent `board.detail` call on the client (21 columns, a second round
+   * trip, and a board id it cannot know until this query resolves) for one
+   * string. The JOIN is the same shape `byTown` above already uses, and it is
+   * INNER rather than LEFT on purpose: `meeting.board_id` is `NOT NULL` and
+   * both tables carry the same tenancy policy, so a meeting visible to this
+   * caller always has a visible board — a LEFT JOIN would only be pretending
+   * otherwise. The embed's `board.id` is deliberately NOT added: the subnav
+   * renders the name only, and `board_id` is already here.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
@@ -498,14 +605,19 @@ export const meetingRouter = router({
           agenda_packet_generated_at: string | null;
           meeting_notice_url: string | null;
           meeting_notice_generated_at: string | null;
+          adjournment: unknown;
+          board_name: string;
         }>(
           await tx.execute(sql`
-            SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
-                   scheduled_time, location, presiding_officer_id, recording_secretary_id,
-                   current_agenda_item_id,
-                   started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
-                   meeting_notice_url, meeting_notice_generated_at
-            FROM meeting WHERE id = ${input.meetingId}
+            SELECT m.id, m.board_id, m.title, m.status, m.meeting_type, m.agenda_status,
+                   m.scheduled_date, m.scheduled_time, m.location, m.presiding_officer_id,
+                   m.recording_secretary_id, m.current_agenda_item_id,
+                   m.started_at, m.ended_at, m.agenda_packet_url, m.agenda_packet_generated_at,
+                   m.meeting_notice_url, m.meeting_notice_generated_at, m.adjournment,
+                   b.name AS board_name
+            FROM meeting m
+            JOIN board b ON b.id = m.board_id
+            WHERE m.id = ${input.meetingId}
           `),
           (message) => new Error(`meeting.detail: ${message}`),
         ),

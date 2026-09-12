@@ -278,9 +278,10 @@ export default function AgendaBuilderPage({ loaderData }: Route.ComponentProps) 
   const addSection = useMutation(
     trpc.agendaItem.insert.mutationOptions({
       onSuccess: () => {
-        // Legacy key: `SourceDataPanel.tsx`, `live.tsx` and `review.tsx`
-        // still read it (conventions item 7 — the legacy line goes when the
-        // last legacy reader does).
+        // Legacy key with no reader left: `review.tsx`, the last one, moved
+        // in wave 6 Task 4 (`live.tsx` in wave 5, `SourceDataPanel.tsx` in
+        // Task 3). Kept rather than deleted — see `cache-key-parity.test.ts`'s
+        // "Why a dead legacy line is not removed on sight".
         void queryClient.invalidateQueries({
           queryKey: queryKeys.agendaItems.byMeeting(meetingId),
         });

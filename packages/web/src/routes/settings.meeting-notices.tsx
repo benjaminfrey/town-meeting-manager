@@ -106,12 +106,15 @@ function BoardTemplateCard({
   const copyMutation = useMutation(
     trpc.board.copyNoticeTemplate.mutationOptions({
       onSuccess: () => {
-        // Both invalidations run during the transition (conventions item 7):
-        // `queryKeys.boards.detail(board.id)` is still read directly by
-        // several unmigrated screens (`useQuorumCheck`,
-        // `meetings.$meetingId.tsx`, `boards.$boardId.meetings.tsx`, and
-        // others — see `grep -rn "queryKeys.boards.detail" packages/web/src`),
-        // and `trpc.board.pathFilter()` is this screen's own read
+        // `queryKeys.boards.detail(board.id)` has NO reader left — the three
+        // screens this comment used to name (`useQuorumCheck`,
+        // `meetings.$meetingId.tsx`, `boards.$boardId.meetings.tsx`) migrated
+        // in waves 3-5 and the claim was already false before wave 6; the last
+        // real one, `boards.$boardId.templates.$templateId.edit.tsx`, went in
+        // wave 6 Task 5. Kept for `docs/backlog.md` entry 7's batch deletion
+        // rather than removed piecemeal (see `ArchiveBoardDialog`'s matching
+        // comment for why the batch has to move together).
+        // `trpc.board.pathFilter()` is this screen's own read
         // (`board.list`) plus the board's `board.detail`. The PREVIOUS
         // version of this write invalidated `queryKeys.boards.byTown("")` —
         // an empty, always-wrong town id — which this replaces with the

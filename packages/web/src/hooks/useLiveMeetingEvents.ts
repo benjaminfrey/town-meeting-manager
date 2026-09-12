@@ -72,9 +72,10 @@
  * NOT reproduced here. They were invalidated because the LIVE SCREEN read
  * them; it no longer does (this task moved all nine of its raw Supabase reads
  * onto tRPC, where they are eleven procedures),
- * and the other files still on those keys — `meetings.$meetingId.review.tsx`,
- * `components/minutes/SourceDataPanel.tsx` — are not subscribed to anything
- * and never were. Invalidating a key no subscribed screen reads is the
+ * and no file is still on those keys at all — `meetings.$meetingId.review.tsx`
+ * was the last, until Phase E wave 6, Task 4 (`components/minutes/SourceDataPanel.tsx`
+ * in Task 3). Neither was subscribed to anything
+ * and neither ever was. Invalidating a key no subscribed screen reads is the
  * "invalidate everything" shape conventions item 7 bans, one size down.
  */
 

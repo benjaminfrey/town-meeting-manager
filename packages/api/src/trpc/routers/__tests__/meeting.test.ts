@@ -87,6 +87,8 @@ async function seedMeeting(
     status?: string;
     meetingType?: string;
     agendaStatus?: string;
+    /** `meeting.liveByTown`'s ordering column — Phase E wave 6, Task 2. */
+    startedAt?: string | null;
   },
 ): Promise<string> {
   const id = randomUUID();
@@ -94,12 +96,13 @@ async function seedMeeting(
     await tx.execute(sql`
       INSERT INTO meeting (
         id, board_id, town_id, title, scheduled_date, scheduled_time, status,
-        meeting_type, agenda_status
+        meeting_type, agenda_status, started_at
       )
       VALUES (
         ${id}, ${boardId}, ${town.townId}, ${opts.title}, ${opts.scheduledDate}::date,
         ${opts.scheduledTime ?? null}, ${opts.status ?? "draft"}::meeting_status,
-        ${opts.meetingType ?? "regular"}, ${opts.agendaStatus ?? "draft"}
+        ${opts.meetingType ?? "regular"}, ${opts.agendaStatus ?? "draft"},
+        ${opts.startedAt ?? null}::timestamptz
       )
     `);
   });
@@ -191,6 +194,85 @@ describe("meeting.byTown", () => {
         const caller = appRouter.createCaller(contextFor(db, mine, actor));
 
         expect(await caller.meeting.byTown()).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("meeting.liveByTown", () => {
+  it("returns the id of the most recently started open meeting", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        await seedMeeting(db, town, town.boardId, {
+          title: "Opened Earlier",
+          scheduledDate: "2026-01-01",
+          status: "open",
+          startedAt: "2026-11-03T18:00:00Z",
+        });
+        const latest = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Opened Later",
+          scheduledDate: "2026-01-02",
+          status: "open",
+          startedAt: "2026-11-03T19:00:00Z",
+        });
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        expect(await caller.meeting.liveByTown()).toEqual({ id: latest });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("returns null when no meeting is open", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        // `adjourned`, not `open` — and one with a `started_at` set, so a
+        // status filter that quietly widened to "has started_at" rather than
+        // "is open" would be caught here.
+        await seedMeeting(db, town, town.boardId, {
+          title: "Already Adjourned",
+          scheduledDate: "2026-01-01",
+          status: "adjourned",
+          startedAt: "2026-11-03T18:00:00Z",
+        });
+
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        expect(await caller.meeting.liveByTown()).toEqual({ id: null });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("does not return another town's open meeting", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        await seedMeeting(db, theirs, theirs.boardId, {
+          title: "Not Mine",
+          scheduledDate: "2026-01-01",
+          status: "open",
+          startedAt: "2026-11-03T18:00:00Z",
+        });
+        const actor = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, actor));
+
+        expect(await caller.meeting.liveByTown()).toEqual({ id: null });
       } finally {
         await app.end();
       }
@@ -357,6 +439,47 @@ describe("meeting.detail", () => {
         // The shape every consumer actually depends on: V8 parses this raw
         // postgres text even though it is not ISO-8601.
         expect(new Date(after.agenda_packet_generated_at!).getTime()).not.toBeNaN();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  // Wave 6, Task 4. `routes/meetings.$meetingId.review.tsx` renders the
+  // "Adjourned by motion / without objection" badge off `adjournment.method`
+  // and hands the whole object to `buildStructuredMeetingRecord`. Two
+  // assertions rather than one: that the column comes back at all, and that
+  // it arrives as a parsed OBJECT rather than the JSON TEXT the screen it
+  // replaces used to receive from PostgREST — the screen's own
+  // `normalizeJsonString` helper branches on exactly that, so which side of
+  // the branch this value lands on is behaviour, not a detail.
+  it("returns the adjournment JSONB, parsed, not as text", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Annual Meeting",
+          scheduledDate: "2026-03-14",
+        });
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const before = await caller.meeting.detail({ meetingId });
+        expect(before.adjournment).toBeNull();
+
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            UPDATE meeting
+            SET adjournment = jsonb_build_object('method', 'motion', 'motion_id', 'm-1')
+            WHERE id = ${meetingId}
+          `);
+        });
+
+        const after = await caller.meeting.detail({ meetingId });
+        expect(typeof after.adjournment).toBe("object");
+        expect(after.adjournment).toMatchObject({ method: "motion", motion_id: "m-1" });
       } finally {
         await app.end();
       }

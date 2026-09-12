@@ -28,8 +28,8 @@
  * the drop target's column id) and `status` (the real value sent to
  * `updateStatus`).
  *
- * TODO(phase-e-wave-6): board.listActive — the board picker's `allBoards`
- * read is still raw Supabase; see that query's own comment for why.
+ * ~~TODO(phase-e-wave-6): board.listActive~~ — discharged in wave 6, Task 5;
+ * see that query's own comment. Every read and write on this screen is tRPC.
  */
 
 import { useState, useMemo } from "react";
@@ -64,8 +64,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { CreateMeetingDialog } from "@/components/meetings/CreateMeetingDialog";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
 import { refusalMessage, trpc, type RouterOutputs } from "@/lib/trpc";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
@@ -216,23 +214,15 @@ export default function MeetingsPage() {
     isError: isMeetingsError,
   } = useQuery(trpc.meeting.byTown.queryOptions());
 
-  // TODO(phase-e-wave-6): board.listActive — still raw Supabase, matching
-  // home.tsx's own identical board picker (`board.listActive` exists but is
-  // deliberately not wired into either picker yet — see home.tsx's own
-  // header for the ordering difference that needs checking first; out of
-  // this task's scope, retagged wave-6 to match home.tsx's own marker).
+  // ~~TODO(phase-e-wave-6): board.listActive~~ — wired in wave 6, Task 5,
+  // alongside `home.tsx`'s identical picker. The ordering difference that
+  // marker asked to be checked first is checked and accepted; `home.tsx`'s
+  // own header states it in full for both screens (`listActive` sorts the
+  // governing board first, the raw read was alphabetical). The
+  // `archived_at IS NULL` filter — the reason this could not just reuse
+  // `board.list` — is identical.
   const { data: allBoards = [] } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name")
-        .throwOnError();
-      return (data ?? []) as Array<{ id: string; name: string }>;
-    },
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId && canCreateMeeting,
   });
 
@@ -244,11 +234,13 @@ export default function MeetingsPage() {
     trpc.meeting.updateStatus.mutationOptions({
       onSuccess: () => {
         setTransitionError(null);
-        // Legacy key: `home.tsx`'s own kanban-adjacent meeting list still
-        // reads `queryKeys.meetings.byTown` raw (its own marker defers that
-        // migration to wave 6) — conventions item 7, "the legacy line stays
-        // because other, unmigrated screens still read that key."
-        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.byTown(townId) });
+        // The legacy `queryKeys.meetings.byTown(townId)` line is GONE, not
+        // merely unused: conventions item 7 is "the legacy line stays because
+        // other, unmigrated screens still read that key — it goes when the
+        // last legacy reader does," and this commit is the one that removes
+        // them. `home.tsx`'s kanban-adjacent list and `CommandPalette.tsx`'s
+        // search were the only two, and both read `trpc.meeting` now, so
+        // `pathFilter()` below reaches every reader this writer has.
         void queryClient.invalidateQueries(trpc.meeting.pathFilter());
       },
       onError: (err) => {

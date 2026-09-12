@@ -271,6 +271,15 @@ export function VotePanel({
           void queryClient.invalidateQueries(trpc.meeting.pathFilter());
           void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
           void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+          // FOUR routers, not three: the adjournment also COPIES the unreached
+          // and tabled items into `future_item_queue`, and as of wave 6 Task 4
+          // `routes/meetings.$meetingId.review.tsx` reads that table through
+          // `trpc.futureItem.byMeeting`. `future_item_queue` is not one of the
+          // eight `LIVE_MEETING_TOPICS` either, so nothing else would reach it
+          // — and it had no legacy `queryKeys.futureItemQueues` invalidation
+          // here to be corrected, which is why item 7's usual "update the
+          // writer of the key you abandoned" sweep could not find it.
+          void queryClient.invalidateQueries(trpc.futureItem.pathFilter());
           toast.success("Meeting adjourned");
         }
 

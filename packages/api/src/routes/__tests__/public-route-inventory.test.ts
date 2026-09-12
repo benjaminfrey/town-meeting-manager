@@ -86,11 +86,18 @@ interface CollectedRoute {
   readonly tenantExempt: boolean;
 }
 
-/** The environment `buildServer` refuses to boot without. */
+/**
+ * The environment `buildServer` refuses to boot without.
+ *
+ * The two `SUPABASE_*` entries that used to sit here were dropped at Phase E's
+ * close-out (wave 6, Task 7): `grep -rn "SUPABASE" packages/api/src` finds no
+ * reader for either, and `server.ts` asks only for `BETTER_AUTH_SECRET` and
+ * `DATABASE_URL`. They were unread long before this, so the comment above them
+ * had been false for however long — the same claim-goes-stale shape conventions
+ * item 14 chases in the plan documents, sitting in a test fixture instead.
+ */
 const REQUIRED_ENV = {
   BETTER_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
-  SUPABASE_URL: "http://localhost:54321",
-  SUPABASE_SERVICE_ROLE_KEY: "service-role-key-for-this-test-only",
   DATABASE_URL: process.env.DATABASE_URL ?? "postgres://localhost:5432/postgres",
 } as const;
 

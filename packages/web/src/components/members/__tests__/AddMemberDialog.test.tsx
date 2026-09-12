@@ -2,7 +2,7 @@
  * AddMemberDialog — real options proxy, stubbed transport.
  *
  * Phase E, wave 2, Task 3 — the dialog itself was migrated off Supabase onto
- * `boardMember.searchCandidates`/`.personEmailExists`/`.addBoardMember`/
+ * `boardMember.searchCandidates`/`person.emailExists`/`boardMember.addBoardMember`/
  * `.addStaffMember` and `person.insert`; see `AddMemberDialog.tsx`'s own
  * header. This test file's previous version mocked `@/hooks/useSupabase`
  * generically — the write no longer goes through Supabase at all, so it is
@@ -53,7 +53,7 @@ const queryClient = setupAppQueryClient();
 
 const stub = installTRPCFetchStub({
   "boardMember.searchCandidates": () => [],
-  "boardMember.personEmailExists": () => false,
+  "person.emailExists": () => false,
   "person.insert": (input) => ({ id: "new-person-1", name: input.name, email: input.email }),
   "boardMember.addBoardMember": () => ({ name: "Jane Doe", invitationId: "inv-1" }),
   "boardMember.addStaffMember": () => ({ name: "Jane Doe", invitationId: "inv-2" }),
@@ -122,6 +122,21 @@ describe("AddMemberDialog", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(personKey)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(rosterKey)?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates trpc.board.pathFilter() after adding a board member — board.stats counts active seats", async () => {
+    // `board.stats.active_members` lives on the `board` router, which
+    // `trpc.boardMember.pathFilter()` does NOT match — see this mutation's own
+    // comment and conventions item 8.
+    const statsKey = trpc.board.stats.queryOptions({ boardId: "b1" }).queryKey;
+    queryClient.setQueryData(statsKey, { active_members: 3, meetings: 0 });
+    expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBeFalsy();
+
+    const { user } = renderDialog();
+    await createNewPerson(user);
+    await user.click(screen.getByRole("button", { name: /add board member/i }));
+
+    await waitFor(() => expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBe(true));
   });
 
   it("invalidates trpc.person.pathFilter() and trpc.boardMember.pathFilter() after adding a staff member", async () => {

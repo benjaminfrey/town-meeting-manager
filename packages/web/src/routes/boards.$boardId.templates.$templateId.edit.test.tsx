@@ -11,16 +11,17 @@
  * that mocked `@/lib/supabase` directly for the (then-raw) read and write.
  * Both are rewritten and merged here, same shape as `boards.$boardId.test.tsx`:
  * `@/lib/trpc` is NOT mocked, only `globalThis.fetch` is replaced via
- * `installTRPCFetchStub`. `@/lib/supabase` is still mocked, narrowly — the
- * `board` breadcrumb read stays raw Supabase (out of this task's marker) —
- * but the template read/write no longer touch it.
+ * `installTRPCFetchStub`. The narrow `@/lib/supabase` mock that covered the
+ * `board` breadcrumb read is gone as of wave 6, Task 5 — that read is
+ * `trpc.board.detail` now, so this file mocks nothing but identity and
+ * `sonner`.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
 import { toast } from "sonner";
 import AgendaTemplateEditorPage from "./boards.$boardId.templates.$templateId.edit";
 
@@ -34,19 +35,6 @@ vi.mock("@/hooks/useCurrentUser", () => ({
 // no `Toaster` is mounted by `renderWithProviders`, so asserting the toast
 // fired means mocking the module and checking the call, not the DOM.
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-
-// ─── Mock Supabase (only the board-name breadcrumb read still uses it) ──
-
-vi.mock("@/lib/supabase", () => {
-  const chain: Record<string, unknown> = {};
-  chain["single"] = () => chain;
-  chain["throwOnError"] = () =>
-    Promise.resolve({ data: { id: "b1", name: "Select Board" }, error: null });
-  for (const m of ["select", "eq"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { supabase: { from: vi.fn().mockReturnValue(chain) } };
-});
 
 // ─── Harness ────────────────────────────────────────────────────────────
 
@@ -84,7 +72,33 @@ const server = {
 };
 
 // Collection scope, once per file — see `installTRPCFetchStub`'s doc comment.
+/** A full `board.detail` row — only `name` is read (the breadcrumb). */
+const boardDetail = {
+  id: "board-1",
+  name: "Select Board",
+  board_type: "select_board",
+  elected_or_appointed: "elected",
+  member_count: 5,
+  election_method: "at_large",
+  officer_election_method: "vote_of_board",
+  is_governing_board: true,
+  meeting_formality_override: null,
+  minutes_style_override: null,
+  quorum_type: "simple_majority",
+  quorum_value: null,
+  motion_display_format: "inline_narrative",
+  archived_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  notice_template_blocks: null,
+  minutes_consent_agenda: false,
+  minutes_requires_second: true,
+  r4_board_member_default: true,
+  audio_retention_policy_override: null,
+  auto_publish_on_approval_override: null,
+} satisfies RouterOutputs["board"]["detail"];
+
 const stub = installTRPCFetchStub({
+  "board.detail": () => boardDetail,
   "agendaTemplate.detail": () => {
     if (server.detailRejects) trpcTestError("NOT_FOUND");
     return { id: "template-1", name: server.templateName, sections: server.sections };
@@ -252,5 +266,21 @@ describe("AgendaTemplateEditorPage", () => {
     await queryClient.invalidateQueries(trpc.agendaTemplate.pathFilter());
 
     await waitFor(() => expect(stub.countFor("agendaTemplate.detail")).toBeGreaterThan(before));
+  });
+
+  it("names the board in the breadcrumb, through trpc.board.detail", async () => {
+    // Wave 6, Task 5 — the file's last raw Supabase read.
+    renderRoute();
+    expect(await screen.findByText("Select Board")).toBeInTheDocument();
+  });
+
+  it("refetches the breadcrumb when a writer invalidates trpc.board.pathFilter()", async () => {
+    renderRoute();
+    await screen.findByText("Select Board");
+    const before = stub.countFor("board.detail");
+
+    await queryClient.invalidateQueries(trpc.board.pathFilter());
+
+    await waitFor(() => expect(stub.countFor("board.detail")).toBeGreaterThan(before));
   });
 });

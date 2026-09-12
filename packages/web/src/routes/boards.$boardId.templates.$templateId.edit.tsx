@@ -10,8 +10,12 @@
  * procedures shipped in wave 2, Task 1 — wired here in Phase E wave 4,
  * Task 0. The `templateRow` read and the save write now go through
  * `trpc.agendaTemplate.detail`/`trpc.agendaTemplate.update`; the board-name
- * breadcrumb read stays on raw Supabase (out of this marker's scope — see
- * the `board` query below). Converting the write also closes the
+ * breadcrumb read followed in wave 6, Task 5 (`trpc.board.detail`) — it was
+ * the last raw Supabase call in the file, and it carried no
+ * `TODO(phase-e-wave-*)` marker, so item 11's sweep read this file as done
+ * even though its own log records it as "closed in wave 4, Task 0". That
+ * entry closed the template read/write pair and never re-checked the file for
+ * anything else. Converting the write also closes the
  * non-admin-can-write gap this file's header used to describe:
  * `agendaTemplate.update` carries `requireActor(assertCanUpdateAgendaTemplate)`
  * (declared before `.input()`, conventions item 2), so a non-admin save now
@@ -46,7 +50,6 @@ import { parseSections, serializeSections } from "@/lib/agenda-template-helpers"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
 import { queryClient as globalQueryClient } from "@/lib/queryClient";
 import { trpc, errorMessage } from "@/lib/trpc";
 
@@ -67,18 +70,16 @@ export default function AgendaTemplateEditorPage({ loaderData }: Route.Component
   const queryClient = useQueryClient();
 
   // ─── Queries ──────────────────────────────────────────────────────
-  const { data: board } = useQuery({
-    queryKey: queryKeys.boards.detail(boardId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("id", boardId)
-        .single()
-        .throwOnError();
-      return data;
-    },
-  });
+  // Only `name` is read (the breadcrumb). `board.detail` is one procedure
+  // shared by every screen that needs a board row, not a per-screen query —
+  // conventions item 1; the twenty columns this screen ignores are invisible
+  // to it (`test/trpc.ts`'s "the gap runs one way"). Two differences from the
+  // `.single()` call it replaces, both narrowings: a board in another town
+  // answers NOT_FOUND rather than a PostgREST 406, and the breadcrumb falls
+  // back to "" on failure exactly as it did before — the page's own error
+  // state belongs to `agendaTemplate.detail`, which is what actually gates
+  // the editor.
+  const { data: board } = useQuery(trpc.board.detail.queryOptions({ boardId }));
 
   const {
     data: templateRow,

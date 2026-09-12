@@ -5,10 +5,22 @@
  * `list`, `listActive`), deliberately: `board` carried a pure tenancy policy
  * and nothing else, so any authenticated member of a town may read that
  * town's boards. `protectedProcedure` + `ctx.withTenant` is exactly that
- * rule. `copyNoticeTemplate`, `insert` and `update` are the exceptions —
- * they are writes, and get the matching admin gate (`assertCanUpdateBoard` or
- * `assertCanInsertBoard`), `.use(requireActor(...))` before `.input()` per
- * conventions item 2.
+ * rule. `copyNoticeTemplate`, `insert`, `update`, `updateNoticeTemplate`,
+ * `updateMinutesWorkflow` and `archive` are the exceptions — they are writes,
+ * and get the matching admin gate (`assertCanUpdateBoard`,
+ * `assertCanInsertBoard`, or — for `archive`, which writes `board_member` too
+ * — the composite `assertCanArchiveBoard`), `.use(requireActor(...))` before
+ * `.input()` per conventions item 2.
+ *
+ * ─── Wave 6, Task 5 — the last three board writes ─────────────────────────
+ *
+ * `updateNoticeTemplate`, `updateMinutesWorkflow` and `archive` close the
+ * three raw `supabase.from("board").update(...)` calls that survived every
+ * earlier wave, none of them guarded by anything but RLS. Two of the three had
+ * also never WORKED: they sent an `updated_at` column `board` does not have.
+ * Each procedure's own doc comment carries the detail; the pattern worth
+ * carrying forward is that a dead data layer makes "refused", "rejected" and
+ * "returned nothing" indistinguishable from outside.
  *
  * A board that does not exist, or belongs to another town, answers NOT_FOUND
  * from every procedure here that names a specific board — `detail`, `stats`,
@@ -52,7 +64,11 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, requireActor } from "../trpc.js";
-import { assertCanInsertBoard, assertCanUpdateBoard } from "../authorization/rules.js";
+import {
+  assertCanArchiveBoard,
+  assertCanInsertBoard,
+  assertCanUpdateBoard,
+} from "../authorization/rules.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
 
@@ -514,6 +530,213 @@ export const boardRouter = router({
    * that directly below — a second `assertBoardExists` call would just repeat
    * the same query the `UPDATE` already runs.
    */
+  /**
+   * `NoticeTemplateEditor.tsx`'s "Save Template" write — this board's own
+   * `notice_template_blocks`, replacing a raw, UNAUTHORIZED
+   * `supabase.from("board").update({notice_template_blocks})` that had no
+   * application-level check of any kind between a caller and a board's
+   * published-notice wording (tenancy-only RLS, and nothing else).
+   *
+   * **Not `board.update`, and the reason is its input schema, not its guard.**
+   * `update` requires `name`, `elected_or_appointed`, `member_count`,
+   * `election_method`, both formality/style overrides, `quorum_type`,
+   * `quorum_value` and `motion_display_format` — nine fields the notice editor
+   * neither holds nor has a control for. Routing this write through it would
+   * force the editor to carry a whole board row and send it back up on every
+   * template save: the same "client-trusted copy of server data" round trip
+   * `copyNoticeTemplate` below was created specifically to remove, and a
+   * lost-update hazard besides (a stale row in the editor would silently
+   * revert a rename made in another tab). One column, one procedure — the
+   * shape `copyNoticeTemplate` already established for this same column.
+   *
+   * Guard: `requireActor(assertCanUpdateBoard)`, identical to `update` and
+   * `copyNoticeTemplate`. There is no narrower rule to reach for — no
+   * `PermissionCode` in `PERMISSIONS` governs board configuration at all (see
+   * `assertCanUpdateBoard`'s own definition, a bare admin gate), so
+   * `requireBoardPermission` has nothing to resolve and `requireActor` is the
+   * correct shape (conventions item 2's "admin gates that are NOT
+   * `PermissionCode`-keyed").
+   *
+   * NOT_FOUND for a board in another town, via `RETURNING` on the `UPDATE`
+   * itself — the same no-separate-`assertBoardExists` reasoning `update`
+   * gives above.
+   */
+  updateNoticeTemplate: protectedProcedure
+    .use(requireActor(assertCanUpdateBoard))
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        /**
+         * `NoticeTemplateBlock[]` (`@town-meeting/shared`), validated
+         * structurally rather than imported: the shared type is a plain
+         * `interface`, not a Zod schema, and `config` is
+         * `Record<string, unknown>` there — per-block config shapes are the
+         * editor's business, not this column's. `type` IS pinned to the seven
+         * real block types, because that set is closed and a typo in it would
+         * render as a missing block rather than an error.
+         */
+        blocks: z.array(
+          z.object({
+            id: z.string().min(1),
+            type: z.enum([
+              "letterhead",
+              "meeting_details",
+              "agenda_summary",
+              "rich_text",
+              "statutory_footer",
+              "signature_block",
+              "spacer",
+            ]),
+            order: z.number().int().min(0),
+            config: z.record(z.string(), z.unknown()),
+          }),
+        ),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE board
+            SET notice_template_blocks = ${JSON.stringify(input.blocks)}::jsonb
+            WHERE id = ${input.boardId}
+            RETURNING id
+          `),
+          (message) => new Error(`board.updateNoticeTemplate: ${message}`),
+        );
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return row;
+      });
+    }),
+
+  /**
+   * `MinutesWorkflowEditor.tsx`'s "Save" write — the board's five
+   * minutes-approval columns, replacing the second raw, UNAUTHORIZED
+   * `supabase.from("board").update(...)` this wave found. Same guard and same
+   * "not `board.update`" reasoning as `updateNoticeTemplate` above; the two
+   * editors sit side by side in the board's Settings tab and neither holds
+   * the other's fields.
+   *
+   * **The write it replaces has never succeeded.** It sent `updated_at: new
+   * Date().toISOString()` alongside the five real columns, and `board` has no
+   * `updated_at` column — confirmed against a live database
+   * (`SELECT 1 FROM information_schema.columns WHERE table_name='board' AND
+   * column_name='updated_at'` → 0 rows) and against `0000_baseline.sql`'s
+   * `CREATE TABLE public.board`. PostgREST rejects an unknown column
+   * (`PGRST204`) rather than ignoring it, the editor's `if (error) throw
+   * error` turned that into its "Error saving" state, and no board-level
+   * minutes-workflow setting has ever been persisted. This is the THIRD
+   * instance of this exact column-that-does-not-exist shape in this codebase:
+   * wave 1 found `EditGovTitleDialog` writing `updated_at` to `user_account`,
+   * wave 2 found `EditBoardDialog` writing it to `board`, and this task found
+   * it here and in `ArchiveBoardDialog` (see `archive` below). The column is
+   * simply not sent here.
+   *
+   * `audio_retention_policy_override`'s four accepted values are the
+   * `board_audio_retention_policy_override_check` CHECK constraint's own list,
+   * not a wider `z.string()`: a value outside it would be a constraint
+   * violation surfacing as INTERNAL_SERVER_ERROR instead of BAD_REQUEST.
+   * Both overrides are nullable, and `null` is the real "inherit the town
+   * default" value the editor writes when its Override switch is off.
+   */
+  updateMinutesWorkflow: protectedProcedure
+    .use(requireActor(assertCanUpdateBoard))
+    .input(
+      z.object({
+        boardId: z.string().uuid(),
+        minutes_consent_agenda: z.boolean(),
+        minutes_requires_second: z.boolean(),
+        r4_board_member_default: z.boolean(),
+        audio_retention_policy_override: z
+          .enum(["purge_on_approval", "retain_30_days", "retain_90_days", "retain_indefinitely"])
+          .nullable(),
+        auto_publish_on_approval_override: z.boolean().nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE board SET
+              minutes_consent_agenda = ${input.minutes_consent_agenda},
+              minutes_requires_second = ${input.minutes_requires_second},
+              r4_board_member_default = ${input.r4_board_member_default},
+              audio_retention_policy_override = ${input.audio_retention_policy_override},
+              auto_publish_on_approval_override = ${input.auto_publish_on_approval_override}
+            WHERE id = ${input.boardId}
+            RETURNING id
+          `),
+          (message) => new Error(`board.updateMinutesWorkflow: ${message}`),
+        );
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return row;
+      });
+    }),
+
+  /**
+   * `ArchiveBoardDialog.tsx`'s write — archive the board AND every active
+   * `board_member` seat on it, in ONE transaction.
+   *
+   * **The point of this procedure is the transaction.** The dialog made two
+   * untransacted round trips (`board.update`, then `board_member.update`) and
+   * a failure between them left a board archived with its members still
+   * `active` — a board absent from every picker whose seats still count
+   * toward quorum. `ctx.withTenant` runs its callback inside a single Drizzle
+   * transaction (`db/with-tenant.ts`), so either both writes land or neither
+   * does. Both procedures existed individually; the atomic pair did not, and
+   * composing them client-side cannot produce one.
+   *
+   * Guard: `requireActor(assertCanArchiveBoard)` — a composite of
+   * `assertCanUpdateBoard` AND `assertCanUpdateBoardMember`, added in
+   * `rules.ts` for this procedure. Using either half alone would be a guard
+   * naming one of the two tables it writes; see that rule's own comment.
+   *
+   * **This write has never succeeded either**, and for the same reason
+   * `updateMinutesWorkflow` above records: the `board` half sent `updated_at`
+   * as well as `archived_at`, and `board` has no such column. Unlike the
+   * minutes editor, this dialog rendered NOTHING on failure — no error state
+   * at all — so the dialog simply stayed open. The column is not sent here.
+   *
+   * `status = 'archived'` is the whole of the member write, matching the raw
+   * query exactly. `boardMember.archiveMembership` additionally stamps
+   * `term_end = CURRENT_DATE`; that is a different operation (retiring one
+   * named seat) and its extra clause is deliberately NOT adopted here —
+   * conventions' "the query you are replacing is a specification", where an
+   * ADDED clause is as much a behaviour change as a dropped one.
+   *
+   * Returns `archivedMembers` so a caller — and this procedure's own
+   * failure-mode test — can assert the second write actually ran.
+   */
+  archive: protectedProcedure
+    .use(requireActor(assertCanArchiveBoard))
+    .input(z.object({ boardId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const rows = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE board SET archived_at = now()
+            WHERE id = ${input.boardId}
+            RETURNING id
+          `),
+          (message) => new Error(`board.archive: ${message}`),
+        );
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const archived = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE board_member SET status = 'archived'
+            WHERE board_id = ${input.boardId} AND status = 'active'
+            RETURNING id
+          `),
+          (message) => new Error(`board.archive: ${message}`),
+        );
+        return { id: row.id, archivedMembers: archived.length };
+      });
+    }),
+
   copyNoticeTemplate: protectedProcedure
     .use(requireActor(assertCanUpdateBoard))
     .input(

@@ -14,25 +14,11 @@
  * `EditBoardDialog.tsx` still turns this red.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
-import { installTRPCFetchStub } from "@/test/trpc";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc, type RouterOutputs } from "@/lib/trpc";
-
-// `EditBoardDialog` still reads `meeting` count off `@/hooks/useSupabase`
-// directly (whether the board has meetings, to disable the name field) —
-// not this task's file list. Mocked just enough to resolve.
-vi.mock("@/hooks/useSupabase", () => {
-  const chain: Record<string, unknown> = {
-    then: (resolve: (value: { count: number; error: null }) => void) =>
-      resolve({ count: 0, error: null }),
-  };
-  for (const m of ["select", "eq"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { useSupabase: () => ({ from: vi.fn().mockReturnValue(chain) }) };
-});
 
 import { EditBoardDialog } from "../EditBoardDialog";
 
@@ -62,8 +48,20 @@ const board: RouterOutputs["board"]["detail"] = {
   auto_publish_on_approval_override: null,
 };
 
+/**
+ * Wave 6, Task 5: the meeting-count read is `board.stats` now, not a raw
+ * `useSupabase()` head-count — the file's last Supabase call, and one that
+ * carried no `TODO(phase-e-wave-*)` marker despite living under a header that
+ * narrated the `board.update` migration as if the file were finished.
+ */
+const server = { meetings: 0, updateRefuses: false };
+
 const stub = installTRPCFetchStub({
-  "board.update": (input) => ({ id: input.boardId, name: input.name }),
+  "board.stats": () => ({ active_members: 3, meetings: server.meetings }),
+  "board.update": (input) => {
+    if (server.updateRefuses) trpcTestError("FORBIDDEN");
+    return { id: input.boardId, name: input.name };
+  },
 });
 
 async function save() {
@@ -92,6 +90,11 @@ async function save() {
 }
 
 describe("EditBoardDialog", () => {
+  beforeEach(() => {
+    server.meetings = 0;
+    server.updateRefuses = false;
+  });
+
   it("submits the edit through trpc.board.update, with no updated_at field", async () => {
     // The `not.toHaveProperty` assertion below is a weak runtime signal, not
     // the real protection — `board.update`'s Zod schema has no `updated_at`
@@ -100,7 +103,9 @@ describe("EditBoardDialog", () => {
     // call is a compile error, not a test failure). Kept anyway as a cheap,
     // literal check on what the stub actually received.
     await save();
-    const input = stub.calls[0]?.inputs["0"] as Record<string, unknown>;
+    // Not `calls[0]` — `board.stats` fires on mount, before this write.
+    const call = stub.calls.find((c) => c.paths.includes("board.update"));
+    const input = call?.inputs["0"] as Record<string, unknown>;
     expect(input).toMatchObject({ boardId: "b1", name: "Select Board" });
     expect(input).not.toHaveProperty("updated_at");
   });
@@ -108,5 +113,50 @@ describe("EditBoardDialog", () => {
   it("invalidates the tRPC key the board detail screen reads under", async () => {
     const { detailKey } = await save();
     await waitFor(() => expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true));
+  });
+
+  it("disables the name field when board.stats reports the board has meetings", async () => {
+    // The historical-record rule this control exists for. `board.stats`'s
+    // `meetings` is the same unfiltered `count(*)` the raw head-count ran.
+    server.meetings = 4;
+    renderWithProviders(
+      <EditBoardDialog
+        townId="town-1"
+        town={undefined}
+        board={board}
+        open
+        onOpenChange={() => {}}
+      />,
+      { queryClient },
+    );
+    await waitFor(() => expect(screen.getByDisplayValue("Select Board")).toBeDisabled());
+    expect(
+      screen.getByText(/name cannot be changed because this board has associated meetings/i),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the name field editable when the board has no meetings", async () => {
+    renderWithProviders(
+      <EditBoardDialog
+        townId="town-1"
+        town={undefined}
+        board={board}
+        open
+        onOpenChange={() => {}}
+      />,
+      { queryClient },
+    );
+    await waitFor(() => expect(stub.countFor("board.stats")).toBeGreaterThan(0));
+    expect(screen.getByDisplayValue("Select Board")).not.toBeDisabled();
+  });
+
+  it("says why a refused edit failed — it said nothing before", async () => {
+    // `board.update` has carried `requireActor(assertCanUpdateBoard)` since
+    // wave 2, so FORBIDDEN has been reachable for four waves with no surface.
+    server.updateRefuses = true;
+    await save();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /don't have permission to change this board's settings/i,
+    );
   });
 });

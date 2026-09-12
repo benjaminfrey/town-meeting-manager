@@ -3,9 +3,10 @@
  * stay true while they changed.
  *
  * Sixteen of the guards in `authorization/rules.ts` gained a REQUIRED board
- * in that task (`grep -cE ": BoardScope" …` answered 16 then and answers 29 at
+ * in that task (`grep -cE ": BoardScope" …` answered 16 then and answers 30 at
  * HEAD — quote the grep, not the number; the additions since are wave 4 Task
- * 2's `assertCanPublishAgenda` and wave 5 Task 2's ten).
+ * 2's `assertCanPublishAgenda`, wave 5 Task 2's ten and wave 6 Task 1's
+ * `assertCanPublishMinutes`).
  * That is a change to how every one of them answers, so it needs more than
  * "the new case works":
  *
@@ -239,6 +240,22 @@ const FAMILIES: ReadonlyArray<{
     code: "M3",
     label: "vote record clearing",
     allowed: (actor, boardId) => !throws(() => rules.assertCanDeleteVoteRecord(actor, { boardId })),
+  },
+  {
+    // Phase E wave 6, Task 1. R5 (`publish_approved_minutes`) is in
+    // `BOARD_SCOPED_CODES` and in `TEMPLATE_BOARD_SPECIFIC_STAFF`, and until
+    // that task had no rule and no guard anywhere: the only occurrences of
+    // "R5" in `packages/api/src` were `admin-gates.test.ts`'s maximal matrix
+    // and `require-permission.test.ts`'s `BOARD_SCOPED_CODES` roster — the
+    // same fixture-only footprint A5, M6 and M7 had before their own waves.
+    // It is listed separately from the R1 "minutes writes" entry above for the
+    // reason the two A3 entries are listed separately: same table, different
+    // code, and a mutation that dropped the board from one would be covered by
+    // the other's test while the widening this rule exists to stop went
+    // unpinned.
+    code: "R5",
+    label: "minutes publication",
+    allowed: (actor, boardId) => !throws(() => rules.assertCanPublishMinutes(actor, { boardId })),
   },
 ];
 

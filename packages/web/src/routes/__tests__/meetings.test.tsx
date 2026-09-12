@@ -38,18 +38,6 @@ vi.mock("@/hooks/usePermission", () => ({
   usePermission: () => ({ allowed: true }),
 }));
 
-// The board picker's read — still raw Supabase, not this task's file (see
-// meetings.tsx's own header). Resolves empty; the picker is never opened by
-// these tests.
-vi.mock("@/lib/supabase", () => {
-  const chain: Record<string, unknown> = {};
-  chain["throwOnError"] = () => Promise.resolve({ data: [], error: null });
-  for (const m of ["select", "eq", "is", "order"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { supabase: { from: vi.fn().mockReturnValue(chain) } };
-});
-
 // ─── Mock @dnd-kit — capture the real onDragEnd instead of discarding it ──
 
 const dnd = vi.hoisted(() => ({ onDragEnd: null as ((e: DragEndEvent) => void) | null }));
@@ -93,6 +81,10 @@ const noticedMeeting = {
   meeting_type: "regular",
   scheduled_date: "2026-09-10",
   scheduled_time: "18:00:00",
+  // Wave 6, Task 5 added `started_at` to `meeting.byTown` for `home.tsx`'s
+  // "started N min ago" hero. This screen does not read it; the stub owes it
+  // anyway, because `TestHandlers` binds the payload to the procedure.
+  started_at: null,
   board_id: "b1",
   board_name: "Select Board",
 } satisfies RouterOutputs["meeting"]["byTown"][number];
@@ -107,7 +99,19 @@ const server = {
 /** Set by the `meeting.updateStatus` handler, so a test can assert on the exact input sent. */
 const received: { updateStatus?: unknown } = {};
 
+const activeBoards = [
+  {
+    id: "b1",
+    name: "Select Board",
+    member_count: 5,
+    is_governing_board: true,
+    election_method: "at_large",
+    officer_election_method: "vote_of_board",
+  },
+] satisfies RouterOutputs["board"]["listActive"];
+
 const stub = installTRPCFetchStub({
+  "board.listActive": () => activeBoards,
   "meeting.byTown": () => {
     if (server.byTownRejects) trpcTestError("INTERNAL_SERVER_ERROR");
     return server.meetings;
@@ -217,5 +221,26 @@ describe("meetings kanban", () => {
     expect(
       await screen.findByText("You don't have permission to change this meeting's status."),
     ).toBeInTheDocument();
+  });
+
+  it("offers only active boards in the Schedule meeting picker", async () => {
+    // Wave 6, Task 5: this picker was the file's last raw Supabase read.
+    // `board.listActive` filters `archived_at IS NULL`, which is why
+    // `board.list` (which deliberately does not) was not reusable here.
+    // `?new=1` is how this screen opens its picker — the kanban's own header
+    // has no button for it; `home.tsx`'s "Schedule meeting" links here.
+    renderWithProviders(<MeetingsPage />, { route: "/?new=1", queryClient });
+    expect(await screen.findByText("Select a Board")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Select Board" })).toBeInTheDocument();
+  });
+
+  it("refetches the board picker when a writer invalidates trpc.board.pathFilter()", async () => {
+    renderRoute();
+    await waitFor(() => expect(stub.countFor("board.listActive")).toBeGreaterThan(0));
+    const before = stub.countFor("board.listActive");
+
+    await queryClient.invalidateQueries(trpc.board.pathFilter());
+
+    await waitFor(() => expect(stub.countFor("board.listActive")).toBeGreaterThan(before));
   });
 });

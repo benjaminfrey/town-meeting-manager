@@ -1,15 +1,72 @@
+/**
+ * The minutes editor's right-hand panel — what the live meeting actually
+ * recorded for the section the clerk is editing.
+ *
+ * ─── Phase E, wave 6, Task 3 ──────────────────────────────────────────────
+ *
+ * Five raw `select("*")` reads moved to the five procedures that already
+ * existed for them (`agendaItem`/`motion`/`voteRecord`/`agendaItemTransition`/
+ * `guestSpeaker`, all `byMeeting`, all wave 3–5). Every row type below comes
+ * from `RouterOutputs`, never `Record<string, unknown>` — conventions item 10,
+ * and it is the bag type that hid what follows.
+ *
+ * ─── Five of this panel's reads were of columns that do not exist ─────────
+ *
+ * `select("*")` returns whatever the table has; a `Record<string, unknown>`
+ * read of a key the table does NOT have compiles, evaluates to `undefined`,
+ * and every one of these sat behind a `Boolean(...)`/`!= null` guard, so the
+ * panel silently rendered less than it appears to. Checked against
+ * `packages/api/drizzle/0000_baseline.sql`, not inferred from the procedures:
+ *
+ *   - `motion.moved_by_name` / `motion.seconded_by_name` — the columns are
+ *     `moved_by` / `seconded_by`, `board_member.id` foreign keys. The
+ *     "Moved: …" / "Seconded: …" spans have NEVER rendered. They are now
+ *     resolved through `boardMember.roster`, the same mapping `live.tsx`
+ *     builds for `VotePanel`.
+ *   - `motion.yeas` / `nays` / `abstentions` — no such columns; the tally
+ *     lives in the `vote_summary` JSONB that `voteRecord.recordForMotion`
+ *     writes. `hasVoteData` was therefore always `false` and the three vote
+ *     badges have never rendered either. Now read from `vote_summary`,
+ *     through `lib/meeting/voteTally.ts`'s `voteTallyOf` — written here in
+ *     Task 3, moved out unchanged in Task 4 when
+ *     `routes/meetings.$meetingId.review.tsx` needed the same narrowing of
+ *     the same column and a second copy would have been a second answer.
+ *   - `vote_record.member_name` — the column is `board_member_id`. Each
+ *     individual-vote badge rendered as ": yea". Same roster mapping.
+ *   - `agenda_item_transition.transition_type` — no such column, so the
+ *     `?? "Transition"` fallback was the only thing that ever rendered. The
+ *     dead read is gone and the literal stays; naming the transition would
+ *     need a product decision about what to call it, not a column rename.
+ *
+ * The roster read is the one procedure this panel did not already have a call
+ * for. It needs a `boardId`, which is why this component takes one — threaded
+ * from `minutes.tsx`'s `meeting.detail.board_id` through `MinutesEditor`,
+ * the single source for it on that screen.
+ *
+ * No writes here, so no `pathFilter()` call: the writers that change these
+ * tables (`AgendaSection`, `InlineItemForm`, `MotionPanel`, `VotePanel`,
+ * `GuestSpeakerEntry`, `MeetingStartFlow`, …) already invalidate both the
+ * legacy `queryKeys.*` keys and their routers' `pathFilter()`, so this
+ * panel's reads are reached by the same invalidations that reach `live.tsx`'s.
+ */
+
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
-import { queryKeys } from "@/lib/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Clock } from "lucide-react";
+import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { voteTallyOf } from "@/lib/meeting/voteTally";
 import type { MinutesContentJson, MinutesContentSection } from "@town-meeting/shared/types";
 
 interface SourceDataPanelProps {
   meetingId: string;
+  /** The meeting's board — needed only to resolve seat ids to member names. */
+  boardId: string;
   selectedSectionIndex: number;
   contentJson: MinutesContentJson;
 }
+
+type Motion = RouterOutputs["motion"]["byMeeting"][number];
 
 function formatTime(timestamp: string | null): string {
   if (!timestamp) return "--";
@@ -25,73 +82,46 @@ function formatTime(timestamp: string | null): string {
 
 export function SourceDataPanel({
   meetingId,
+  boardId,
   selectedSectionIndex,
   contentJson,
 }: SourceDataPanelProps) {
-  const supabase = useSupabase();
-
+  // `enabled: !!meetingId` is carried over from the queries these replace. It
+  // is load-bearing now in a way it was not before: every input below is
+  // `z.string().uuid()`, so an empty id is a BAD_REQUEST rather than a query
+  // that returns nothing.
   const { data: agendaItems = [] } = useQuery({
-    queryKey: queryKeys.agendaItems.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("agenda_item")
-        .select("*")
-        .eq("meeting_id", meetingId)
-        .order("sort_order");
-      if (error) throw error;
-      return data as Record<string, unknown>[];
-    },
+    ...trpc.agendaItem.byMeeting.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
 
   const { data: motions = [] } = useQuery({
-    queryKey: queryKeys.motions.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data, error } = await supabase.from("motion").select("*").eq("meeting_id", meetingId);
-      if (error) throw error;
-      return data as Record<string, unknown>[];
-    },
+    ...trpc.motion.byMeeting.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
 
   const { data: voteRecords = [] } = useQuery({
-    queryKey: queryKeys.voteRecords.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("vote_record")
-        .select("*")
-        .eq("meeting_id", meetingId);
-      if (error) throw error;
-      return data as Record<string, unknown>[];
-    },
+    ...trpc.voteRecord.byMeeting.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
 
   const { data: transitions = [] } = useQuery({
-    queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("agenda_item_transition")
-        .select("*")
-        .eq("meeting_id", meetingId);
-      if (error) throw error;
-      return data as Record<string, unknown>[];
-    },
+    ...trpc.agendaItemTransition.byMeeting.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
 
   const { data: guestSpeakers = [] } = useQuery({
-    queryKey: queryKeys.guestSpeakers.byMeeting(meetingId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("guest_speaker")
-        .select("*")
-        .eq("meeting_id", meetingId);
-      if (error) throw error;
-      return data as Record<string, unknown>[];
-    },
+    ...trpc.guestSpeaker.byMeeting.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
+
+  const { data: roster = [] } = useQuery({
+    ...trpc.boardMember.roster.queryOptions({ boardId }),
+    enabled: !!boardId,
+  });
+
+  /** `board_member.id` → the person's name, for movers, seconders and voters. */
+  const memberNames = useMemo(() => new Map(roster.map((seat) => [seat.id, seat.name])), [roster]);
 
   const section: MinutesContentSection | undefined = contentJson.sections[selectedSectionIndex];
 
@@ -104,32 +134,22 @@ export function SourceDataPanel({
   }
 
   // Find agenda items that match this section by section_type and sort_order
-  const sectionAgendaItems = agendaItems.filter(
-    (ai: Record<string, unknown>) => (ai.section_type as string) === section.section_type,
-  );
+  const sectionAgendaItems = agendaItems.filter((ai) => ai.section_type === section.section_type);
 
   // Get motions for these agenda items
-  const agendaItemIds = new Set(
-    sectionAgendaItems.map((ai: Record<string, unknown>) => ai.id as string),
-  );
-  const sectionMotions = motions.filter((m: Record<string, unknown>) =>
-    agendaItemIds.has(m.agenda_item_id as string),
-  );
+  const agendaItemIds = new Set(sectionAgendaItems.map((ai) => ai.id));
+  const sectionMotions = motions.filter((m) => agendaItemIds.has(m.agenda_item_id));
 
   // Get vote records for these motions
-  const motionIds = new Set(sectionMotions.map((m: Record<string, unknown>) => m.id as string));
-  const sectionVoteRecords = voteRecords.filter((vr: Record<string, unknown>) =>
-    motionIds.has(vr.motion_id as string),
-  );
+  const motionIds = new Set(sectionMotions.map((m) => m.id));
+  const sectionVoteRecords = voteRecords.filter((vr) => motionIds.has(vr.motion_id));
 
   // Get transitions for these agenda items
-  const sectionTransitions = transitions.filter((t: Record<string, unknown>) =>
-    agendaItemIds.has(t.agenda_item_id as string),
-  );
+  const sectionTransitions = transitions.filter((t) => agendaItemIds.has(t.agenda_item_id));
 
   // Get guest speakers for these agenda items
-  const sectionSpeakers = guestSpeakers.filter((gs: Record<string, unknown>) =>
-    agendaItemIds.has(gs.agenda_item_id as string),
+  const sectionSpeakers = guestSpeakers.filter(
+    (gs) => gs.agenda_item_id !== null && agendaItemIds.has(gs.agenda_item_id),
   );
 
   return (
@@ -147,15 +167,15 @@ export function SourceDataPanel({
             Timestamps
           </h4>
           <div className="space-y-1.5">
-            {sectionTransitions.map((t: Record<string, unknown>, idx: number) => (
+            {sectionTransitions.map((t) => (
               <div
-                key={idx}
+                key={t.id}
                 className="rounded border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
               >
-                <span className="font-medium">{(t.transition_type as string) ?? "Transition"}</span>
+                {/* Literal, not a column: see this file's header. */}
+                <span className="font-medium">Transition</span>
                 <span className="ml-2">
-                  {formatTime(t.started_at as string | null)} &rarr;{" "}
-                  {formatTime(t.ended_at as string | null)}
+                  {formatTime(t.started_at)} &rarr; {formatTime(t.ended_at)}
                 </span>
               </div>
             ))}
@@ -168,37 +188,35 @@ export function SourceDataPanel({
         <div className="mb-4">
           <h4 className="mb-2 text-xs font-medium text-muted-foreground">Motions</h4>
           <div className="space-y-3">
-            {sectionMotions.map((m: Record<string, unknown>, idx: number) => {
-              const hasVoteData: boolean = m.yeas != null || m.nays != null;
-              const motionVotes = sectionVoteRecords.filter(
-                (vr: Record<string, unknown>) => (vr.motion_id as string) === (m.id as string),
-              );
+            {sectionMotions.map((m: Motion) => {
+              const tally = voteTallyOf(m.vote_summary);
+              const movedByName = m.moved_by ? memberNames.get(m.moved_by) : undefined;
+              const secondedByName = m.seconded_by ? memberNames.get(m.seconded_by) : undefined;
+              const motionVotes = sectionVoteRecords.filter((vr) => vr.motion_id === m.id);
               return (
-                <div key={idx} className="rounded border border-border bg-muted/50 px-3 py-2">
-                  <p className="mb-1 text-xs text-muted-foreground">{m.motion_text as string}</p>
+                <div key={m.id} className="rounded border border-border bg-muted/50 px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">{m.motion_text}</p>
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    {Boolean(m.moved_by_name) && <span>Moved: {m.moved_by_name as string}</span>}
-                    {Boolean(m.seconded_by_name) && (
-                      <span>| Seconded: {m.seconded_by_name as string}</span>
-                    )}
+                    {movedByName && <span>Moved: {movedByName}</span>}
+                    {secondedByName && <span>| Seconded: {secondedByName}</span>}
                   </div>
                   {/* Vote summary */}
-                  {hasVoteData ? (
+                  {tally ? (
                     <div className="mt-1.5 flex items-center gap-2">
                       <Badge variant="outline" className="text-xs text-muted-foreground">
-                        Yeas: {(m.yeas as number) ?? 0}
+                        Yeas: {tally.yeas}
                       </Badge>
                       <Badge variant="outline" className="text-xs text-muted-foreground">
-                        Nays: {(m.nays as number) ?? 0}
+                        Nays: {tally.nays}
                       </Badge>
                       <Badge variant="outline" className="text-xs text-muted-foreground">
-                        Abstentions: {(m.abstentions as number) ?? 0}
+                        Abstentions: {tally.abstentions}
                       </Badge>
                     </div>
                   ) : null}
                   {Boolean(m.status) && (
                     <Badge variant="secondary" className="mt-1.5 text-xs text-muted-foreground">
-                      {m.status as string}
+                      {m.status}
                     </Badge>
                   )}
                   {/* Individual votes */}
@@ -208,13 +226,13 @@ export function SourceDataPanel({
                         Individual Votes
                       </p>
                       <div className="flex flex-wrap gap-1">
-                        {motionVotes.map((vr: Record<string, unknown>, vIdx: number) => (
+                        {motionVotes.map((vr) => (
                           <Badge
-                            key={vIdx}
+                            key={vr.id}
                             variant="outline"
                             className="text-[10px] text-muted-foreground"
                           >
-                            {vr.member_name as string}: {vr.vote as string}
+                            {memberNames.get(vr.board_member_id) ?? "Unknown member"}: {vr.vote}
                           </Badge>
                         ))}
                       </div>
@@ -232,13 +250,13 @@ export function SourceDataPanel({
         <div className="mb-4">
           <h4 className="mb-2 text-xs font-medium text-muted-foreground">Guest Speakers</h4>
           <div className="space-y-1.5">
-            {sectionSpeakers.map((gs: Record<string, unknown>, idx: number) => (
+            {sectionSpeakers.map((gs) => (
               <div
-                key={idx}
+                key={gs.id}
                 className="rounded border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
               >
-                <span className="font-medium">{gs.name as string}</span>
-                {Boolean(gs.topic) && <span className="ml-2">- {gs.topic as string}</span>}
+                <span className="font-medium">{gs.name}</span>
+                {Boolean(gs.topic) && <span className="ml-2">- {gs.topic}</span>}
               </div>
             ))}
           </div>
@@ -246,18 +264,18 @@ export function SourceDataPanel({
       )}
 
       {/* Operator Notes from Agenda Items */}
-      {sectionAgendaItems.some((ai: Record<string, unknown>) => ai.operator_notes) && (
+      {sectionAgendaItems.some((ai) => ai.operator_notes) && (
         <div className="mb-4">
           <h4 className="mb-2 text-xs font-medium text-muted-foreground">Operator Notes</h4>
           <div className="space-y-1.5">
             {sectionAgendaItems
-              .filter((ai: Record<string, unknown>) => ai.operator_notes)
-              .map((ai: Record<string, unknown>, idx: number) => (
+              .filter((ai) => ai.operator_notes)
+              .map((ai) => (
                 <div
-                  key={idx}
+                  key={ai.id}
                   className="rounded border border-border bg-muted/50 px-3 py-2 text-xs italic text-muted-foreground"
                 >
-                  {ai.operator_notes as string}
+                  {ai.operator_notes}
                 </div>
               ))}
           </div>
@@ -268,7 +286,7 @@ export function SourceDataPanel({
       {sectionMotions.length === 0 &&
         sectionTransitions.length === 0 &&
         sectionSpeakers.length === 0 &&
-        !sectionAgendaItems.some((ai: Record<string, unknown>) => ai.operator_notes) && (
+        !sectionAgendaItems.some((ai) => ai.operator_notes) && (
           <p className="text-xs text-muted-foreground italic">
             No source data found for this section.
           </p>

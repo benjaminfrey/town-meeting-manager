@@ -19,8 +19,10 @@
  *
  * Reads: `boardMember.searchCandidates` replaces the four-way merge of
  * `person` search + `user_account` by town + `board_member` active-counts by
- * town + `board_member` active-on-this-board by town; `boardMember
- * .personEmailExists` replaces the fifth (the live email-uniqueness check).
+ * town + `board_member` active-on-this-board by town; `person.emailExists`
+ * replaces the fifth (the live email-uniqueness check — that procedure was
+ * `boardMember.personEmailExists` until wave 6, Task 5 moved it to the router
+ * whose noun it reads; see its own doc comment).
  *
  * Writes: a NEW person is created with `person.insert` FIRST (the same
  * two-step shape `AddPersonDialog` already uses), then the resulting id is
@@ -133,11 +135,12 @@ export function AddMemberDialog({
     enabled: trimmedSearch.length >= 2,
   });
 
-  // Check email uniqueness — `boardMember.personEmailExists` replaces the
-  // fifth read.
+  // Check email uniqueness — `person.emailExists` replaces the fifth read.
+  // No `excludePersonId`: this form is creating a brand-new person, so there
+  // is no id to exclude yet (that argument exists for `EditPersonDialog`).
   const emailToCheck = personForm.values.email.toLowerCase().trim();
   const { data: emailExists = false } = useQuery({
-    ...trpc.boardMember.personEmailExists.queryOptions({ email: emailToCheck }),
+    ...trpc.person.emailExists.queryOptions({ email: emailToCheck }),
     enabled: !!emailToCheck && emailToCheck.includes("@"),
   });
 
@@ -236,6 +239,16 @@ export function AddMemberDialog({
       // `MemberRoster.tsx` reads its roster through `boardMember.roster` now
       // (this task) — same reasoning, new key.
       void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+      // Seating or retiring a member changes three BOARD-level aggregates —
+      // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+      // `board.list.active_member_count` (`/boards`) and
+      // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+      // live on the `board` router, which `trpc.boardMember.pathFilter()`
+      // does not match. Found in wave 6, Task 5; see conventions item 8's
+      // "a `pathFilter()` obligation no grep could have surfaced" for why
+      // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+      // this class of miss.
+      void queryClient.invalidateQueries(trpc.board.pathFilter());
       // Fire invitation email (best-effort, non-blocking) — same as the
       // original mutationFn's direct call, now against the id the server
       // handed back rather than one this component generated itself.

@@ -42,6 +42,7 @@
 
 import { sql } from "drizzle-orm";
 import type { TenantJob } from "../jobs/tenant-job.js";
+import type { TenantTx } from "../db/with-tenant.js";
 import { toRows } from "../db/rows.js";
 import { NotificationService } from "./notification-service.js";
 import type { NotificationEventType } from "@town-meeting/shared";
@@ -92,32 +93,37 @@ interface MeetingContextRow {
  * under RLS is the same answer as "no such meeting" — and must be, or the
  * distinction becomes a membership oracle over other towns' meetings.
  */
+async function loadMeetingContextIn(
+  tx: TenantTx,
+  meetingId: string,
+): Promise<MeetingContextRow | null> {
+  const found = rows<MeetingContextRow>(
+    await tx.execute(sql`
+      SELECT m.id,
+             m.board_id,
+             m.town_id,
+             m.scheduled_date::text AS scheduled_date,
+             m.scheduled_time::text AS scheduled_time,
+             m.location,
+             m.meeting_type::text AS meeting_type,
+             b.name AS board_name,
+             t.name AS town_name,
+             t.subdomain AS town_subdomain
+      FROM meeting m
+      JOIN board b ON b.id = m.board_id
+      JOIN town t ON t.id = m.town_id
+      WHERE m.id = ${meetingId}
+    `),
+    "notification-trigger.meetingContext",
+  );
+  return found[0] ?? null;
+}
+
 async function loadMeetingContext(
   job: TenantJob,
   meetingId: string,
 ): Promise<MeetingContextRow | null> {
-  const found = await job.run(async (tx) =>
-    rows<MeetingContextRow>(
-      await tx.execute(sql`
-        SELECT m.id,
-               m.board_id,
-               m.town_id,
-               m.scheduled_date::text AS scheduled_date,
-               m.scheduled_time::text AS scheduled_time,
-               m.location,
-               m.meeting_type::text AS meeting_type,
-               b.name AS board_name,
-               t.name AS town_name,
-               t.subdomain AS town_subdomain
-        FROM meeting m
-        JOIN board b ON b.id = m.board_id
-        JOIN town t ON t.id = m.town_id
-        WHERE m.id = ${meetingId}
-      `),
-      "notification-trigger.meetingContext",
-    ),
-  );
-  return found[0] ?? null;
+  return job.run((tx) => loadMeetingContextIn(tx, meetingId));
 }
 
 // ─── Helper: format date ──────────────────────────────────────────────
@@ -255,4 +261,72 @@ export async function triggerMinutesApproved(
   } catch (err) {
     console.error("[notification-trigger] triggerMinutesApproved failed:", err);
   }
+}
+
+// ─── The same two payloads, for a caller that has a TenantTx ──────────
+//
+// Phase E, wave 6, Task 1. `minutesDocument.submitForReview` and
+// `minutesDocument.approve` are tRPC procedures, and a tRPC resolver cannot
+// build a `TenantJob` — that needs `fastify.tenantDb`, which is on the Fastify
+// instance and not on a tRPC context. What it HAS is the `TenantTx` of the
+// transaction that just changed the status, which is strictly better for the
+// enqueue half: the `notification_event` row commits or rolls back WITH the
+// status change, so a failed transition cannot leave a queued email behind and
+// a successful one cannot fail to queue.
+//
+// These export the PAYLOAD only, not the enqueue. The caller writes the row
+// itself, inside its own transaction, exactly as
+// `routers/minutes-document.ts`'s `approveMinutesForPassedMotion` already
+// does. The keys are the ones `triggerMinutesReview` and
+// `triggerMinutesApproved` above build, character for character, so the two
+// paths cannot drift: `minutes-review.hbs` and `minutes-approved.hbs` read
+// `townName`, `boardName`, `meetingDate` and the urls, and — the one that is
+// not cosmetic — `NotificationService.getSubscribersForEvent` reads
+// `payload.board_id` and returns NO SUBSCRIBERS AT ALL without it.
+//
+// **What the caller gives up by not going through `NotificationService`:**
+// immediate processing. `createNotificationEvent` inserts the row AND
+// schedules the sweep; a bare INSERT waits for the next 60-second pass in
+// `server.ts`. That is the same trade D1c's split made and the same one
+// `approveMinutesForPassedMotion` makes today — an up-to-60-second delivery
+// latency, not a lost event.
+//
+// `null` when the meeting is not visible in this tenant context, which under
+// RLS is the same answer as "no such meeting" — see `loadMeetingContextIn`.
+
+export async function minutesReviewPayload(
+  tx: TenantTx,
+  meetingId: string,
+  minutesDocId: string,
+): Promise<Record<string, unknown> | null> {
+  const meeting = await loadMeetingContextIn(tx, meetingId);
+  if (!meeting) return null;
+  return {
+    meeting_id: meetingId,
+    board_id: meeting.board_id,
+    minutes_document_id: minutesDocId,
+    townName: meeting.town_name,
+    boardName: meeting.board_name,
+    meetingDate: formatDate(meeting.scheduled_date),
+    reviewUrl: `${APP_URL}/meetings/${meetingId}/minutes`,
+  };
+}
+
+export async function minutesApprovedPayload(
+  tx: TenantTx,
+  meetingId: string,
+  minutesDocId: string,
+): Promise<Record<string, unknown> | null> {
+  const meeting = await loadMeetingContextIn(tx, meetingId);
+  if (!meeting) return null;
+  return {
+    meeting_id: meetingId,
+    board_id: meeting.board_id,
+    minutes_document_id: minutesDocId,
+    townName: meeting.town_name,
+    boardName: meeting.board_name,
+    meetingDate: formatDate(meeting.scheduled_date),
+    minutesUrl: `${APP_URL}/meetings/${meetingId}/minutes`,
+    portalUrl: `${portalBaseFor(meeting.town_subdomain)}/meetings/${meetingId}`,
+  };
 }

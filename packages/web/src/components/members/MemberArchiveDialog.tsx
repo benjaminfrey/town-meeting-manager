@@ -98,6 +98,16 @@ export function MemberArchiveDialog({
         // `trpc.person.pathFilter()` call below: archiving JUST the board seat
         // still changes that read's own `status` column for this row.
         void queryClient.invalidateQueries(trpc.boardMember.pathFilter());
+        // Seating or retiring a member changes three BOARD-level aggregates —
+        // `board.stats.active_members` (`boards.$boardId.tsx`'s Overview),
+        // `board.list.active_member_count` (`/boards`) and
+        // `boardMember.memberCount` (`ProgressChecklist`) — and the first two
+        // live on the `board` router, which `trpc.boardMember.pathFilter()`
+        // does not match. Found in wave 6, Task 5; see conventions item 8's
+        // "a `pathFilter()` obligation no grep could have surfaced" for why
+        // neither item 7's procedure nor `cache-key-parity.test.ts` can see
+        // this class of miss.
+        void queryClient.invalidateQueries(trpc.board.pathFilter());
         // `result.archivedAccount` — the SERVER's own answer — not the
         // client's `willArchiveAccount` guess: `archiveMembership` recomputes
         // whether the account was actually archived (see this file's header

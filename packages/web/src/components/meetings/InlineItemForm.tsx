@@ -113,9 +113,14 @@ export function InlineItemForm({
   );
 
   /**
-   * The legacy key plus the router filter (conventions item 7). The legacy
-   * `queryKeys.agendaItems.byMeeting` line stays because `SourceDataPanel`,
-   * `live.tsx` and `review.tsx` still read it.
+   * The legacy key plus the router filter (conventions item 7).
+   * `queryKeys.agendaItems.byMeeting` now has NO reader left —
+   * `review.tsx`, its last one, moved to `trpc.agendaItem.byMeeting` in
+   * Phase E wave 6, Task 4 (`SourceDataPanel.tsx` in Task 3, `live.tsx` in
+   * wave 5). The line stays anyway: `cache-key-parity.test.ts` keys off it,
+   * and removing the last one from a file removes the tripwire for the next
+   * writer added to it — see that file's "Why a dead legacy line is not
+   * removed on sight".
    */
   const invalidateItems = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });

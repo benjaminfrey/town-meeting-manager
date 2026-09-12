@@ -3,34 +3,56 @@
  *
  * Searches meetings and boards, plus quick actions.
  * Uses cmdk for the command palette primitives.
+ *
+ * Phase E, wave 6, Task 5. Both reads are tRPC now (`meeting.byTown`,
+ * `board.listActive`). This file carried NO `TODO(phase-e-wave-*)` marker
+ * through five waves despite two live raw Supabase reads, so item 11's
+ * completeness sweep read it as done — it was findable only by the import
+ * grep, which is why Task 0 made that grep the wave's completeness measure.
+ *
+ * ─── Two behaviour changes, stated rather than smuggled ──────────────────
+ *
+ * 1. **`.limit(50)` is gone.** `meeting.byTown` returns every non-cancelled
+ *    meeting in the town. A search box that silently could not find the
+ *    51st-oldest meeting is a defect, not a feature, and reproducing the cap
+ *    would need either a new procedure or a `limit` argument on one whose
+ *    other caller (the kanban) wants all of them. The palette renders inside a
+ *    `max-h-72` scroller and `cmdk` filters by the typed query, so the cost is
+ *    a longer client-side list, not a longer page.
+ * 2. **The order is restored at the call site, not in the procedure.** The raw
+ *    query was `scheduled_date` DESC (most recent first); `meeting.byTown` is
+ *    ASC, because the kanban that owns it wants oldest-first. Sorting here
+ *    keeps this screen's own order without changing the procedure out from
+ *    under its other caller — the same "sort at the call site" choice
+ *    `board.list`'s doc comment already records for `routes/boards.tsx`.
+ *
+ * And one for the board list: `board.listActive` orders governing-board-first
+ * then alphabetically, where the raw read was plain `.order("name")`. Left as
+ * the procedure gives it — this is a jump-to list, every entry is labelled,
+ * and the town's governing board sorting first is if anything the better
+ * answer. The archived filter is identical (`archived_at IS NULL`).
  */
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
-import { Search, CalendarDays, List, Plus, Settings, ArrowRight } from "lucide-react";
+import {
+  Search,
+  CalendarDays,
+  List,
+  Plus,
+  Settings,
+  ArrowRight,
+  AlertTriangle,
+} from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import { queryKeys } from "@/lib/queryKeys";
-import { supabase } from "@/lib/supabase";
+import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-interface MeetingResult {
-  id: string;
-  title: string;
-  status: string;
-  scheduled_date: string;
-  board: { id: string; name: string } | null;
-}
-
-interface BoardResult {
-  id: string;
-  name: string;
 }
 
 function formatDate(dateStr: string) {
@@ -66,38 +88,24 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onOpenChange]);
 
-  // Fetch meetings
-  const { data: meetings = [] } = useQuery({
-    queryKey: [...queryKeys.meetings.byTown(townId), "cmd-palette"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("id, title, status, scheduled_date, board:board_id(id, name)")
-        .eq("town_id", townId)
-        .neq("status", "cancelled")
-        .order("scheduled_date", { ascending: false })
-        .limit(50)
-        .throwOnError();
-      // PostgREST infers the `board` to-one embed as an array, but a FK
-      // relationship returns a single object at runtime — cast through unknown.
-      return (data ?? []) as unknown as MeetingResult[];
-    },
+  // Fetch meetings. `enabled` keeps both reads off the wire until the palette
+  // is actually opened, exactly as before — the shell mounts this component on
+  // every authenticated screen.
+  const { data: meetingRows = [], isError: isMeetingsError } = useQuery({
+    ...trpc.meeting.byTown.queryOptions(),
     enabled: !!townId && open,
   });
 
+  // Most-recent-first, restoring the order the raw query had — see this
+  // file's header for why it is sorted here rather than in the procedure.
+  const meetings = useMemo(
+    () => [...meetingRows].sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date)),
+    [meetingRows],
+  );
+
   // Fetch boards
-  const { data: boards = [] } = useQuery({
-    queryKey: queryKeys.boards.byTown(townId),
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("board")
-        .select("id, name")
-        .eq("town_id", townId)
-        .is("archived_at", null)
-        .order("name")
-        .throwOnError();
-      return (data ?? []) as BoardResult[];
-    },
+  const { data: boards = [], isError: isBoardsError } = useQuery({
+    ...trpc.board.listActive.queryOptions(),
     enabled: !!townId && open,
   });
 
@@ -137,6 +145,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </div>
 
           <Command.List className="max-h-72 overflow-y-auto p-2">
+            {/* A failed search read used to render as "No results found." —
+                indistinguishable from a town with nothing in it (conventions
+                item 5). Non-blocking: the quick actions below still work. */}
+            {(isMeetingsError || isBoardsError) && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="mx-2 mb-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <p>Couldn't load search results. Try again in a moment.</p>
+              </div>
+            )}
+
             <Command.Empty className="py-8 text-center text-sm text-muted-foreground">
               No results found.
             </Command.Empty>
@@ -194,7 +216,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 {meetings.map((meeting) => (
                   <Command.Item
                     key={meeting.id}
-                    value={`meeting ${meeting.title} ${meeting.board?.name ?? ""} ${meeting.scheduled_date}`}
+                    value={`meeting ${meeting.title} ${meeting.board_name} ${meeting.scheduled_date}`}
                     onSelect={() => runAction(() => navigate(`/meetings/${meeting.id}`))}
                     className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm aria-selected:bg-muted/70"
                   >
@@ -202,7 +224,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     <div className="min-w-0 flex-1">
                       <span className="truncate">{meeting.title}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
-                        {meeting.board?.name}
+                        {meeting.board_name}
                         {meeting.scheduled_date && ` \u00b7 ${formatDate(meeting.scheduled_date)}`}
                       </span>
                     </div>

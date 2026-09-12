@@ -8,12 +8,38 @@
  * Self-contained: takes only the meetingId and queries the rest. The active
  * tab is derived from the URL, so callers just render
  * <MeetingSubnavHeader meetingId={meetingId} />.
+ *
+ * Phase E, wave 6, Task 5 — `trpc.meeting.detail`, which gained `board_name`
+ * for this component (see that procedure's own doc comment for why a JOIN
+ * rather than a dependent `board.detail` call). Like `CommandPalette.tsx`,
+ * this file carried no `TODO(phase-e-wave-*)` marker through five waves
+ * despite a live raw read, so item 11's sweep read it as done.
+ *
+ * Three differences from the query it replaces, all of them narrowings the
+ * raw read could not express:
+ *
+ *  - `.limit(1).maybeSingle()` on a primary key becomes plain NOT_FOUND:
+ *    `meeting.detail` throws for an id that names no row or a row in another
+ *    town, where `maybeSingle()` answered `null` for both and this component
+ *    rendered its "Meeting" placeholder either way.
+ *  - The `board:board_id(id, name)` embed and its array/object normalisation
+ *    are gone — a to-one PostgREST embed infers as an array, which is what
+ *    the `Array.isArray(boardRaw)` dance existed for. A real JOIN has no such
+ *    ambiguity, and `board.id` is dropped because nothing here rendered it.
+ *  - `title` and `status` are `NOT NULL` in the schema, so the `?? null`
+ *    coalescing and the `MeetingHeader` bag type went with them.
+ *
+ * The failure is now VISIBLE rather than silent: a header that renders
+ * "Meeting" with no title is exactly the "renders nothing and says nothing"
+ * mode conventions item 5 exists to end. It stays small and non-blocking (the
+ * tabs remain usable) for the reason `home.tsx`'s town-header banner gives —
+ * this is a context strip, not the screen's content.
  */
 
 import { Link, useLocation } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { AlertTriangle, ChevronLeft } from "lucide-react";
+import { trpc } from "@/lib/trpc";
 import { MEETING_STATUS_LABELS, MEETING_STATUS_COLORS } from "@/components/meetings/meeting-labels";
 import { LIFECYCLE_STAGES, lifecycleStageForStatus } from "@/components/MeetingLifecycle";
 import { cn } from "@/lib/utils";
@@ -25,40 +51,12 @@ const TABS = [
   { seg: "minutes", label: "Minutes" },
 ] as const;
 
-interface MeetingHeader {
-  id: string;
-  title: string | null;
-  status: string | null;
-  board: { id: string; name: string } | null;
-}
-
 export function MeetingSubnavHeader({ meetingId }: { meetingId: string }) {
   const location = useLocation();
   const activeSeg = location.pathname.split("/").pop() ?? "";
 
-  const { data: meeting } = useQuery({
-    queryKey: ["meeting-subnav", meetingId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("meeting")
-        .select("id, title, status, board:board_id(id, name)")
-        .eq("id", meetingId)
-        .limit(1)
-        .maybeSingle();
-      if (!data) return null;
-      const raw = data as Record<string, unknown>;
-      const boardRaw = raw.board as
-        | { id: string; name: string }
-        | { id: string; name: string }[]
-        | null;
-      const board = Array.isArray(boardRaw) ? (boardRaw[0] ?? null) : boardRaw;
-      return {
-        id: raw.id as string,
-        title: (raw.title as string) ?? null,
-        status: (raw.status as string) ?? null,
-        board,
-      } satisfies MeetingHeader;
-    },
+  const { data: meeting, isError } = useQuery({
+    ...trpc.meeting.detail.queryOptions({ meetingId }),
     enabled: !!meetingId,
   });
 
@@ -78,7 +76,7 @@ export function MeetingSubnavHeader({ meetingId }: { meetingId: string }) {
             Meetings
           </Link>
           <span className="text-muted-foreground/40">/</span>
-          <span className="font-medium">{meeting?.board?.name ?? "Meeting"}</span>
+          <span className="font-medium">{meeting?.board_name ?? "Meeting"}</span>
           {meeting?.title && (
             <span className="truncate text-muted-foreground">{meeting.title}</span>
           )}
@@ -93,6 +91,19 @@ export function MeetingSubnavHeader({ meetingId }: { meetingId: string }) {
             </span>
           )}
         </div>
+
+        {/* This read failed after mount (conventions item 5/12) — small and
+            non-blocking, matching this strip's weight on the screen. */}
+        {isError && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="mt-2 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive"
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <p>Couldn't load this meeting's details.</p>
+          </div>
+        )}
 
         {/* Tabs — the meeting lifecycle, navigable */}
         <nav className="-mb-px mt-3 flex gap-1 overflow-x-auto" aria-label="Meeting stages">

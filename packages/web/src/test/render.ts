@@ -138,8 +138,20 @@ export interface RenderOptions {
  * - MemoryRouter (React Router)
  * - MockAuthProvider (auth context)
  *
- * Supabase reads/writes are mocked at the module level via
- * vi.mock("@/lib/supabase") in individual test files.
+ * Data access is stubbed at the TRANSPORT, not at a module: install
+ * `installTRPCFetchStub` from `@/test/trpc` once per file, above the `it(...)`
+ * blocks, and leave `@/lib/trpc` alone. See that file's header for why
+ * replacing the options proxy makes an invalidation assertion inexpressible.
+ *
+ * This paragraph used to read "Supabase reads/writes are mocked at the module
+ * level via vi.mock(\"@/lib/supabase\") in individual test files." That advice
+ * is dead: Phase E wave 6, Task 6 deleted `lib/supabase.ts` and
+ * `hooks/useSupabase.ts`. It is recorded rather than simply cut because this
+ * doc comment is the one place a new test file is likely to copy its shape
+ * from, and the sentence was also the only reason `test/render.ts` matched a
+ * repo-wide `grep -rl "lib/supabase\\|useSupabase"` — the comment-versus-code
+ * hazard conventions item 11 names, in the very file item 9 tells people to
+ * exclude from its own greps for the same reason.
  *
  * ─── `user` does NOT reach `useCurrentUser()` ─────────────────────────────
  *

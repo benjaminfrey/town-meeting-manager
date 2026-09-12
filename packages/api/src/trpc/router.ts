@@ -35,6 +35,7 @@ import { voteRecordRouter } from "./routers/vote-record.js";
 import { executiveSessionRouter } from "./routers/executive-session.js";
 import { guestSpeakerRouter } from "./routers/guest-speaker.js";
 import { realtimeRouter } from "./routers/realtime.js";
+import { futureItemRouter } from "./routers/future-item.js";
 
 export const appRouter = router({
   /**
@@ -45,7 +46,11 @@ export const appRouter = router({
 
   /**
    * Board reads and writes. No permission guard on the reads — see
-   * `routers/board.ts` for why.
+   * `routers/board.ts` for why. Six writes, all admin-gated: `insert`,
+   * `update`, `copyNoticeTemplate`, and — added in wave 6, Task 5 —
+   * `updateNoticeTemplate`, `updateMinutesWorkflow` and `archive`, the last
+   * of which is the codebase's first procedure written specifically because
+   * two client-side writes needed to be ONE transaction.
    */
   board: boardRouter,
 
@@ -53,9 +58,11 @@ export const appRouter = router({
    * Board membership: seats, the staff/board-member accounts that come with
    * them, and the invitations both paths issue. `memberCount` has no
    * permission guard (tenancy-only, moved from `board.ts`); `roster`,
-   * `searchCandidates` and `personEmailExists` are tenancy-only reads for the
-   * same reason; `addBoardMember` and `addStaffMember` are admin gates — see
-   * `routers/board-member.ts`.
+   * `searchCandidates` is a tenancy-only read for the same reason;
+   * `addBoardMember` and `addStaffMember` are admin gates — see
+   * `routers/board-member.ts`. `personEmailExists` USED to live here and is
+   * now `person.emailExists` (wave 6, Task 5 — it reads `person` and nothing
+   * else).
    */
   boardMember: boardMemberRouter,
 
@@ -67,7 +74,9 @@ export const appRouter = router({
 
   /**
    * The people directory and its writes, plus `detail` (wave 3, Task 3) — one
-   * person's name, by id. No permission guard on either read — see
+   * person's name, by id — and `emailExists` (wave 6, Task 5), the live
+   * "somebody already uses that email" check three dialogs run while an admin
+   * types. No permission guard on any of the three reads — see
    * `routers/person.ts` for why. The four writes are all admin gates.
    */
   person: personRouter,
@@ -182,6 +191,14 @@ export const appRouter = router({
    * browser. Phase E wave 5, Task 1.
    */
   realtime: realtimeRouter,
+
+  /**
+   * The future item queue's only read — `review.tsx`'s deferred/tabled list
+   * for one meeting. No writes here; every row is written by
+   * `meeting.performAdjournment`. See `routers/future-item.ts`. Phase E wave
+   * 6, Task 2.
+   */
+  futureItem: futureItemRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

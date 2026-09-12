@@ -7,14 +7,30 @@
  * Stage 1, Phase E, Task 2 — the write is `town.updateProfile` now, not a raw
  * Supabase `update()`. The mutation invalidates BOTH the legacy
  * `queryKeys.towns.detail(townId)` key and `trpc.town.pathFilter()`
- * (conventions item 7): `settings.town.tsx` itself moved onto the tRPC key,
- * but `boards.tsx`, `boards.$boardId.tsx`,
- * `meetings.$meetingId.{agenda,review,minutes}.tsx`,
- * `settings.minutes-workflow.tsx` and `CreateMeetingDialog` all still read
- * the town row through the legacy key, so dropping that invalidation would
- * leave every one of them stale for up to the 60s `staleTime`. `home.tsx`
- * moved onto `town.detail` too, in Task 5 of this same wave — removed from
- * this list rather than left stale on it.
+ * (conventions item 7).
+ *
+ * **Corrected in wave 6 Task 4's fix round.** This header previously named
+ * `boards.tsx`, `boards.$boardId.tsx`,
+ * `meetings.$meetingId.{agenda,review,minutes}.tsx` and
+ * `settings.minutes-workflow.tsx` as still reading the town row through the
+ * legacy key. None does: `agenda.tsx` migrated in wave 4, `minutes.tsx` in
+ * wave 6 Task 3, `review.tsx` in wave 6 Task 4 (this same task), and
+ * `boards.tsx` / `boards.$boardId.tsx` / `settings.minutes-workflow.tsx` all
+ * read `trpc.town.detail` directly. `queryKeys.towns.detail` has **no reader
+ * left at all** — see `boards.$boardId.tsx`'s own header (corrected first,
+ * in this same fix round) for the up-to-date state. The legacy invalidation
+ * line stays anyway, for the sequencing reason in
+ * `cache-key-parity.test.ts`'s "Why a dead legacy line is not removed on
+ * sight" — NOT because a reader remains.
+ *
+ * Mechanical note for whoever greps next: the three files this correction
+ * touched (this one, `SetPortalAddressModal.tsx`, and
+ * `settings.minutes-workflow.tsx`) all named the three now-migrated route
+ * files in BRACE form (`meetings.$meetingId.{agenda,review,minutes}.tsx`),
+ * so a literal `grep -n "review.tsx"` against any of them finds nothing —
+ * one level deeper than conventions item 14's third widening ("grep the
+ * whole document for the exact string before claiming absence"): the string
+ * was never present to grep for, only its brace-compressed form.
  */
 
 import { useCallback } from "react";
