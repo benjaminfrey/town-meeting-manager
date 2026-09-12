@@ -1,5 +1,15 @@
 /**
  * Phase E, wave 5, Task 3 — where a live-meeting row's REAL board comes from.
+ * Phase E, wave 6, Task 1 — and where a MINUTES DOCUMENT's does.
+ *
+ * The minutes pair at the bottom is the first entry here that is not about a
+ * live meeting: `minutes_document` is not one of `realtime/events.ts`'s eight
+ * `LIVE_MEETING_TOPICS`, and no minutes write publishes a realtime event. It
+ * belongs here anyway, because the question it answers is this file's —
+ * "which board does this row really belong to, read inside the write's own
+ * transaction" — and because the wrong answer for it is already sitting on
+ * the table as a nullable `board_id` column. See
+ * `resolveMinutesDocumentScope` for why that column is not the answer.
  *
  * ─── Why this is a module and not seven copies ────────────────────────────
  *
@@ -148,6 +158,123 @@ export async function assertLiveRowOnAuthorizedBoard(
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
   assertMatchesAuthorizedBoard(ctx, row.board_id);
   return { meetingId: row.meeting_id, boardId: row.board_id };
+}
+
+/**
+ * The minutes document's own shape — Phase E, wave 6, Task 1.
+ *
+ * `status` is returned alongside the board for the same reason
+ * `assertMeetingOnAuthorizedBoard` returns `board_id`: every one of the six
+ * status transitions needs it (each refuses from the wrong status, and rule 9
+ * decides who may READ the document from it), and asking twice would be two
+ * round trips for one question.
+ */
+export interface MinutesDocumentScope {
+  meetingId: string;
+  boardId: string;
+  status: "draft" | "review" | "approved" | "published";
+}
+
+/**
+ * Where a `minutes_document`'s board comes from, and where it does NOT.
+ *
+ * ─── Not `minutes_document.board_id` ──────────────────────────────────────
+ *
+ * The table HAS that column. Authorizing on it would be wrong, and quietly:
+ *
+ *   board_id uuid,            -- `0000_baseline.sql`, no NOT NULL
+ *
+ * It is nullable and denormalised. A row where it is NULL would have to be
+ * either refused outright or resolved GLOBALLY, and a global resolution of R1
+ * or R5 answers "no" to every account the two `designated_boards` templates
+ * create (they grant per board with global all-false) while ignoring an
+ * override that REVOKES — wrong in both directions, which is the whole reason
+ * `BoardScope` is required rather than optional. Two places already say so:
+ * `storage/documents.ts`'s header ("`minutes_document.board_id` is nullable
+ * and denormalised ... join through `meeting.board_id`, which is NOT NULL")
+ * and `rules.ts`'s `BoardScopedRow` ("Do not read that one").
+ *
+ * `routers/agenda-item.ts` DOES filter on a denormalised board column in one
+ * place and documents the divergence. That is a non-authorization LIST query;
+ * do not copy it into a guard.
+ *
+ * So the board is `minutes_document.meeting_id → meeting.board_id`, one join,
+ * the same derivation `resolveMinutesDocumentForDownload` has used since
+ * Stage 1 — and an INNER JOIN for the reason this file's header gives:
+ * `meeting_id` is `NOT NULL` with a foreign key, so a missing partner cannot
+ * happen, and a LEFT JOIN would answer `null` for one if it ever did.
+ *
+ * ─── The existence check is the row-count check, at one id ────────────────
+ *
+ * `rows[0]` absent → `NOT_FOUND`. That IS conventions item 2's row-count
+ * comparison at a list of one, exactly as `assertAgendaItemsOnMeeting` says of
+ * itself ("it runs on the single-id case too, where it degrades to 'the row
+ * came back'"). Stated rather than left implicit because the shape the item
+ * warns against — `SELECT DISTINCT board_id FROM minutes_document md JOIN
+ * meeting m …` — is a one-line edit away from this query and has NO existence
+ * check at all: it returns zero rows for a missing document and zero rows for
+ * a document this town cannot see, and a caller that then loops over the empty
+ * board set writes with nothing having been checked.
+ *
+ * **Removing the check is not a refusal that becomes an error; it is a
+ * cross-tenant write that SUCCEEDS.** Postgres enforces a foreign key with row
+ * security bypassed — reproduced nine times in this project — so a
+ * `minutes_document` id from another town satisfies every constraint the six
+ * transitions touch. Delete the `if (!row)` below and `publish` puts ANOTHER
+ * TOWN'S minutes on the public portal, with no error anywhere. Pinned by one
+ * test per transition; see `routers/__tests__/minutes-document.test.ts`.
+ */
+export async function resolveMinutesDocumentScope(
+  tx: TenantTx,
+  minutesDocumentId: string,
+): Promise<MinutesDocumentScope> {
+  const rows = toRows<{ meeting_id: string; board_id: string; status: string }>(
+    await tx.execute(sql`
+      SELECT md.meeting_id, m.board_id, md.status::text AS status
+      FROM minutes_document md
+      JOIN meeting m ON m.id = md.meeting_id
+      WHERE md.id = ${minutesDocumentId}
+    `),
+    (message) => new Error(`resolveMinutesDocumentScope: ${message}`),
+  );
+  const row = rows[0];
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  return {
+    meetingId: row.meeting_id,
+    boardId: row.board_id,
+    status: row.status as MinutesDocumentScope["status"],
+  };
+}
+
+/**
+ * The same derivation, plus the board-mismatch defence.
+ *
+ * This is what a BOARD-SCOPED minutes mutation calls — one whose guard is
+ * `requireBoardPermission("R1"/"R3"/"R5", boardIdFrom())`, so the request
+ * carries a CLIENT-CLAIMED `boardId` that the guard authorized and the write
+ * does not otherwise need. `minutes_document`'s RLS is
+ * `minutes_document_tenant_isolation` — `FOR ALL USING (town_id =
+ * get_current_town_id())`, no board term (and `minutes_section`'s is the same)
+ * — so any member of the town can already learn any document's real board, and
+ * nothing but this comparison stops a caller holding R5 on their OWN board
+ * from naming another board's document and claiming their own board for it.
+ *
+ * `resolveMinutesDocumentScope` above is the form for a mutation whose guard
+ * authorizes NO board — `approve` and `returnForAmendments`, which are
+ * `requireActor` admin gates (rule 13b). Calling THIS one from there would
+ * throw `assertMatchesAuthorizedBoard`'s wiring `Error`, because
+ * `requireActor` sets no `ctx.authorizedBoardId`; calling the plain one from a
+ * board-scoped mutation is the mistake to watch for, and the reason the two
+ * have deliberately different names rather than one optional argument.
+ */
+export async function assertMinutesDocumentOnAuthorizedBoard(
+  ctx: BoardAuthorizedContext,
+  tx: TenantTx,
+  minutesDocumentId: string,
+): Promise<MinutesDocumentScope> {
+  const scope = await resolveMinutesDocumentScope(tx, minutesDocumentId);
+  assertMatchesAuthorizedBoard(ctx, scope.boardId);
+  return scope;
 }
 
 /**
