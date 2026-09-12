@@ -2,7 +2,7 @@
  * AddMemberDialog — real options proxy, stubbed transport.
  *
  * Phase E, wave 2, Task 3 — the dialog itself was migrated off Supabase onto
- * `boardMember.searchCandidates`/`.personEmailExists`/`.addBoardMember`/
+ * `boardMember.searchCandidates`/`person.emailExists`/`boardMember.addBoardMember`/
  * `.addStaffMember` and `person.insert`; see `AddMemberDialog.tsx`'s own
  * header. This test file's previous version mocked `@/hooks/useSupabase`
  * generically — the write no longer goes through Supabase at all, so it is
@@ -53,7 +53,7 @@ const queryClient = setupAppQueryClient();
 
 const stub = installTRPCFetchStub({
   "boardMember.searchCandidates": () => [],
-  "boardMember.personEmailExists": () => false,
+  "person.emailExists": () => false,
   "person.insert": (input) => ({ id: "new-person-1", name: input.name, email: input.email }),
   "boardMember.addBoardMember": () => ({ name: "Jane Doe", invitationId: "inv-1" }),
   "boardMember.addStaffMember": () => ({ name: "Jane Doe", invitationId: "inv-2" }),

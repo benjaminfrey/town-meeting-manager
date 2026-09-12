@@ -93,6 +93,10 @@ const noticedMeeting = {
   meeting_type: "regular",
   scheduled_date: "2026-09-10",
   scheduled_time: "18:00:00",
+  // Wave 6, Task 5 added `started_at` to `meeting.byTown` for `home.tsx`'s
+  // "started N min ago" hero. This screen does not read it; the stub owes it
+  // anyway, because `TestHandlers` binds the payload to the procedure.
+  started_at: null,
   board_id: "b1",
   board_name: "Select Board",
 } satisfies RouterOutputs["meeting"]["byTown"][number];

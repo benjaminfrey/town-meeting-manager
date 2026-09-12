@@ -203,6 +203,9 @@ const meetingDetail = {
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
   adjournment: null,
+  // Wave 6, Task 5 joined `board` into `meeting.detail` for
+  // `MeetingSubnavHeader`; every stub of this procedure owes the column.
+  board_name: "Select Board",
 } satisfies MeetingDetail;
 
 const server = {

@@ -19,8 +19,10 @@
  *
  * Reads: `boardMember.searchCandidates` replaces the four-way merge of
  * `person` search + `user_account` by town + `board_member` active-counts by
- * town + `board_member` active-on-this-board by town; `boardMember
- * .personEmailExists` replaces the fifth (the live email-uniqueness check).
+ * town + `board_member` active-on-this-board by town; `person.emailExists`
+ * replaces the fifth (the live email-uniqueness check — that procedure was
+ * `boardMember.personEmailExists` until wave 6, Task 5 moved it to the router
+ * whose noun it reads; see its own doc comment).
  *
  * Writes: a NEW person is created with `person.insert` FIRST (the same
  * two-step shape `AddPersonDialog` already uses), then the resulting id is
@@ -133,11 +135,12 @@ export function AddMemberDialog({
     enabled: trimmedSearch.length >= 2,
   });
 
-  // Check email uniqueness — `boardMember.personEmailExists` replaces the
-  // fifth read.
+  // Check email uniqueness — `person.emailExists` replaces the fifth read.
+  // No `excludePersonId`: this form is creating a brand-new person, so there
+  // is no id to exclude yet (that argument exists for `EditPersonDialog`).
   const emailToCheck = personForm.values.email.toLowerCase().trim();
   const { data: emailExists = false } = useQuery({
-    ...trpc.boardMember.personEmailExists.queryOptions({ email: emailToCheck }),
+    ...trpc.person.emailExists.queryOptions({ email: emailToCheck }),
     enabled: !!emailToCheck && emailToCheck.includes("@"),
   });
 

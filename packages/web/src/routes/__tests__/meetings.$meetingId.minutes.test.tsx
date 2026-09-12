@@ -146,6 +146,9 @@ const meetingDetail = {
   // intersection is the same `unknown`-is-optional quirk the three
   // `MinutesDetail` members above document.
   adjournment: null,
+  // Wave 6, Task 5: `meeting.detail` joins `board` for
+  // `MeetingSubnavHeader`.
+  board_name: "Select Board",
 } satisfies RouterOutputs["meeting"]["detail"] & { adjournment: unknown };
 
 const boardDetail = {

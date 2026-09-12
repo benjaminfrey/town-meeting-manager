@@ -1,7 +1,8 @@
 import React from "react";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { onlineManager } from "@tanstack/react-query";
-import { renderWithProviders, screen } from "@/test/render";
+import { renderWithProviders, screen, setupAppQueryClient, waitFor } from "@/test/render";
+import { installTRPCFetchStub } from "@/test/trpc";
 import { createAdminUser } from "@/test/mocks/auth-mock";
 import { APP_NAME } from "@town-meeting/shared";
 import type { CurrentUser } from "@/hooks/useCurrentUser";
@@ -14,19 +15,13 @@ vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: () => userRef.value,
 }));
 
-// Supabase chain — the live-meeting indicator query resolves empty
-const { mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-    Promise.resolve({ data: [], error: null }).then(resolve, reject);
-  chain["catch"] = (reject: (e: unknown) => unknown) =>
-    Promise.resolve({ data: [], error: null }).catch(reject);
-  for (const m of ["select", "eq", "in", "order", "limit"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { mockFrom: vi.fn().mockReturnValue(chain) };
+// The live-meeting indicator's read, through the real options proxy — only
+// `globalThis.fetch` is replaced (conventions item 8). `server.liveMeetingId`
+// is mutable so a test can turn the indicator on without a second install.
+const server = { liveMeetingId: null as string | null };
+const stub = installTRPCFetchStub({
+  "meeting.liveByTown": () => ({ id: server.liveMeetingId }),
 });
-vi.mock("@/lib/supabase", () => ({ supabase: { from: mockFrom } }));
 
 // Isolate the shell from heavy children
 vi.mock("@/components/ProtectedRoute", () => ({
@@ -44,9 +39,12 @@ vi.mock("@/components/LogoutDialog", () => ({
 
 import AppShell from "@/layouts/AppShell";
 
+const queryClient = setupAppQueryClient();
+
 describe("AppShell", () => {
   beforeEach(() => {
     userRef.value = createAdminUser();
+    server.liveMeetingId = null;
   });
 
   afterEach(() => {
@@ -64,9 +62,21 @@ describe("AppShell", () => {
     }
   });
 
-  it("hides the live-meeting indicator when no meeting is in progress", () => {
-    renderWithProviders(<AppShell />, { route: "/" });
+  it("hides the live-meeting indicator when no meeting is open", async () => {
+    renderWithProviders(<AppShell />, { route: "/", queryClient });
+    await waitFor(() => expect(stub.countFor("meeting.liveByTown")).toBeGreaterThan(0));
     expect(screen.queryByText("Meeting live")).not.toBeInTheDocument();
+  });
+
+  it("shows the live-meeting indicator, linking to the open meeting", async () => {
+    // Never actually reachable before wave 6, Task 5: the raw query this
+    // replaced filtered on `in_progress`, which is not a `meeting_status`
+    // value, so PostgREST rejected it and the hook fell to null on every
+    // poll. See `useLiveMeetingId`'s own comment.
+    server.liveMeetingId = "m-live";
+    renderWithProviders(<AppShell />, { route: "/", queryClient });
+    const link = await screen.findByRole("link", { name: /meeting live/i });
+    expect(link).toHaveAttribute("href", "/meetings/m-live/live");
   });
 
   it("says nothing about the connection while the device is online", () => {

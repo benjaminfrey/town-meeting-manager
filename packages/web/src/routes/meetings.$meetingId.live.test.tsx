@@ -295,6 +295,9 @@ const baseMeeting: Meeting = {
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
   adjournment: null,
+  // Wave 6, Task 5: `meeting.detail` joins `board` for
+  // `MeetingSubnavHeader`.
+  board_name: "Select Board",
 };
 
 const baseBoard = {

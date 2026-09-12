@@ -127,6 +127,9 @@ const meetingDetail: MeetingDetail = {
   meeting_notice_url: null,
   meeting_notice_generated_at: null,
   adjournment: { method: "motion", motion_id: "motion-2" },
+  // Wave 6, Task 5: `meeting.detail` joins `board` for
+  // `MeetingSubnavHeader`.
+  board_name: "Select Board",
 };
 
 const boardDetail = {
