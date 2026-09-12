@@ -82,6 +82,21 @@ describe("router wiring", () => {
         "agendaItem.setOperatorNotes",
         "agendaItem.markComplete",
         "minutesDocument.byMeeting",
+        // Phase E wave 6, Task 1 — the minutes surface. Unwired client-side
+        // until Task 3 (`minutes.tsx`) and Task 5 (`home.tsx`'s
+        // `pendingByTown`); pinned here for the reason the wave-4 and wave-5
+        // entries above are, and with the same thing at stake: these are the
+        // names five raw, UNAUTHORIZED `minutes_document` writes become, so a
+        // rename before that wiring lands should be caught here rather than in
+        // the first task that calls one.
+        "minutesDocument.detail",
+        "minutesDocument.pendingByTown",
+        "minutesDocument.saveDraft",
+        "minutesDocument.submitForReview",
+        "minutesDocument.approve",
+        "minutesDocument.publish",
+        "minutesDocument.returnForAmendments",
+        "minutesDocument.unpublish",
         "meetingAttendance.countByMeeting",
         // Phase E wave 5, Task 3 — the live-meeting routers. Every one of
         // these is UNWIRED client-side until Tasks 4 and 5; pinned here for
@@ -154,6 +169,7 @@ describe("router wiring", () => {
       "agendaItem.countByMeeting",
       "exhibit.byMeeting",
       "minutesDocument.byMeeting",
+      "minutesDocument.detail",
       "meetingAttendance.countByMeeting",
       // A subscription's input is parsed the same way a query's is — the
       // procedure TYPE differs, the input schema does not. `meetingId` is a
@@ -229,6 +245,16 @@ describe("router wiring", () => {
       "meeting.callToOrder",
       "meeting.navigateToAgendaItem",
       "meeting.adjourn",
+      // Phase E wave 6, Task 1. `minutesDocument.pendingByTown` is absent on
+      // purpose: it takes no `.input()` at all (the tenant decides the town,
+      // not the caller), so there is no schema to assert on — the same reason
+      // `town.acknowledgeRetentionPolicy` is absent from this list.
+      "minutesDocument.saveDraft",
+      "minutesDocument.submitForReview",
+      "minutesDocument.approve",
+      "minutesDocument.publish",
+      "minutesDocument.returnForAmendments",
+      "minutesDocument.unpublish",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
