@@ -220,7 +220,7 @@ grep -n "global.*A2.*true" supabase/seed.sql
 
 ---
 
-## 7. Thirteen dead legacy cache-invalidation lines, kept deliberately, not yet removed
+## 7. Dead legacy cache-invalidation lines, kept deliberately, not yet removed
 
 **Where:** `packages/web/src/lib/__tests__/cache-key-parity.test.ts`'s own header, under "Why a dead
 legacy line is not removed on sight"; the same reasoning is in wave 6 Task 4's report
@@ -233,12 +233,32 @@ rule.
 **What the gap is:** wave 6 Task 4 moved `routes/meetings.$meetingId.review.tsx` off the last of
 THIRTEEN legacy `queryKeys.*` reads, but did NOT delete the now-dead `invalidateQueries(queryKeys.*)`
 lines those namespaces' writers still carry, and did not delete the matching `MIGRATED` entries in
-`cache-key-parity.test.ts`. Eleven namespaces are affected (not `meetings` — see item 3 of the same
-task's fix round; it keeps live legacy readers in `CommandPalette.tsx`, `EditBoardDialog.tsx` and
-`home.tsx` unrelated to this screen): `agendaItem`, `motion`, `voteRecord`, `executiveSession`,
-`agendaItemTransition`, `guestSpeaker`, `exhibit`, `meetingAttendance`, `boardMember`, `town` and
-`minutesDocument`. Roughly 80 dead lines across ~20 writer files, plus 13 test files that assert on
-those keys.
+`cache-key-parity.test.ts`. Eleven namespaces were affected at that point (not `meetings` — see item
+3 of the same task's fix round; it kept live legacy readers in `CommandPalette.tsx`,
+`EditBoardDialog.tsx` and `home.tsx` unrelated to that screen): `agendaItem`, `motion`, `voteRecord`,
+`executiveSession`, `agendaItemTransition`, `guestSpeaker`, `exhibit`, `meetingAttendance`,
+`boardMember`, `town` and `minutesDocument`. Roughly 80 dead lines across ~20 writer files, plus 13
+test files that assert on those keys.
+
+**Widened by wave 6, Task 5 (`43c2963`): the set is now FOURTEEN namespaces, and `meetings` is one of
+them.** That task removed the last legacy reader of `meetings`, `boards`, `persons` and `minutes` —
+the three files the paragraph above names as `meetings`' live readers all migrated in it, along with
+`boards.$boardId.templates.$templateId.edit.tsx` (`queryKeys.boards.detail`), `meetings.tsx` /
+`home.tsx` / `CommandPalette.tsx` (`queryKeys.boards.byTown`), `home.tsx`
+(`queryKeys.minutes.byMeeting`) and both person dialogs (`queryKeys.persons.byTown`). So:
+
+- **`meetings`: partially executed, deliberately.** Task 5 DID delete the two lines whose stated
+  justification it falsified — `meetings.tsx`'s `queryKeys.meetings.byTown` and
+  `CreateMeetingDialog.tsx`'s `queryKeys.meetings.byBoard`, both of whose comments named a reader
+  that task removed by name. It stopped there because `queryKeys.meetings.detail`/`.all` lines
+  survive in seven other files (they were already dead before wave 6, so they belong to this batch,
+  not to that task), which keeps the `meetings` MIGRATED entry matching something and avoids the
+  "zero violations for the wrong reason" trap below.
+- **`boards`, `persons`, `minutes`: not executed.** Deleting their remaining lines empties those
+  MIGRATED entries entirely, which forces the same-commit entry removal this section already
+  requires — exactly the batch being deferred. Left in place, with the comments that justified them
+  corrected to say the key is dead rather than to keep naming readers that no longer exist. One of
+  those comments, in `routes/settings.meeting-notices.tsx`, had already been false since wave 5.
 
 **Why it wasn't closed in Phase E:** the call to keep them stands on sequencing, not on the check
 going vacuous without them (verified false — deleting them and planting an unpathFiltered writer on
@@ -247,17 +267,25 @@ files plus 13 test files, in the same wave Task 5 adds writers to several of tho
 deserves its own diff rather than riding along with a screen migration.
 
 **Condition that retires this entry:** either (a) no remaining Phase E wave task is adding writers to
-any of the eleven affected files, or (b) wave 6 closes out, whichever comes first. At that point:
-delete the eleven now-pointless `queryKeys.<abandoned>` invalidation lines, delete the matching
-eleven `MIGRATED` entries in `cache-key-parity.test.ts` in the SAME commit (an entry with nothing
-left to match reports zero violations for the wrong reason), and update the 13 test files that assert
-on those keys.
+any of the affected files, or (b) wave 6 closes out, whichever comes first. **(a) is now satisfied —
+Task 5 was the last task that adds writers, and Task 6 only deletes — so this is actionable as soon
+as wave 6's close-out wants it.** At that point: delete the now-pointless `queryKeys.<abandoned>`
+invalidation lines for all fourteen namespaces, delete the matching `MIGRATED` entries in
+`cache-key-parity.test.ts` in the SAME commit (an entry with nothing left to match reports zero
+violations for the wrong reason), and update the test files that assert on those keys. Note that
+emptying the map entirely leaves `cache-key-parity.test.ts` checking nothing at all — decide then
+whether it is deleted with the last entry or kept as a tripwire against a NEW legacy key being
+introduced.
 
 **Verification command (re-run before acting, in case counts have moved):**
 
 ```
-grep -rl "queryKeys\.\(agendaItems\|motions\|voteRecords\|executiveSessions\|agendaItemTransitions\|guestSpeakers\|exhibits\|attendance\|members\|towns\|minutesDocuments\)\." packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
+grep -rl "queryKeys\.\(agendaItems\|motions\|voteRecords\|executiveSessions\|agendaItemTransitions\|guestSpeakers\|exhibits\|attendance\|members\|towns\|minutesDocuments\|meetings\|boards\|persons\|minutes\)\." packages/web/src | grep -v __tests__ | grep -v '\.test\.' | wc -l
 ```
+
+(Widened with the four namespaces wave 6 Task 5 added. The authoritative list is
+`cache-key-parity.test.ts`'s own `MIGRATED` object, not this pattern — quote the object, as that
+file's header says.)
 
 ---
 

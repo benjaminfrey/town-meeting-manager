@@ -8,7 +8,8 @@
  * Stage 1, Phase E, wave 6, Task 5 — every read on this screen is tRPC now.
  * `town.detail` moved in wave 1; `meeting.byTown`, `minutesDocument
  * .pendingByTown` and `board.listActive` move here, discharging this file's
- * `TODO(phase-e-wave-6)` marker in full.
+ * marker in full: ~~TODO(phase-e-wave-6): minutesDocument.pendingByTown,
+ * board.listActive~~.
  *
  * ─── The three reads, and what changed with each ─────────────────────────
  *

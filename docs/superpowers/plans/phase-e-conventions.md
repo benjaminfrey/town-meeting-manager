@@ -2078,7 +2078,25 @@ round:** `AddBoardDialog.tsx`, pinned in `__tests__/AddBoardDialog.test.tsx`, an
 — both had shipped their `pathFilter()` call without the pin and were caught in review; both
 verified the identical way. Six writers carry the pin as of `2d78964`. That roster is what goes
 stale first, not the pin discipline itself — re-run `grep -rl "\.pathFilter()" packages/web/src`
-rather than trust the count above staying current.
+rather than trust the count above staying current. (It answers **113** at `43c2963`, wave 6 Task 5's
+close, against 6 when the roster above was written — which is the whole argument for re-running it.)
+
+**Wave 6, Task 5 found a `pathFilter()` obligation that no grep of any kind could have surfaced, and
+this is the shape to watch for.** Migrating a READ can create a new obligation for a writer in a
+different file, with no legacy key involved on either side. `EditBoardDialog`'s "does this board have
+meetings" check moved from a raw `meeting` head-count onto `trpc.board.stats` — a procedure on a
+DIFFERENT router from the table the count reads. `CreateMeetingDialog` was already invalidating
+`trpc.meeting.pathFilter()`, correctly, and that call does not match a `board.*` key, so creating a
+meeting silently stopped re-enabling the name field for the full 60s `staleTime`. Item 7's prescribed
+procedure ("grep `queryKeys.<entity>`, check every `invalidateQueries` hit") finds this only by
+accident, because the legacy key it points at (`queryKeys.meetings.byBoard`) names `meeting`, not
+`board`; `cache-key-parity.test.ts` cannot see it either, since the file DOES call a `pathFilter()`
+and the check is per-file-and-namespace, not per-procedure. This is the read-side twin of backlog
+entry 8's write-side blind spot. **The question to ask when you migrate a read is not "which legacy
+key did this abandon" but "which ROUTER does the new procedure live on, and does every writer that
+changes what it returns invalidate THAT router" — and those are different answers whenever a
+procedure aggregates across tables** (`board.stats`, `board.list`'s `active_member_count`,
+`boardMember.memberCount`). Found by hand, fixed with its pin in the same commit.
 
 **Write the pin the same commit a writer's `pathFilter()` call lands, not on a later wave.** These
 six calls already exist and already serve an already-migrated screen; deferring the pin to
@@ -2527,6 +2545,40 @@ $ grep -rnE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" packages/web/src | wc -l
      # Re-derived against `git archive 670d9df`, not against the working tree
      # and not from any task report — which matters this time, because this
      # task's Part 1 temporarily edited two tracked files and restored them.
+ 0   # at 43c2963, the close of Phase E wave 6, Task 5 — ZERO, for the first
+     # time since this countdown was written. Re-derived, not carried over:
+     # the wave's base (`e2cae4a`) had SEVEN lines, not the five this log
+     # listed at 670d9df — the three board writers below acquired theirs in
+     # the fix round after wave 5's review (finding L8), after this entry was
+     # written, and `meetings.tsx` carries two lines for one gap:
+     #   $ git grep -nE "^[[:space:]]*(//|\*) TODO\(phase-e-wave" e2cae4a -- packages/web/src
+     #   ArchiveBoardDialog.tsx  MinutesWorkflowEditor.tsx
+     #   NoticeTemplateEditor.tsx  AppShell.tsx  home.tsx  meetings.tsx x2
+     # All seven are Task 5's own files and all seven are discharged. Each is
+     # struck through in place (`~~TODO(...)~~ — closed in wave 6, Task 5`)
+     # rather than deleted; the anchored grep correctly does not count a
+     # `~~TODO(` line, which is the distinction the anchor exists to make (see
+     # the 01ff3ab entry above). No marker was ADDED: all twelve of Task 5's
+     # files reach zero raw Supabase calls.
+     #
+     # **Zero markers is NOT the definition of done, and this countdown is
+     # the wrong measure to celebrate it with** — Task 0 of this wave found
+     # seven files with real, unmarked Supabase code that the countdown was
+     # structurally incapable of seeing, and Task 5 closed exactly those
+     # seven (plus five more). The measure that matters is the IMPORT grep
+     # below:
+     #   $ git grep -l 'from "@/lib/supabase"\|from "@/hooks/useSupabase"\|@supabase/supabase-js' \
+     #       -- packages/web/src | wc -l   -> 2  (17 at e5250ad)
+     # and the two are `lib/supabase.ts` and `hooks/useSupabase.ts`
+     # themselves, which Task 6 deletes. The other two greps this item
+     # tracks, for continuity:
+     #   $ grep -rl "@/lib/supabase" packages/web/src | grep -v __tests__ \
+     #       | grep -v '\.test\.' | wc -l      -> 5   (14 at 670d9df)
+     #   $ grep -rl "lib/supabase\|useSupabase" packages/web/src \
+     #       | grep -v __tests__ | grep -v '\.test\.' | wc -l  -> 11  (23 then)
+     # Both residues are comment-only prose plus the two modules — the
+     # comment-versus-code hazard this item names two paragraphs down, now
+     # the ONLY thing either mention grep is still counting.
 ```
 
 **Wave 6, Task 0 — the marker grep is not the measure that matters, and re-deriving the "23 files"
