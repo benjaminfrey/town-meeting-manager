@@ -3020,6 +3020,61 @@ for this exact reason; the bullet's substance is correct and was re-verified
 through a `board_member.id` map, `formatAdjournmentText` falls back to
 `attendance.presiding_officer`).
 
+**Wave 6, Task 0 — run before any wave-6 code, per this task's own brief and
+wave 5 Task 0's precedent ("now, not at the end").** Method: the codebase
+itself moved almost not at all since the last sweep (`c2b4b25`) —
+`git diff --stat c2b4b25 e5250ad` touches only the new wave-6 plan document and
+a five-line doc-comment edit in `meeting.ts` (replacing two line-number
+citations with symbol references, item 1's own rule, in the `adjourned_by` and
+cache-comment paragraphs — no claim in THIS document depends on either
+citation) — so this pass is a genuine re-verification, not a search for drift
+a large diff would make obvious. Walked every Known-gaps bullet and every
+numbered item's prose in items 1, 2, 7, 8, 9, 11, 12 and 14 for present-tense
+assertions, re-ran the grep or read the code behind each, and — per the
+widened lens — checked whether any OTHER section of this document contradicts
+it. Re-verified directly rather than assumed:
+
+- Item 2's board-scoped census: `: BoardScope` in `rules.ts` **29**,
+  `requireBoardPermission` (anchored) **20**, `.use(requireBoardActor(` **9** —
+  all three unchanged since `670d9df`.
+- Item 8's `pathFilter()` file/call census: **53** files, **88** calls,
+  unchanged.
+- Item 9's `MockAuthProvider` ("directly named in 4 files") and `useMockAuth`
+  ("zero callers outside its own module") — both hold exactly.
+- Item 1's `exhibit_count` grep — **9** lines, unchanged, all comments/tests as
+  the doc already says.
+- The Known-gaps bullet on `assertCanSelectTownNotificationConfig` and its two
+  siblings — still zero procedure callers, only their own definitions in
+  `rules.ts`.
+- Wave 5, Task 5's own open item 1 (`executiveSession.markEntered`/`discard`
+  have no caller) — still true, zero non-test references outside
+  `executive-session.ts` itself.
+- Wave 5, Task 5's own open item 2 (`VotePanel.tsx`'s minutes re-render posts
+  the LIVE meeting's id, not the approved document's) — still true at its
+  current call site (`VotePanel.tsx`, `/api/meetings/${meetingId}/minutes/render`).
+- Wave 5/6's `getMutationErrorMessage` and `isPaused` bullets — re-verified as
+  part of this same task's item-2 clearing above (see "Carried forward" items
+  5 and 6): both claims hold exactly as worded, and are now marked with an
+  explicit outlives-Phase-E decision rather than re-carried silently.
+
+**One false claim found, and it is this item's own headline number, not a
+Known-gaps bullet — exactly the shape this item's widened lens exists to
+catch.** Item 11's "23 remaining files" was presented as a clean, current
+count; cross-checked against the rest of item 11's own history and against the
+files themselves, it undercounts by omitting one bare grep-versus-import
+distinction (comment mentions counted as dependencies) and overstates
+completeness by four files with live, unmarked code — corrected in place at
+item 11 above, in the same task that found it, per this item's own rule
+("retire ... any bullet this wave's work closed, whether or not the task that
+closed it was the one that wrote the bullet"). No second instance of the
+"another section of this document falsifies a claim" shape (wave 5 Task 6's
+finding) was found: the SSE/subscription sections, the guard-shape census, and
+the Known-gaps list all agree with each other and with the code at HEAD.
+
+**No other false claim found.** Stated with the method above rather than as a
+bare assertion, per this item's own standing rule that an unstated method is
+what produced two of this project's five sweep failures.
+
 ---
 
 ## Files to copy from
