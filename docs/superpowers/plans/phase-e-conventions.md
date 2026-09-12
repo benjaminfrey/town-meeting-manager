@@ -2467,9 +2467,13 @@ depend on the client," and not "how many gaps item 11's own token sweep is silen
    (`person.insert`/`person.insertStaffAccount`/`invitation.insert` for the first,
    `person.update` for the second) and say nothing about the read that remains; and
    `SourceDataPanel.tsx` is unwrapped raw Supabase for every one of its reads, with no header comment
-   at all — this item's own log mentions the file only once, in an unrelated context (which legacy
-   `queryKeys.*` invalidation lines stay live, item 7), never as an unmigrated screen in its own
-   right. **The corrected count is seven files, not four**, all confirmed by reading the file
+   at all — **this item's own section mentions the file zero times, not once as first written here.**
+   (`git show e5250ad:docs/superpowers/plans/phase-e-conventions.md | grep -n SourceDataPanel` finds
+   two pre-task mentions, and both sit outside item 11 entirely: one in item 14's wave-5 close-out
+   history, one in the Known-gaps list below — neither is "an unrelated context within item 11,"
+   because neither is within item 11 at all.) So it was never named as an unmigrated screen anywhere
+   in this document, in or out of item 11, until now. **The corrected count is seven files, not four**,
+   all confirmed by reading the file
    directly rather than trusted from either number: `CommandPalette.tsx`, `MeetingSubnavHeader.tsx`,
    `EditBoardDialog.tsx`, `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
    `EditPersonDialog.tsx`, `SourceDataPanel.tsx`. An eighth candidate,
@@ -4040,7 +4044,9 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   transport at all. Recording the decision here, rather than repeating "a
   wave-6 reader should decide" a second time with no wave-6 task positioned to
   decide it, is what stops this from becoming a third wave's carry-over by
-  default.
+  default. **Also recorded in `docs/backlog.md` (item 3)**, because this
+  document is scoped to Phase E's own lifecycle and nothing reads it once the
+  phase ends.
 
 - **Wave 5, Task 7 — `supabase/seed.sql`'s ids are not RFC-valid UUIDs, so the
   seeded database cannot be used to exercise ANY migrated screen.** The
@@ -4072,27 +4078,28 @@ NULL` on reuse, unconditionally). Whichever wave next touches `RoleConflictDialo
   where a template id reaches a `z.uuid()` procedure — wave 6 should check the
   template pickers before assuming it does not.
 
-- **`SourceDataPanel.tsx` is not on any wave-6 task's file list, and it is fully
-  raw Supabase — found at wave 6, Task 0 while re-deriving item 11's corrected
-  measure.** The wave 6 plan's Task 5 ("the ten strays") names twelve files
-  (not ten — a second, smaller drift the same task's own title has) —
+- **CORRECTED in wave 6, Task 0's fix round: the bullet originally recorded here claimed
+  `SourceDataPanel.tsx` was missing from every wave-6 task's file list. That was false — it
+  is on Task 3's list.** The wave-6 plan's own Task 3 section names it directly, eight lines
+  from where the original bullet quoted Task 5: "**Files:** `routes/meetings.$meetingId.minutes.tsx`,
+  `components/minutes/SourceDataPanel.tsx`, and whatever `MinutesEditor` needs," and the next
+  line: "`SourceDataPanel`'s five reads all map to procedures that already exist; it is imported
+  by `MinutesEditor`, which `minutes.tsx` renders." The original pass read Task 5's file list in
+  isolation, noticed `SourceDataPanel.tsx` was absent from it, and concluded no task named the
+  file — without searching the rest of the plan for the filename first. It should have.
+
+  **The actual defect is narrower, and it belongs to the plan, not the code: Task 5's own
+  heading said "The ten strays" while its file list names twelve** —
   `home.tsx`, `meetings.tsx`, `AppShell.tsx`, `CommandPalette.tsx`,
   `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`, `ArchiveBoardDialog.tsx`,
   `MinutesWorkflowEditor.tsx`, `NoticeTemplateEditor.tsx`,
   `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`,
-  `EditPersonDialog.tsx` — which covers six of item 11's seven newly-named
-  unmarked files. The seventh, `SourceDataPanel.tsx`, appears on no task's file
-  list in the wave-6 plan at all: not Task 5, and not Task 3/4 (the minutes and
-  review screens), even though `SourceDataPanel.tsx` is a minutes-review
-  component and every one of its reads (`agenda_item`, `motion`, and others) is
-  still unwrapped `useSupabase()`. Task 6's deletion step will eventually catch
-  this as a build error if it is missed (`lib/supabase.ts`/`hooks/useSupabase.ts`
-  deleted, the file fails to compile), which is the whole point of that task —
-  but that is a late, expensive way to discover a missing file on a list, and
-  Task 6 explicitly says to run it "only when Tasks 1–5 are complete," which
-  assumes the file list for those tasks is complete. It is not. Whichever task
-  picks up the minutes/review screens or the strays should add this file
-  rather than let Task 6's build find it first.
+  `EditPersonDialog.tsx`. **FIXED** in the plan itself: the heading now reads "The twelve
+  strays." With that correction, every one of item 11's seven newly-named unmarked files is
+  accounted for on some wave-6 task's list — six of them by Task 5, and the seventh,
+  `SourceDataPanel.tsx`, by Task 3. Task 6's deletion step (`lib/supabase.ts`/
+  `hooks/useSupabase.ts` deleted, build fails on any straggler) remains the backstop it was always
+  meant to be, not a missing-file catcher — no file needs to be added to any task's list.
 
 ---
 
@@ -4173,7 +4180,9 @@ one list rather than reconstructing it from seven task reports.
    definition of done (`lib/supabase.ts` deleted) turns on. Recording it here,
    explicitly out of scope, is what stops a third wave from inheriting it
    silently — the alternative is exactly the drift item 14 exists to catch,
-   just aimed at a decision instead of a claim.
+   just aimed at a decision instead of a claim. **Also recorded in
+   `docs/backlog.md` (item 1)**, because this document is scoped to Phase E's
+   own lifecycle and nothing reads it once the phase ends.
 6. **An offline device pauses its mutations silently at the form.** The shell's
    pill states the app-global fact; nothing anywhere renders `isPaused`, so the
    Save the user just pressed shows a spinner that never resolves. The fix is
@@ -4189,7 +4198,9 @@ one list rather than reconstructing it from seven task reports.
    unchanged; none of them is positioned to invent the pattern the other ~70
    already-migrated forms would also need. Recorded as a standing product gap
    for whichever initiative owns offline UX after Phase E, not reopened as a
-   wave-6 task.
+   wave-6 task. **Also recorded in `docs/backlog.md` (item 2)**, because this
+   document is scoped to Phase E's own lifecycle and nothing reads it once the
+   phase ends.
 
 ### For the merge notes: a production bug this wave fixed incidentally
 
@@ -4243,7 +4254,9 @@ about the development topology:
   reload. **Decided at wave 6, Task 0** (see the "Wave 5, Task 7 — the browser
   check" finding (c) above for the full reasoning): this outlives Phase E — no
   wave 6 task touches the live transport, and a timeout ceiling is a
-  retry/backoff policy decision, not a migration-completeness one.
+  retry/backoff policy decision, not a migration-completeness one. **Also
+  recorded in `docs/backlog.md` (item 3)**, because this document is scoped to
+  Phase E's own lifecycle and nothing reads it once the phase ends.
 - **An intermediary can keep a dead stream looking alive.** Measured: with the
   API killed, a stream direct to it ends at once and a stream through the Vite
   dev proxy stays open indefinitely. Whatever sits between the browser and the

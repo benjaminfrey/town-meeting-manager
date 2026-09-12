@@ -191,7 +191,7 @@ It calls `/api/meetings/:meetingId/minutes/generate`, a Fastify route, **not** t
 
 ---
 
-## Task 5: The ten strays
+## Task 5: The twelve strays
 
 **Files:** `home.tsx`, `meetings.tsx`, `AppShell.tsx`, `CommandPalette.tsx`, `MeetingSubnavHeader.tsx`, `EditBoardDialog.tsx`, `ArchiveBoardDialog.tsx`, `MinutesWorkflowEditor.tsx`, `NoticeTemplateEditor.tsx`, `boards.$boardId.templates.$templateId.edit.tsx`, `AddPersonDialog.tsx`, `EditPersonDialog.tsx`.
 
