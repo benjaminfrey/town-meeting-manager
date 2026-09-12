@@ -93,10 +93,16 @@
  * `attendance` — every one of them a real writer of the table its router
  * owns, each fixed on its own merits with a `pathFilter()` call and a pin
  * test, each pin verified by deleting the line and watching it go red. The
- * legacy `queryKeys.*` lines all STAY: `useQuorumCheck.ts` and reads inside
- * `review.tsx`/`agenda.tsx` still consume them, and they go when the last
- * legacy reader does. (`SourceDataPanel.tsx` was in that list until Phase E
- * wave 6, Task 3 migrated its five reads; `live.tsx` until wave 5.)
+ * legacy `queryKeys.*` lines all STAY, though no longer for the reason this
+ * paragraph gave: `SourceDataPanel.tsx` left the reader list in wave 6 Task 3,
+ * `review.tsx` in Task 4, `live.tsx` in wave 5, and `useQuorumCheck.ts` reads
+ * no `queryKeys.*` at all any more (`grep -n "queryKeys" hooks/useQuorumCheck.ts`
+ * is empty). `agendaItems.byMeeting`, `attendance.byMeeting` and
+ * `minutesDocuments.byMeeting` therefore have **no reader left**. The lines
+ * stay anyway, and deliberately: this check keys off them, so removing the
+ * last legacy invalidation from a file also removes the tripwire that would
+ * catch the NEXT writer added to it. See "Why a dead legacy line is not
+ * removed on sight" below.
  *
  * `exhibits: "exhibit"` joined in Phase E wave 4, Task 3, the commit that
  * moved `routes/meetings.$meetingId.agenda.tsx`'s exhibit read onto
@@ -112,8 +118,43 @@
  * `InlineItemForm.tsx` (whose `agendaItem.delete` cascades to the item's
  * exhibits). `AgendaSection.tsx` gained the call in the same commit for its
  * own cascading section delete, which had no `queryKeys.exhibits` line at all
- * to be flagged by. The legacy `queryKeys.exhibits.*` lines all STAY:
- * `routes/meetings.$meetingId.review.tsx` still reads that namespace.
+ * to be flagged by. ~~The legacy `queryKeys.exhibits.*` lines all STAY:
+ * `routes/meetings.$meetingId.review.tsx` still reads that namespace.~~ —
+ * that reader is gone as of wave 6, Task 4; the lines stay for the reason
+ * below instead.
+ *
+ * `futureItemQueues: "futureItem"` joined in Phase E wave 6, Task 4, when
+ * `routes/meetings.$meetingId.review.tsx`'s deferred-items list moved onto
+ * `trpc.futureItem.byMeeting` (the router itself is Task 2's). It raised
+ * **zero** violations, because no client code invalidates
+ * `queryKeys.futureItemQueues` at all — every `future_item_queue` row is
+ * written server-side inside `meeting.performAdjournment`. That is exactly
+ * why the entry is worth having and exactly why it caught nothing: the real
+ * gap was the mirror image of what this check looks for — two adjournment
+ * call sites (`routes/meetings.$meetingId.live.tsx`'s `adjournMutation` and
+ * `VotePanel.tsx`'s `data.adjourned` branch) that invalidated three routers
+ * each and owed a fourth, with no legacy key present to be flagged by. Both
+ * carry `trpc.futureItem.pathFilter()` now, each pinned and each verified by
+ * deletion. **A check that fires on an abandoned legacy key cannot see a
+ * writer that never had one.**
+ *
+ * ─── Why a dead legacy line is not removed on sight ──────────────────────
+ *
+ * Wave 6, Task 4 left `routes/meetings.$meetingId.review.tsx` as the last
+ * reader of THIRTEEN legacy keys and migrated all of them at once. Item 7's
+ * "the legacy line goes when the last legacy reader does" would then delete
+ * roughly eighty lines across twenty-odd writer files — and with them every
+ * `queryKeys.<migrated>` reference this check matches on, for twelve
+ * namespaces simultaneously. The check would go quiet for `agendaItem`,
+ * `motion`, `voteRecord`, `executiveSession`, `agendaItemTransition`,
+ * `guestSpeaker`, `exhibit`, `meetingAttendance`, `boardMember`, `town`,
+ * `meeting` and `minutesDocument` in the same commit that wave 6's remaining
+ * tasks start adding writers to several of those files. The lines are
+ * therefore kept, and the asymmetry is the reason: a dead invalidation costs
+ * one no-op cache scan, a missing `pathFilter()` costs a silently stale
+ * screen. Whoever removes them should remove the matching `MIGRATED` entry in
+ * the same commit, because an entry with nothing left to match is a check
+ * that reports zero violations for the wrong reason.
  *
  * The `agendaTemplates` entry is the rule's own cautionary tale: the first
  * version of wave 2 Task 2 left it out, reasoning that two of its three
@@ -229,6 +270,7 @@ const MIGRATED: Record<string, string> = {
   guestSpeakers: "guestSpeaker",
   executiveSessions: "executiveSession",
   agendaItemTransitions: "agendaItemTransition",
+  futureItemQueues: "futureItem",
 };
 
 /**
@@ -367,17 +409,20 @@ describe("the check itself", () => {
       onSuccess: () => {
         // Deliberately a namespace NOT in MIGRATED — this fixture needs a
         // key this check has no opinion about, not one it would now flag
-        // for real. It has now been rewritten TWICE for that reason, which is
-        // the pattern worth naming: \`meetings\` joined the map in wave 3
-        // Task 2's fix round, and \`motions\` (this fixture's replacement for
-        // it) joined in wave 5 Task 4 — each time, the fixture's own
-        // "genuinely unmigrated" example became migrated and the fixture
-        // started failing as a real violation. \`futureItemQueues\` is the
-        // current choice: \`future_item_queue\` has no router in
-        // \`packages/api/src/trpc/router.ts\` at all. When it gets one, pick
-        // another — and expect to.
+        // for real. It has now been rewritten THREE times for that reason,
+        // which is the pattern worth naming: \`meetings\` joined the map in
+        // wave 3 Task 2's fix round, \`motions\` (its replacement) joined in
+        // wave 5 Task 4, and \`futureItemQueues\` (the replacement for THAT)
+        // joined in wave 6 Task 4 — each time, the fixture's own "genuinely
+        // unmigrated" example became migrated and the fixture started failing
+        // as a real violation. The previous comment here said "when it gets
+        // one, pick another — and expect to," and that is exactly what
+        // happened one wave later. \`pushSubscriptions\` is the current
+        // choice: \`push_subscription\` has no router in
+        // \`packages/api/src/trpc/router.ts\` at all, and nothing in Phase E
+        // proposes one. When it gets one, pick another — and expect to.
         void queryClient.invalidateQueries({
-          queryKey: queryKeys.futureItemQueues.byMeeting(meetingId),
+          queryKey: queryKeys.pushSubscriptions.byUser(userId),
         });
       },
       `,

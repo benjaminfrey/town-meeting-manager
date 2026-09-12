@@ -91,8 +91,11 @@ export function PublishAgendaDialog({
   const publish = useMutation(
     trpc.meeting.publishAgenda.mutationOptions({
       onSuccess: () => {
-        // Legacy key: this meeting's raw `meeting` row still has unmigrated
-        // readers (`live.tsx`, `review.tsx`) — conventions item 7.
+        // Legacy key: `queryKeys.meetings.detail` has no reader left —
+        // `review.tsx`, its last one, moved in wave 6 Task 4 (`live.tsx` in
+        // wave 5). Kept per `cache-key-parity.test.ts`'s "Why a dead legacy
+        // line is not removed on sight"; the router filter below is what
+        // actually reaches a reader.
         void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
         // The agenda builder's own `meeting.detail` read (whose
         // `agenda_status` gates the Publish button and the read-only mode),

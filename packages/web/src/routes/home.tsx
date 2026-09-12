@@ -63,9 +63,16 @@ import { queryKeys } from "@/lib/queryKeys";
 // rather than left claiming a gap that no longer exists (wave 3's own Task 1
 // brief: "Do not migrate any screen... the screens are Task 2", so this file
 // still reads `meetingRows` off Supabase — only the marker's CLAIM changed,
-// not the wiring). `minutesDocs` is the one remaining read with no procedure
-// at all — a `minutesDocument` router, wave 3's own plan scopes `minutes.tsx`/
-// `review.tsx` to wave 6, and this is the identical table. `boardRows` has an
+// not the wiring). ~~`minutesDocs` is the one remaining read with no
+// procedure at all — a `minutesDocument` router, wave 3's own plan scopes
+// `minutes.tsx`/`review.tsx` to wave 6, and this is the identical table.~~ —
+// **false since wave 6, Task 1**: `minutesDocument.pendingByTown` exists
+// (`packages/api/src/trpc/routers/minutes-document.ts`), and it is the
+// procedure the marker above already names. Like `board.listActive`, it is
+// shipped and not yet wired HERE; this screen is wave 6, Task 5's. Corrected
+// in Task 4 under conventions item 14, which asks a task to retire a false
+// present-tense claim wherever it finds one, not only in files it owns.
+// `boardRows` has an
 // existing candidate (`board.listActive`, wave 2) that is deliberately not
 // used yet, for the reason in this file's header comment — unrelated to
 // which wave owns the remaining `minutesDocs` gap.

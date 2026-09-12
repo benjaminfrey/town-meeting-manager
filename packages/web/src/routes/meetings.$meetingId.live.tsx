@@ -845,6 +845,13 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
         });
         // Closes every still-open `agenda_item_transition` row.
         void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+        // And COPIES the unreached and tabled items into `future_item_queue`,
+        // which the comment above describes and nothing invalidated: as of
+        // wave 6 Task 4 `routes/meetings.$meetingId.review.tsx` — the page
+        // this handler navigates to — reads that table through
+        // `trpc.futureItem.byMeeting`. `future_item_queue` is not one of the
+        // eight `LIVE_MEETING_TOPICS`, so no realtime event reaches it either.
+        void queryClient.invalidateQueries(trpc.futureItem.pathFilter());
 
         toast.success("Meeting adjourned");
         void navigate(`/meetings/${meetingId}/review`);

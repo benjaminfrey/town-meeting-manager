@@ -136,11 +136,15 @@ describe("VotePanel", () => {
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
   });
 
-  it("invalidates all THREE routers the adjournment touches when the call reports it", async () => {
+  it("invalidates all FOUR routers the adjournment touches when the call reports it", async () => {
     server.adjourned = true;
-    // Three separate `pathFilter()` lines in one branch: a test asserting only
-    // the first would let the other two be deleted silently (item 8's per-file
-    // credit bleed, one level down — the branch's own credit bleed).
+    // Four separate `pathFilter()` lines in one branch: a test asserting only
+    // the first would let the other three be deleted silently (item 8's
+    // per-file credit bleed, one level down — the branch's own credit bleed).
+    // `futureItem` is the fourth, added in wave 6 Task 4: the adjournment
+    // COPIES the unreached and tabled items into `future_item_queue`, which
+    // `routes/meetings.$meetingId.review.tsx` now reads through
+    // `trpc.futureItem.byMeeting`.
     const meetingKey = seed(trpc.meeting.byBoard.queryOptions({ boardId: "board-1" }).queryKey, []);
     const itemKey = seed(
       trpc.agendaItem.countByMeeting.queryOptions({ meetingId: "m1" }).queryKey,
@@ -150,6 +154,10 @@ describe("VotePanel", () => {
       trpc.agendaItemTransition.byMeeting.queryOptions({ meetingId: "m1" }).queryKey,
       [],
     );
+    const futureItemKey = seed(
+      trpc.futureItem.byMeeting.queryOptions({ meetingId: "m1" }).queryKey,
+      [],
+    );
 
     const { user } = renderPanel();
     await recordVote(user);
@@ -157,6 +165,7 @@ describe("VotePanel", () => {
     await waitFor(() => expect(queryClient.getQueryState(meetingKey)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(itemKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(transitionKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(futureItemKey)?.isInvalidated).toBe(true);
   });
 
   it("shows a refusal when recording the vote is FORBIDDEN", async () => {

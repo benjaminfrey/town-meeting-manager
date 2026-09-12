@@ -808,6 +808,25 @@ describe("LiveMeetingPage cache invalidation", () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/meetings/meeting-1/review"));
   });
 
+  it("invalidates trpc.futureItem.pathFilter() when adjourning — the review page's queue", async () => {
+    // The adjournment COPIES the unreached and tabled items into
+    // `future_item_queue`, and this handler navigates straight to the page
+    // that reads them (`routes/meetings.$meetingId.review.tsx`, wave 6 Task
+    // 4). `future_item_queue` is not one of the eight `LIVE_MEETING_TOPICS`,
+    // so nothing else in this app would reach that key. This screen does not
+    // observe it, so `isInvalidated` is safe here.
+    const queueKey = trpc.futureItem.byMeeting.queryOptions({
+      meetingId: "meeting-1",
+    }).queryKey;
+    queryClient.setQueryData(queueKey, []);
+    expect(queryClient.getQueryState(queueKey)?.isInvalidated).toBeFalsy();
+
+    renderLive();
+    fireEvent.click(await screen.findByTestId("adjourn-wo"));
+
+    await waitFor(() => expect(queryClient.getQueryState(queueKey)?.isInvalidated).toBe(true));
+  });
+
   it("invalidates trpc.agendaItem.pathFilter() when adjourning — the shell's item count", async () => {
     const countKey = trpc.agendaItem.countByMeeting.queryOptions({
       meetingId: "meeting-1",

@@ -57,11 +57,14 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 // `settings.minutes-workflow.tsx`) already invalidates BOTH that key and
 // `trpc.town.pathFilter()` — `towns: "town"` has been in
 // `cache-key-parity.test.ts`'s `MIGRATED` map since before this task. The
-// legacy key stays in `lib/queryKeys.ts` and un-invalidated nowhere: four
-// other files (`CreateMeetingDialog.tsx`, `meetings.$meetingId.review.tsx`,
-// `meetings.$meetingId.minutes.tsx`, `meetings.$meetingId.agenda.tsx`) still
-// READ `queryKeys.towns.detail` directly and are unaffected by this file's
-// own migration.
+// legacy key stays in `lib/queryKeys.ts` and un-invalidated nowhere. The four
+// other files this comment used to name as direct readers of
+// `queryKeys.towns.detail` (`CreateMeetingDialog.tsx`,
+// `meetings.$meetingId.review.tsx`, `meetings.$meetingId.minutes.tsx`,
+// `meetings.$meetingId.agenda.tsx`) have all since migrated — the last,
+// `review.tsx`, in Phase E wave 6, Task 4 — so that key now has NO reader at
+// all. The writers keep both lines regardless; see `cache-key-parity.test.ts`'s
+// "Why a dead legacy line is not removed on sight".
 import { trpc } from "@/lib/trpc";
 import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
