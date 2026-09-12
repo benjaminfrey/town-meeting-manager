@@ -30,8 +30,9 @@
  *    (conventions item 11). The grep is the one in `trpc.ts`'s
  *    `requireBoardActor` doc comment: it counts the `BoardScope`-taking
  *    signatures in THIS file, and answered 16 at Stage 1 Task D1d, 18 at
- *    `860a469`, 19 at `5d11393` and 29 after Phase E wave 5 Task 2 added
- *    rules 2a, 6a and 21b–21e below.
+ *    `860a469`, 19 at `5d11393`, 29 after Phase E wave 5 Task 2 added
+ *    rules 2a, 6a and 21b–21e below, and 30 after wave 6 Task 1 added rule
+ *    13a (`assertCanPublishMinutes`, R5).
  *
  *    **The command itself is deliberately not reproduced here**, and that is
  *    not squeamishness: its pattern is a substring of every signature it
@@ -422,6 +423,136 @@ export function assertCanInsertMinutesSection(actor: Actor, scope: BoardScope): 
 
 export function assertCanUpdateMinutesSection(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "R1", { boardId: scope.boardId, action: "to edit a minutes section" });
+}
+
+// ─── 13a — minutes_document PUBLISH/UNPUBLISH: R5, BOARD-SCOPED ───────
+//
+// Phase E wave 6, Task 1. The third consecutive wave to find a code the
+// product defines, a screen acts on, and nothing in `packages/api` stands
+// between: A5 in wave 4 (rule 21a), M6/M7 in wave 5 (21b, 21e), R5 here.
+// Before this commit:
+//
+//   $ grep -rn '"R5"\|"R6"' packages/api/src --include='*.ts' | grep -v __tests__
+//   (no output)
+//
+// — the same fixture-only footprint the other three had, and for R5 the same
+// two fixtures: `admin-gates.test.ts`'s maximal matrix and
+// `require-permission.test.ts`'s `BOARD_SCOPED_CODES` roster.
+//
+// **This one widens silently, which the other three did not.** A5, M6 and M7
+// governed actions that were simply unguarded; adding a rule REFUSED callers
+// who had been allowed, and anything relying on the old behaviour broke
+// loudly. R5's hazard runs the other way: `minutes.tsx` gates its Publish
+// button on R5 in the browser, and the write behind it is a raw, unauthorized
+// `minutes_document` UPDATE. The only minutes-document write rule that exists
+// is `assertCanUpdateMinutesDocument` — **R1** — so migrating publish behind
+// the nearest existing guard would compile, pass every test, refuse nobody who
+// is refused today, and hand `TEMPLATE_RECORDING_SECRETARY` (M2 M3 M4 M5 R1 R2
+// R3 R4 R6 — R1 WITHOUT R5, by design) the power to put minutes on the public
+// portal. Nothing would have failed. That is why this rule is written before
+// any screen is wired, not after.
+//
+// Publishing is a SEPARATE act from editing, exactly as rule 21a argues for
+// A5 against A2: R1 (`edit_draft_minutes`) is who may change what the minutes
+// SAY; R5 (`publish_approved_minutes`) is who may make an adopted record
+// public. Two of the five shipped templates grant R1 and withhold R5
+// (`TEMPLATE_RECORDING_SECRETARY`, `TEMPLATE_DEPUTY_CLERK`), so the
+// distinction is one towns have already been offered.
+//
+// **UNPUBLISHING is R5 too**, not a narrower gate, for the reason rule 21b
+// gives for `executive_session`'s DELETE being M6: it is the undoing of the
+// act this code governs, and an authority that can publish minutes but cannot
+// pull them back has no way to correct its own mistake without an
+// administrator. `TEMPLATE_TOWN_CLERK` grants R5 to a `staff` account, so
+// "ask an admin" is a real operational cost, not a formality. Recorded as a
+// decision: today's UI shows Unpublish to administrators only (`isAdmin`),
+// while the server enforces nothing at all, so R5 here is a large narrowing
+// against the server and a small widening against the button.
+//
+// `minutesDocument.publish`/`unpublish` reach this code through
+// `requireBoardPermission("R5", boardIdFrom())` rather than importing this
+// function — that middleware resolves exactly one `PermissionCode` via
+// `assertPermission`, which IS the call below (rule 21a's own note, and
+// conventions item 2's "reach for `requireBoardPermission` FIRST"). The
+// function exists for the reason rule 21a's does: R5 had no entry in this file
+// at all, so a reader auditing "what governs publishing minutes" found
+// nothing, and `board-scope.test.ts`'s rule-by-rule table needs a callable
+// form to cover R5 the way it covers A1–A3, A5, M1, M2, M3, M6, M7, R1 and R4.
+//
+// ─── R6 (`export_minutes`) deliberately gets NO rule ──────────────────
+//
+// It is the other half of the same grep and the answer came out differently.
+// R6's only consumer anywhere is `minutes.tsx`'s `canExport`, which gates a
+// "Download PDF" link — a READ of a minutes document, and reads of that
+// document are already decided, on every fetch, by rule 9 above:
+// `GET /api/files/minutes/:documentId` → `resolveMinutesDocumentForDownload`
+// → `assertCanSelectMinutesDocument`. Three reasons not to add a second gate
+// in front of it:
+//
+//   1. It would NARROW a read the portal already serves to the anonymous
+//      public once published, which is rule 9b's "a narrower rule for members
+//      would be theatre" argument, unchanged.
+//   2. It would refuse every `board_member` reading their own board's adopted
+//      minutes: R6 is a delegable staff code and no board-member account is
+//      created with one.
+//   3. It discriminates nobody today in any case. Across all five shipped
+//      templates R6 is granted exactly where R4 is — TOWN_CLERK (R4 R5 R6),
+//      DEPUTY_CLERK (R4 R6), BOARD_SPECIFIC_STAFF (R4 R5 R6), GENERAL_STAFF
+//      (R4 R6), RECORDING_SECRETARY (R4 R6) — so an R6 gate ahead of a rule-9
+//      check changes no answer while adding a second place for the two to
+//      drift apart.
+//
+// R5 is the code that actually separates the templates (only TOWN_CLERK and
+// BOARD_SPECIFIC_STAFF hold it); R6 tracks R4 exactly. Recorded here so the
+// next sweep that greps for an unenforced code finds the decision instead of
+// re-deriving it.
+
+export function assertCanPublishMinutes(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "R5", {
+    boardId: scope.boardId,
+    action: "to publish approved minutes to the public portal",
+  });
+}
+
+// ─── 13b — minutes ADOPTION: the administrator, no code ───────────────
+//
+// Phase E wave 6, Task 1. `approve` and `returnForAmendments` are the two
+// outcomes of one decision — whether the board adopts the minutes — and
+// neither is keyed to a `PermissionCode`, because there is no governable
+// action for adopting minutes among the thirty.
+//
+// That is not an oversight this task fixes. `routes/minutes.ts`'s approve
+// route already states it and states why it is still open: its guard was once
+// `requirePermission("approve_minutes")`, an action that does not exist, so
+// the matrix lookup could never return true and only the admin short-circuit
+// ever admitted anybody. Task G1 replaced it with `requireAdmin` as
+// BEHAVIOUR-IDENTICAL and flagged "whether minutes approval should instead be
+// delegable (R5 is the nearest existing action)" as a product decision for the
+// owner — re-flagged in D1f's report, still open. Minting a code here, or
+// reaching for R5 because it is nearby, would make that decision inside a
+// migration. So these two reproduce today's answer exactly: the town
+// administrator, and nobody else.
+//
+// Not `assertAdmin`, whose message says "one of the governance actions
+// (T1–T4) that cannot be delegated" — that sentence is true of the town
+// profile and false here, where the open question is precisely whether this
+// should become delegable. The message is part of the rule (this file's
+// header, point 4).
+
+function assertMinutesAdoptionAdmin(actor: Actor, action: string): void {
+  if (isAdmin(actor)) return;
+  throw new AuthorizationError(
+    `Only a town administrator can ${action}. Adopting minutes has no delegable action ` +
+      "code — see routes/minutes.ts for the open product decision about whether it should.",
+  );
+}
+
+export function assertCanApproveMinutes(actor: Actor): void {
+  assertMinutesAdoptionAdmin(actor, "adopt minutes on behalf of the board");
+}
+
+export function assertCanReturnMinutesForAmendments(actor: Actor): void {
+  assertMinutesAdoptionAdmin(actor, "return minutes to the clerk for amendments");
 }
 
 // ─── 9a — the four board-scoped codes the legacy routes guard ─────────

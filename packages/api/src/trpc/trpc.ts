@@ -620,14 +620,17 @@ export function requireActor<R>(
  * `phase-e-conventions.md` item 2 — quote the grep, not the number
  * (conventions item 11); it answered 18 then, 19 after Phase E wave 4, Task 2
  * added `assertCanPublishAgenda` (A5, the one board-scoped code with no rule
- * in this codebase at all until that task), and 29 now, after wave 5, Task 2
+ * in this codebase at all until that task), 29 after wave 5, Task 2
  * added ten more — the four live-meeting tables that had no rule at all
  * (`executive_session` M6, `guest_speaker` M7, `agenda_item_transition` M1,
  * `future_item_queue` M1), the missing `vote_record` DELETE (M3), and
- * `assertCanUpdateAgendaItemProgress`:
+ * `assertCanUpdateAgendaItemProgress` — and 30 after wave 6, Task 1 added
+ * `assertCanPublishMinutes` (R5, `publish_approved_minutes`, the code whose
+ * absence would have let an R1-without-R5 recording secretary publish minutes
+ * to the public portal):
  *
  *     $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
- *     29
+ *     30
  *
  * **All but THREE are exactly one `assertPermission` call, as of wave 5.** The
  * two long-standing ones are `assertCanUpdateMeeting` (admin OR A1@board OR
