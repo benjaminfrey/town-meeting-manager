@@ -35,6 +35,7 @@ import { voteRecordRouter } from "./routers/vote-record.js";
 import { executiveSessionRouter } from "./routers/executive-session.js";
 import { guestSpeakerRouter } from "./routers/guest-speaker.js";
 import { realtimeRouter } from "./routers/realtime.js";
+import { futureItemRouter } from "./routers/future-item.js";
 
 export const appRouter = router({
   /**
@@ -182,6 +183,14 @@ export const appRouter = router({
    * browser. Phase E wave 5, Task 1.
    */
   realtime: realtimeRouter,
+
+  /**
+   * The future item queue's only read — `review.tsx`'s deferred/tabled list
+   * for one meeting. No writes here; every row is written by
+   * `meeting.performAdjournment`. See `routers/future-item.ts`. Phase E wave
+   * 6, Task 2.
+   */
+  futureItem: futureItemRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

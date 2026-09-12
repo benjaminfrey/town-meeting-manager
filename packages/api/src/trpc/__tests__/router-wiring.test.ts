@@ -137,6 +137,9 @@ describe("router wiring", () => {
         // wired client-side by this task; pinned here for the reason the
         // wave-4/wave-5 unwired entries above are.
         "meeting.liveByTown",
+        // Phase E wave 6, Task 2 — `review.tsx`'s deferred/tabled list. Not
+        // wired client-side by this task; pinned here for the same reason.
+        "futureItem.byMeeting",
         "whoami",
       ]),
     );
@@ -185,6 +188,7 @@ describe("router wiring", () => {
       "voteRecord.byMeeting",
       "executiveSession.byMeeting",
       "guestSpeaker.byMeeting",
+      "futureItem.byMeeting",
     ]) {
       const def = procedures[name]?._def;
       const schema = def?.inputs?.[0];
