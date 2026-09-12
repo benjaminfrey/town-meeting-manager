@@ -13,7 +13,7 @@
  * a field carried on the list row — see the route's own doc comment for why.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
@@ -25,21 +25,6 @@ import BoardListPage from "../boards";
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: () => ({ townId: "town-1" }),
 }));
-
-// `EditBoardDialog` reads a board's meeting count off `@/hooks/useSupabase`
-// directly (whether to disable the name field) — not this task's file list.
-// Mocked just enough to resolve; see that dialog's own test file for the
-// identical mock.
-vi.mock("@/hooks/useSupabase", () => {
-  const chain: Record<string, unknown> = {
-    then: (resolve: (value: { count: number; error: null }) => void) =>
-      resolve({ count: 0, error: null }),
-  };
-  for (const m of ["select", "eq"]) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  return { useSupabase: () => ({ from: vi.fn().mockReturnValue(chain) }) };
-});
 
 // ─── Harness ────────────────────────────────────────────────────────────
 
@@ -102,6 +87,16 @@ const server = {
   boards: [activeBoard, archivedBoard] as (typeof activeBoard | typeof archivedBoard)[],
   listRejects: false,
   detailRejects: false,
+  /**
+   * `EditBoardDialog` opens from this screen and reads the board's meeting
+   * count to decide whether the name field is renameable. That read was a raw
+   * `@/hooks/useSupabase` head-count until wave 6, Task 5 moved it onto
+   * `trpc.board.stats`; this file's `vi.mock("@/hooks/useSupabase")` outlived
+   * it and was stubbing a module the dialog no longer touched. Removed in
+   * Task 6 and replaced with the real handler below, so the count the dialog
+   * reads now arrives over the same transport as everything else here.
+   */
+  meetingCount: 0,
 };
 
 const stub = installTRPCFetchStub({
@@ -134,6 +129,7 @@ const stub = installTRPCFetchStub({
     if (server.detailRejects) trpcTestError("INTERNAL_SERVER_ERROR");
     return boardDetail;
   },
+  "board.stats": () => ({ active_members: 3, meetings: server.meetingCount }),
 });
 
 function renderRoute() {
@@ -144,6 +140,13 @@ function renderRoute() {
 }
 
 describe("board list", () => {
+  beforeEach(() => {
+    server.boards = [activeBoard, archivedBoard];
+    server.listRejects = false;
+    server.detailRejects = false;
+    server.meetingCount = 0;
+  });
+
   it("shows every active board's name, type and member counts, archived hidden by default", async () => {
     server.boards = [activeBoard, archivedBoard];
     server.listRejects = false;
@@ -186,6 +189,35 @@ describe("board list", () => {
     expect(await screen.findByRole("button", { name: /save changes/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Select Board")).toBeInTheDocument();
     expect(stub.countFor("board.detail")).toBeGreaterThan(0);
+  });
+
+  it("disables the name field from trpc.board.stats when the board already has meetings", async () => {
+    // What the removed `vi.mock("@/hooks/useSupabase")` above this file's
+    // handlers used to stand in for, now asserted rather than merely resolved:
+    // the dialog's rename gate reads `board.stats.meetings`, and the stub
+    // answering 0 was the only reason the field was editable in the test
+    // above. A dead module mock could not have expressed either direction.
+    server.meetingCount = 4;
+    const { user } = renderRoute();
+
+    await screen.findByText("Select Board");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    await screen.findByRole("button", { name: /save changes/i });
+    await waitFor(() => expect(screen.getByDisplayValue("Select Board")).toBeDisabled());
+    expect(stub.countFor("board.stats")).toBeGreaterThan(0);
+  });
+
+  it("leaves the name field editable when trpc.board.stats reports no meetings", async () => {
+    server.meetingCount = 0;
+    const { user } = renderRoute();
+
+    await screen.findByText("Select Board");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    await screen.findByRole("button", { name: /save changes/i });
+    await waitFor(() => expect(stub.countFor("board.stats")).toBeGreaterThan(0));
+    expect(screen.getByDisplayValue("Select Board")).toBeEnabled();
   });
 
   it("refetches when a writer invalidates trpc.board.pathFilter()", async () => {

@@ -33,14 +33,17 @@ const { BOARDS } = vi.hoisted(() => ({
   ],
 }));
 
+// The board checkbox list. `StaffAccountFlow` read `board` off
+// `@/hooks/useSupabase` until wave 2, Task 3 put it on `trpc.board.listActive`;
+// this file kept a `vi.mock("@/hooks/useSupabase", () => ({ useSupabase: () =>
+// ({ from: vi.fn() }) }))` for four more waves, stubbing a module the component
+// no longer imported and supplying no board to anything. `BOARDS` below has
+// been the only source of that list since; the dead mock is removed in wave 6,
+// Task 6 with the client itself.
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual("@tanstack/react-query");
   return { ...(actual as object), useQuery: vi.fn().mockReturnValue({ data: BOARDS }) };
 });
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({ from: vi.fn() }),
-}));
 
 // The matrix editor is step 2's whole UI and is tested on its own. Stubbed so
 // these tests are about what leaves the flow, not about how it is edited.

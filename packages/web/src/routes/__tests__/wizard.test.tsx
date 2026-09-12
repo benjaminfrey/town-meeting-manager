@@ -29,24 +29,16 @@ vi.mock("@/hooks/useCurrentUser", () => ({
   })),
 }));
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({
-        data: { user: { id: "user-1", email: "admin@test.com" } },
-        error: null,
-      }),
-      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
-      refreshSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
-    },
-    from: vi.fn(() => ({
-      insert: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: { id: "town-1" }, error: null }),
-      upsert: vi.fn().mockResolvedValue({ data: null, error: null }),
-    })),
-  },
-}));
+// This file used to carry a `vi.mock("@/lib/supabase")` stubbing
+// `supabase.auth.getUser/getSession/refreshSession` and a `from()` chain for a
+// town upsert. None of it was reachable from anything this file renders: the
+// three stage components imported below read their state from the mocked
+// `useWizard` and hand their output back through `onRegister` /
+// `onValidityChange`, and the onboarding write is not in their tree at all —
+// it is `lib/completeWizard.ts`, called from `routes/setup.tsx`, which this
+// file neither imports nor renders. The auth half was dead even earlier:
+// Stage 1, Task C2 removed every `supabase.auth.*` call from the client.
+// Removed in wave 6, Task 6 with the client itself.
 
 vi.mock("sonner", () => ({
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
