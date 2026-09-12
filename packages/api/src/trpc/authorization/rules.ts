@@ -1199,6 +1199,24 @@ export function assertCanUpdateBoardMember(actor: Actor): void {
   assertAdmin(actor, "change a board seat");
 }
 
+/**
+ * Archiving a board writes TWO tables — `board.archived_at` and every active
+ * `board_member` row on it — so it needs both rules to hold, not one.
+ *
+ * Both are `assertAdmin` today, so this composite answers identically to
+ * either half. That is exactly why it is written out rather than left as a
+ * single `requireActor(assertCanUpdateBoard)`: a guard naming only one of the
+ * two tables it writes is correct by coincidence, and the day either rule
+ * stops being a bare admin gate (the `BOARD_SCOPED_CODES` direction this file
+ * already anticipates elsewhere) the coincidence ends silently. Phase E wave
+ * 6, Task 5 — `board.archive`, which replaced `ArchiveBoardDialog.tsx`'s two
+ * untransacted, unguarded raw writes.
+ */
+export function assertCanArchiveBoard(actor: Actor): void {
+  assertCanUpdateBoard(actor);
+  assertCanUpdateBoardMember(actor);
+}
+
 export function assertCanInsertAgendaTemplate(actor: Actor): void {
   assertAdmin(actor, "create an agenda template");
 }

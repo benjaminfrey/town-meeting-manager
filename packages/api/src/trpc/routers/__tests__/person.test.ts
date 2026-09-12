@@ -1,6 +1,13 @@
 /**
- * `person.list` / `person.insert` / `person.update` /
- * `person.insertStaffAccount` / `person.updateGovTitle`.
+ * `person.list` / `person.detail` / `person.emailExists` / `person.insert` /
+ * `person.update` / `person.insertStaffAccount` / `person.updateGovTitle`.
+ *
+ * `emailExists`'s block is MOVED from `board-member.test.ts`, where it lived
+ * as `boardMember.personEmailExists` until wave 6, Task 5 — the same "moved
+ * to the router whose noun it reads" shape `memberCount`'s tests already have
+ * a comment about in that file, in the opposite direction. Its original case
+ * is carried over verbatim; the `excludePersonId` cases are new with the
+ * argument.
  *
  * Same connection discipline as `board.test.ts`/`town.test.ts`: every case
  * runs through `connectAsAppRole`, never the owner connection `withTestDb`
@@ -249,6 +256,75 @@ describe("person.detail", () => {
 
         const err = await expectTrpcError(() => caller.person.detail({ personId: randomUUID() }));
         expect(err.code).toBe("NOT_FOUND");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("person.emailExists", () => {
+  it("answers true for an email already used in the town, case- and whitespace-insensitively", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        await seedPerson(db, town, "Taken", "taken@example.test");
+        const actor = await seedActor(db, town, { role: "admin" });
+
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+        expect(await caller.person.emailExists({ email: "Taken@Example.Test" })).toBe(true);
+        expect(await caller.person.emailExists({ email: "nobody@example.test" })).toBe(false);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("excludes the named person, so an edit form does not report a person's own email as taken", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const mine = await seedPerson(db, town, "Mine", "mine@example.test");
+        const other = await seedPerson(db, town, "Other", "other@example.test");
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // The person's OWN email, excluded: not taken.
+        expect(
+          await caller.person.emailExists({ email: "mine@example.test", excludePersonId: mine }),
+        ).toBe(false);
+        // Somebody ELSE's email, same exclusion: still taken.
+        expect(
+          await caller.person.emailExists({ email: "other@example.test", excludePersonId: mine }),
+        ).toBe(true);
+        // And the exclusion is not a blanket "always false": the same email
+        // without it is taken. This is the assertion that fails if the SQL
+        // ever collapses to one statement with a NULL parameter, since
+        // `id != NULL` is NULL and would match no rows at all.
+        expect(await caller.person.emailExists({ email: "mine@example.test" })).toBe(true);
+        expect(other).not.toBe(mine);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("cannot see another town's person", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mineTown = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        await seedPerson(db, theirs, "Theirs", "theirs@example.test");
+        const actor = await seedActor(db, mineTown, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mineTown, actor));
+
+        expect(await caller.person.emailExists({ email: "theirs@example.test" })).toBe(false);
       } finally {
         await app.end();
       }

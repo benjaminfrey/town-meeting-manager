@@ -369,6 +369,16 @@ export const meetingRouter = router({
    * scopes this to the caller's town, and a redundant clause makes the
    * tenancy test vacuous — conventions item 2's "no redundant WHERE town_id
    * alongside RLS."
+   *
+   * **`started_at` ADDED in wave 6, Task 5, for a SECOND caller.**
+   * `routes/home.tsx`'s "Happening now" hero renders `started N min ago` off
+   * it, and that screen's `select("*")` used to supply it. Conventions item
+   * 1's "add it back the day something does", the same treatment
+   * `meeting.detail`'s own four packet/notice columns got in wave 4 — every
+   * other column `home.tsx` got from `SELECT *` (`town_id`, `location`,
+   * `created_by`, …) is still absent because nothing on either screen reads
+   * it. Invisible to `meetings.tsx`, which does not read it (`test/trpc.ts`'s
+   * "the gap runs one way").
    */
   byTown: protectedProcedure.query(async ({ ctx }) => {
     return ctx.withTenant(async (tx) =>
@@ -379,12 +389,13 @@ export const meetingRouter = router({
         meeting_type: string;
         scheduled_date: string;
         scheduled_time: string | null;
+        started_at: string | null;
         board_id: string;
         board_name: string;
       }>(
         await tx.execute(sql`
           SELECT m.id, m.title, m.status, m.meeting_type, m.scheduled_date, m.scheduled_time,
-                 m.board_id, b.name AS board_name
+                 m.started_at, m.board_id, b.name AS board_name
           FROM meeting m
           JOIN board b ON b.id = m.board_id
           WHERE m.status != 'cancelled'
@@ -555,6 +566,21 @@ export const meetingRouter = router({
    * for a value the database does not constrain. Its five keys and the
    * `adjourned_by` misattribution they carry are documented on `adjourn`
    * below — a reader of this column should start there.
+   *
+   * **`board_name` ADDED in wave 6, Task 5, for a FOURTH caller**, and it is
+   * the first column here that is not a `meeting` column at all.
+   * `components/MeetingSubnavHeader.tsx` — the shared context header
+   * `MeetingLayout` renders above the agenda/live/review/minutes screens —
+   * shows the board's name beside the meeting title, and did it with its own
+   * raw `board:board_id(id, name)` PostgREST embed. The alternative was a
+   * dependent `board.detail` call on the client (21 columns, a second round
+   * trip, and a board id it cannot know until this query resolves) for one
+   * string. The JOIN is the same shape `byTown` above already uses, and it is
+   * INNER rather than LEFT on purpose: `meeting.board_id` is `NOT NULL` and
+   * both tables carry the same tenancy policy, so a meeting visible to this
+   * caller always has a visible board — a LEFT JOIN would only be pretending
+   * otherwise. The embed's `board.id` is deliberately NOT added: the subnav
+   * renders the name only, and `board_id` is already here.
    */
   detail: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
@@ -580,14 +606,18 @@ export const meetingRouter = router({
           meeting_notice_url: string | null;
           meeting_notice_generated_at: string | null;
           adjournment: unknown;
+          board_name: string;
         }>(
           await tx.execute(sql`
-            SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
-                   scheduled_time, location, presiding_officer_id, recording_secretary_id,
-                   current_agenda_item_id,
-                   started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
-                   meeting_notice_url, meeting_notice_generated_at, adjournment
-            FROM meeting WHERE id = ${input.meetingId}
+            SELECT m.id, m.board_id, m.title, m.status, m.meeting_type, m.agenda_status,
+                   m.scheduled_date, m.scheduled_time, m.location, m.presiding_officer_id,
+                   m.recording_secretary_id, m.current_agenda_item_id,
+                   m.started_at, m.ended_at, m.agenda_packet_url, m.agenda_packet_generated_at,
+                   m.meeting_notice_url, m.meeting_notice_generated_at, m.adjournment,
+                   b.name AS board_name
+            FROM meeting m
+            JOIN board b ON b.id = m.board_id
+            WHERE m.id = ${input.meetingId}
           `),
           (message) => new Error(`meeting.detail: ${message}`),
         ),

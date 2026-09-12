@@ -1,6 +1,8 @@
 /**
  * `boardMember.memberCount` / `.roster` / `.searchCandidates` /
- * `.personEmailExists` / `.addBoardMember` / `.addStaffMember`.
+ * `.addBoardMember` / `.addStaffMember`. (`.personEmailExists` moved to
+ * `person.emailExists` in wave 6, Task 5 — its tests moved with it, to
+ * `person.test.ts`.)
  *
  * `memberCount`'s two tests are MOVED from `board.test.ts`, unchanged, now
  * that `board-member.ts` exists as their home — see that router's own
@@ -507,30 +509,6 @@ describe("boardMember.searchCandidates", () => {
           caller.boardMember.searchCandidates({ boardId: theirBoard, query: "casey" }),
         );
         expect(err.code).toBe("NOT_FOUND");
-      } finally {
-        await app.end();
-      }
-    });
-  });
-});
-
-describe("boardMember.personEmailExists", () => {
-  it("answers true for an email already used in the town, case- and whitespace-insensitively", async () => {
-    await withTestDb(async (client) => {
-      const app = await connectAsAppRole(client);
-      try {
-        const db = testDb(app);
-        const town = await seedTown(db);
-        await seedPerson(db, town, "Taken", "taken@example.test");
-        const actor = await seedActor(db, town, { role: "admin" });
-
-        const caller = appRouter.createCaller(contextFor(db, town, actor));
-        expect(await caller.boardMember.personEmailExists({ email: "Taken@Example.Test" })).toBe(
-          true,
-        );
-        expect(await caller.boardMember.personEmailExists({ email: "nobody@example.test" })).toBe(
-          false,
-        );
       } finally {
         await app.end();
       }

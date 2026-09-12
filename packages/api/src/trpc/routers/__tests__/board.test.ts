@@ -984,3 +984,444 @@ describe("board.copyNoticeTemplate", () => {
     });
   });
 });
+
+// ─── Wave 6, Task 5: the three writes ArchiveBoardDialog / ────────────────
+// NoticeTemplateEditor / MinutesWorkflowEditor used to make raw.
+
+/** The five columns `board.updateMinutesWorkflow` writes. */
+interface MinutesWorkflowRow {
+  minutes_consent_agenda: boolean;
+  minutes_requires_second: boolean;
+  r4_board_member_default: boolean;
+  audio_retention_policy_override: string | null;
+  auto_publish_on_approval_override: boolean | null;
+}
+
+async function readMinutesWorkflow(
+  db: TestDb,
+  town: TownFixture,
+  boardId: string,
+): Promise<MinutesWorkflowRow | null> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(
+        sql`
+        SELECT minutes_consent_agenda, minutes_requires_second, r4_board_member_default,
+          audio_retention_policy_override, auto_publish_on_approval_override
+        FROM board WHERE id = ${boardId}
+      `,
+      )
+      .then((r) => toRows<MinutesWorkflowRow>(r, (m) => new Error(m))),
+  );
+  return rows[0] ?? null;
+}
+
+async function memberStatuses(db: TestDb, town: TownFixture, boardId: string): Promise<string[]> {
+  const rows = await inTown(db, town, (tx) =>
+    tx
+      .execute(
+        sql`SELECT status::text AS status FROM board_member WHERE board_id = ${boardId} ORDER BY status`,
+      )
+      .then((r) => toRows<{ status: string }>(r, (m) => new Error(m))),
+  );
+  return rows.map((r) => r.status);
+}
+
+const BLOCKS = [
+  { id: "b1", type: "letterhead" as const, order: 0, config: { showSeal: true } },
+  { id: "b2", type: "rich_text" as const, order: 1, config: { content: "<p>Hello</p>" } },
+];
+
+describe("board.updateNoticeTemplate", () => {
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Shellfish Commission" });
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.board.updateNoticeTemplate({ boardId, blocks: BLOCKS }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        expect(await readNoticeTemplate(db, town, boardId)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.board.updateNoticeTemplate({ boardId: "not-a-uuid", blocks: BLOCKS }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator replace the board's blocks, and can empty them", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Shellfish Commission" });
+        await setNoticeTemplate(db, town, boardId, [{ id: "old", type: "spacer" }]);
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        await caller.board.updateNoticeTemplate({ boardId, blocks: BLOCKS });
+        expect(await readNoticeTemplate(db, town, boardId)).toEqual(BLOCKS);
+
+        // An empty array is a real value the editor can send (remove every
+        // block, then save) and must not be confused with "leave it alone".
+        await caller.board.updateNoticeTemplate({ boardId, blocks: [] });
+        expect(await readNoticeTemplate(db, town, boardId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a board in another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreign = await seedBoard(db, theirs, { name: "Their Board" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.updateNoticeTemplate({ boardId: foreign, blocks: BLOCKS }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readNoticeTemplate(db, theirs, foreign)).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.updateMinutesWorkflow", () => {
+  const PAYLOAD = {
+    minutes_consent_agenda: true,
+    minutes_requires_second: false,
+    r4_board_member_default: false,
+    audio_retention_policy_override: "retain_90_days" as const,
+    auto_publish_on_approval_override: true,
+  };
+
+  it("refuses a caller who is not an administrator, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Shellfish Commission" });
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() =>
+            caller.board.updateMinutesWorkflow({ boardId, ...PAYLOAD }),
+          );
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        // The column defaults from `0000_baseline.sql`, untouched.
+        expect(await readMinutesWorkflow(db, town, boardId)).toEqual({
+          minutes_consent_agenda: false,
+          minutes_requires_second: true,
+          r4_board_member_default: true,
+          audio_retention_policy_override: null,
+          auto_publish_on_approval_override: null,
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.board.updateMinutesWorkflow({ boardId: "not-a-uuid", ...PAYLOAD }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("lets an administrator save the five columns, and clear both overrides back to null", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Shellfish Commission" });
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+
+        await caller.board.updateMinutesWorkflow({ boardId, ...PAYLOAD });
+        expect(await readMinutesWorkflow(db, town, boardId)).toEqual({
+          minutes_consent_agenda: true,
+          minutes_requires_second: false,
+          r4_board_member_default: false,
+          audio_retention_policy_override: "retain_90_days",
+          auto_publish_on_approval_override: true,
+        });
+
+        // "Inherit the town default" is `null`, and it must be reachable
+        // again after an override has been set — the editor's Override
+        // switches write exactly this.
+        await caller.board.updateMinutesWorkflow({
+          boardId,
+          ...PAYLOAD,
+          audio_retention_policy_override: null,
+          auto_publish_on_approval_override: null,
+        });
+        const row = await readMinutesWorkflow(db, town, boardId);
+        expect(row?.audio_retention_policy_override).toBeNull();
+        expect(row?.auto_publish_on_approval_override).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a board in another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreign = await seedBoard(db, theirs, { name: "Their Board" });
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() =>
+          caller.board.updateMinutesWorkflow({ boardId: foreign, ...PAYLOAD }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect((await readMinutesWorkflow(db, theirs, foreign))?.minutes_consent_agenda).toBe(
+          false,
+        );
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("board.archive", () => {
+  it("refuses a caller who is not an administrator, and writes neither table", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Harbor Committee" });
+        const personId = await seedPerson(db, town, "Seated Member");
+        await seedBoardMember(db, town, boardId, personId);
+
+        for (const role of ["staff", "board_member"] as const) {
+          const actor = await seedActor(db, town, { role, global: [] });
+          const caller = appRouter.createCaller(contextFor(db, town, actor));
+          const err = await expectTrpcError(() => caller.board.archive({ boardId }));
+          expect([role, err.code]).toEqual([role, "FORBIDDEN"]);
+        }
+
+        expect((await readBoard(db, town, boardId))?.archived_at).toBeNull();
+        expect(await memberStatuses(db, town, boardId)).toEqual(["active"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN even when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() => caller.board.archive({ boardId: "not-a-uuid" }));
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("archives the board and every ACTIVE seat on it, in one call", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Harbor Committee" });
+        const a = await seedPerson(db, town, "Active One");
+        const b = await seedPerson(db, town, "Active Two");
+        const c = await seedPerson(db, town, "Already Archived");
+        await seedBoardMember(db, town, boardId, a);
+        await seedBoardMember(db, town, boardId, b);
+        await seedBoardMember(db, town, boardId, c, "archived");
+
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        const result = await caller.board.archive({ boardId });
+
+        // Two, not three: the already-archived seat is not re-touched, which
+        // is what `AND status = 'active'` buys.
+        expect(result.archivedMembers).toBe(2);
+        expect((await readBoard(db, town, boardId))?.archived_at).not.toBeNull();
+        expect(await memberStatuses(db, town, boardId)).toEqual([
+          "archived",
+          "archived",
+          "archived",
+        ]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("leaves another board's seats alone", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const archived = await seedBoard(db, town, { name: "Harbor Committee" });
+        const untouched = await seedBoard(db, town, { name: "Road Committee" });
+        const person = await seedPerson(db, town, "Sits On Both");
+        await seedBoardMember(db, town, archived, person);
+        await seedBoardMember(db, town, untouched, person);
+
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await caller.board.archive({ boardId: archived });
+
+        expect(await memberStatuses(db, town, untouched)).toEqual(["active"]);
+        expect((await readBoard(db, town, untouched))?.archived_at).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The failure-mode test: the reason this procedure exists.
+   *
+   * `ArchiveBoardDialog` made two untransacted round trips, so a failure
+   * between them left a board archived with its members still `active`. This
+   * forces a failure AFTER the `board` write and BEFORE the `board_member`
+   * write commits, and asserts the board write did not survive it.
+   *
+   * The failure is injected on the real code path rather than a paraphrase
+   * of it: a `BEFORE UPDATE` trigger on `board_member` that raises. The
+   * `board` UPDATE has already run by the time it fires, inside the same
+   * transaction. If `withTenant` were not a transaction — if this procedure
+   * were two independently-committed round trips, the way the dialog was —
+   * the board would stay archived and the last assertion here would fail.
+   * That is the mutation to run when checking this test can go red: move the
+   * `board_member` UPDATE into its own `ctx.withTenant` call, separate from
+   * the `board` one, reproducing the shipped dialog's shape exactly.
+   */
+  it("rolls the board write back when the member write fails (the whole point of the procedure)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Harbor Committee" });
+        const personId = await seedPerson(db, town, "Seated Member");
+        await seedBoardMember(db, town, boardId, personId);
+
+        // Owner connection (`client` is the raw postgres.js handle
+        // `withTestDb` hands back): creating a trigger is DDL on a scratch
+        // database, not a tenant write, so it does not go through
+        // `connectAsAppRole`.
+        await client.unsafe(`
+          CREATE FUNCTION injected_board_member_failure() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN RAISE EXCEPTION 'injected board_member failure'; END $$
+        `);
+        await client.unsafe(`
+          CREATE TRIGGER board_member_injected_failure
+          BEFORE UPDATE ON board_member
+          FOR EACH ROW EXECUTE FUNCTION injected_board_member_failure()
+        `);
+
+        const admin = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, admin));
+        await expect(caller.board.archive({ boardId })).rejects.toThrow();
+
+        await client.unsafe(`DROP TRIGGER board_member_injected_failure ON board_member`);
+
+        // Neither write survived.
+        expect((await readBoard(db, town, boardId))?.archived_at).toBeNull();
+        expect(await memberStatuses(db, town, boardId)).toEqual(["active"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND for a board in another town, and writes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const mine = await seedTown(db, "Newcastle");
+        const theirs = await seedTown(db, "Bristol");
+        const foreign = await seedBoard(db, theirs, { name: "Their Board" });
+        const person = await seedPerson(db, theirs, "Their Member");
+        await seedBoardMember(db, theirs, foreign, person);
+        const admin = await seedActor(db, mine, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, mine, admin));
+
+        const err = await expectTrpcError(() => caller.board.archive({ boardId: foreign }));
+        expect(err.code).toBe("NOT_FOUND");
+        expect((await readBoard(db, theirs, foreign))?.archived_at).toBeNull();
+        expect(await memberStatuses(db, theirs, foreign)).toEqual(["active"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
