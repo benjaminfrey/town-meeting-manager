@@ -12,9 +12,8 @@
 
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import {
   ChevronLeft,
   ChevronRight,
@@ -70,23 +69,26 @@ interface MotionData {
   secondedBy: string | null;
   status: string;
   parentMotionId: string | null;
-  voteSummary: string | null;
+  /**
+   * `motion.vote_summary` is a JSONB column, so the procedure declares it
+   * `unknown` and this prop says the same. It was typed `string | null`, which
+   * `MotionPanel`'s own reader has contradicted in a comment since it was
+   * written ("Supabase returns JSONB as a native object; no JSON.parse
+   * needed") — that reader already handles both shapes and is unchanged.
+   */
+  voteSummary: unknown;
 }
 
-interface VoteRecordData {
-  id: string;
-  motion_id: string;
-  board_member_id: string;
-  vote: string;
-  recusal_reason: string | null;
-}
-
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-}
+/**
+ * Both taken from the procedures rather than restated — conventions item 10.
+ * `live.tsx` used to reach this component through
+ * `votesByMotion as unknown as Map<string, Array<{...}>>` and a
+ * `ComponentProps<typeof X>["attendanceRecords"]` cast; a double cast of that
+ * shape is exactly what lets a column the procedure stopped selecting arrive
+ * as `undefined` with `tsc` at exit 0.
+ */
+type VoteRecordData = RouterOutputs["voteRecord"]["byMeeting"][number];
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface BoardQuorumConfig {
   quorumType: string | null;
@@ -118,7 +120,21 @@ interface CurrentItem {
 interface AgendaItemDetailPanelProps {
   item: CurrentItem | null;
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to.
+   *
+   * Required by `agendaItem.setOperatorNotes`, `agendaItem.markComplete` and —
+   * as of wave 5, Task 5 — by every write in this panel's children
+   * (`MotionPanel`'s two, `VotePanel`'s, `MotionCaptureDialog`'s,
+   * `RecusalDialog`'s and `GuestSpeakerEntry`'s two),
+   * whose guard (`requireBoardActor(assertCanUpdateAgendaItemProgress)`) runs
+   * BEFORE `.input()` and therefore has nothing but the request body to
+   * authorize on. Conventions item 2 names this cost explicitly: a row-targeted
+   * board-scoped write inherits a client-supplied `boardId` whose only job is
+   * feeding the guard, and the resolver re-derives the item's REAL board inside
+   * its own transaction and refuses a mismatch.
+   */
+  boardId: string;
   allMembers: MemberInfo[];
   presentMembers: MemberInfo[];
   memberNameMap: Map<string, string>;
@@ -146,7 +162,7 @@ interface AgendaItemDetailPanelProps {
 export function AgendaItemDetailPanel({
   item,
   meetingId,
-  townId,
+  boardId,
   allMembers,
   presentMembers,
   memberNameMap,
@@ -164,7 +180,6 @@ export function AgendaItemDetailPanel({
   isInExecSession,
   onEnterExecSession,
 }: AgendaItemDetailPanelProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [notesValue, setNotesValue] = useState(item?.operatorNotes ?? "");
 
@@ -214,54 +229,75 @@ export function AgendaItemDetailPanel({
 
   // ─── Handlers ─────────────────────────────────────────────────
 
-  const saveNotesMutation = useMutation({
-    mutationFn: async ({ itemId, notes }: { itemId: string; notes: string | null }) => {
-      const { error } = await supabase
-        .from("agenda_item")
-        .update({ operator_notes: notes, updated_at: new Date().toISOString() })
-        .eq("id", itemId);
-      if (error) throw error;
-    },
-    onSuccess: (_data, { itemId }) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      // Writes an `agenda_item` row, which `routes/meetings.$meetingId.tsx`'s
-      // shell reads through `trpc.agendaItem.countByMeeting`. Router-level,
-      // per conventions item 7 ("a writer should not have to know which
-      // procedures some screen happens to call") — this particular write
-      // changes `operator_notes`, not the count, but wave 4's own
-      // `agendaItem.list`/`detail` procedures will render it, and this
-      // writer is not the place to encode which procedures exist today.
-      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-    },
-  });
+  /**
+   * Wave 5, Task 4 — both writes moved off the raw Supabase client onto the
+   * procedures wave 4, Task 1 shipped unwired.
+   *
+   * Both were completely unauthorized before this: `agenda_item_tenant_isolation`
+   * is tenancy-only, so any account in the town could set any board's operator
+   * notes and complete any board's agenda items. They now answer FORBIDDEN,
+   * which is a code path the UI never had to render before — hence the
+   * `onError` handlers, per conventions item 13's rule that every newly-guarded
+   * mutation surfaces its refusal.
+   *
+   * **Wave 5, Task 2 settled the rule as A2 OR M1, board-scoped, live-run
+   * columns only** — a WIDENING, so nothing that worked before stops working: a
+   * presiding officer holding M1 and no A2 can now complete an item, where the
+   * seven CONTENT writes in the same router still require A2.
+   *
+   * The refusal renders INLINE, beside the control that produced it, the way
+   * `InlineItemForm.tsx` and `AgendaSection.tsx` do. Neither control sits
+   * inside a confirmation dialog, so item 2's `AlertDialog` `aria-hidden`
+   * finding does not apply here — but a toast would still be the weaker
+   * choice: the notes field saves on BLUR, with the operator's attention
+   * already somewhere else, and a toast that has timed out is a refusal nobody
+   * can go back and read. Each message carries `role="alert"`, which is what
+   * the tests assert on rather than the string.
+   */
+  const saveNotesMutation = useMutation(
+    trpc.agendaItem.setOperatorNotes.mutationOptions({
+      onSuccess: (_data, { itemId }) => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // Writes an `agenda_item` row, which `routes/meetings.$meetingId.tsx`'s
+        // shell reads through `trpc.agendaItem.countByMeeting` and the live
+        // screen through `trpc.agendaItem.byMeeting`. Router-level, per
+        // conventions item 7 ("a writer should not have to know which
+        // procedures some screen happens to call").
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+      },
+    }),
+  );
 
   const saveNotes = useCallback(() => {
     if (!item || readOnly) return;
-    saveNotesMutation.mutate({ itemId: item.id, notes: notesValue.trim() || null });
-  }, [item, notesValue, saveNotesMutation, readOnly]);
+    saveNotesMutation.mutate({
+      boardId,
+      itemId: item.id,
+      operatorNotes: notesValue.trim() || null,
+    });
+  }, [item, boardId, notesValue, saveNotesMutation, readOnly]);
 
-  const markCompleteMutation = useMutation({
-    mutationFn: async (itemId: string) => {
-      const { error } = await supabase
-        .from("agenda_item")
-        .update({ status: "completed", updated_at: new Date().toISOString() })
-        .eq("id", itemId);
-      if (error) throw error;
-    },
-    onSuccess: (_data, itemId) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      // Moves the item to `completed` — same reasoning as `saveNotesMutation`
-      // above: an `agenda_item` write, invalidated at the router.
-      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-      onNavigateNext();
-    },
-  });
+  const markCompleteMutation = useMutation(
+    trpc.agendaItem.markComplete.mutationOptions({
+      onSuccess: (_data, { itemId }) => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.detail(itemId) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
+        });
+        // Moves the item to `completed` — same reasoning as `saveNotesMutation`
+        // above: an `agenda_item` write, invalidated at the router.
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        onNavigateNext();
+      },
+    }),
+  );
 
   const markComplete = () => {
     if (!item || readOnly) return;
-    markCompleteMutation.mutate(item.id);
+    markCompleteMutation.mutate({ boardId, itemId: item.id });
   };
 
   const openMotionDialog = (mode: MotionDialogMode) => {
@@ -438,7 +474,7 @@ export function AgendaItemDetailPanel({
           memberNameMap={memberNameMap}
           motionDisplayFormat={motionDisplayFormat}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={item.id}
           allMembers={allMembers}
           presentMembers={presentMembers}
@@ -460,7 +496,7 @@ export function AgendaItemDetailPanel({
           <GuestSpeakerEntry
             meetingId={meetingId}
             agendaItemId={item.id}
-            townId={townId}
+            boardId={boardId}
             speakers={item.speakers}
             readOnly={readOnly}
           />
@@ -478,6 +514,11 @@ export function AgendaItemDetailPanel({
               onChange={(e) => setNotesValue(e.target.value)}
               onBlur={() => saveNotes()}
             />
+            {saveNotesMutation.error && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">
+                {refusalMessage(saveNotesMutation.error, "edit this item's operator notes")}
+              </p>
+            )}
           </div>
         )}
         {readOnly && item.operatorNotes && (
@@ -489,6 +530,11 @@ export function AgendaItemDetailPanel({
       </div>
 
       {/* Action bar */}
+      {markCompleteMutation.error && (
+        <p className="border-t px-6 pt-3 text-sm text-red-600 dark:text-red-400" role="alert">
+          {refusalMessage(markCompleteMutation.error, "mark this item complete")}
+        </p>
+      )}
       <div className="flex items-center justify-between border-t px-6 py-3">
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onNavigatePrev} disabled={!hasPrev}>
@@ -548,7 +594,7 @@ export function AgendaItemDetailPanel({
           onOpenChange={setMotionDialogOpen}
           mode={motionDialogMode}
           meetingId={meetingId}
-          townId={townId}
+          boardId={boardId}
           agendaItemId={item.id}
           presentMembers={presentMembers}
         />
@@ -562,8 +608,7 @@ export function AgendaItemDetailPanel({
           memberName={recusalMember.name}
           boardMemberId={recusalMember.boardMemberId}
           meetingId={meetingId}
-          townId={townId}
-          agendaItemId={item.id}
+          boardId={boardId}
           activeMotionId={activeVotingMotionId}
           onRecusalRecorded={handleRecusalRecorded}
         />

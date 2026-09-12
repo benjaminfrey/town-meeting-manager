@@ -1,44 +1,15 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { renderWithProviders, screen, waitFor } from "@/test/render";
+import { renderWithProviders, screen, waitFor, setupAppQueryClient } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
+import { installTRPCFetchStub } from "@/test/trpc";
 import { ExecutiveSessionDialog } from "./ExecutiveSessionDialog";
 import { ExitExecutiveSessionDialog } from "./ExitExecutiveSessionDialog";
 
-const { mockChain, mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: null, error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
-});
+const queryClient = setupAppQueryClient();
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
+const stub = installTRPCFetchStub({
+  "executiveSession.markExited": ({ executiveSessionId }) => ({ id: executiveSessionId }),
+});
 
 // ─── ExecutiveSessionDialog ──────────────────────────────────────────
 
@@ -133,27 +104,6 @@ describe("ExitExecutiveSessionDialog", () => {
     onOpenChange = vi.fn();
     onReturnWithActions = vi.fn();
     onReturnNoActions = vi.fn();
-    // Restore chainable mock after clearAllMocks
-    mockFrom.mockReturnValue(mockChain);
-    for (const m of [
-      "select",
-      "insert",
-      "update",
-      "delete",
-      "eq",
-      "neq",
-      "order",
-      "limit",
-      "single",
-      "throwOnError",
-      "or",
-      "filter",
-      "maybeSingle",
-    ]) {
-      if (typeof mockChain[m] === "function" && "mockReturnValue" in (mockChain[m] as object)) {
-        (mockChain[m] as ReturnType<typeof vi.fn>).mockReturnValue(mockChain);
-      }
-    }
   });
 
   function renderDialog() {
@@ -162,9 +112,11 @@ describe("ExitExecutiveSessionDialog", () => {
         open={true}
         onOpenChange={onOpenChange}
         execSessionId={execSessionId}
+        boardId="board-1"
         onReturnWithActions={onReturnWithActions}
         onReturnNoActions={onReturnNoActions}
       />,
+      { queryClient },
     );
   }
 
@@ -175,19 +127,22 @@ describe("ExitExecutiveSessionDialog", () => {
     expect(screen.getByRole("button", { name: /Confirm Return/ })).toBeInTheDocument();
   });
 
-  it("updates executive session and shows post-action prompt", async () => {
+  it("records the exit through executiveSession.markExited and shows the post-action prompt", async () => {
+    const before = stub.countFor("executiveSession.markExited");
     renderDialog();
 
     const confirmBtn = screen.getByRole("button", { name: /Confirm Return/ });
     fireEvent.click(confirmBtn);
 
-    await waitFor(() => {
-      expect(mockFrom).toHaveBeenCalledWith("executive_session");
-      expect(mockChain.update).toHaveBeenCalledWith(
-        expect.objectContaining({ exited_at: expect.any(String) }),
-      );
-      expect(mockChain.eq).toHaveBeenCalledWith("id", execSessionId);
-    });
+    await waitFor(() => expect(stub.countFor("executiveSession.markExited")).toBe(before + 1));
+    // `exited_at` is not in the payload at all — the procedure writes the
+    // DATABASE's `now()`, which is what `live.tsx` compares motion timestamps
+    // against when deciding what counts as a post-session action.
+    const input = Object.values(stub.calls[stub.calls.length - 1]!.inputs)[0] as Record<
+      string,
+      unknown
+    >;
+    expect(input).toEqual({ boardId: "board-1", executiveSessionId: execSessionId });
 
     await waitFor(() => {
       expect(screen.getByText("Post-Session Actions")).toBeInTheDocument();

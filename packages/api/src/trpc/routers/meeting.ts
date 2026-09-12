@@ -261,6 +261,23 @@
  * raw Supabase. Wave 3 reported a hole closed at the moment its procedure
  * shipped and had to correct itself; recorded here so the same claim is not
  * made twice.
+ *
+ * ─── All four writes publish, as of Phase E wave 5, Task 3 ────────────────
+ *
+ * `meeting` is one of the eight `LIVE_MEETING_TOPICS` (`realtime/events.ts`),
+ * and `insert`, `cancel`, `updateStatus` and `publishAgenda` were four of the
+ * eleven entries on `router-wiring.test.ts`'s `AWAITING_PUBLISH` ledger. Each
+ * now calls `publishRealtimeEvent(tx, …)` as the last statement inside its own
+ * transaction, so the announcement commits or rolls back with the write it
+ * announces.
+ *
+ * **`insert` publishes for a meeting nobody can be watching yet, and that is
+ * deliberate rather than an oversight.** A subscriber names one `meetingId`
+ * (`routers/realtime.ts`), so a just-created meeting has no subscribers and
+ * the event reaches nobody. It is published anyway because the alternative is
+ * a ledger entry: an exception on the "every live-meeting write announces
+ * itself" rule that a reader would have to re-derive as harmless every time
+ * they met it, in exchange for saving one `pg_notify` per meeting created.
  */
 
 import { sql } from "drizzle-orm";
@@ -275,6 +292,12 @@ import {
   boardIdFrom,
 } from "../trpc.js";
 import { assertCanUpdateMeeting } from "../authorization/rules.js";
+import { publishRealtimeEvent, type LiveMeetingTopic } from "../../realtime/events.js";
+import {
+  assertAgendaItemsOnMeeting,
+  assertBoardMembersOnBoard,
+  assertMotionsOnMeeting,
+} from "../board-derivation.js";
 import { assertBoardExists } from "./board.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
@@ -468,6 +491,7 @@ export const meetingRouter = router({
           location: string | null;
           presiding_officer_id: string | null;
           recording_secretary_id: string | null;
+          current_agenda_item_id: string | null;
           started_at: string | null;
           ended_at: string | null;
           agenda_packet_url: string | null;
@@ -478,6 +502,7 @@ export const meetingRouter = router({
           await tx.execute(sql`
             SELECT id, board_id, title, status, meeting_type, agenda_status, scheduled_date,
                    scheduled_time, location, presiding_officer_id, recording_secretary_id,
+                   current_agenda_item_id,
                    started_at, ended_at, agenda_packet_url, agenda_packet_generated_at,
                    meeting_notice_url, meeting_notice_generated_at
             FROM meeting WHERE id = ${input.meetingId}
@@ -538,7 +563,13 @@ export const meetingRouter = router({
           `),
           (message) => new Error(`meeting.insert: ${message}`),
         );
-        return { id: rows[0]!.id };
+        const meetingId = rows[0]!.id;
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId,
+          topic: "meeting",
+        });
+        return { id: meetingId };
       });
     }),
 
@@ -564,6 +595,11 @@ export const meetingRouter = router({
           UPDATE meeting SET status = 'cancelled'::meeting_status, updated_at = now()
           WHERE id = ${input.meetingId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "meeting",
+        });
         return { id: input.meetingId };
       });
     }),
@@ -597,6 +633,11 @@ export const meetingRouter = router({
           UPDATE meeting SET status = ${input.status}::meeting_status, updated_at = now()
           WHERE id = ${input.meetingId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "meeting",
+        });
         return { id: input.meetingId, status: input.status };
       });
     }),
@@ -631,7 +672,597 @@ export const meetingRouter = router({
           UPDATE meeting SET agenda_status = 'published', updated_at = now()
           WHERE id = ${input.meetingId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "meeting",
+        });
         return { id: input.meetingId, agenda_status: "published" as const };
       });
     }),
+
+  /**
+   * `MeetingStartFlow.tsx`'s "Call to Order" — ONE of the two `meeting.status`
+   * holes wave 5 closes, and the first of this router's three COMPOSITE
+   * procedures.
+   *
+   * Today it is four sequential Supabase writes with no transaction and **no
+   * authorization check of any kind**: the recording secretary's
+   * `meeting_attendance` flag, `meeting` (`status = 'open'`, `started_at`,
+   * both officers, `current_agenda_item_id`), the first agenda item's
+   * `status = 'active'`, and the opening `agenda_item_transition`. A failure
+   * after the second leaves a meeting that is OPEN with no current item and no
+   * clock running.
+   *
+   * ─── The guard, and the one real cost in this task ───────────────────────
+   *
+   * `requireBoardActor(assertCanUpdateMeeting)` — the same guard `cancel` and
+   * `updateStatus` carry, for the same reason (`meeting.status` is exactly
+   * that rule's stated scope), plus the same resolver-side
+   * `assertMatchesAuthorizedBoard` against the row's real `board_id`.
+   *
+   * **That is ONE rule for an act that writes FOUR tables, and the other three
+   * rules are not additionally required. Stated as a decision, with its cost,
+   * rather than left to be discovered:**
+   *
+   *   | write                          | its own rule                              |
+   *   | ------------------------------ | ----------------------------------------- |
+   *   | `meeting.status` etc.          | 21, `assertCanUpdateMeeting` — admin/A1/M1 |
+   *   | `meeting_attendance` flag      | 8, `assertCanUpdateMeetingAttendance` — M2 |
+   *   | `agenda_item.status`           | 2a, `assertCanUpdateAgendaItemProgress` — A2 or M1 |
+   *   | `agenda_item_transition` INSERT | 21d, `assertCanInsertAgendaItemTransition` — M1 |
+   *
+   * A caller holding A1 and none of M1/M2/A2 passes the guard and performs all
+   * four. Three alternatives were considered:
+   *
+   *   - **Require every rule.** Coherent on paper, and it refuses an M1
+   *     presiding officer who holds no M2 — who is precisely the person this
+   *     button exists for. That is the failure `rules.ts`'s rule 2a comment is
+   *     organised around ("a partial adjournment, which is worse than either
+   *     answer"), reached one act earlier.
+   *   - **Require M1 alone.** M1 satisfies 21, 2a and 21d in one code, and is
+   *     the honest description of the act. Rejected because `updateStatus`
+   *     ALREADY lets an A1 holder drag a meeting to `open` from the kanban:
+   *     the same status transition would then be allowed through one procedure
+   *     and refused through another, an inconsistency no rule asks for. If the
+   *     product wants live-run acts to be M1-only, that is a change to rule 21
+   *     and to `updateStatus` together, not a guard chosen differently here.
+   *   - **What shipped**: the rule governing the act's PRIMARY write, applied
+   *     to the whole act.
+   *
+   * The cost is real and is bounded: it is a NARROWING of today's behaviour
+   * (four writes authorized by nothing become four writes authorized by
+   * admin/A1/M1 on the meeting's own board), and it stops short of the rules
+   * for M2 specifically. Revisit it with rule 21, not here.
+   *
+   * ─── Idempotent when the meeting is already open ─────────────────────────
+   *
+   * `SELECT … FOR UPDATE` holds the meeting row for the transaction, and a
+   * meeting already `open` returns without writing. That is an ADDED
+   * precondition — the raw writes had none — and it exists because two clerks
+   * pressing "Call to Order" is the ordinary case, not an edge one: without
+   * it the second press moves `started_at`, re-picks the officers and opens a
+   * SECOND transition on the same item. No other precondition is added; in
+   * particular this does not require the meeting to be `noticed`, because
+   * nothing required that before.
+   *
+   * ─── Foreign keys, derived values, and one bug faithfully preserved ──────
+   *
+   * `presidingOfficerId` is a `board_member.id` (`meeting_presiding_officer_id_fkey`)
+   * and is checked against THIS MEETING'S BOARD.
+   * `recordingSecretaryId` is a `person.id` with **no foreign key at all** on
+   * that column, so nothing has ever checked it; it is checked here for
+   * existence within the caller's town, which is ADDED. `firstItemId` is
+   * checked to be an agenda item of this meeting.
+   *
+   * Every timestamp is the DATABASE's `now()`, not the browser's clock.
+   *
+   * The recording-secretary flag is SET and never cleared on a previously
+   * flagged row — matching the raw write exactly. Calling a meeting to order
+   * twice with two different secretaries would flag both. Preserved rather
+   * than "fixed" because which row should win is a product question, and the
+   * idempotency guard above makes the sequence unreachable through this
+   * procedure.
+   */
+  callToOrder: protectedProcedure
+    .use(requireBoardActor(assertCanUpdateMeeting))
+    .input(
+      z.object({
+        meetingId: z.string().uuid(),
+        boardId: z.string().uuid(),
+        presidingOfficerId: z.string().uuid().nullable(),
+        recordingSecretaryId: z.string().uuid().nullable(),
+        firstItemId: z.string().uuid().nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const meeting = await lockMeetingOnAuthorizedBoard(ctx, tx, input.meetingId, "callToOrder");
+        if (meeting.status === "open") {
+          return { id: input.meetingId, alreadyOpen: true as const };
+        }
+
+        if (input.presidingOfficerId !== null) {
+          await assertBoardMembersOnBoard(tx, meeting.board_id, [input.presidingOfficerId]);
+        }
+        if (input.recordingSecretaryId !== null) {
+          await assertPersonInTown(tx, input.recordingSecretaryId, "callToOrder");
+        }
+        if (input.firstItemId !== null) {
+          await assertAgendaItemsOnMeeting(tx, input.meetingId, [input.firstItemId]);
+        }
+
+        if (input.recordingSecretaryId !== null) {
+          await tx.execute(sql`
+            UPDATE meeting_attendance SET is_recording_secretary = true
+            WHERE meeting_id = ${input.meetingId} AND person_id = ${input.recordingSecretaryId}
+          `);
+        }
+
+        await tx.execute(sql`
+          UPDATE meeting SET
+            status = 'open'::meeting_status,
+            started_at = now(),
+            presiding_officer_id = ${input.presidingOfficerId},
+            recording_secretary_id = ${input.recordingSecretaryId},
+            current_agenda_item_id = ${input.firstItemId},
+            updated_at = now()
+          WHERE id = ${input.meetingId}
+        `);
+
+        if (input.firstItemId !== null) {
+          await tx.execute(sql`
+            UPDATE agenda_item SET status = 'active'::agenda_item_status, updated_at = now()
+            WHERE id = ${input.firstItemId}
+          `);
+          await tx.execute(sql`
+            INSERT INTO agenda_item_transition (meeting_id, agenda_item_id, town_id)
+            VALUES (${input.meetingId}, ${input.firstItemId}, ${ctx.tenant.townId})
+          `);
+        }
+
+        await publishLiveMeetingTopics(tx, ctx.tenant.townId, input.meetingId, [
+          "meeting",
+          "meeting_attendance",
+          "agenda_item",
+          "agenda_item_transition",
+        ]);
+        return { id: input.meetingId, alreadyOpen: false as const };
+      });
+    }),
+
+  /**
+   * `live.tsx`'s `navigateToItem` — the presiding officer moves the meeting to
+   * an agenda item. Four writes today, sequential and untransacted, with no
+   * authorization check of any kind.
+   *
+   * Guarded the same way and for the same reasons as `callToOrder` above; the
+   * primary write is `meeting.current_agenda_item_id`, which is
+   * `assertCanUpdateMeeting`'s own scope and is the exact accompaniment
+   * `rules.ts` rule 21d cites when explaining why a transition row takes M1.
+   *
+   * **It does NOT mark the departed item `completed`.** `live.tsx`'s own cache
+   * comment says it does ("Sets the departed item to `completed` and the
+   * arrived one to `active`") and that does not reproduce — the handler
+   * updates exactly one `agenda_item`, the one being navigated TO. Marking an
+   * item complete is `agendaItem.markComplete`, a separate button in
+   * `AgendaItemDetailPanel`. Reported to Task 5 rather than silently added
+   * here; adding it would be a product change smuggled into a migration.
+   *
+   * **The transition close is WIDER than the client's, deliberately.** The
+   * browser closed the one transition it happened to be holding in memory
+   * (`currentTransition`, the open row on the current item) and only if it had
+   * one. This closes every still-open transition on the meeting. In the normal
+   * case that is the same single row; in the case where it is not — a client
+   * that missed one, a browser closed mid-navigation — the old code leaked a
+   * transition that never ends, and the item timer read off it runs forever.
+   * Stated as an added clause per conventions item 1.
+   */
+  navigateToAgendaItem: protectedProcedure
+    .use(requireBoardActor(assertCanUpdateMeeting))
+    .input(
+      z.object({
+        meetingId: z.string().uuid(),
+        boardId: z.string().uuid(),
+        itemId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        await lockMeetingOnAuthorizedBoard(ctx, tx, input.meetingId, "navigateToAgendaItem");
+        await assertAgendaItemsOnMeeting(tx, input.meetingId, [input.itemId]);
+
+        await tx.execute(sql`
+          UPDATE agenda_item_transition SET ended_at = now()
+          WHERE meeting_id = ${input.meetingId} AND ended_at IS NULL
+        `);
+        await tx.execute(sql`
+          UPDATE agenda_item SET status = 'active'::agenda_item_status, updated_at = now()
+          WHERE id = ${input.itemId}
+        `);
+        await tx.execute(sql`
+          UPDATE meeting SET current_agenda_item_id = ${input.itemId}, updated_at = now()
+          WHERE id = ${input.meetingId}
+        `);
+        await tx.execute(sql`
+          INSERT INTO agenda_item_transition (meeting_id, agenda_item_id, town_id)
+          VALUES (${input.meetingId}, ${input.itemId}, ${ctx.tenant.townId})
+        `);
+
+        await publishLiveMeetingTopics(tx, ctx.tenant.townId, input.meetingId, [
+          "meeting",
+          "agenda_item",
+          "agenda_item_transition",
+        ]);
+        return { id: input.meetingId, currentAgendaItemId: input.itemId };
+      });
+    }),
+
+  /**
+   * `live.tsx`'s `handleMeetingEnd`, moved WHOLE — the second `meeting.status`
+   * hole, and the procedure wave 5's plan singles out.
+   *
+   * Today it is: close the current transition; loop over every unreached item
+   * writing an `agenda_item` UPDATE **and** a `future_item_queue` INSERT per
+   * item, one round trip each; loop again over tabled items; then update
+   * `meeting`. Unbounded, sequential, and with no transaction — so a failure
+   * partway leaves items marked `deferred` with no queue row behind them,
+   * which is a silently lost agenda item rather than a visible error. It is
+   * also authorized by nothing at all.
+   *
+   * The two loops become two statements. The deferred one is a data-modifying
+   * CTE — the `UPDATE … RETURNING` feeds the `INSERT … SELECT`, so an item
+   * cannot be marked deferred without its queue row being written from the
+   * same rows, in the same statement.
+   *
+   * ─── The authorization cost, stated as `callToOrder`'s doc comment states
+   * its own — added in the single fix wave after wave 5's review, the one
+   * composite in this file that had shipped without this section ─────────
+   *
+   * `requireBoardActor(assertCanUpdateMeeting)` — the same guard `callToOrder`
+   * and `navigateToAgendaItem` carry, and for the same reason: `meeting.status`
+   * is that rule's stated scope. **That is ONE rule for an act that writes
+   * FOUR tables** (`performAdjournment` below is the shared body for both of
+   * this act's origins — see its own doc comment):
+   *
+   *   | write                               | its own rule                                       |
+   *   | ----------------------------------- | --------------------------------------------------- |
+   *   | `meeting.status` etc.               | 21, `assertCanUpdateMeeting` — admin/A1/M1           |
+   *   | `agenda_item_transition.ended_at`   | 21d, `assertCanUpdateAgendaItemTransition` — M1      |
+   *   | `agenda_item.status = 'deferred'`   | 2a, `assertCanUpdateAgendaItemProgress` — A2 or M1   |
+   *   | `future_item_queue` INSERT (x2)     | 21e, `assertCanInsertFutureItem` — M1                |
+   *
+   * A caller holding A1 alone (no M1, no A2) passes the guard and performs all
+   * four — the identical shape `callToOrder`'s own table names, for the
+   * identical reason (rule 2a's and 21d's own comments: refusing an M1
+   * presiding officer who holds no A1/A2 would be the "partial adjournment,
+   * worse than either answer" `rules.ts` rule 2a is organised around,
+   * reached one act later here). Revisit it with rule 21, not here.
+   *
+   * ─── What is preserved exactly ───────────────────────────────────────────
+   *
+   *   - **The unreached filter**: a CHILD item (`parent_item_id IS NOT NULL`)
+   *     whose status is `pending` or `active`, other than the current one.
+   *     `id IS DISTINCT FROM ${current}` reproduces the client's
+   *     `item.id !== currentItemId` including when there is no current item.
+   *   - **The tabled filter**: a child item with a `table` motion that
+   *     `passed`. It is applied INDEPENDENTLY of the deferred pass, so an item
+   *     that is both unreached AND tabled produces TWO queue rows — one
+   *     `source = 'deferred'`, one `source = 'tabled'`. The client does the
+   *     same thing, for the same structural reason, and "fixing" it would
+   *     change what `routes/meetings.$meetingId.review.tsx` lists.
+   *   - **The `adjournment` JSONB's five keys**, with their current meanings.
+   *
+   * ─── One preserved defect, named rather than fixed — and it is a
+   * misattribution, not a blank field ─────────────────────────────────────
+   *
+   * `adjournment.adjourned_by` receives a **`person.id`** (the acting user's),
+   * and `services/minutes-assembler.ts`'s `buildAdjournment` reads it with
+   * `memberName(adjData.adjourned_by)`, whose lookup is
+   * `boardMemberById.get(...)` — a **`board_member.id`** map. So the lookup
+   * resolves to `null`, and `minutes-formatters.ts`'s `formatAdjournmentText`
+   * treats a null `adjourned_by` as "not recorded" and falls back to
+   * `attendance.presiding_officer` (`minutes-formatters.ts`'s `formatAdjournmentText`) — it does
+   * **not** print a blank. So when the clerk adjourns and the chair presides,
+   * the generated legal record states that the chair adjourned the meeting,
+   * silently, with nothing anywhere flagging it as wrong. That is live today,
+   * and it is reproduced here rather than repaired: the fix is a change to
+   * what a column of a legal record MEANS, its only readers are the assembler
+   * and the formatter, and the minutes surface is wave 6's. `adjourned_by_name`
+   * is written (the presiding officer's name, which is a different person
+   * from `adjourned_by` whenever the clerk is not the chair) and is read by
+   * nothing at all — the formatter independently recomputes the same value as
+   * its own fallback instead.
+   *
+   * ─── A second cache comment that does not reproduce ──────────────────────
+   *
+   * The cache comment that sat on `live.tsx`'s `handleMeetingEnd` — a function
+   * wave 5, Task 5 removed from that file when this procedure replaced it — said
+   * adjournment "marks the remaining items `completed` and moves tabled ones
+   * to `future_agenda_item`." Neither half is what this procedure does: the
+   * unreached items are marked `deferred` (not `completed`), and both the
+   * deferred and the tabled rows are written to `future_item_queue` (not
+   * `future_agenda_item`) — see the two statements above. `live.tsx` is
+   * Task 5's file, not edited here; recorded per conventions item 1.
+   *
+   * ─── Idempotent, because two devices race to call it ─────────────────────
+   *
+   * ~~The adjourn-on-motion path is a `useEffect` that fires on the motion row
+   * arriving over the subscription, deduplicated only by an in-memory
+   * `useRef<Set>`… Task 5 still owns the client-side design.~~ — **Task 5
+   * decided it, and the answer removed the effect rather than deduplicating
+   * it.** Adjournment has two origins now and neither observes anything: the
+   * "without objection" declaration calls THIS procedure, and a passed motion
+   * to adjourn is performed inside `voteRecord.recordForMotion`'s own
+   * transaction (`performAdjournment` below is the shared body, so the two can
+   * never diverge). `SELECT … FOR UPDATE` plus the early return for a meeting
+   * already `adjourned` is still the floor, and it is what makes two
+   * concurrent callers of either origin produce one adjournment.
+   */
+  adjourn: protectedProcedure
+    .use(requireBoardActor(assertCanUpdateMeeting))
+    .input(
+      z.object({
+        meetingId: z.string().uuid(),
+        boardId: z.string().uuid(),
+        method: z.enum(["motion", "without_objection"]),
+        adjournMotionId: z.string().uuid().nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) => {
+        const meeting = await lockMeetingOnAuthorizedBoard(ctx, tx, input.meetingId, "adjourn");
+        if (meeting.status === "adjourned") {
+          return { id: input.meetingId, alreadyAdjourned: true as const, deferred: 0, tabled: 0 };
+        }
+        if (input.adjournMotionId !== null) {
+          await assertMotionsOnMeeting(tx, input.meetingId, [input.adjournMotionId]);
+        }
+
+        const outcome = await performAdjournment(tx, {
+          townId: ctx.tenant.townId,
+          personId: ctx.tenant.personId,
+          meetingId: input.meetingId,
+          meeting,
+          method: input.method,
+          adjournMotionId: input.adjournMotionId,
+        });
+
+        await publishLiveMeetingTopics(tx, ctx.tenant.townId, input.meetingId, [
+          "meeting",
+          "agenda_item",
+          "agenda_item_transition",
+        ]);
+        return {
+          id: input.meetingId,
+          alreadyAdjourned: false as const,
+          deferred: outcome.deferred,
+          tabled: outcome.tabled,
+        };
+      });
+    }),
 });
+
+/** The live-run columns `performAdjournment` needs off an already-locked meeting row. */
+export interface LockedMeetingRow {
+  board_id: string;
+  status: string;
+  current_agenda_item_id: string | null;
+  presiding_officer_id: string | null;
+}
+
+/**
+ * Every row-write an adjournment performs, on a meeting row the CALLER has
+ * already locked.
+ *
+ * Extracted in Phase E wave 5, Task 5 because adjournment has two origins and
+ * only one of them is a button. The other is a passed motion to adjourn, which
+ * `voteRecord.recordForMotion` now performs inside the transaction that
+ * decides the motion's outcome — see that procedure's doc comment for why the
+ * reactive `useEffect` in `live.tsx` could not stay where it was. Both callers
+ * must see the identical writes, and two copies of a data-modifying CTE is how
+ * they stop being identical.
+ *
+ * **The lock is the caller's, deliberately.** Both callers hold the meeting row
+ * `FOR UPDATE` before they get here — `adjourn` through
+ * `lockMeetingOnAuthorizedBoard`, `recordForMotion` through the same function —
+ * and both read `status` off that locked row to decide whether to call at all.
+ * Putting the lock inside would either take it twice or leave the caller's
+ * status check racing the write it guards.
+ *
+ * It does NOT publish. `meeting.adjourn`'s own resolver does, and so does
+ * `recordForMotion`, because `trpc/__tests__/router-wiring.test.ts`'s publish
+ * inventory attributes a helper's writes to the mutations that NAME it but
+ * reads `publishes` only one level deep — a publish buried here would be
+ * invisible to it and the inventory would start failing for the wrong reason.
+ */
+export async function performAdjournment(
+  tx: TenantTx,
+  args: {
+    townId: string;
+    personId: string;
+    meetingId: string;
+    meeting: LockedMeetingRow;
+    method: "motion" | "without_objection";
+    adjournMotionId: string | null;
+  },
+): Promise<{ deferred: number; tabled: number }> {
+  const { townId, personId, meetingId, meeting, method, adjournMotionId } = args;
+
+  await tx.execute(sql`
+    UPDATE agenda_item_transition SET ended_at = now()
+    WHERE meeting_id = ${meetingId} AND ended_at IS NULL
+  `);
+
+  const deferred = toRows<{ id: string }>(
+    await tx.execute(sql`
+      WITH unreached AS (
+        UPDATE agenda_item SET status = 'deferred'::agenda_item_status, updated_at = now()
+        WHERE meeting_id = ${meetingId}
+          AND parent_item_id IS NOT NULL
+          AND status IN ('pending', 'active')
+          AND id IS DISTINCT FROM ${meeting.current_agenda_item_id}
+        RETURNING id, title, description
+      )
+      INSERT INTO future_item_queue (
+        board_id, town_id, source_meeting_id, source_agenda_item_id,
+        title, description, source, status
+      )
+      SELECT ${meeting.board_id}, ${townId}, ${meetingId}, u.id,
+             u.title, u.description, 'deferred', 'pending'
+      FROM unreached u
+      RETURNING id
+    `),
+    (message) => new Error(`meeting.performAdjournment: ${message}`),
+  );
+
+  const tabled = toRows<{ id: string }>(
+    await tx.execute(sql`
+      INSERT INTO future_item_queue (
+        board_id, town_id, source_meeting_id, source_agenda_item_id,
+        title, description, source, status
+      )
+      SELECT ${meeting.board_id}, ${townId}, ${meetingId}, ai.id,
+             ai.title, ai.description, 'tabled', 'pending'
+      FROM agenda_item ai
+      WHERE ai.meeting_id = ${meetingId}
+        AND ai.parent_item_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM motion m
+          WHERE m.agenda_item_id = ai.id
+            AND m.motion_type = 'table'
+            AND m.status = 'passed'
+        )
+      RETURNING id
+    `),
+    (message) => new Error(`meeting.performAdjournment: ${message}`),
+  );
+
+  const adjournedByName = await presidingOfficerName(tx, meeting.presiding_officer_id);
+  await tx.execute(sql`
+    UPDATE meeting SET
+      status = 'adjourned'::meeting_status,
+      ended_at = now(),
+      current_agenda_item_id = NULL,
+      adjournment = jsonb_build_object(
+        'method', ${method}::text,
+        'adjourned_by', ${personId}::text,
+        'adjourned_by_name', ${adjournedByName}::text,
+        'motion_id', ${adjournMotionId}::text,
+        'timestamp', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      ),
+      updated_at = now()
+    WHERE id = ${meetingId}
+  `);
+
+  return { deferred: deferred.length, tabled: tabled.length };
+}
+
+/**
+ * Read a meeting's live-run columns, LOCK the row, and refuse unless it sits
+ * on the board the guard authorized.
+ *
+ * `FOR UPDATE` is what makes the three composite procedures above safe against
+ * the multi-device race `live.tsx`'s reactive `useEffect`s create: two clerks
+ * whose screens both decide to adjourn serialize here rather than both
+ * proceeding on a stale `status`.
+ *
+ * `board-derivation.ts`'s `assertMeetingOnAuthorizedBoard` is the same check
+ * without the lock and without the extra columns; it is used where a procedure
+ * needs the board and nothing else. This is not a second copy of the mismatch
+ * defence — both end in the same `assertMatchesAuthorizedBoard` call.
+ */
+export async function lockMeetingOnAuthorizedBoard(
+  ctx: { authorizedBoardId?: string },
+  tx: TenantTx,
+  meetingId: string,
+  label: string,
+): Promise<LockedMeetingRow> {
+  const rows = toRows<LockedMeetingRow>(
+    await tx.execute(sql`
+      SELECT board_id, status::text AS status, current_agenda_item_id, presiding_officer_id
+      FROM meeting WHERE id = ${meetingId}
+      FOR UPDATE
+    `),
+    (message) => new Error(`meeting.${label}: ${message}`),
+  );
+  const row = rows[0];
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  assertMatchesAuthorizedBoard(ctx, row.board_id);
+  return row;
+}
+
+/**
+ * The name `live.tsx` puts in `adjournment.adjourned_by_name`: the presiding
+ * officer's, or the literal `"Chair"` when there is none.
+ *
+ * `presiding_officer_id` is a `board_member.id`
+ * (`meeting_presiding_officer_id_fkey`), so this is one join to `person`. The
+ * `"Chair"` fallback is the client's (`presidingOfficerName`'s
+ * `?? "Chair"`), carried over rather than replaced with `null`, because the
+ * string is what any existing row already holds.
+ */
+async function presidingOfficerName(
+  tx: TenantTx,
+  presidingOfficerId: string | null,
+): Promise<string> {
+  if (!presidingOfficerId) return "Chair";
+  const rows = toRows<{ name: string }>(
+    await tx.execute(sql`
+      SELECT p.name FROM board_member bm
+      JOIN person p ON p.id = bm.person_id
+      WHERE bm.id = ${presidingOfficerId}
+    `),
+    (message) => new Error(`meeting.presidingOfficerName: ${message}`),
+  );
+  return rows[0]?.name ?? "Chair";
+}
+
+/**
+ * Confirm a `person` row exists in the caller's own town.
+ *
+ * `meeting.recording_secretary_id` has NO foreign key constraint on it
+ * (`grep -n "recording_secretary_id_fkey" drizzle/0000_baseline.sql` is
+ * empty), so nothing in the database has ever checked that value — this is an
+ * ADDED check, and it is the cheap half of conventions item 3 rather than the
+ * FK-bypass half: there is no constraint to bypass, only a column that renders
+ * as a missing name on every screen if it names nothing.
+ */
+async function assertPersonInTown(tx: TenantTx, personId: string, label: string): Promise<void> {
+  const rows = toRows<{ id: string }>(
+    await tx.execute(sql`SELECT id FROM person WHERE id = ${personId}`),
+    (message) => new Error(`meeting.${label}: ${message}`),
+  );
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+/**
+ * Announce several topics for one meeting, from inside the write's own
+ * transaction.
+ *
+ * The three composite procedures above each write three or four of the eight
+ * `LIVE_MEETING_TOPICS` in one act, and they publish EVERY topic they can
+ * touch rather than only the ones a particular call actually wrote —
+ * `callToOrder` announces `meeting_attendance` even when no recording
+ * secretary was named, and `agenda_item` even when the meeting has no items.
+ * That is deliberate: an event carries no payload and means only "refetch
+ * this", so an extra one costs one query on the other device and is never
+ * wrong, while a MISSING one is a panel that stops updating with no error
+ * anywhere — the failure `realtime/events.ts` is organised around. Conditional
+ * publishing would put a branch on the side of that trade where being wrong is
+ * silent.
+ */
+export async function publishLiveMeetingTopics(
+  tx: TenantTx,
+  townId: string,
+  meetingId: string,
+  topics: readonly LiveMeetingTopic[],
+): Promise<void> {
+  // Sequential, not `Promise.all`: `tx` is one pooled connection inside an
+  // open transaction, and postgres.js has no pipelining there — issuing these
+  // concurrently would interleave statements on a connection that expects one
+  // at a time.
+  for (const topic of topics) {
+    await publishRealtimeEvent(tx, { townId, meetingId, topic });
+  }
+}

@@ -1,46 +1,71 @@
 /**
- * `AttendancePanel` — its `trpc.meetingAttendance.pathFilter()` invalidation.
+ * `AttendancePanel` — its `trpc.meetingAttendance.pathFilter()` invalidation,
+ * and its refusal.
  *
- * Phase E wave 3, Tasks 3+4 fix round. Task 3 moved
- * `routes/meetings.$meetingId.tsx`'s "N members recorded" summary onto
- * `trpc.meetingAttendance.countByMeeting`, which left this component — still
- * a raw Supabase writer, see its `cycleStatusMutation` — invalidating only
- * the abandoned `queryKeys.attendance.byMeeting` key. Its `else` branch
- * INSERTs a `meeting_attendance` row for a member who has none, so it moves
- * exactly the number that shell renders.
+ * Phase E wave 5, Task 5. The status cycle is `meetingAttendance.setStatus`
+ * now: one `INSERT … ON CONFLICT DO UPDATE` in place of a branch the browser
+ * chose between UPDATE and INSERT from its own stale copy of the roster —
+ * which is why two clerks taking attendance at once used to collide on
+ * `attendance_unique_per_meeting`. The upsert still creates a row for a member
+ * who has none, which is the number the meeting shell renders through
+ * `trpc.meetingAttendance.countByMeeting`.
  *
- * Real `QueryClient` (`setupAppQueryClient()`), real `@/lib/trpc` proxy —
- * only `@/hooks/useSupabase` is mocked, per conventions item 8's writer-pin
- * template (`ArchiveBoardDialog.test.tsx`).
+ * `meeting_attendance_tenant_isolation` is tenancy-only, so this write was
+ * authorized by nothing; it is M2, board-scoped, now, and the second test pins
+ * that the refusal reaches a human. It is not behind a confirmation dialog, so
+ * there is one reachability path and one `role="alert"` site.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
-
-vi.mock("@/hooks/useSupabase", () => ({
-  useSupabase: () => ({
-    from: () => {
-      const chain = {
-        update: () => chain,
-        insert: () => Promise.resolve({ error: null }),
-        eq: () => Promise.resolve({ error: null }),
-      };
-      return chain;
-    },
-  }),
-}));
-
 import { AttendancePanel } from "../AttendancePanel";
 
 const queryClient = setupAppQueryClient();
+
+const server = { setStatusRefuses: false };
+
+installTRPCFetchStub({
+  "meetingAttendance.setStatus": () => {
+    if (server.setStatusRefuses) trpcTestError("FORBIDDEN");
+    return { id: "att-new" };
+  },
+});
 
 const members = [
   { boardMemberId: "bm1", personId: "p1", name: "Chair Person", seatTitle: "Chair" },
 ];
 
-describe("AttendancePanel cache invalidation", () => {
+function renderPanel() {
+  return renderWithProviders(
+    <AttendancePanel
+      meetingId="m1"
+      boardId="board-1"
+      members={members}
+      // No record for `bm1` — so the upsert takes its INSERT path, the one
+      // that genuinely changes the shell's count.
+      attendance={[]}
+      presidingOfficerId={null}
+      recordingSecretaryId={null}
+      quorumRequired={1}
+      quorumPresent={0}
+      quorumTotal={1}
+      hasQuorum={false}
+      meetingStartedAt={null}
+      currentItemStartedAt={null}
+      currentItemEstimatedDuration={null}
+    />,
+    { queryClient },
+  );
+}
+
+describe("AttendancePanel", () => {
+  beforeEach(() => {
+    server.setStatusRefuses = false;
+  });
+
   it("invalidates trpc.meetingAttendance.pathFilter() when a member's status is cycled", async () => {
     const countKey = trpc.meetingAttendance.countByMeeting.queryOptions({
       meetingId: "m1",
@@ -48,29 +73,20 @@ describe("AttendancePanel cache invalidation", () => {
     queryClient.setQueryData(countKey, 0);
     expect(queryClient.getQueryState(countKey)?.isInvalidated).toBeFalsy();
 
-    const { user } = renderWithProviders(
-      <AttendancePanel
-        meetingId="m1"
-        townId="town-1"
-        members={members}
-        // No record for `bm1` — so the mutation takes its INSERT branch,
-        // the one that genuinely changes the shell's count.
-        attendance={[]}
-        presidingOfficerId={null}
-        recordingSecretaryId={null}
-        quorumRequired={1}
-        quorumPresent={0}
-        quorumTotal={1}
-        hasQuorum={false}
-        meetingStartedAt={null}
-        currentItemStartedAt={null}
-        currentItemEstimatedDuration={null}
-      />,
-      { queryClient },
-    );
+    const { user } = renderPanel();
 
     await user.click(screen.getByRole("button", { name: /chair person/i }));
 
     await waitFor(() => expect(queryClient.getQueryState(countKey)?.isInvalidated).toBe(true));
+  });
+
+  it("shows a refusal when changing recorded attendance is FORBIDDEN", async () => {
+    server.setStatusRefuses = true;
+    const { user } = renderPanel();
+
+    await user.click(screen.getByRole("button", { name: /chair person/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to change recorded attendance/i);
   });
 });

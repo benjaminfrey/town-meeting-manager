@@ -24,8 +24,24 @@
  *    require a `boardId`, so the mistake is a type error rather than a quiet
  *    global check.
  *
- *    SIXTEEN of the guards are board-scoped, not the two that were obviously
- *    so. Every code the two `designated_boards` permission templates grant —
+ *    Most of the guards are board-scoped, not the two that were obviously
+ *    so. This paragraph used to say SIXTEEN, and stayed at sixteen through
+ *    three waves that changed it — quote the grep, not the number
+ *    (conventions item 11). The grep is the one in `trpc.ts`'s
+ *    `requireBoardActor` doc comment: it counts the `BoardScope`-taking
+ *    signatures in THIS file, and answered 16 at Stage 1 Task D1d, 18 at
+ *    `860a469`, 19 at `5d11393` and 29 after Phase E wave 5 Task 2 added
+ *    rules 2a, 6a and 21b–21e below.
+ *
+ *    **The command itself is deliberately not reproduced here**, and that is
+ *    not squeamishness: its pattern is a substring of every signature it
+ *    counts, so writing it in this file makes the file match itself and the
+ *    command answers one MORE than the number of rules. That happened — a
+ *    draft of this very paragraph pasted the command and turned 29 into 30,
+ *    caught by re-running it rather than by reading. Quote it from `trpc.ts`,
+ *    the conventions, or `board-scope.test.ts`; never from here.
+ *
+ *    Every code the two `designated_boards` permission templates grant —
  *    `TEMPLATE_BOARD_SPECIFIC_STAFF` (A1 A2 A3 A5 A6 M1–M7 R1–R6) and
  *    `TEMPLATE_RECORDING_SECRETARY` (M2 M3 M4 M5 R1 R2 R3 R4 R6) — is granted
  *    ONLY inside `board_overrides`, with global all-false. A guard that
@@ -142,6 +158,76 @@ export function assertCanUpdateAgendaItem(actor: Actor, scope: BoardScope): void
   assertPermission(actor, "A2", { boardId: scope.boardId, action: "to edit an agenda item" });
 }
 
+// ─── 2a — agenda_item's LIVE-RUN columns: A2 or M1, BOARD-SCOPED ──────
+//
+// Phase E wave 5, Task 2. This settles the question wave 4, Task 1 wrote
+// down and deliberately did not answer, in `routers/agenda-item.ts`'s header:
+//
+//   "both use A2, matching every other `agenda_item` write, but a live-meeting
+//    operator may hold M1/M2 and no A2 — if the product wants a presiding
+//    officer with no agenda-editing rights to mark items complete, that is a
+//    rules change (a second code, hence `requireBoardActor`), not a wiring
+//    change, and it should be made deliberately rather than discovered when a
+//    clerk is refused mid-meeting."
+//
+// **Answered: A2 OR M1, for the live-run columns only.** Two columns on
+// `agenda_item` are not agenda CONTENT and are never written from the agenda
+// builder:
+//
+//   `status`         — pending / active / completed / deferred: where the
+//                      MEETING has got to. Written by navigating to an item
+//                      (`active`), by marking one done (`completed`) and by
+//                      adjourning with items unreached (`deferred`).
+//   `operator_notes` — the presiding officer's running note on how an item
+//                      went. Nothing outside the live screen writes it and
+//                      nothing published reads it.
+//
+// Neither changes what the agenda SAYS, which is what A2 (`edit_agenda`)
+// governs; both are produced by running the meeting, which is M1
+// (`start_run_meeting`). Requiring A2 for them is the mid-meeting refusal the
+// header predicted: an operator seated to run a board's meetings holds M1 and
+// need not hold A2 at all.
+//
+// **A2 stays in the rule rather than being replaced by M1**, deliberately.
+// Dropping it would NARROW what ships today. `setOperatorNotes` and
+// `markComplete` were guarded `requireBoardPermission("A2", …)` before this
+// task; at HEAD they are `requireBoardActor(assertCanUpdateAgendaItemProgress)`
+// below, and dropping the A2 branch out of that function would refuse a
+// hand-built matrix holding A2 without M1. Nothing in the five shipped
+// templates is affected either way (every template granting A2 also grants
+// M1: Town Clerk, Deputy Clerk and Board-Specific Staff; Recording Secretary
+// and General Staff grant neither), so the widening costs nothing and the
+// narrowing would buy nothing.
+//
+// It is also the rule that makes ADJOURNMENT coherent. `handleMeetingEnd`
+// (`routes/meetings.$meetingId.live.tsx`, which wave 5 Task 3 moves whole into
+// one procedure) writes `agenda_item.status = 'deferred'` in the same
+// transaction as `future_item_queue` INSERT, `agenda_item_transition` UPDATE
+// and `meeting.status = 'adjourned'`. The other three are M1 (rules 21d, 21e,
+// and `assertCanUpdateMeeting`'s M1 branch). Had this one stayed A2-only, an
+// M1 presiding officer's adjournment would have been refused halfway through —
+// a partial adjournment, which is worse than either answer.
+//
+// NOT admin-branched, unlike `assertCanUpdateMeeting` which opens with
+// `isAdmin(actor)`: `resolvePermission` already short-circuits `admin` to true
+// for every code (`permission.ts`), so an explicit branch here would be a
+// second statement of the same fact.
+//
+// Sibling writes NOT covered by this rule: every content column on
+// `agenda_item` — title, description, sort_order, section_type, parent_item_id
+// — stays A2 through `assertCanUpdateAgendaItem` above. A rule wide enough for
+// the live screen must not become the rule the agenda builder uses.
+
+export function assertCanUpdateAgendaItemProgress(actor: Actor, scope: BoardScope): void {
+  if (resolvePermission(actor, "A2", scope.boardId)) return;
+  if (resolvePermission(actor, "M1", scope.boardId)) return;
+  throw new AuthorizationError(
+    "Recording an agenda item's progress during a meeting requires M1 (start_run_meeting) " +
+      "or A2 (edit_agenda) for this board.",
+    { code: "M1", boardId: scope.boardId },
+  );
+}
+
 // ─── 3, 4 — motion INSERT / UPDATE: M3, BOARD-SCOPED ──────────────────
 //
 // M3 is in BOTH `designated_boards` templates — a recording secretary
@@ -218,6 +304,35 @@ export function assertCanUpdateVoteRecord(actor: Actor, scope: BoardScope): void
   assertPermission(actor, "M3", {
     boardId: scope.boardId,
     action: "to correct a recorded vote",
+  });
+}
+
+// ─── 6a — vote_record DELETE: M3, BOARD-SCOPED. NOT the self-vote ─────
+//
+// Phase E wave 5, Task 2. This is NOT the third identical copy that
+// `assertCanDeleteAgendaItem` would have been (rules 1/2's comment above):
+// `vote_record` has TWO rules with DIFFERENT answers, so "which one does
+// DELETE resemble" is a real question with a wrong answer available, where
+// `agenda_item`'s DELETE had one code stated twice and nothing to decide.
+//
+// It resembles UPDATE, not INSERT. Rule 5's second branch lets a board member
+// record their OWN vote on a seat they currently hold (M8, the one code in
+// `BOARD_MEMBER_ALWAYS_ACTIONS` any rule here consults). Carried into DELETE
+// that branch would let a member erase a recorded vote of theirs — and the
+// erasure the product actually performs is worse than one row:
+// `VotePanel.tsx`'s re-vote is
+// `supabase.from("vote_record").delete().eq("motion_id", motionId)`, which
+// removes EVERY member's vote on that motion before re-inserting the tally. A
+// self-vote branch would be a licence to delete other people's votes, since
+// the statement is not keyed by seat at all.
+//
+// So: M3 only, the same reading rule 6 gives for correcting a vote — a records
+// action over a legal record, not the act of casting one.
+
+export function assertCanDeleteVoteRecord(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M3", {
+    boardId: scope.boardId,
+    action: "to clear a motion's recorded votes",
   });
 }
 
@@ -481,7 +596,7 @@ export function assertCanUpdateExhibit(actor: Actor, scope: BoardScope): void {
 // ═══════════════════════════════════════════════════════════════════════
 // 17, 18, 19 — the C2 rules. TOWN-LEVEL, deliberately.
 //
-// These three keep a global check while the sixteen above became
+// These three keep a global check while the board-scoped ones above became
 // board-scoped, and that is a decision rather than an oversight:
 //
 //   - Neither `designated_boards` template grants C2, so no account exists
@@ -631,6 +746,208 @@ export function assertCanPublishAgenda(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "A5", {
     boardId: scope.boardId,
     action: "to publish this meeting's agenda",
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 21b–21e — the four live-meeting tables that had NO rule at all
+//
+// Phase E wave 5, Task 2. Same shape of hole as rule 21a's A5 and closed for
+// the same reason, one wave on: the product defines a code, a screen acts on
+// it, and nothing in `packages/api` stands in between. Before this commit the
+// strings "M6" and "M7" occurred in `packages/api/src` in exactly ONE place —
+// `require-permission.test.ts`'s `BOARD_SCOPED_CODES` roster, a test fixture —
+// which is the SAME footprint A5 had before rule 21a (two fixtures) and the
+// same reason a completeness sweep reads past it: a code named only by a
+// roster is named by nothing that runs. (An earlier draft of this comment said
+// "did not occur at ALL," which does not reproduce — `git grep -n -E "M6|M7"
+// d796f29 -- packages/api` also finds the seed JSONB in `0000_baseline.sql`
+// and this file's own `M1–M7` range on line 29.) And `executive_session`,
+// `guest_speaker`, `agenda_item_transition` and `future_item_queue` were
+// written by `routes/meetings.$meetingId.live.tsx`,
+// `components/meeting/GuestSpeakerEntry.tsx`,
+// `components/meeting/ExitExecutiveSessionDialog.tsx` and
+// `components/meeting/MeetingStartFlow.tsx` straight through the Supabase
+// client with no authorization check of any kind.
+//
+// **RLS does not cover for that on any of the four.** Each carries a plain
+// `FOR ALL USING (town_id = get_current_town_id()) WITH CHECK (…)` —
+// `executive_session_tenant_isolation`, `guest_speaker_tenant_isolation`,
+// `agenda_item_transition_tenant_isolation`,
+// `future_item_queue_tenant_isolation` in `0000_baseline.sql` — no board
+// predicate and no role predicate, verified directly. Any signed-in member of
+// the town gets past all four today.
+//
+// ─── One function per write the product performs, and why that differs ────
+// ─── from rules 1/2's decision NOT to add `assertCanDeleteAgendaItem` ─────
+//
+// That decision turned on A2 being stated TWICE in this file already, so a
+// reader auditing "what governs deleting an agenda item" found the code and a
+// paragraph saying DELETE is A2 as well. Here the file states M6, M7 and M1
+// zero times, so the first statement of "M6 governs executive_session" has to
+// exist, and the operations differ in what a refusal must be able to tell the
+// caller (this file's header, point 4: "the message is part of the rule").
+// Every function below corresponds to a write `packages/web` actually
+// performs; none is speculative, and the operations the product does NOT
+// perform (a `guest_speaker` UPDATE, a `future_item_queue` UPDATE or DELETE)
+// get no function, because a rule with neither a caller nor a write to
+// describe is a name rather than a check.
+//
+// All four are single-code, so conventions item 2's "reach for
+// `requireBoardPermission` FIRST" applies at the call sites wave 5, Task 3
+// writes: `requireBoardPermission("M6", boardIdFrom(), {action})` IS the
+// `assertPermission` call below, not a shortcut around it. The functions exist
+// to state the rule in the file that holds the rules, and so that
+// `board-scope.test.ts`'s family table can prove each new code is actually
+// board-scoped.
+//
+// M6 and M7 are both in `TEMPLATE_BOARD_SPECIFIC_STAFF` (and in
+// `TEMPLATE_TOWN_CLERK`), M1 in three of the five templates — so all three are
+// in `BOARD_SCOPED_CODES` and every one of them is granted per board with
+// global all-false by the `designated_boards` templates. A global check would
+// answer "no" to every account either template ever created; hence
+// `BoardScope`, required, like every other board-scoped rule here.
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─── 21b — executive_session INSERT / UPDATE / DELETE: M6 ─────────────
+//
+// M6 is `trigger_executive_session`. The three writes are one authority:
+// filing the pending session record when the entry motion is made (INSERT),
+// stamping `entered_at` when that motion passes and `exited_at` when the board
+// returns to open session, plus appending the post-session action motions
+// (UPDATE), and discarding the pending record when the entry motion FAILS
+// (DELETE — `live.tsx`'s reactive `motionStatus === "failed"` branch).
+//
+// The DELETE is the undoing of a session that never began, not the destruction
+// of a record of one; there is no narrower code for it and inventing a second
+// authority to cancel what M6 created would mean a board could enter executive
+// session and then be unable to unwind a failed motion.
+
+export function assertCanInsertExecutiveSession(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M6", {
+    boardId: scope.boardId,
+    action: "to move this meeting into executive session",
+  });
+}
+
+export function assertCanUpdateExecutiveSession(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M6", {
+    boardId: scope.boardId,
+    action: "to change an executive session record",
+  });
+}
+
+export function assertCanDeleteExecutiveSession(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M6", {
+    boardId: scope.boardId,
+    action: "to discard a pending executive session",
+  });
+}
+
+// ─── 21c — guest_speaker INSERT / DELETE: M7 ──────────────────────────
+//
+// M7 is `manage_speaker_queue`, and the queue is exactly what these two rows
+// are: `GuestSpeakerEntry.tsx` adds a name to the public-comment list and
+// removes one from it. The product performs no UPDATE — an edit is a remove
+// and a re-add — so there is no update rule.
+//
+// `guest_speaker` is deliberately NOT linked to a `person` row (the table's
+// own comment in `0000_baseline.sql` says so, citing advisory 1.2), so there
+// is no self-scoping branch to consider the way rule 5 has one: a guest is not
+// an account and cannot act here at all.
+
+export function assertCanInsertGuestSpeaker(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M7", {
+    boardId: scope.boardId,
+    action: "to add a speaker to the queue",
+  });
+}
+
+export function assertCanDeleteGuestSpeaker(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M7", {
+    boardId: scope.boardId,
+    action: "to remove a speaker from the queue",
+  });
+}
+
+// ─── 21d — agenda_item_transition INSERT / UPDATE: M1 ─────────────────
+//
+// No code names this table, because no user ever acts on one. A transition row
+// is a CLOCK: the table's own comment is "Tracks time spent on each agenda
+// item during live meetings." It is opened when the meeting moves to an item
+// and closed (`ended_at`) when it moves off, and it is written from exactly
+// three places, all of them the act of running a meeting — `MeetingStartFlow`
+// (call to order opens the first one), `live.tsx`'s `navigateToItem` (close
+// the current, open the next) and `handleMeetingEnd` (close the last).
+//
+// **It takes the code of the action that causes it: M1, `start_run_meeting`.**
+// Two reasons rather than one, because "the causing action" alone would be a
+// guess:
+//
+//   1. Every transition write is accompanied, in the same user action, by a
+//      write to `meeting.current_agenda_item_id` — and that write is already
+//      governed by `assertCanUpdateMeeting`, whose branches are admin, A1 or
+//      **M1** for the board. Any other code here would mean an operator who
+//      may move the meeting to an item may not record that they did, which is
+//      an authorization boundary running through the middle of one action.
+//   2. A2 (`edit_agenda`) is the alternative and it is wrong for the same
+//      reason it was wrong for `status`/`operator_notes` (rule 2a): this row
+//      is not agenda content, it is what happened to the agenda in the room.
+//
+// A rule of its own — a new `PermissionCode` for "write the meeting clock" —
+// was considered and rejected: it would be a code no template grants, no
+// screen exposes and no town would ever configure, which in a system where
+// unset means false is a rule that refuses everyone.
+//
+// There is no DELETE rule because nothing deletes a transition; the history is
+// what the minutes assembler reads.
+
+export function assertCanInsertAgendaItemTransition(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M1", {
+    boardId: scope.boardId,
+    action: "to move this meeting to an agenda item",
+  });
+}
+
+export function assertCanUpdateAgendaItemTransition(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M1", {
+    boardId: scope.boardId,
+    action: "to close out the current agenda item",
+  });
+}
+
+// ─── 21e — future_item_queue INSERT: M1, on its OWN board column ──────
+//
+// The other bookkeeping table, and the same answer for a different balance of
+// reasons. Every row in it is written by ADJOURNING: `handleMeetingEnd` defers
+// each item the meeting never reached and queues each item a passed `table`
+// motion tabled. Nothing else in the product writes one — no screen offers
+// "add to the future queue," and `routes/meetings.$meetingId.review.tsx` only
+// READS the queue for a meeting.
+//
+// **M1, not A2**, and here the choice is load-bearing rather than tidy.
+// Adjournment is a single act that writes four tables at once (rule 2a's
+// comment lists them); the other three are M1. Had this one taken A2 on the
+// grounds that a queued item is future agenda content, an operator holding M1
+// and not A2 would get a meeting adjourned with its deferred items silently
+// unqueued — the failure mode is not a refusal the user can see, it is a lost
+// item. A2 governs the moment a queued item is PLACED on an agenda
+// (`placed_agenda_item_id`), which is a write no screen performs today; when
+// one does, that is an `agenda_item` INSERT and rule 1 already governs it.
+//
+// **The board is a COLUMN here, not a join** — `future_item_queue.board_id` is
+// `uuid NOT NULL` (`0000_baseline.sql:1248`) while `source_meeting_id` is
+// nullable (`:1250`), so this is the one table of the nine wave 5 writes whose
+// board must NOT be derived through `meeting`: a deferred item that outlives
+// its source meeting would derive NULL. The rule itself is the same shape as
+// every other `BoardScope` rule — what differs is where the caller gets the
+// board, which is the resolver's business and is stated in wave 5's plan and
+// in conventions item 2.
+
+export function assertCanInsertFutureItem(actor: Actor, scope: BoardScope): void {
+  assertPermission(actor, "M1", {
+    boardId: scope.boardId,
+    action: "to queue an item for a future meeting",
   });
 }
 

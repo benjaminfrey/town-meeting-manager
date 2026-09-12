@@ -1392,3 +1392,814 @@ describe("meeting.publishAgenda", () => {
     });
   });
 });
+
+/**
+ * ─── Phase E, wave 5, Task 3 — the three composite procedures ─────────────
+ *
+ * `callToOrder`, `navigateToAgendaItem` and `adjourn` each replace three or
+ * four sequential, untransacted Supabase writes that carried **no
+ * authorization check of any kind**. Two things make their tests different
+ * from every other procedure's in this phase:
+ *
+ * **1. The topic SET is asserted, not just "it published".**
+ * `trpc/__tests__/router-wiring.test.ts`'s inventory flags a mutation as
+ * publishing or not — one boolean — so a composite that writes four live
+ * tables and announces only `meeting` passes it while leaving the agenda panel
+ * stale on every other device. `captureRealtimeEvents` opens a real `LISTEN`
+ * connection and the assertions below name the exact topics each one emits.
+ *
+ * **2. Idempotency is a property, not a nicety.** `live.tsx`'s adjourn-on-motion
+ * path is a `useEffect` that fires on data arriving over the subscription,
+ * deduplicated only by per-tab memory, so two devices really do both call it.
+ * `lockMeetingOnAuthorizedBoard`'s `FOR UPDATE` plus an early return is what
+ * makes the second call a no-op instead of a second adjournment.
+ */
+
+import {
+  seedAgendaItem as seedLiveAgendaItem,
+  seedSeat,
+  seedMotion,
+  readRows,
+  captureRealtimeEvents,
+} from "./live-fixtures.js";
+
+function meetingOperatorSpec(town: TownFixture) {
+  // M1 only, board-scoped with global all-false — the `designated_boards`
+  // shape, and the branch of `assertCanUpdateMeeting` that a straight
+  // A1-only guard would wrongly refuse.
+  return {
+    role: "staff" as const,
+    global: [],
+    boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+  };
+}
+
+function readLiveMeeting(db: TestDb, town: TownFixture, meetingId: string) {
+  return readRows<{
+    status: string;
+    started_at: string | null;
+    ended_at: string | null;
+    current_agenda_item_id: string | null;
+    presiding_officer_id: string | null;
+    recording_secretary_id: string | null;
+    adjournment: Record<string, unknown> | null;
+  }>(
+    db,
+    town,
+    sql`SELECT status::text AS status, started_at, ended_at, current_agenda_item_id,
+               presiding_officer_id, recording_secretary_id, adjournment
+        FROM meeting WHERE id = ${meetingId}`,
+  );
+}
+
+function readTransitions(db: TestDb, town: TownFixture, meetingId: string) {
+  return readRows<{ agenda_item_id: string; ended_at: string | null }>(
+    db,
+    town,
+    sql`SELECT agenda_item_id, ended_at FROM agenda_item_transition
+        WHERE meeting_id = ${meetingId} ORDER BY started_at, id`,
+  );
+}
+
+function readQueue(db: TestDb, town: TownFixture, meetingId: string) {
+  return readRows<{ source_agenda_item_id: string | null; source: string; title: string }>(
+    db,
+    town,
+    sql`SELECT source_agenda_item_id, source, title FROM future_item_queue
+        WHERE source_meeting_id = ${meetingId} ORDER BY source, title`,
+  );
+}
+
+function readItemStatuses(db: TestDb, town: TownFixture, meetingId: string) {
+  return readRows<{ id: string; status: string }>(
+    db,
+    town,
+    sql`SELECT id, status::text AS status FROM agenda_item
+        WHERE meeting_id = ${meetingId} ORDER BY title`,
+  );
+}
+
+describe("meeting.callToOrder", () => {
+  it("opens the meeting, flags the recording secretary, activates the first item and starts the clock", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const section = await seedLiveAgendaItem(db, town, meetingId, { title: "New Business" });
+        const firstItem = await seedLiveAgendaItem(db, town, meetingId, {
+          title: "Budget",
+          parentItemId: section,
+        });
+        const chair = await seedSeat(db, town, town.boardId);
+        const secretary = await seedSeat(db, town, town.boardId);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+        // An attendance row for the secretary, so the flag has something to
+        // land on — `MeetingStartFlow` only updates a row roll call created.
+        // Seeded directly rather than through `meetingAttendance.setRollCall`:
+        // this operator holds M1 and NOT M2, which is the whole point of the
+        // spec above, and that procedure would correctly refuse them.
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO meeting_attendance (meeting_id, town_id, board_member_id, person_id, status)
+            VALUES (${meetingId}, ${town.townId}, ${secretary.boardMemberId},
+                    ${secretary.personId}, 'present'::attendance_status)
+          `);
+        });
+
+        const { result, topics } = await captureRealtimeEvents(client, 4, () =>
+          caller.meeting.callToOrder({
+            meetingId,
+            boardId: town.boardId,
+            presidingOfficerId: chair.boardMemberId,
+            recordingSecretaryId: secretary.personId,
+            firstItemId: firstItem,
+          }),
+        );
+
+        expect(result.alreadyOpen).toBe(false);
+        const meeting = (await readLiveMeeting(db, town, meetingId))[0];
+        expect(meeting).toMatchObject({
+          status: "open",
+          current_agenda_item_id: firstItem,
+          presiding_officer_id: chair.boardMemberId,
+          recording_secretary_id: secretary.personId,
+        });
+        expect(meeting?.started_at).not.toBeNull();
+
+        const items = await readItemStatuses(db, town, meetingId);
+        expect(items.find((i) => i.id === firstItem)?.status).toBe("active");
+
+        const transitions = await readTransitions(db, town, meetingId);
+        expect(transitions).toEqual([{ agenda_item_id: firstItem, ended_at: null }]);
+
+        const flagged = await readRows<{ is_recording_secretary: boolean }>(
+          db,
+          town,
+          sql`SELECT is_recording_secretary FROM meeting_attendance
+              WHERE meeting_id = ${meetingId} AND person_id = ${secretary.personId}`,
+        );
+        expect(flagged[0]?.is_recording_secretary).toBe(true);
+
+        // All four tables this act writes, announced. The inventory in
+        // router-wiring.test.ts cannot check this — see this block's header.
+        expect(topics).toEqual([
+          "agenda_item",
+          "agenda_item_transition",
+          "meeting",
+          "meeting_attendance",
+        ]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("is a no-op on a meeting that is already open", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const item = await seedLiveAgendaItem(db, town, meetingId);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        await caller.meeting.callToOrder({
+          meetingId,
+          boardId: town.boardId,
+          presidingOfficerId: null,
+          recordingSecretaryId: null,
+          firstItemId: item,
+        });
+        const second = await caller.meeting.callToOrder({
+          meetingId,
+          boardId: town.boardId,
+          presidingOfficerId: null,
+          recordingSecretaryId: null,
+          firstItemId: item,
+        });
+
+        expect(second.alreadyOpen).toBe(true);
+        // The point of the guard: a second press must not open a SECOND
+        // transition on the same item, which is what a re-run would do.
+        expect(await readTransitions(db, town, meetingId)).toHaveLength(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A1 nor M1 on this board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const item = await seedLiveAgendaItem(db, town, meetingId);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.callToOrder({
+            meetingId,
+            boardId: town.boardId,
+            presidingOfficerId: null,
+            recordingSecretaryId: null,
+            firstItemId: item,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("noticed");
+        expect(await readTransitions(db, town, meetingId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses when the claimed boardId does not match the meeting's real board", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const theirMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Planning Board",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const item = await seedLiveAgendaItem(db, town, theirMeeting);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.callToOrder({
+            meetingId: theirMeeting,
+            boardId: town.boardId,
+            presidingOfficerId: null,
+            recordingSecretaryId: null,
+            firstItemId: item,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, theirMeeting)).toBe("noticed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.callToOrder({
+            meetingId: "not-a-uuid" as string,
+            boardId: town.boardId,
+            presidingOfficerId: null,
+            recordingSecretaryId: null,
+            firstItemId: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND when the presiding officer's seat is on another board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const foreignSeat = await seedSeat(db, town, town.otherBoardId);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.callToOrder({
+            meetingId,
+            boardId: town.boardId,
+            presidingOfficerId: foreignSeat.boardMemberId,
+            recordingSecretaryId: null,
+            firstItemId: null,
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("noticed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND when the first item belongs to another meeting, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const otherMeeting = await seedMeeting(db, town, town.boardId, {
+          title: "Another Meeting",
+          scheduledDate: "2026-12-01",
+          status: "noticed",
+        });
+        const foreignItem = await seedLiveAgendaItem(db, town, otherMeeting);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.callToOrder({
+            meetingId,
+            boardId: town.boardId,
+            presidingOfficerId: null,
+            recordingSecretaryId: null,
+            firstItemId: foreignItem,
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("noticed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("meeting.navigateToAgendaItem", () => {
+  it("closes the open transition, activates the new item, moves the meeting and opens a new clock", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const first = await seedLiveAgendaItem(db, town, meetingId, { title: "A first" });
+        const second = await seedLiveAgendaItem(db, town, meetingId, { title: "B second" });
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+        await caller.meeting.callToOrder({
+          meetingId,
+          boardId: town.boardId,
+          presidingOfficerId: null,
+          recordingSecretaryId: null,
+          firstItemId: first,
+        });
+
+        const { topics } = await captureRealtimeEvents(client, 3, () =>
+          caller.meeting.navigateToAgendaItem({
+            meetingId,
+            boardId: town.boardId,
+            itemId: second,
+          }),
+        );
+
+        expect((await readLiveMeeting(db, town, meetingId))[0]?.current_agenda_item_id).toBe(
+          second,
+        );
+        const transitions = await readTransitions(db, town, meetingId);
+        expect(transitions).toHaveLength(2);
+        expect(transitions[0]?.ended_at).not.toBeNull();
+        expect(transitions[1]).toEqual({ agenda_item_id: second, ended_at: null });
+
+        // The DEPARTED item is NOT marked completed — `live.tsx`'s own cache
+        // comment claims otherwise and does not reproduce. See the
+        // procedure's doc comment.
+        const items = await readItemStatuses(db, town, meetingId);
+        expect(items.find((i) => i.id === first)?.status).toBe("active");
+        expect(items.find((i) => i.id === second)?.status).toBe("active");
+
+        expect(topics).toEqual(["agenda_item", "agenda_item_transition", "meeting"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A1 nor M1 on this board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const item = await seedLiveAgendaItem(db, town, meetingId);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.navigateToAgendaItem({
+            meetingId,
+            boardId: town.boardId,
+            itemId: item,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect((await readLiveMeeting(db, town, meetingId))[0]?.current_agenda_item_id).toBeNull();
+        expect(await readTransitions(db, town, meetingId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses when the claimed boardId does not match the meeting's real board", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const theirMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Planning Board",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const item = await seedLiveAgendaItem(db, town, theirMeeting);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.navigateToAgendaItem({
+            meetingId: theirMeeting,
+            boardId: town.boardId,
+            itemId: item,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readTransitions(db, town, theirMeeting)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.navigateToAgendaItem({
+            meetingId: randomUUID(),
+            boardId: town.boardId,
+            itemId: "not-a-uuid" as string,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND when the item belongs to another meeting, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const otherMeeting = await seedMeeting(db, town, town.boardId, {
+          title: "Another Meeting",
+          scheduledDate: "2026-12-01",
+          status: "open",
+        });
+        const foreignItem = await seedLiveAgendaItem(db, town, otherMeeting);
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.navigateToAgendaItem({
+            meetingId,
+            boardId: town.boardId,
+            itemId: foreignItem,
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readTransitions(db, town, meetingId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("meeting.adjourn", () => {
+  it("closes the clock, defers unreached items with queue rows, queues tabled ones, and records the adjournment", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const chair = await seedSeat(db, town, town.boardId, { name: "Dana Chair" });
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "noticed",
+        });
+        const section = await seedLiveAgendaItem(db, town, meetingId, { title: "A section" });
+        const reached = await seedLiveAgendaItem(db, town, meetingId, {
+          title: "B reached",
+          parentItemId: section,
+        });
+        const unreached = await seedLiveAgendaItem(db, town, meetingId, {
+          title: "C unreached",
+          parentItemId: section,
+        });
+        const tabled = await seedLiveAgendaItem(db, town, meetingId, {
+          title: "D tabled",
+          parentItemId: section,
+          status: "completed",
+        });
+        await seedMotion(db, town, meetingId, tabled, {
+          motionType: "table",
+          status: "passed",
+          text: "to table this item",
+        });
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+        await caller.meeting.callToOrder({
+          meetingId,
+          boardId: town.boardId,
+          presidingOfficerId: chair.boardMemberId,
+          recordingSecretaryId: null,
+          firstItemId: reached,
+        });
+
+        const { result, topics } = await captureRealtimeEvents(client, 3, () =>
+          caller.meeting.adjourn({
+            meetingId,
+            boardId: town.boardId,
+            method: "without_objection",
+            adjournMotionId: null,
+          }),
+        );
+
+        expect(result).toMatchObject({ alreadyAdjourned: false, deferred: 1, tabled: 1 });
+
+        const meeting = (await readLiveMeeting(db, town, meetingId))[0];
+        expect(meeting?.status).toBe("adjourned");
+        expect(meeting?.ended_at).not.toBeNull();
+        expect(meeting?.current_agenda_item_id).toBeNull();
+        expect(meeting?.adjournment).toMatchObject({
+          method: "without_objection",
+          adjourned_by: operator.personId,
+          adjourned_by_name: "Dana Chair",
+          motion_id: null,
+        });
+        expect(String(meeting?.adjournment?.timestamp)).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+        );
+
+        // The CURRENT item is not deferred; the section (a parent) is not
+        // either — both are the filter `handleMeetingEnd` has always used.
+        const items = await readItemStatuses(db, town, meetingId);
+        expect(items.find((i) => i.id === unreached)?.status).toBe("deferred");
+        expect(items.find((i) => i.id === reached)?.status).toBe("active");
+        expect(items.find((i) => i.id === section)?.status).toBe("pending");
+
+        const queue = await readQueue(db, town, meetingId);
+        expect(queue).toEqual([
+          { source_agenda_item_id: unreached, source: "deferred", title: "C unreached" },
+          { source_agenda_item_id: tabled, source: "tabled", title: "D tabled" },
+        ]);
+
+        const transitions = await readTransitions(db, town, meetingId);
+        expect(transitions.every((t) => t.ended_at !== null)).toBe(true);
+
+        expect(topics).toEqual(["agenda_item", "agenda_item_transition", "meeting"]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("is a no-op on a meeting that is already adjourned — the two-device race", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const section = await seedLiveAgendaItem(db, town, meetingId, { title: "A section" });
+        await seedLiveAgendaItem(db, town, meetingId, {
+          title: "B unreached",
+          parentItemId: section,
+        });
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const first = await caller.meeting.adjourn({
+          meetingId,
+          boardId: town.boardId,
+          method: "motion",
+          adjournMotionId: null,
+        });
+        const second = await caller.meeting.adjourn({
+          meetingId,
+          boardId: town.boardId,
+          method: "motion",
+          adjournMotionId: null,
+        });
+
+        expect(first).toMatchObject({ alreadyAdjourned: false, deferred: 1 });
+        expect(second).toMatchObject({ alreadyAdjourned: true, deferred: 0, tabled: 0 });
+        // Without the guard the second call queues the item a second time.
+        expect(await readQueue(db, town, meetingId)).toHaveLength(1);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A1 nor M1 on this board, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const section = await seedLiveAgendaItem(db, town, meetingId, { title: "A section" });
+        await seedLiveAgendaItem(db, town, meetingId, {
+          title: "B unreached",
+          parentItemId: section,
+        });
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.adjourn({
+            meetingId,
+            boardId: town.boardId,
+            method: "without_objection",
+            adjournMotionId: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("open");
+        expect(await readQueue(db, town, meetingId)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses when the claimed boardId does not match the meeting's real board", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const theirMeeting = await seedMeeting(db, town, town.otherBoardId, {
+          title: "Planning Board",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const section = await seedLiveAgendaItem(db, town, theirMeeting, { title: "A section" });
+        await seedLiveAgendaItem(db, town, theirMeeting, {
+          title: "B unreached",
+          parentItemId: section,
+        });
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.adjourn({
+            meetingId: theirMeeting,
+            boardId: town.boardId,
+            method: "without_objection",
+            adjournMotionId: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+        expect(await readMeetingStatus(db, town, theirMeeting)).toBe("open");
+        expect(await readQueue(db, town, theirMeeting)).toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers FORBIDDEN, not BAD_REQUEST, when a refused caller's input also fails validation (the reorder pin)", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.adjourn({
+            meetingId: "not-a-uuid" as string,
+            boardId: town.boardId,
+            method: "without_objection",
+            adjournMotionId: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("answers NOT_FOUND when the adjourning motion belongs to another meeting, and changes nothing", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId, {
+          title: "Regular Meeting",
+          scheduledDate: "2026-11-03",
+          status: "open",
+        });
+        const otherMeeting = await seedMeeting(db, town, town.boardId, {
+          title: "Another Meeting",
+          scheduledDate: "2026-12-01",
+          status: "open",
+        });
+        const otherItem = await seedLiveAgendaItem(db, town, otherMeeting);
+        const foreignMotion = await seedMotion(db, town, otherMeeting, otherItem, {
+          motionType: "adjourn",
+          status: "passed",
+        });
+        const operator = await seedActor(db, town, meetingOperatorSpec(town));
+        const caller = appRouter.createCaller(contextFor(db, town, operator));
+
+        const err = await expectTrpcError(() =>
+          caller.meeting.adjourn({
+            meetingId,
+            boardId: town.boardId,
+            method: "motion",
+            adjournMotionId: foreignMotion,
+          }),
+        );
+        expect(err.code).toBe("NOT_FOUND");
+        expect(await readMeetingStatus(db, town, meetingId)).toBe("open");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});

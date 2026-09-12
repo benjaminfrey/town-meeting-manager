@@ -1,0 +1,420 @@
+/**
+ * The topic → query-key mapping, checked against the SERVER'S list.
+ *
+ * Phase E, wave 5, Task 4. `LIVE_MEETING_TOPICS` lives in
+ * `packages/api/src/realtime/events.ts` and the mapping that gives a topic
+ * meaning lives in `hooks/useLiveMeetingEvents.ts`. The two have to be
+ * extended in lockstep, and the failure when they are not is silent: the
+ * client receives a topic, matches nothing, and drops the invalidation, so a
+ * panel stops updating on other devices with no error anywhere.
+ *
+ * `useLiveMeetingEvents.ts`'s own `Record<LiveMeetingTopic, …>` already makes
+ * a missing entry a TYPE error. This file is the second half, and it is not
+ * redundant with the first:
+ *
+ *   - The type is derived from the PROCEDURE'S OUTPUT. This reads the ARRAY.
+ *     If someone widened `LiveMeetingTopic` without adding to
+ *     `LIVE_MEETING_TOPICS` (or the reverse), the type check would be happy
+ *     with whichever half it can see and this one would not.
+ *   - A type error is not a failing test, and the brief for this task asks for
+ *     a failing test by name.
+ *
+ * Reading the API source as TEXT rather than importing it is deliberate.
+ * `@town-meeting/api`'s `exports` map publishes TYPES only, and `events.ts`
+ * imports `drizzle-orm` — importing it for real would pull server code into
+ * the web package's module graph for the sake of one array. The same
+ * read-the-source technique is what `packages/api/src/trpc/__tests__/
+ * router-wiring.test.ts` uses for its publish inventory.
+ */
+
+import path from "node:path";
+import fs from "node:fs";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createElement } from "react";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook } from "@testing-library/react";
+import { TRPCClientError } from "@trpc/client";
+import { trpc } from "@/lib/trpc";
+import {
+  LIVE_MEETING_TOPIC_ROUTERS,
+  LIVE_STREAM_ERROR_TOAST_ID,
+  LIVE_STREAM_RECONNECT_GRACE_MS,
+  liveMeetingPathFilter,
+  useLiveMeetingEvents,
+} from "@/hooks/useLiveMeetingEvents";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+/**
+ * The options object `useSubscription` was handed — the same seam
+ * `routes/meetings.$meetingId.live.test.tsx` uses, for the same reason: jsdom
+ * has no live stream, and the thing under test is what the hook DOES with the
+ * subscription's callbacks, not the transport. (Which link a subscription
+ * takes is pinned separately, in `lib/__tests__/trpc.test.ts`.)
+ */
+const subscription: {
+  options: { onData?: (e: unknown) => void; onError?: (e: unknown) => void } | null;
+  /**
+   * What the transport is currently reporting.
+   *
+   * Mutable, because wave 5 Task 6's grace window is a function of how the
+   * transport's `status` MOVES over time — a fixed `"pending"` can express
+   * "the hook opened a subscription" and nothing about a reconnect. Set it,
+   * then `rerender()`, exactly as a real status change would.
+   */
+  status: "idle" | "connecting" | "pending" | "error";
+} = { options: null, status: "pending" };
+
+vi.mock("@trpc/tanstack-react-query", async () => {
+  const actual = await vi.importActual<typeof import("@trpc/tanstack-react-query")>(
+    "@trpc/tanstack-react-query",
+  );
+  return {
+    ...actual,
+    useSubscription: vi.fn((opts: { onData?: (e: unknown) => void }) => {
+      subscription.options = opts;
+      return { status: subscription.status, data: undefined, error: null, reset: () => {} };
+    }),
+  };
+});
+
+import { toast } from "sonner";
+
+const PROJECT_ROOT = path.resolve(__dirname, "../../../../..");
+const EVENTS_TS = path.join(PROJECT_ROOT, "packages/api/src/realtime/events.ts");
+
+/**
+ * The topics the SERVER can publish, parsed out of its own declaration.
+ *
+ * Anchored on `export const LIVE_MEETING_TOPICS = [` so a mention of the name
+ * in a doc comment cannot be mistaken for the declaration — the
+ * markers-versus-mentions hazard `phase-e-conventions.md` item 11 records, and
+ * `events.ts` does mention the name in prose more than once.
+ */
+function serverTopics(): string[] {
+  const source = fs.readFileSync(EVENTS_TS, "utf8");
+  const start = source.indexOf("export const LIVE_MEETING_TOPICS = [");
+  expect(
+    start,
+    "LIVE_MEETING_TOPICS is no longer declared as `export const LIVE_MEETING_TOPICS = [` in packages/api/src/realtime/events.ts — this parser needs updating before it can check anything",
+  ).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf("]", start);
+  expect(end).toBeGreaterThan(start);
+  const body = source.slice(source.indexOf("[", start) + 1, end);
+  return [...body.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+}
+
+describe("live meeting topic mapping", () => {
+  it("parses a non-empty topic list off the server's own declaration", () => {
+    // The control for every assertion below: a parser that silently matched
+    // nothing would make the comparison vacuously true in one direction.
+    expect(serverTopics().length).toBeGreaterThan(0);
+  });
+
+  it("maps every topic the server can publish — a new topic with no client mapping fails here", () => {
+    expect([...serverTopics()].sort()).toEqual(Object.keys(LIVE_MEETING_TOPIC_ROUTERS).sort());
+  });
+
+  it("names a real router for every topic, and that router's own path filter", () => {
+    for (const [topic, routers] of Object.entries(LIVE_MEETING_TOPIC_ROUTERS)) {
+      expect(routers.length, `${topic} invalidates nothing`).toBeGreaterThan(0);
+      for (const name of routers) {
+        // `pathFilter()`'s key is the router prefix the real proxy produces,
+        // so this fails if a name is ever mapped to a router that does not
+        // exist or is renamed.
+        expect(liveMeetingPathFilter(name).queryKey, `${topic} → ${name}`).toEqual([[name]]);
+      }
+    }
+  });
+
+  it("invalidates exactly the routers a topic names, and nothing else", () => {
+    // `motion` is the useful probe: it is one-to-one with its table, so a
+    // mapping that quietly reached further would show up as `voteRecord`
+    // going stale too.
+    const queryClient = new QueryClient();
+    const motionKey = trpc.motion.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    const voteKey = trpc.voteRecord.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(motionKey, []);
+    queryClient.setQueryData(voteKey, []);
+
+    for (const name of LIVE_MEETING_TOPIC_ROUTERS.motion) {
+      void queryClient.invalidateQueries(liveMeetingPathFilter(name));
+    }
+
+    expect(queryClient.getQueryState(motionKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(voteKey)?.isInvalidated).toBeFalsy();
+  });
+
+  it("invalidates BOTH the agenda and the exhibit reads for one agenda_item event", () => {
+    // The one topic that is not one-to-one. The Supabase channel it replaces
+    // invalidated a single `select("*, exhibit(*)")` key, so an agenda_item
+    // change refetched exhibits as a side effect; two procedures back that
+    // one read now, and dropping the second would be a silent behaviour
+    // change rather than a tidy-up.
+    const queryClient = new QueryClient();
+    const agendaKey = trpc.agendaItem.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    const exhibitKey = trpc.exhibit.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(agendaKey, []);
+    queryClient.setQueryData(exhibitKey, []);
+
+    for (const name of LIVE_MEETING_TOPIC_ROUTERS.agenda_item) {
+      void queryClient.invalidateQueries(liveMeetingPathFilter(name));
+    }
+
+    expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(exhibitKey)?.isInvalidated).toBe(true);
+  });
+});
+
+/**
+ * The resume handshake — the event that carries no topic.
+ *
+ * Phase E, wave 5, Task 7's fix round. `realtime.onMeetingChange` now emits one
+ * `tracked()` event with `topic: null` at the top of every connection, because
+ * a browser `EventSource` sends `Last-Event-ID` only once it has received an
+ * `id:` frame and neither `event: connected` nor `event: ping` carries one — so
+ * a quiet meeting used to reconnect as a fresh subscribe and lose everything
+ * published during the gap. The server half is pinned in
+ * `packages/api/src/trpc/__tests__/sse-resume.test.ts`. This is the client
+ * half, and the thing it has to get right is INACTION: the handshake must
+ * invalidate nothing.
+ *
+ * The mutation: delete `if (topic === null) return;` from `onData`. The first
+ * test below goes red — `LIVE_MEETING_TOPIC_ROUTERS[null]` is `undefined` and
+ * the loop throws, which is exactly the failure a live meeting would have seen
+ * on every connection.
+ */
+describe("the resume handshake event", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    subscription.status = "pending";
+  });
+
+  function renderWithClient() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+    return queryClient;
+  }
+
+  it("invalidates nothing at all", () => {
+    const queryClient = renderWithClient();
+    const motionKey = trpc.motion.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    const agendaKey = trpc.agendaItem.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(motionKey, []);
+    queryClient.setQueryData(agendaKey, []);
+
+    subscription.options!.onData!({ id: "0", data: { topic: null } });
+
+    expect(queryClient.getQueryState(motionKey)?.isInvalidated).toBeFalsy();
+    expect(queryClient.getQueryState(agendaKey)?.isInvalidated).toBeFalsy();
+  });
+
+  it("does not stop a real topic on the same stream from being acted on", () => {
+    // The control. Without it, a hook whose `onData` had been broken outright
+    // would pass the assertion above.
+    const queryClient = renderWithClient();
+    const motionKey = trpc.motion.byMeeting.queryOptions({ meetingId: "m1" }).queryKey;
+    queryClient.setQueryData(motionKey, []);
+
+    subscription.options!.onData!({ id: "0", data: { topic: null } });
+    subscription.options!.onData!({ id: "1", data: { topic: "motion" } });
+
+    expect(queryClient.getQueryState(motionKey)?.isInvalidated).toBe(true);
+  });
+});
+
+/**
+ * The stream's own failure, which this hook used to drop on the floor.
+ *
+ * Added in Task 4's fix round. `realtime.onMeetingChange` refuses with a
+ * `TRPCError` (NOT_FOUND for a meeting outside the caller's tenant, or
+ * whatever the auth chain throws at subscribe), and the transport ADR's
+ * addendum measured that a `TRPCError` makes this client STOP rather than
+ * silently resume. The hook discarded `useSubscription`'s whole result, so
+ * that ended a live meeting's updates permanently with nothing on screen —
+ * and `ConnectionStatusBar`, still on a Supabase heartbeat until Task 6
+ * replaces it, would have gone on reporting healthy.
+ */
+describe("a refusal on the stream", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    subscription.status = "pending";
+    vi.mocked(toast.error).mockClear();
+  });
+
+  function renderTheHook() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    return renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+  }
+
+  it("raises a persistent toast — a dead stream is never silent", () => {
+    renderTheHook();
+    expect(subscription.options, "the hook no longer opens a subscription").not.toBeNull();
+    expect(
+      subscription.options!.onError,
+      "the hook passes no onError — a refusal on the stream is silent again",
+    ).toBeTypeOf("function");
+
+    subscription.options!.onError!(
+      new TRPCClientError("That meeting does not exist.", {
+        result: { error: { code: -32004, message: "That meeting does not exist.", data: null } },
+      } as never),
+    );
+
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    const [message, options] = vi.mocked(toast.error).mock.calls[0]!;
+    expect(message).toContain("Live updates have stopped");
+    // Infinity, not a timeout: the stream does not come back on its own, so a
+    // message that disappears after four seconds is one an operator who was
+    // looking at the agenda cannot go back and read.
+    expect((options as { duration?: number }).duration).toBe(Infinity);
+    // A stable id, so a refusing reconnect loop replaces one toast rather
+    // than stacking a column of them over the operator's controls.
+    expect((options as { id?: string }).id).toBe(LIVE_STREAM_ERROR_TOAST_ID);
+    // The server's own sentence is carried through — "That meeting does not
+    // exist." tells a clerk something "something went wrong" does not.
+    expect((options as { description?: string }).description).toContain(
+      "That meeting does not exist.",
+    );
+  });
+
+  it("still says what is broken when the error is not a tRPC one", () => {
+    renderTheHook();
+    subscription.options!.onError!(new Error("boom"));
+
+    const [, options] = vi.mocked(toast.error).mock.calls[0]!;
+    expect((options as { description?: string }).description).toContain(
+      "will not appear here until you reload",
+    );
+  });
+});
+
+/**
+ * **A healthy client reconnects every five minutes, and this is what stops it
+ * from looking like an outage.**
+ *
+ * Added in wave 5, Task 6. `SSE_MAX_STREAM_DURATION_MS` bounds authorization
+ * staleness by ending every stream at five minutes, and
+ * `packages/api/src/trpc/__tests__/sse-bounds.test.ts` pins that the deadline
+ * ends the response WITHOUT `event: return` — which is exactly what makes
+ * `httpSubscriptionLink` resume with `Last-Event-ID` instead of stopping. The
+ * client-side trace of that, read off `@trpc/client`'s own SSE state machine,
+ * is `pending → connecting → pending`: a real transition through `connecting`,
+ * twelve times an hour, on a stream that is working perfectly.
+ *
+ * So an indicator wired straight to `status === "connecting"` would flash
+ * amber over a clerk's controls twelve times an hour during a public meeting.
+ * That is worse than no indicator — the one time it means something is the one
+ * time nobody looks — and it is the failure this suite exists to prevent.
+ *
+ * The transport is driven through the same mocked `useSubscription` the rest
+ * of this file uses; the thing under test is the hook's own state machine, not
+ * the transport, and jsdom has no stream either way.
+ */
+describe("a routine five-minute reconnect versus a real outage", () => {
+  beforeEach(() => {
+    subscription.options = null;
+    subscription.status = "pending";
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderTheHook() {
+    const queryClient = new QueryClient();
+    function wrapper({ children }: { children: ReactNode }) {
+      return createElement(QueryClientProvider, { client: queryClient }, children);
+    }
+    return renderHook(() => useLiveMeetingEvents("meeting-1"), { wrapper });
+  }
+
+  it("stays silent through a bounded reconnect that resolves inside the grace window", () => {
+    const { result, rerender } = renderTheHook();
+    expect(result.current).toBe("healthy");
+
+    // The deadline fires: tRPC aborts the stream, the EventSource reconnects.
+    subscription.status = "connecting";
+    rerender();
+    expect(result.current, "a routine reconnect must not be announced").toBe("healthy");
+
+    // Still inside the window — a fresh same-origin request takes well under a
+    // second, so this is the whole of a normal bounce.
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS - 1);
+    });
+    expect(result.current).toBe("healthy");
+
+    subscription.status = "pending";
+    rerender();
+    expect(result.current).toBe("healthy");
+
+    // And the pending timer was CLEARED, not merely outrun: without the
+    // effect's cleanup this fires long after the stream is back and turns a
+    // healthy meeting amber for no reason.
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(result.current, "a reconnect that already succeeded still announced itself").toBe(
+      "healthy",
+    );
+  });
+
+  it("reports an outage once the disconnection outlives the grace window", () => {
+    const { result, rerender } = renderTheHook();
+
+    subscription.status = "connecting";
+    rerender();
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS);
+    });
+    expect(result.current).toBe("reconnecting");
+  });
+
+  it("does not strobe while a bad connection flaps", () => {
+    // `connecting → connecting` is a real sequence (the SSE link re-emits it
+    // with an error attached). Resetting to healthy on each one would blink
+    // the banner on and off over the operator's controls.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "connecting";
+    rerender();
+    act(() => {
+      vi.advanceTimersByTime(LIVE_STREAM_RECONNECT_GRACE_MS);
+    });
+    expect(result.current).toBe("reconnecting");
+
+    rerender();
+    expect(result.current).toBe("reconnecting");
+  });
+
+  it("reports a stopped stream IMMEDIATELY, with no grace at all", () => {
+    // A `TRPCError` makes this client stop rather than resume, so there is
+    // nothing to wait for — waiting would only delay the one message that
+    // needs a human. The grace window must not apply here.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "error";
+    rerender();
+    expect(result.current).toBe("stopped");
+  });
+
+  it("treats a completed stream as stopped too", () => {
+    // `idle` means the subscription completed — over SSE, that the server sent
+    // `event: return`. `realtime.onMeetingChange` never returns and the
+    // five-minute deadline specifically does not emit that frame, so this is
+    // unreachable today; it is mapped to the loud answer rather than the
+    // silent one precisely because reaching it would mean a stream ended and
+    // is not coming back.
+    const { result, rerender } = renderTheHook();
+    subscription.status = "idle";
+    rerender();
+    expect(result.current).toBe("stopped");
+  });
+});

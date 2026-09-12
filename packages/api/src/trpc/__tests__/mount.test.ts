@@ -84,6 +84,33 @@ describe("the /api/trpc mount", () => {
     });
   });
 
+  // ─── Phase E wave 5, Task 1: the SSE surface is not a second door ──────
+  //
+  // A subscription is a GET with an `accept: text/event-stream` header, which
+  // is a shape no other route in this API has. It is served by the same mount
+  // and therefore by the same gate — but "therefore" is exactly the kind of
+  // reasoning `route-access.test.ts` exists because of, so it is a request
+  // here rather than an inference. A long-lived unauthenticated stream would
+  // be worse than a leaked query: it stays open.
+  it("refuses a sessionless SUBSCRIPTION with 401, before any stream is opened", async () => {
+    await withServer(async (server) => {
+      const response = await server.inject({
+        method: "GET",
+        url:
+          "/api/trpc/realtime.onMeetingChange?input=" +
+          encodeURIComponent(JSON.stringify({ meetingId: "00000000-0000-4000-8000-000000000000" })),
+        headers: { accept: "text/event-stream" },
+      });
+      expect(response.statusCode).toBe(401);
+      // The gate's own message, so this is not a tRPC-level refusal that
+      // happened to produce the same status.
+      expect(response.body).toContain("requires a signed-in session");
+      // And emphatically not a stream: a 401 that arrived as `text/event-stream`
+      // would mean the response had already been committed as one.
+      expect(response.headers["content-type"]).not.toContain("text/event-stream");
+    });
+  });
+
   it("refuses a cross-origin call to the mount before looking for a session", async () => {
     await withServer(async (server) => {
       const response = await server.inject({

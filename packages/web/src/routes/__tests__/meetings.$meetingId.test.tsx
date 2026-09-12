@@ -56,6 +56,7 @@ const stub = installTRPCFetchStub({
       location: "Town Hall",
       presiding_officer_id: PRESIDING_ID,
       recording_secretary_id: SECRETARY_ID,
+      current_agenda_item_id: null,
       started_at: null,
       ended_at: null,
       // Added to `meeting.detail` in wave 4, Task 3 for the agenda builder;

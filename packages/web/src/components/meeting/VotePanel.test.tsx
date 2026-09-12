@@ -1,45 +1,39 @@
+/**
+ * `VotePanel`'s rendering and tally, plus the one write it performs.
+ *
+ * Phase E wave 5, Task 5. The Supabase chainable mock this file used to carry
+ * is gone: `globalThis.fetch` is stubbed instead (conventions item 8), so the
+ * write assertion is about the PROCEDURE the panel calls and the payload it
+ * sends, not about which chain methods a mock happened to see. The tally tests
+ * are unchanged — `calculateVoteResult` still runs here for the live preview,
+ * and it is the SERVER that recomputes the outcome from the roll.
+ */
+
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { renderWithProviders, screen, waitFor } from "@/test/render";
+import { renderWithProviders, screen, waitFor, setupAppQueryClient } from "@/test/render";
 import { fireEvent } from "@testing-library/react";
+import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { VotePanel } from "./VotePanel";
 
 // ─── Supabase chainable mock ──────────────────────────────────────────────────
 
-const { mockChain, mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: null, error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
-});
+const queryClient = setupAppQueryClient();
 
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
+const server = { refuses: false };
+
+const stub = installTRPCFetchStub({
+  "voteRecord.recordForMotion": ({ motionId, votes }) => {
+    if (server.refuses) trpcTestError("FORBIDDEN");
+    return {
+      motionId,
+      status: "passed",
+      recorded: votes.length,
+      executiveSession: null,
+      minutesApproved: null,
+      adjourned: false,
+    };
+  },
+});
 
 // ─── Mock data ─────────────────────────────────────────────────────
 
@@ -51,12 +45,22 @@ const allMembers = [
   { boardMemberId: "bm-5", personId: "p-5", name: "Eve Green", seatTitle: null },
 ];
 
+const attendanceRow = (id: string, boardMemberId: string, personId: string, status: string) => ({
+  id,
+  board_member_id: boardMemberId,
+  person_id: personId,
+  status,
+  arrived_at: null,
+  departed_at: null,
+  is_recording_secretary: false,
+});
+
 const attendancePresent = [
-  { id: "att-1", board_member_id: "bm-1", person_id: "p-1", status: "present" },
-  { id: "att-2", board_member_id: "bm-2", person_id: "p-2", status: "present" },
-  { id: "att-3", board_member_id: "bm-3", person_id: "p-3", status: "present" },
-  { id: "att-4", board_member_id: "bm-4", person_id: "p-4", status: "absent" },
-  { id: "att-5", board_member_id: "bm-5", person_id: "p-5", status: "present" },
+  attendanceRow("att-1", "bm-1", "p-1", "present"),
+  attendanceRow("att-2", "bm-2", "p-2", "present"),
+  attendanceRow("att-3", "bm-3", "p-3", "present"),
+  attendanceRow("att-4", "bm-4", "p-4", "absent"),
+  attendanceRow("att-5", "bm-5", "p-5", "present"),
 ];
 
 const memberNameMap = new Map([
@@ -70,7 +74,7 @@ const memberNameMap = new Map([
 const defaultProps = {
   motionId: "motion-1",
   meetingId: "meeting-1",
-  townId: "town-1",
+  boardId: "board-1",
   allMembers,
   attendanceRecords: attendancePresent,
   existingVotes: [] as any[],
@@ -100,29 +104,7 @@ function voteAllEligible(label: "Yea" | "Nay" | "Abstain", count: number) {
 describe("VotePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Restore chainable mock after clear
-    mockFrom.mockReturnValue(mockChain);
-    for (const m of [
-      "select",
-      "insert",
-      "update",
-      "delete",
-      "eq",
-      "neq",
-      "order",
-      "limit",
-      "single",
-      "throwOnError",
-      "or",
-      "filter",
-      "upsert",
-      "in",
-      "maybeSingle",
-    ]) {
-      if (typeof mockChain[m]?.mockReturnValue === "function") {
-        mockChain[m].mockReturnValue(mockChain);
-      }
-    }
+    server.refuses = false;
   });
 
   it("renders all members with correct attendance status", () => {
@@ -157,6 +139,7 @@ describe("VotePanel", () => {
         board_member_id: "bm-3",
         vote: "recusal",
         recusal_reason: "Conflict of interest",
+        created_at: "2026-03-10T19:00:00Z",
       },
     ];
 
@@ -240,8 +223,9 @@ describe("VotePanel", () => {
     expect(screen.getByText("Passed 3-1")).toBeInTheDocument();
   });
 
-  it("records votes via Supabase sequential inserts", async () => {
-    renderWithProviders(<VotePanel {...defaultProps} />);
+  it("records the whole roll in ONE call, including the absent seat", async () => {
+    const before = stub.countFor("voteRecord.recordForMotion");
+    renderWithProviders(<VotePanel {...defaultProps} />, { queryClient });
 
     // Vote all eligible members
     clickVoteButton("Yea", 0); // Alice
@@ -253,17 +237,38 @@ describe("VotePanel", () => {
     const recordButton = screen.getByRole("button", { name: "Record Vote" });
     fireEvent.click(recordButton);
 
-    await waitFor(() => {
-      // delete old vote records, then insert new ones
-      expect(mockFrom).toHaveBeenCalledWith("vote_record");
-      expect(mockChain.delete).toHaveBeenCalled();
-      expect(mockChain.insert).toHaveBeenCalled();
+    await waitFor(() => expect(stub.countFor("voteRecord.recordForMotion")).toBe(before + 1));
+
+    // One request, not `1 + N + 1`. And the roll names every seat — Dave is
+    // absent and is recorded as such, exactly as the sequential inserts did.
+    const call = stub.calls[stub.calls.length - 1]!;
+    const input = Object.values(call.inputs)[0] as {
+      votes: { boardMemberId: string; vote: string }[];
+    };
+    expect(input.votes).toHaveLength(5);
+    expect(input.votes).toContainEqual({
+      boardMemberId: "bm-4",
+      vote: "absent",
+      recusalReason: null,
     });
+    // Nothing about the OUTCOME is sent; the server derives it.
+    expect(call.inputs).not.toHaveProperty("status");
+  });
+
+  it("shows a refusal when recording the vote is FORBIDDEN", async () => {
+    server.refuses = true;
+    renderWithProviders(<VotePanel {...defaultProps} />, { queryClient });
+
+    voteAllEligible("Yea", 4);
+    fireEvent.click(screen.getByRole("button", { name: "Record Vote" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/permission to record the votes on this motion/i);
   });
 
   it("calls onComplete after successful vote recording", async () => {
     const onComplete = vi.fn();
-    renderWithProviders(<VotePanel {...defaultProps} onComplete={onComplete} />);
+    renderWithProviders(<VotePanel {...defaultProps} onComplete={onComplete} />, { queryClient });
 
     // Vote all eligible members
     clickVoteButton("Yea", 0); // Alice

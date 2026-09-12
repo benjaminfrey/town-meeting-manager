@@ -58,7 +58,6 @@ import {
   FileText,
   ChevronRight,
 } from "lucide-react";
-import { isTRPCClientError } from "@trpc/client";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -67,7 +66,7 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { usePermission } from "@/hooks/usePermission";
 import { queryKeys } from "@/lib/queryKeys";
 import { supabase } from "@/lib/supabase";
-import { trpc, type RouterOutputs } from "@/lib/trpc";
+import { refusalMessage, trpc, type RouterOutputs } from "@/lib/trpc";
 import { MeetingListSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/utils";
 
@@ -253,11 +252,7 @@ export default function MeetingsPage() {
         void queryClient.invalidateQueries(trpc.meeting.pathFilter());
       },
       onError: (err) => {
-        setTransitionError(
-          isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
-            ? "You don't have permission to change this meeting's status."
-            : "Couldn't update this meeting's status. Try again.",
-        );
+        setTransitionError(refusalMessage(err, "change this meeting's status"));
       },
     }),
   );

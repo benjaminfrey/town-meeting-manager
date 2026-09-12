@@ -26,8 +26,12 @@
  * `minutesDocuments: "minutesDocument"` and `attendance: "meetingAttendance"`
  * joined in wave 3 Tasks 3+4's fix round (see the paragraph after `meetings`
  * below); `minutes: "minutesDocument"` joined in the whole-branch fix round
- * after that. Growing it is exactly the moment this rule should fire for a
- * newly-migrated entity, so it stays a deliberate edit, not a derived one.
+ * after that; `motions`, `voteRecords`, `guestSpeakers`, `executiveSessions`
+ * and `agendaItemTransitions` joined in wave 5, Task 4, when
+ * `routes/meetings.$meetingId.live.tsx` moved all nine of its reads onto tRPC
+ * and the five routers behind them acquired their first web readers. Growing
+ * it is exactly the moment this rule should fire for a newly-migrated entity,
+ * so it stays a deliberate edit, not a derived one.
  *
  * **`minutes` and `minutesDocuments` are TWO namespaces over ONE table**
  * (`queryKeys.minutes.byMeeting` and `queryKeys.minutesDocuments.byMeeting`
@@ -219,6 +223,11 @@ const MIGRATED: Record<string, string> = {
   minutes: "minutesDocument",
   attendance: "meetingAttendance",
   exhibits: "exhibit",
+  motions: "motion",
+  voteRecords: "voteRecord",
+  guestSpeakers: "guestSpeaker",
+  executiveSessions: "executiveSession",
+  agendaItemTransitions: "agendaItemTransition",
 };
 
 /**
@@ -357,12 +366,18 @@ describe("the check itself", () => {
       onSuccess: () => {
         // Deliberately a namespace NOT in MIGRATED — this fixture needs a
         // key this check has no opinion about, not one it would now flag
-        // for real. \`meetings\` joined the map in wave 3 Task 2's fix round
-        // (this exact fixture is why: it used \`queryKeys.meetings.byBoard\`
-        // as its "genuinely unmigrated" example until that entry was added,
-        // which would have turned this fixture into a real violation rather
-        // than a non-match). \`motions\` has no router at all yet.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+        // for real. It has now been rewritten TWICE for that reason, which is
+        // the pattern worth naming: \`meetings\` joined the map in wave 3
+        // Task 2's fix round, and \`motions\` (this fixture's replacement for
+        // it) joined in wave 5 Task 4 — each time, the fixture's own
+        // "genuinely unmigrated" example became migrated and the fixture
+        // started failing as a real violation. \`futureItemQueues\` is the
+        // current choice: \`future_item_queue\` has no router in
+        // \`packages/api/src/trpc/router.ts\` at all. When it gets one, pick
+        // another — and expect to.
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.futureItemQueues.byMeeting(meetingId),
+        });
       },
       `,
     );

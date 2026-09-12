@@ -43,11 +43,14 @@ export function MinutesPanelErrorBoundary({ children }: MinutesPanelErrorBoundar
 }
 
 // ─── Connection status bar ────────────────────────────────────────────
-// The status bar MUST never crash and take the meeting view with it.
+// Wraps `LiveStreamStatusBar` (wave 5, Task 6 — it was `ConnectionStatusBar`
+// with `prominent`, on a Supabase heartbeat, before that). The status bar MUST
+// never crash and take the meeting view with it.
 
 function ConnectionStatusSilentFallback() {
-  // If the ConnectionStatusBar itself crashes, render nothing — don't disrupt
-  // the operator. An absence of status information is better than a crash.
+  // If the status bar itself crashes, render nothing — don't disrupt the
+  // operator. An absence of status information is better than a crash, and the
+  // stream's own death is reported by a toast as well as by this bar.
   return null;
 }
 

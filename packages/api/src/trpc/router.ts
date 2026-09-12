@@ -29,6 +29,12 @@ import { agendaItemRouter } from "./routers/agenda-item.js";
 import { exhibitRouter } from "./routers/exhibit.js";
 import { minutesDocumentRouter } from "./routers/minutes-document.js";
 import { meetingAttendanceRouter } from "./routers/meeting-attendance.js";
+import { agendaItemTransitionRouter } from "./routers/agenda-item-transition.js";
+import { motionRouter } from "./routers/motion.js";
+import { voteRecordRouter } from "./routers/vote-record.js";
+import { executiveSessionRouter } from "./routers/executive-session.js";
+import { guestSpeakerRouter } from "./routers/guest-speaker.js";
+import { realtimeRouter } from "./routers/realtime.js";
 
 export const appRouter = router({
   /**
@@ -121,11 +127,61 @@ export const appRouter = router({
   minutesDocument: minutesDocumentRouter,
 
   /**
-   * The attendance count `routes/meetings.$meetingId.tsx`'s shell needs.
-   * Wave 5 owns the full attendance surface (`live.tsx`) and extends this
-   * router. See `routers/meeting-attendance.ts`.
+   * The attendance count `routes/meetings.$meetingId.tsx`'s shell needs, the
+   * live meeting's whole roll, and the two writes behind roll call and the
+   * attendance cycle — both M2, both upserts on
+   * `attendance_unique_per_meeting`. See `routers/meeting-attendance.ts`.
    */
   meetingAttendance: meetingAttendanceRouter,
+
+  /**
+   * The live meeting's clock. ONE read and no writes, on purpose — every
+   * `agenda_item_transition` write happens inside `meeting.callToOrder`,
+   * `meeting.navigateToAgendaItem` or `meeting.adjourn`, in the same
+   * transaction as the `meeting.current_agenda_item_id` change that causes
+   * it. See `routers/agenda-item-transition.ts`.
+   */
+  agendaItemTransition: agendaItemTransitionRouter,
+
+  /**
+   * Motions: the live meeting's read, the capture dialog's insert, and the
+   * two status moves a clerk performs by hand. The outcome stamp a completed
+   * vote applies lives in `voteRecord.recordForMotion`, because it is derived
+   * from the tally. All M3 — see `routers/motion.ts`.
+   */
+  motion: motionRouter,
+
+  /**
+   * Votes: the live meeting's read, one member's vote (the only path where
+   * `assertCanInsertVoteRecord`'s self-vote branch is reachable, and the
+   * codebase's first resolver-side rule needing a `TenantTx`), and the whole
+   * roll call on one motion in a single transaction. See
+   * `routers/vote-record.ts` for how the async rule is guarded and what that
+   * costs.
+   */
+  voteRecord: voteRecordRouter,
+
+  /**
+   * Executive sessions — M6, the code wave 5 Task 2 gave a rule for and this
+   * router applies for the first time. Five writes that were reaching the
+   * database with no authorization check of any kind. See
+   * `routers/executive-session.ts`.
+   */
+  executiveSession: executiveSessionRouter,
+
+  /**
+   * The public-comment speaker queue — M7, the same shape of hole as M6 and
+   * closed the same way. See `routers/guest-speaker.ts`.
+   */
+  guestSpeaker: guestSpeakerRouter,
+
+  /**
+   * The SSE transport, replacing Supabase Realtime. One subscription today
+   * (`onMeetingChange`), which is the whole of `live.tsx`'s eight channels —
+   * see `routers/realtime.ts` for why eight streams would not work in a
+   * browser. Phase E wave 5, Task 1.
+   */
+  realtime: realtimeRouter,
 
   /**
    * Who the caller is, read back through the tenant context rather than echoed

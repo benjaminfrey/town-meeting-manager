@@ -26,7 +26,10 @@ import { listJobTenants, tenantJob } from "./jobs/tenant-job.js";
 import { sql } from "drizzle-orm";
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { appRouter } from "./trpc/router.js";
-import { createTrpcContext } from "./trpc/context.js";
+import { createTrpcContextFactory } from "./trpc/context.js";
+import { createRealtimeBus } from "./realtime/bus.js";
+import postgres from "postgres";
+import { TRPC_BATCH_PATH_LENGTH_LIMIT } from "@town-meeting/shared";
 
 export interface BuildServerOptions {
   /**
@@ -63,7 +66,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // network, and nginx sets `X-Forwarded-Proto` itself — overwriting anything
   // a client sent. If the API is ever exposed directly, this must be narrowed
   // to the proxy's address.
-  const app = Fastify({ logger: true, trustProxy: true });
+  // `maxParamLength` — Phase E, wave 5, Task 7. Fastify's router
+  // (`find-my-way`) defaults this to 100, sized for an id or a slug in a
+  // dynamic path segment. `/api/trpc/*` puts something else there:
+  // `httpBatchLink` joins every procedure a screen's loader fires in one
+  // tick into ONE comma-separated segment (`/api/trpc/a,b,c?batch=1`), and
+  // the live meeting screen alone composes a batch of six whose joined path
+  // is 151-152 characters — over the default, so the route 404s before tRPC
+  // ever sees the request. `TRPC_BATCH_PATH_LENGTH_LIMIT`'s doc comment
+  // (`@town-meeting/shared`) has the full sizing argument: the check this
+  // guards is a single length comparison against a string the transport
+  // layer (Node's own header-size limit, and nginx's in production) has
+  // already bounded far below this value, so raising it costs nothing extra
+  // and admits no request shape that was not reaching Fastify regardless.
+  const app = Fastify({
+    logger: true,
+    trustProxy: true,
+    maxParamLength: TRPC_BATCH_PATH_LENGTH_LIMIT,
+  });
 
   // Registered before anything else so it sees every route, including those
   // inside encapsulated children (`onRoute` propagates down).
@@ -202,11 +222,50 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // The context is built from the request the gate has already processed —
   // see `trpc/context.ts`. It carries `withTenant` and nothing else that can
   // reach the database.
+  // ─── The realtime bus (Phase E wave 5, Task 1) ───────────────────
+  //
+  // One `LISTEN` connection for the whole process, on its OWN postgres.js
+  // handle rather than a slot borrowed from the application pool: a listening
+  // connection is occupied for the life of the process, so taking one from the
+  // pool would permanently shrink it, and `sql.listen`'s automatic reconnect
+  // is easier to reason about on a handle nothing else uses.
+  //
+  // Same `DATABASE_URL`, therefore the same non-owner `tmm_app` role as every
+  // query — `LISTEN` needs no privilege, so this is not an elevated handle.
+  // See `realtime/bus.ts` for why the tenancy filter it feeds is application
+  // code and cannot be row level security.
+  //
+  // Closed with the server, ahead of the application pool, so no subscription
+  // is left parked on a promise nothing will resolve.
+  //
+  // `createAppDb()` above has already refused to boot without `DATABASE_URL`,
+  // so this cannot be unset here — but it is re-checked rather than asserted
+  // away, because `postgres(undefined)` does not throw: it falls back to
+  // libpq's own environment defaults and connects somewhere plausible-looking
+  // as whatever role the process happens to run as, which is the silent
+  // misconfiguration `auth/db.ts`'s own guard exists to prevent.
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required for the realtime LISTEN connection.");
+  }
+  const realtime = await createRealtimeBus({
+    sql: postgres(databaseUrl, { max: 1, onnotice: () => {} }),
+    log: app.log,
+  });
+  app.addHook("onClose", async () => realtime.close());
+
   await app.register(fastifyTRPCPlugin, {
     prefix: "/api/trpc",
+    // SSE, not WebSockets — `docs/advisory-resolutions/5.1-realtime-transport.md`
+    // resolves the transport and verified reconnect-resume against a real
+    // process kill and through real nginx. Stated explicitly rather than left
+    // to the default so that a future reader finds the decision here, next to
+    // the mount, instead of inferring it from the absence of
+    // `@fastify/websocket`.
+    useWSS: false,
     trpcOptions: {
       router: appRouter,
-      createContext: createTrpcContext,
+      createContext: createTrpcContextFactory({ realtime }),
       onError({ path, error }: { path?: string; error: Error }) {
         app.log.error({ err: error, path }, "tRPC procedure failed");
       },

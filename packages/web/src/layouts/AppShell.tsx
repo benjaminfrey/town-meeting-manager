@@ -4,6 +4,13 @@
  * Replaces the former RootLayout (sidebar) + MinimalLayout (rice-paper) split.
  * Structure: persistent labeled sidebar + top bar + command palette, with a
  * calm rice-paper surface inside. One consistent navigation everywhere.
+ *
+ * The `<ConnectionStatusBar />` in the top bar is the app-GLOBAL half of Phase
+ * E wave 5's transport work, and it changed meaning in Task 6 without changing
+ * its call here: it used to report a Supabase Realtime WebSocket that no
+ * longer exists, and now reports whether this device can reach the network at
+ * all. See that component for why the SSE world has two connection states and
+ * why only one of them belongs on every screen.
  */
 
 import { useState } from "react";
@@ -51,7 +58,18 @@ const navItems: NavItem[] = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-/** Returns the id of an in-progress meeting for this town, or null. */
+/**
+ * Returns the id of an in-progress meeting for this town, or null.
+ *
+ * TODO(phase-e-wave-6): meeting.liveByTown — the sidebar's live-meeting
+ * indicator is the last raw Supabase read in the app shell. `meeting.byTown`
+ * exists but is not a drop-in: it selects no `started_at`, which is this
+ * query's ordering column, and returns every non-cancelled meeting where this
+ * needs the single most recently started `open`/`in_progress` one. Left rather
+ * than widened inside a transport task; marked rather than left silent,
+ * because conventions item 11's completeness sweep reads an unmarked file as
+ * done and this one was unmarked through four waves.
+ */
 function useLiveMeetingId(townId: string | null): string | null {
   const { data } = useQuery({
     queryKey: ["live-meeting-indicator", townId],

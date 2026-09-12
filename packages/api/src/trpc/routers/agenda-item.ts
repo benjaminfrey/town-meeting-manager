@@ -47,18 +47,55 @@
  * router's greppable form of "did this procedure re-check the row's true
  * board" — `grep -n "OnAuthorizedBoard(" packages/api/src/trpc/routers/agenda-item.ts`
  * answers it for all seven writes; `assertMatchesAuthorizedBoard(` itself
- * appears twice, once inside each helper.
+ * appears ONCE now, inside `assertItemsOnAuthorizedBoard`.
+ *
+ * **`assertMeetingOnAuthorizedBoard` moved OUT of this file in wave 5, Task 3**
+ * — to `trpc/board-derivation.ts`, unchanged in body, because six more tables
+ * (`motion`, `vote_record`, `meeting_attendance`, `executive_session`,
+ * `guest_speaker`, `agenda_item_transition`) derive their board the identical
+ * way and wave 5's plan says to reuse it rather than reinvent it. The only
+ * visible difference here is the import and the error prefix inside the
+ * helper. `assertItemsOnAuthorizedBoard` stayed: it additionally returns the
+ * distinct meeting ids `reorder` needs, and two ways to ask one question is
+ * one too many.
+ *
+ * ─── Every write here publishes, as of wave 5, Task 3 ─────────────────────
+ *
+ * `agenda_item` is one of the eight `LIVE_MEETING_TOPICS`
+ * (`realtime/events.ts`), and all seven writes below sat on
+ * `router-wiring.test.ts`'s `AWAITING_PUBLISH` ledger from the moment wave 5
+ * Task 1 created it — seven of its eleven entries. They now call
+ * `publishRealtimeEvent(tx, …)` as the last statement inside the write's own
+ * transaction, so a second device watching this meeting refetches when the
+ * write COMMITS and not before. The meeting id comes from
+ * `input.meetingId` where the procedure takes one and from
+ * `assertItemsOnAuthorizedBoard`'s returned `meetingIds` where it does not —
+ * never from a second query, and never from client input the guard did not
+ * check.
  *
  * ─── Authorization: A2 for every write, including the delete ──────────────
  *
  * `rules.ts`'s agenda_item section is "A2, BOARD-SCOPED" —
  * `assertCanInsertAgendaItem` and `assertCanUpdateAgendaItem` are each
- * exactly `assertPermission(actor, "A2", {boardId, action})`. Every write
- * here therefore uses `requireBoardPermission("A2", boardIdFrom(), {action})`,
+ * exactly `assertPermission(actor, "A2", {boardId, action})`. Every CONTENT
+ * write here therefore uses
+ * `requireBoardPermission("A2", boardIdFrom(), {action})`,
  * which IS that call (see `meeting.ts`'s header for the same reasoning about
  * `assertCanInsertMeeting`: going through the code form is the same check,
  * not a shortcut around the rule), and which conventions item 2 tells authors
- * to reach for FIRST for a single-code rule.
+ * to reach for FIRST for a single-code rule. The count moved in wave 5,
+ * Task 2 — quote the grep, not the number:
+ *
+ *     $ grep -cE '^\s+requireBoardPermission\("A2"' packages/api/src/trpc/routers/agenda-item.ts
+ *     7   # at fb3a5cd, wave 5 Task 0's carry-over check
+ *     5   # after wave 5 Task 2 moved setOperatorNotes and markComplete to
+ *         # requireBoardActor(assertCanUpdateAgendaItemProgress)
+ *
+ * Anchored to leading whitespace so it counts GUARDS, not the mentions of one
+ * in this comment. Unanchored the same command answers 9 at both commits, and
+ * `phase-e-conventions.md`'s wave 5 Task 0 carry-over bullet quoted it in that
+ * form against a hand-trimmed 7-line listing — the markers-versus-mentions
+ * confusion item 11 records for `TODO(phase-e-wave-`, in a second place.
  *
  * **The delete rule, decided rather than left implicit.** There is no
  * `assertCanDeleteAgendaItem` in `rules.ts` and no delete-specific
@@ -115,14 +152,23 @@
  * component is imported only by `routes/meetings.$meetingId.live.tsx`, which
  * is **wave 5**'s file — so the procedures land here (this wave's plan: "so
  * wave 5 extends this router rather than creating one") and **nothing calls
- * them yet**. They are tested exactly like the wired writes; what is missing
- * is only the client change. One question wave 5 owns and this task did not
- * decide for it: both use A2, matching every other `agenda_item` write, but a
- * live-meeting operator may hold M1/M2 and no A2 — if the product wants a
- * presiding officer with no agenda-editing rights to mark items complete,
- * that is a rules change (a second code, hence `requireBoardActor`), not a
- * wiring change, and it should be made deliberately rather than discovered
- * when a clerk is refused mid-meeting.
+ * them yet**; wave 5, Task 4 owns the client change.
+ *
+ * ~~One question wave 5 owns and this task did not decide for it: both use A2,
+ * matching every other `agenda_item` write, but a live-meeting operator may
+ * hold M1/M2 and no A2 — if the product wants a presiding officer with no
+ * agenda-editing rights to mark items complete, that is a rules change (a
+ * second code, hence `requireBoardActor`), not a wiring change, and it should
+ * be made deliberately rather than discovered when a clerk is refused
+ * mid-meeting.~~ — **decided in wave 5, Task 2, and the prediction held
+ * exactly: it is a second code and it is `requireBoardActor`.** Both
+ * procedures are now `.use(requireBoardActor(assertCanUpdateAgendaItemProgress))`
+ * — A2 OR M1 for the board, `rules.ts`'s rule 2a. They are the only two
+ * writes in this file NOT guarded by `requireBoardPermission("A2", …)`, and
+ * the line that separates them from the other seven is CONTENT versus
+ * LIVE-RUN state: `status` and `operator_notes` are what the meeting did to
+ * the agenda, not what the agenda says. Widening, not narrowing — every
+ * caller who could reach these under A2 still can.
  *
  * ─── No resolver-side `ctx.actor()` call anywhere in this file ────────────
  *
@@ -141,47 +187,19 @@ import {
   router,
   protectedProcedure,
   requireBoardPermission,
+  requireBoardActor,
   assertMatchesAuthorizedBoard,
   boardIdFrom,
 } from "../trpc.js";
+import { assertCanUpdateAgendaItemProgress } from "../authorization/rules.js";
+import {
+  assertMeetingOnAuthorizedBoard,
+  type BoardAuthorizedContext,
+} from "../board-derivation.js";
+import { publishRealtimeEvent } from "../../realtime/events.js";
 import { assertMeetingExists } from "./meeting.js";
 import { toRows } from "../../db/rows.js";
 import type { TenantTx } from "../../db/with-tenant.js";
-
-/**
- * The context shape the two defence helpers need — the board
- * `requireBoardPermission` authorized, carried on the request context.
- */
-interface BoardAuthorizedContext {
-  authorizedBoardId?: string;
-}
-
-/**
- * Resolve a meeting's real board inside the caller's own tenant transaction
- * and refuse unless it is the board the guard authorized.
- *
- * This IS `meeting.ts`'s exported `assertMeetingExists` — the same
- * `WHERE id = $1` against `meeting` under the same RLS, answering the same
- * NOT_FOUND for a foreign or nonexistent id (conventions item 3, and the FK
- * hazard item 3's second half describes) — with the row's `board_id`
- * returned as well, because the mismatch defence needs it and a second query
- * for the same row would be two round trips for one question. Not a
- * weakening of that check: it is that check, plus a column.
- */
-async function assertMeetingOnAuthorizedBoard(
-  ctx: BoardAuthorizedContext,
-  tx: TenantTx,
-  meetingId: string,
-): Promise<string> {
-  const rows = toRows<{ board_id: string }>(
-    await tx.execute(sql`SELECT board_id FROM meeting WHERE id = ${meetingId}`),
-    (message) => new Error(`agendaItem.assertMeetingOnAuthorizedBoard: ${message}`),
-  );
-  const row = rows[0];
-  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-  assertMatchesAuthorizedBoard(ctx, row.board_id);
-  return row.board_id;
-}
 
 /**
  * The many-row form: derive the DISTINCT set of boards a list of agenda item
@@ -308,10 +326,30 @@ export const agendaItemRouter = router({
    * `PublishAgendaDialog.tsx` — the five files that read an item. NOT
    * selected, each deliberately: `town_id` (RLS scopes this; conventions item
    * 2's "no redundant WHERE town_id"), `meeting_id` (every row is this
-   * meeting's — it is the argument), `status`, `operator_notes` and
-   * `source_minutes_document_id` (nothing on the builder reads them; wave 5's
-   * live screen does read `status`, and adds it the day it needs it),
-   * `created_at`/`updated_at`, `search_vector`.
+   * meeting's — it is the argument), `created_at`/`updated_at` and
+   * `search_vector`.
+   *
+   * **`source_minutes_document_id` was on that not-selected list and is now
+   * selected — wave 5, Task 4.** Same rule as the two columns below, one task
+   * later: `routes/meetings.$meetingId.live.tsx`'s minutes-approval effect
+   * reads it to decide which agenda items are "approve the minutes of <date>"
+   * items, and which `minutes_document` a passed motion on one of them
+   * approves. That effect is the only reader in the repo
+   * (`grep -rn "source_minutes_document_id" packages/web/src`), and it was on
+   * raw Supabase until Task 4 moved this screen's reads here. Conventions item
+   * 1's "add it back the day something does" — the agenda builder still
+   * ignores it.
+   *
+   * **`status` and `operator_notes` were on that not-selected list and are
+   * now selected — wave 5, Task 3.** The entry above used to read "nothing on
+   * the builder reads them; wave 5's live screen does read `status`, and adds
+   * it the day it needs it." This is that day: `AgendaNavigationPanel` renders
+   * a per-item status and `AgendaItemDetailPanel` renders and edits
+   * `operator_notes`, both of them `routes/meetings.$meetingId.live.tsx`'s
+   * children, and both of them wave 5, Task 4's wiring. Conventions item 1's
+   * "add it back the day something does", not a widening — the builder still
+   * ignores both, and `source_minutes_document_id` is still absent because
+   * nothing reads it through this procedure yet.
    *
    * **`exhibit_count` was here and is GONE — removed in wave 4, Task 3, and
    * the removal is the point rather than a tidy-up.** Task 1 added it as a
@@ -351,11 +389,15 @@ export const agendaItemRouter = router({
           background: string | null;
           recommendation: string | null;
           suggested_motion: string | null;
+          status: string;
+          operator_notes: string | null;
+          source_minutes_document_id: string | null;
         }>(
           await tx.execute(sql`
             SELECT ai.id, ai.section_type, ai.sort_order, ai.title, ai.description,
                    ai.presenter, ai.estimated_duration, ai.parent_item_id,
-                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion
+                   ai.staff_resource, ai.background, ai.recommendation, ai.suggested_motion,
+                   ai.status, ai.operator_notes, ai.source_minutes_document_id
             FROM agenda_item ai
             WHERE ai.meeting_id = ${input.meetingId}
             ORDER BY ai.sort_order ASC, ai.id
@@ -434,6 +476,11 @@ export const agendaItemRouter = router({
           `),
           (message) => new Error(`agendaItem.insert: ${message}`),
         );
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "agenda_item",
+        });
         return { id: rows[0]!.id };
       });
     }),
@@ -459,7 +506,7 @@ export const agendaItemRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET
             title = ${input.title},
@@ -473,6 +520,11 @@ export const agendaItemRouter = router({
             updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
@@ -531,6 +583,11 @@ export const agendaItemRouter = router({
             WHERE id = ${itemId}
           `);
         }
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { count: input.itemIds.length };
       });
     }),
@@ -550,8 +607,13 @@ export const agendaItemRouter = router({
     .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`DELETE FROM agenda_item WHERE id = ${input.itemId}`);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
@@ -649,23 +711,31 @@ export const agendaItemRouter = router({
             created += 1;
           }
         }
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: input.meetingId,
+          topic: "agenda_item",
+        });
         return { count: created };
       });
     }),
 
   /**
-   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * UNWIRED — wave 5, Task 4 owns the caller. `AgendaItemDetailPanel.tsx`'s
    * `saveNotesMutation`, which today writes `operator_notes` through the dead
    * Supabase client with no authorization check of any kind. See this file's
-   * header for why it lands here now and for the A2-versus-M1 question wave 5
-   * inherits.
+   * header for why it lands here.
+   *
+   * **A2 OR M1, settled in wave 5, Task 2** — the question this file's header
+   * left open. `operator_notes` is a live-run column, not agenda content, so
+   * the guard is `requireBoardActor(assertCanUpdateAgendaItemProgress)` rather
+   * than the `requireBoardPermission("A2", …)` every content write here uses.
+   * The full reasoning is in `rules.ts`'s rule 2a; the short form is that a
+   * presiding officer seated to run a board's meetings holds M1 and need not
+   * hold A2, and finding that out mid-meeting is the failure this closes.
    */
   setOperatorNotes: protectedProcedure
-    .use(
-      requireBoardPermission("A2", boardIdFrom(), {
-        action: "to record operator notes on an agenda item",
-      }),
-    )
+    .use(requireBoardActor(assertCanUpdateAgendaItemProgress))
     .input(
       z.object({
         boardId: z.string().uuid(),
@@ -675,36 +745,53 @@ export const agendaItemRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET operator_notes = ${input.operatorNotes}, updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),
 
   /**
-   * UNWIRED — wave 5 owns the caller. `AgendaItemDetailPanel.tsx`'s
+   * UNWIRED — wave 5, Task 4 owns the caller. `AgendaItemDetailPanel.tsx`'s
    * `markCompleteMutation`. Sets `status` and nothing else, matching that
-   * write exactly; it does NOT record an `agenda_item_transition` row (that
-   * table exists and nothing in the product writes it today — adding it here
-   * would be a feature, not a migration).
+   * write exactly; it does NOT record an `agenda_item_transition` row.
+   *
+   * **A2 OR M1, settled in wave 5, Task 2** — see `setOperatorNotes` above and
+   * `rules.ts`'s rule 2a. `status` is the meeting's progress through the
+   * agenda, not the agenda's contents.
+   *
+   * **Corrected here too:** this comment used to say `agenda_item_transition`
+   * "exists and nothing in the product writes it today." That does not
+   * reproduce — `routes/meetings.$meetingId.live.tsx` (`navigateToItem`,
+   * `handleMeetingEnd`) and `components/meeting/MeetingStartFlow.tsx` all
+   * write it, raw, with no authorization check; wave 5, Task 2 gave it rules
+   * 21d (M1) and Task 3 owns the procedures. What remains true is the narrow
+   * claim this procedure needs: `markComplete` itself does not write one, and
+   * making it do so would be a feature rather than a migration.
    */
   markComplete: protectedProcedure
-    .use(
-      requireBoardPermission("A2", boardIdFrom(), {
-        action: "to mark an agenda item complete",
-      }),
-    )
+    .use(requireBoardActor(assertCanUpdateAgendaItemProgress))
     .input(z.object({ boardId: z.string().uuid(), itemId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       return ctx.withTenant(async (tx) => {
-        await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
+        const { meetingIds } = await assertItemsOnAuthorizedBoard(ctx, tx, [input.itemId]);
         await tx.execute(sql`
           UPDATE agenda_item SET status = 'completed'::agenda_item_status, updated_at = now()
           WHERE id = ${input.itemId}
         `);
+        await publishRealtimeEvent(tx, {
+          townId: ctx.tenant.townId,
+          meetingId: meetingIds[0]!,
+          topic: "agenda_item",
+        });
         return { id: input.itemId };
       });
     }),

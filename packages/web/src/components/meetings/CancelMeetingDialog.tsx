@@ -26,9 +26,8 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { isTRPCClientError } from "@trpc/client";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { refusalMessage, trpc } from "@/lib/trpc";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -79,11 +78,7 @@ export function CancelMeetingDialog({
       await cancelMutation.mutateAsync({ meetingId, boardId });
       onOpenChange(false);
     } catch (err) {
-      setError(
-        isTRPCClientError(err) && err.data?.code === "FORBIDDEN"
-          ? "You don't have permission to cancel this meeting."
-          : "Couldn't cancel this meeting. Try again.",
-      );
+      setError(refusalMessage(err, "cancel this meeting"));
     } finally {
       setIsSaving(false);
     }

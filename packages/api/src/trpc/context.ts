@@ -42,14 +42,56 @@
  * for a connection the outer transaction itself is holding.
  *
  * `bindTenantAccess` below closes this structurally rather than leaving it to
- * a comment a future author has to have read: a per-request boolean, set for
- * the duration of every `withTenant` call (including the ONE `actor()` makes
+ * a comment a future author has to have read: a marker held for the DYNAMIC
+ * EXTENT of every `withTenant` call (including the ONE `actor()` makes
  * internally) and checked at the top of BOTH `withTenant` and `actor()`. A
  * reentrant call fails FAST, with a message naming the mistake, instead of
  * hanging until whatever timeout eventually gives up — 30 seconds under
  * vitest, and under a production pool sized just large enough to usually hide
  * it, a slow, mysterious connection-starvation incident instead of a loud
  * error at the exact line that caused it.
+ *
+ * ─── Why the marker is dynamic-extent and NOT per-request ─────────────────
+ *
+ * Phase E, wave 5, Task 7's fix round. It WAS a per-request boolean, from
+ * Stage 1 Task D1 until here, and that scope was wrong in a way no test in
+ * this repository could see.
+ *
+ * `httpBatchLink` puts N procedure calls on ONE HTTP request. tRPC's adapter
+ * builds ONE context for that request and resolves the N calls CONCURRENTLY.
+ * With a per-request boolean the first call to reach `ctx.withTenant` set the
+ * flag and every other call on the batch was refused — so the live meeting
+ * screen's five-query loader received one result and four reentrancy errors
+ * and rendered blank. Reproduced with curl on a two-procedure batch (see
+ * `.superpowers/sdd/2026-09-10-phase-e-wave-5-live-and-sse/task-7-report.md`),
+ * and invisible to 1725 green tests because every router test drives one
+ * procedure at a time through `createCaller` and the web suite stubs the
+ * transport, so nothing anywhere ever built a batch.
+ *
+ * The hazard this guard exists for is NESTING — `withTenant` called from
+ * inside another `withTenant`'s own callback — and nesting is a property of
+ * the DYNAMIC EXTENT of a call, not of the request that call arrived on. Two
+ * CONCURRENT `db.transaction()` calls take two pooled connections and cannot
+ * deadlock each other; on the harness's deliberate single-connection pool they
+ * simply QUEUE, which is slow and correct rather than stuck. It is only the
+ * nested case — an outer transaction awaiting code that is waiting for the
+ * connection the outer transaction itself holds — that never completes.
+ *
+ * `AsyncLocalStorage` is what expresses "inside this call" rather than "during
+ * this request": the store is established around `rawWithTenant` and is
+ * visible to everything the callback awaits, and to nothing else. A sibling
+ * procedure on the same batch runs in its own async context, sees no store,
+ * and opens its own transaction. This is the third time this guard has been
+ * narrowed (wave 3's fix round narrowed the actor half from `inTransaction` to
+ * `inTransaction && !actorSettled`); it is the first time the SCOPE rather
+ * than the CONDITION was the thing that was wrong, which is why it is a
+ * different kind of change from the two before it.
+ *
+ * The store holds a SET of scope tokens rather than one token, so that
+ * interleaved contexts nest correctly: if context A's transaction callback
+ * opens context B's transaction, B's `run` must not hide A's marker from a
+ * genuinely nested A call deeper in. One token per `bindTenantAccess` call
+ * keeps the per-context separation `createTrpcContext` already relied on.
  *
  * ─── What the actor half of that guard does NOT refuse, and why ───────────
  *
@@ -76,24 +118,101 @@
  * PENDING memo returns the SAME promise and opens no second transaction.
  *
  * The three states are pinned separately in `__tests__/context.test.ts`
- * (cold → throws, settled → succeeds, pending-but-unsettled → throws), and
- * that file records what the third state is reachable AS: because
- * `inTransaction` is one flag, a pending actor load and a separate open
- * `withTenant` cannot coexist (the second would be refused by the
- * `withTenant` half first), so the only reachable form is a re-entry into the
- * actor's OWN load window.
+ * (cold-inside-a-transaction → throws, settled-inside-a-transaction →
+ * succeeds, pending-with-a-DIFFERENT-transaction-open → throws). The third
+ * state changed shape in wave 5, Task 7's scope fix and is worth reading in
+ * full there: while the marker was per-REQUEST, a pending actor load left the
+ * flag set for the whole request, so the only reachable third state was a
+ * bare re-entry into the actor's own load window — which was refused even
+ * though it opens no second transaction. Now that the marker lasts only for a
+ * call's own extent, that bare re-entry is allowed (correctly: it returns the
+ * same promise), and the third state is reached the way it actually threatens
+ * a connection — a pending load awaited from inside a separate, open
+ * `withTenant` of the same context.
  *
  * `contextFor` in `packages/api/src/trpc/__tests__/fixtures.ts` calls this
  * same function — its own doc comment already promises it is "assembled the
  * same way `createTrpcContext` assembles it," and that promise is what makes
  * the guard testable at all: a test using a DIFFERENT, hand-rolled
  * actor/withTenant pairing could not exercise the real code path.
+ *
+ * ─── How long a context lives, now that one of them is a stream ───────────
+ *
+ * Phase E, wave 5, Task 1. Everything above was written when a context lived
+ * for one HTTP request and a few milliseconds. A tRPC SSE subscription's
+ * context is built once and lives for the whole stream, so both pieces of
+ * per-request state in `bindTenantAccess` had to be re-examined against a
+ * live meeting that runs for hours. The answers are recorded here because
+ * they are properties of THIS file, and because the next subscription's author
+ * will read this header and not the wave plan.
+ *
+ * **The reentrancy guard cannot be tripped by a subscription, and that is
+ * structural rather than careful.** The hazard is two NESTED `ctx.withTenant`
+ * calls — a stream fanning out per-event work from inside a still-open
+ * transaction. `routers/realtime.ts` opens exactly one transaction, at
+ * subscribe time, before its first `yield`, and makes no database call for the
+ * rest of the stream's life: its events carry no payload, so there is nothing
+ * to read. `routers/__tests__/realtime.test.ts` pins the count at one across a
+ * stream that delivers several events, so a future author who adds a per-event
+ * read fails a named test rather than discovering the guard in production.
+ *
+ * A subscription also cannot interfere with the caller's ORDINARY requests.
+ * The scope token is created per call to `bindTenantAccess`, and
+ * `createTrpcContext` calls it once per Fastify request — a query issued by
+ * the same browser while its stream is open is a different request, a
+ * different context and a different token. `__tests__/context.test.ts` pins
+ * that two contexts do not share the marker, and that two CONCURRENT calls on
+ * ONE context (the batched-request shape) do not either.
+ *
+ * **The memoised actor's staleness is bounded by `sse.maxDurationMs`, not by
+ * the meeting.** The worry is real in principle: an actor resolved once and
+ * reused would let a clerk whose permissions were revoked keep acting on the
+ * old answer for as long as the stream stayed up. Two things close it.
+ *
+ * First, the subscription this task ships never resolves an actor at all. Its
+ * only rule is tenancy, which RLS and the Fastify gate answer between them, so
+ * `phase-e-conventions.md` item 2's "a query whose only rule is tenancy is
+ * answered by RLS" applies and the memo is never warmed. There is no stale
+ * actor because there is no actor.
+ *
+ * Second — and this is what makes the answer hold for a FUTURE subscription
+ * that does need a permission code — `trpc.ts` sets `sse.maxDurationMs`, so
+ * every stream is ended by the server on a fixed cadence and the client's own
+ * resume handshake opens a NEW request. Measured during this task against a
+ * real Fastify server and a real `httpSubscriptionLink` client: at the
+ * deadline the server aborts the subscription's signal (the generator's
+ * `finally` runs with `signal.aborted === true`), the client reconnects
+ * transparently carrying `lastEventId`, resumes with no gap and no duplicate,
+ * never fires `onError`, and the server builds a NEW context — which re-runs
+ * `auth/fastify.ts`'s gate (session validity, account archival, tenant
+ * resolution, the cross-origin check) and the whole tRPC middleware chain.
+ *
+ * So the honest statement of the exposure, which is what the wave plan asked
+ * for in writing: **authorization on a subscription is evaluated when the
+ * stream is opened, and re-evaluated in full each time the client reconnects —
+ * which the server forces at least every `SSE_MAX_STREAM_DURATION_MS`. It is
+ * not re-evaluated between those points.** A permission revoked one second
+ * after a stream opens is therefore honoured within that window, and never
+ * later than it. What a subscriber can do inside the window is bounded by what
+ * an event is: a topic name, for a meeting in the town their session resolved
+ * to. Every refetch it prompts is an ordinary request with its own fresh
+ * context, its own fresh actor and its own RLS.
+ *
+ * That statement is only true while the bound is actually configured, and the
+ * bound lives in one object literal on `initTRPC.create()` — the shape a
+ * tidying pass simplifies away without noticing it has just removed the only
+ * limit on authorization staleness in the API. `trpc/__tests__/sse-bounds.test.ts`
+ * is what goes red when that happens: it asserts `appRouter` carries the
+ * option, and separately drives a real HTTP stream to the deadline to pin that
+ * the deadline ends it in the way that makes a client reconnect.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { CreateFastifyContextOptions } from "@trpc/server/adapters/fastify";
 import type { TenantTx } from "../db/with-tenant.js";
 import type { ResolvedTenant } from "../auth/tenant-context.js";
+import type { RealtimeBus } from "../realtime/bus.js";
 import { loadActor, type Actor, type ActorTenant } from "./authorization/actor.js";
 
 export interface AuthenticatedIdentity {
@@ -120,6 +239,21 @@ export interface TrpcContext {
    * something other than the database.
    */
   readonly actor?: () => Promise<Actor>;
+  /**
+   * The `LISTEN` bridge a subscription attaches to.
+   *
+   * Optional, and absent by default, because it is process-wide infrastructure
+   * rather than anything derived from this request: `server.ts` opens one bus
+   * and closes it with the server, and hands it to the context factory. A
+   * context built without one (every test that does not exercise a
+   * subscription) reaches `requireRealtimeBus` in `trpc.ts` and gets a wiring
+   * error naming the omission, rather than a subscription that silently never
+   * yields.
+   *
+   * Carries no tenancy of its own — see `realtime/bus.ts` for why a `LISTEN`
+   * connection cannot, and where the filtering therefore lives.
+   */
+  readonly realtime?: RealtimeBus;
 }
 
 /** What `bindTenantAccess` hands back — the pair every `TrpcContext` carries together. */
@@ -127,6 +261,17 @@ export interface BoundTenantAccess {
   readonly withTenant: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>;
   readonly actor: () => Promise<Actor>;
 }
+
+/**
+ * The tokens of every `ctx.withTenant` transaction currently OPEN on the async
+ * call stack — not on the request, and not on the connection.
+ *
+ * Module-level because an `AsyncLocalStorage` is a channel, not state: what is
+ * per-context is the token stored in it, minted by each `bindTenantAccess`
+ * call below. See this file's header, "Why the marker is dynamic-extent and
+ * NOT per-request", for why a per-request boolean was wrong.
+ */
+const openTransactionScopes = new AsyncLocalStorage<ReadonlySet<object>>();
 
 /**
  * Wire a raw, already-town-bound `withTenant` (Task B3's function — see
@@ -141,28 +286,37 @@ export function bindTenantAccess(
   rawWithTenant: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>,
   tenant: ActorTenant,
 ): BoundTenantAccess {
-  // Per-request (one call to `bindTenantAccess` = one request or one test's
-  // context), not per-connection and not module-level — see this file's
-  // header for why a shared-by-`db`-identity flag would false-positive
-  // across unrelated concurrent requests sharing the same pool.
-  let inTransaction = false;
+  // One token per context (one call to `bindTenantAccess` = one request or one
+  // test's context), so two contexts sharing a pool cannot see each other's
+  // transactions. The token is put in `openTransactionScopes` for the DYNAMIC
+  // EXTENT of a `withTenant` call rather than for the life of the request —
+  // see this file's header for why the per-request version false-positived on
+  // every tRPC HTTP batch.
+  const scopeToken = {};
+
+  /** Is a `withTenant` call of THIS context open on the current call stack? */
+  const insideOwnTransaction = (): boolean =>
+    openTransactionScopes.getStore()?.has(scopeToken) === true;
 
   const withTenant = async <T>(fn: (tx: TenantTx) => Promise<T>): Promise<T> => {
-    if (inTransaction) {
+    if (insideOwnTransaction()) {
       throw new Error(
-        "ctx.withTenant() called while a transaction from an EARLIER, still-open " +
-          "ctx.withTenant() call on this same request has not finished. This is a nested " +
-          "transaction on the same connection, which can deadlock a pooled client (see " +
-          "context.ts's header). Resolve the earlier call — or ctx.actor(), which opens one " +
-          "internally — before opening a second one, rather than from inside its callback.",
+        "ctx.withTenant() called from INSIDE a still-open ctx.withTenant() call's own " +
+          "callback. This is a nested transaction on the same connection, which can deadlock " +
+          "a pooled client (see context.ts's header). Resolve the outer call — or " +
+          "ctx.actor(), which opens one internally — before opening a second one, rather " +
+          "than from inside its callback. Two CONCURRENT calls that are not nested (the " +
+          "procedures of one tRPC HTTP batch, for instance) are fine and are not refused.",
       );
     }
-    inTransaction = true;
-    try {
-      return await rawWithTenant(fn);
-    } finally {
-      inTransaction = false;
-    }
+    // A NEW set rather than a mutation of the enclosing one: the marker has to
+    // disappear again when this call's extent ends, and an async context's
+    // store does that on its own. Copying the enclosing set keeps an outer
+    // context's marker visible to code nested inside this one.
+    const enclosing = openTransactionScopes.getStore();
+    const scopes = new Set(enclosing ?? []);
+    scopes.add(scopeToken);
+    return openTransactionScopes.run(scopes, () => rawWithTenant(fn));
   };
 
   let actorPromise: Promise<Actor> | undefined;
@@ -170,20 +324,27 @@ export function bindTenantAccess(
   // below actually needs and the one a raw promise cannot be asked for
   // synchronously. `actorPromise !== undefined` is NOT the same question: a
   // promise can be defined and still PENDING, with its own internal
-  // `withTenant` transaction holding the connection. That state is refused
-  // deliberately — it is one refactor away from unsafe — but it is NOT itself
-  // the original deadlock: a second call on a pending memo returns the SAME
-  // promise and opens no second transaction. Measured, not assumed: narrowing
-  // to `actorPromise !== undefined` runs the api suite green in normal time,
-  // failing only the state-3 pin. Set on both outcomes, because a REJECTED load
-  // opens no second transaction either; returning the rejected promise
-  // re-throws the load's own error, which is the honest answer.
+  // `withTenant` transaction holding the connection — and a caller reaching
+  // this line from inside a DIFFERENT open transaction of this same context
+  // would then be awaiting a load that is queued behind the very transaction
+  // it is being awaited from, which is the original deadlock wearing a warm
+  // memo's clothes. Set on both outcomes, because a REJECTED load opens no
+  // second transaction either; returning the rejected promise re-throws the
+  // load's own error, which is the honest answer.
+  //
+  // What this no longer refuses, since the scope fix in wave 5, Task 7: a
+  // second `actor()` call made while the memo is pending but with NO
+  // transaction of this context open on the call stack. That call returns the
+  // SAME promise and opens no second transaction, so there was never anything
+  // to deadlock; the old per-request flag refused it only because the memo's
+  // own internal `withTenant` had set a flag that outlived its own extent.
   let actorSettled = false;
   const actor = (): Promise<Actor> => {
-    if (inTransaction && !actorSettled) {
+    if (insideOwnTransaction() && !actorSettled) {
       throw new Error(
-        "ctx.actor() called from INSIDE a ctx.withTenant() transaction on this same request " +
-          "while the actor is still UNRESOLVED. An unresolved ctx.actor() call runs its OWN " +
+        "ctx.actor() called from INSIDE a still-open ctx.withTenant() transaction of this " +
+          "same context while the actor is still UNRESOLVED. An unresolved ctx.actor() call " +
+          "runs its OWN " +
           "withTenant() internally to load the account — see context.ts's header — so calling " +
           "it here opens a second transaction while the first is still open, which can " +
           "deadlock a pooled client. Resolve ctx.actor() BEFORE calling ctx.withTenant(), and " +
@@ -214,6 +375,43 @@ export function bindTenantAccess(
   return { withTenant, actor };
 }
 
+/** Process-wide things a context carries that are not derived from the request. */
+export interface TrpcContextDependencies {
+  readonly realtime?: RealtimeBus;
+}
+
+/**
+ * Build the context factory, closing over the process-wide dependencies.
+ *
+ * A factory rather than a second parameter on `createTrpcContext` because
+ * `fastifyTRPCPlugin` calls `createContext` itself and passes only the
+ * request. Added in Phase E wave 5, Task 1 for the realtime bus, which is one
+ * object per server and must be closed with it — reading it off
+ * `req.server` instead would make every test context depend on a decorated
+ * Fastify instance, and `__tests__/fixtures.ts`'s `contextFor` passes
+ * `{} as never` for `req` precisely so it does not have to build one.
+ */
+export function createTrpcContextFactory(
+  deps: TrpcContextDependencies = {},
+): (opts: CreateFastifyContextOptions) => TrpcContext {
+  return ({ req, res }: CreateFastifyContextOptions): TrpcContext => {
+    const tenant = req.tenant;
+    const rawWithTenant = req.withTenant;
+
+    const bound = tenant && rawWithTenant ? bindTenantAccess(rawWithTenant, tenant) : undefined;
+
+    return {
+      req,
+      res,
+      authUser: req.authUser,
+      tenant,
+      withTenant: bound?.withTenant,
+      actor: bound?.actor,
+      realtime: deps.realtime,
+    };
+  };
+}
+
 /**
  * Build the context from a Fastify request the tenant gate has already
  * processed.
@@ -223,19 +421,9 @@ export function bindTenantAccess(
  * therefore never authenticates anything; it copies forward what the one
  * authentication point decided. Adding a second check here is the shape Task
  * G1 spent its budget removing.
+ *
+ * The no-dependencies form. It carries no realtime bus, so a subscription
+ * reached through it refuses with a wiring error — which is what a caller that
+ * did not build one should get. `server.ts` uses `createTrpcContextFactory`.
  */
-export function createTrpcContext({ req, res }: CreateFastifyContextOptions): TrpcContext {
-  const tenant = req.tenant;
-  const rawWithTenant = req.withTenant;
-
-  const bound = tenant && rawWithTenant ? bindTenantAccess(rawWithTenant, tenant) : undefined;
-
-  return {
-    req,
-    res,
-    authUser: req.authUser,
-    tenant,
-    withTenant: bound?.withTenant,
-    actor: bound?.actor,
-  };
-}
+export const createTrpcContext = createTrpcContextFactory();

@@ -11,21 +11,33 @@
  * On "Start Meeting": updates meeting status to 'open', sets timestamps,
  * creates the first agenda_item_transition, and writes attendance records.
  *
- * TODO(phase-e-wave-5): this file's `meeting`/`meeting_attendance`/
- * `agenda_item`/`agenda_item_transition` writes are all still raw Supabase —
- * NOT a completeness gap alone for `startMeetingMutation`'s `meeting` write:
- * `meeting_tenant_isolation` is tenancy-only, so this `.update({status:
- * "open", ...})` has no authorization check of any kind today, the identical
- * shape Phase E wave 3 Task 2 closed for `meeting.cancel`/`meeting.updateStatus`
- * (see `packages/api/src/trpc/routers/meeting.ts`). Flagged here so wave 5's
- * live-meeting migration does not have to rediscover it.
+ * ─── Phase E, wave 5, Task 5: the call-to-order hole closes here ──────────
+ *
+ * ~~TODO(phase-e-wave-5): this file's writes are all still raw Supabase … this
+ * `.update({status: "open", ...})` has no authorization check of any kind
+ * today.~~ — **closed.** Both writes are tRPC now, and the `meeting.status`
+ * one is the second of the two holes wave 5's plan names (the other is
+ * adjournment, in `routes/meetings.$meetingId.live.tsx`). Task 3 built
+ * `meeting.callToOrder` and correctly declined to claim the hole was shut
+ * while nothing called it; this is what shuts it, and the evidence is the two
+ * halves wave 4's close-out says to demand — the procedure has a real caller
+ * AND the raw writes are gone rather than bypassed. This file no longer
+ * imports `useSupabase` at all.
+ *
+ * Calling a meeting to order was four sequential, untransacted writes
+ * (`meeting_attendance`'s recording-secretary flag, `meeting`, the first
+ * `agenda_item`, the opening `agenda_item_transition`), so a failure after the
+ * second left a meeting OPEN with no current item and no clock running. It is
+ * one transaction now, guarded by `requireBoardActor(assertCanUpdateMeeting)`
+ * — admin/A1/M1 on this meeting's own board. That guard governs the whole act
+ * rather than each table's own rule; the reasoning and its cost are in
+ * `callToOrder`'s own doc comment, not restated here.
  */
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
-import { trpc } from "@/lib/trpc";
+import { trpc, refusalMessage, type RouterOutputs } from "@/lib/trpc";
 import { Check, X, AlertTriangle, ChevronRight, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,17 +52,25 @@ interface MemberInfo {
   isDefaultRecSec: boolean;
 }
 
-interface AttendanceRecord {
-  id: string;
-  board_member_id: string | null;
-  person_id: string;
-  status: string;
-  is_recording_secretary: number;
-}
+/**
+ * One `meeting_attendance` row, as the procedure returns it.
+ *
+ * Phase E, wave 5, Task 4 — was a hand-written interface with
+ * `is_recording_secretary: number`, which the column has never been (it is
+ * `boolean`), reached from `live.tsx` through a
+ * `ComponentProps<typeof X>["attendance"]` cast that made the disagreement
+ * invisible. Conventions item 10: a child taking a tRPC payload takes the
+ * procedure's own output type, never a bag or a restatement.
+ */
+type AttendanceRecord = RouterOutputs["meetingAttendance"]["byMeeting"][number];
 
 interface MeetingStartFlowProps {
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to. Already a prop before this task, and
+   * now load-bearing: both procedures authorize on it before `.input()` parses.
+   * `townId` is gone — both take the town from the caller's own session.
+   */
   boardId: string;
   members: MemberInfo[];
   attendance: AttendanceRecord[];
@@ -72,7 +92,6 @@ const STEP_LABELS: Record<Step, string> = {
 
 export function MeetingStartFlow({
   meetingId,
-  townId,
   boardId,
   members,
   attendance,
@@ -82,7 +101,6 @@ export function MeetingStartFlow({
   hasQuorum,
   firstItemId,
 }: MeetingStartFlowProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("attendance");
   const [presidingId, setPresidingId] = useState<string>("");
@@ -134,124 +152,97 @@ export function MeetingStartFlow({
     }
   }
 
-  const toggleAttendanceMutation = useMutation({
-    mutationFn: async (member: MemberInfo) => {
-      const record = getAttendance(member.boardMemberId);
-      const currentStatus = (record?.status as string) ?? "absent";
-      const nextStatus = currentStatus === "present" ? "absent" : "present";
-
-      if (record) {
-        const { error } = await supabase
-          .from("meeting_attendance")
-          .update({ status: nextStatus })
-          .eq("id", record.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("meeting_attendance").insert({
-          id: crypto.randomUUID(),
-          meeting_id: meetingId,
-          town_id: townId,
-          board_member_id: member.boardMemberId,
-          person_id: member.personId,
-          status: nextStatus,
-          is_recording_secretary: 0,
-          arrived_at: null,
-          departed_at: null,
-        });
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
-      // INSERTs a `meeting_attendance` row for a member with none yet — the
-      // count `routes/meetings.$meetingId.tsx`'s shell renders through
-      // `trpc.meetingAttendance.countByMeeting`.
-      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
-    },
-  });
+  /**
+   * Roll call — `meetingAttendance.setRollCall`, a separate procedure from the
+   * status cycle `AttendancePanel` uses even though both "set this member's
+   * status, creating the row if it does not exist". This one writes `status`
+   * and nothing else; collapsing them would have a pre-meeting roll-call
+   * toggle clearing a `departed_at` it has never touched. See that router's
+   * header.
+   *
+   * `is_recording_secretary: 0` is gone with the raw insert — the column is
+   * `boolean`, and the integer literal was a real type defect wave 5 Task 4
+   * found while retyping this file's props and left for this one.
+   */
+  const toggleAttendanceMutation = useMutation(
+    trpc.meetingAttendance.setRollCall.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+        // Creates a `meeting_attendance` row for a member with none yet — the
+        // count `routes/meetings.$meetingId.tsx`'s shell renders through
+        // `trpc.meetingAttendance.countByMeeting`.
+        void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
+      },
+    }),
+  );
 
   const toggleAttendance = (member: MemberInfo): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      toggleAttendanceMutation.mutate(member, { onSuccess: () => resolve(), onError: reject });
+    const record = getAttendance(member.boardMemberId);
+    const currentStatus = (record?.status as string) ?? "absent";
+    const nextStatus = currentStatus === "present" ? "absent" : "present";
+    toggleAttendanceMutation.reset();
+    // Settles either way, and never REJECTS. The caller is
+    // `AttendanceStep`'s `onClick={() => void onToggle(member)}`, so a
+    // rejection here is an unhandled promise rejection — which vitest fails
+    // the whole run on, and which a browser logs and nobody reads. It used to
+    // be harmless only because the raw write had no failure a user could act
+    // on; now that this can answer FORBIDDEN, the refusal is RENDERED (from
+    // `toggleAttendanceMutation.error`) rather than thrown.
+    return new Promise((resolve) => {
+      toggleAttendanceMutation.mutate(
+        { boardId, meetingId, boardMemberId: member.boardMemberId, status: nextStatus },
+        { onSuccess: () => resolve(), onError: () => resolve() },
+      );
     });
   };
 
-  const startMeetingMutation = useMutation({
-    mutationFn: async () => {
-      const now = new Date().toISOString();
-
-      // Set recording secretary flag
-      const secAttendance = attendance.find((a) => a.person_id === secretaryId);
-      if (secAttendance) {
-        const { error } = await supabase
-          .from("meeting_attendance")
-          .update({ is_recording_secretary: 1 })
-          .eq("id", secAttendance.id);
-        if (error) throw error;
-      }
-
-      // Update meeting
-      const { error: meetingError } = await supabase
-        .from("meeting")
-        .update({
-          status: "open",
-          started_at: now,
-          presiding_officer_id: presidingId,
-          recording_secretary_id: secretaryId,
-          current_agenda_item_id: firstItemId,
-          updated_at: now,
-        })
-        .eq("id", meetingId);
-      if (meetingError) throw meetingError;
-
-      // Set first item to active and create transition
-      if (firstItemId) {
-        const { error: itemError } = await supabase
-          .from("agenda_item")
-          .update({ status: "active", updated_at: now })
-          .eq("id", firstItemId);
-        if (itemError) throw itemError;
-
-        const { error: transError } = await supabase.from("agenda_item_transition").insert({
-          id: crypto.randomUUID(),
-          meeting_id: meetingId,
-          agenda_item_id: firstItemId,
-          town_id: townId,
-          started_at: now,
-          ended_at: null,
+  const startMeetingMutation = useMutation(
+    trpc.meeting.callToOrder.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItems.byMeeting(meetingId),
         });
-        if (transError) throw transError;
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.attendance.byMeeting(meetingId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agendaItems.byMeeting(meetingId) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
-      });
-      // The kanban (routes/meetings.tsx) and board Meetings tab
-      // (routes/boards.$boardId.meetings.tsx) both read this meeting's
-      // status via trpc.meeting.byTown/byBoard — this write moves it
-      // draft/noticed → open, which both screens render.
-      void queryClient.invalidateQueries(trpc.meeting.pathFilter());
-      // Same shell, two more of its reads: this mutation flips the recording
-      // secretary's `meeting_attendance` row and the first `agenda_item` to
-      // `active`. Neither changes a COUNT today, but both are writes to the
-      // tables those two routers own — invalidated at the router, per
-      // conventions item 7.
-      void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
-      void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
-      toast.success("Meeting called to order");
-    },
-    onError: (err) => {
-      console.error("Failed to start meeting:", err);
-      toast.error("Couldn't start the meeting — please try again.");
-    },
-  });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.agendaItemTransitions.byMeeting(meetingId),
+        });
+        // The kanban (routes/meetings.tsx) and board Meetings tab
+        // (routes/boards.$boardId.meetings.tsx) both read this meeting's
+        // status via trpc.meeting.byTown/byBoard — this write moves it
+        // draft/noticed → open, which both screens render.
+        void queryClient.invalidateQueries(trpc.meeting.pathFilter());
+        // Same shell, two more of its reads: this mutation flips the recording
+        // secretary's `meeting_attendance` row and the first `agenda_item` to
+        // `active`. Neither changes a COUNT today, but both are writes to the
+        // tables those two routers own — invalidated at the router, per
+        // conventions item 7.
+        void queryClient.invalidateQueries(trpc.meetingAttendance.pathFilter());
+        void queryClient.invalidateQueries(trpc.agendaItem.pathFilter());
+        // And the first `agenda_item_transition` row this mutation opens — the
+        // read behind the live screen's per-item timer, moved onto
+        // `trpc.agendaItemTransition.byMeeting` in wave 5, Task 4.
+        void queryClient.invalidateQueries(trpc.agendaItemTransition.pathFilter());
+        toast.success("Meeting called to order");
+      },
+    }),
+  );
 
   const startMeeting = () => {
-    startMeetingMutation.mutate();
+    startMeetingMutation.reset();
+    startMeetingMutation.mutate({
+      meetingId,
+      boardId,
+      // `presidingOfficerId` is a `board_member.id` and `recordingSecretaryId`
+      // a `person.id` — two different nouns, as they were in the raw write
+      // (`SecretaryStep` selects by `member.personId`). The procedure checks
+      // the first against this meeting's board and the second for existence in
+      // the caller's town, neither of which the database has ever checked:
+      // `meeting.recording_secretary_id` carries no foreign key at all.
+      presidingOfficerId: presidingId || null,
+      recordingSecretaryId: secretaryId || null,
+      firstItemId,
+    });
   };
 
   return (
@@ -322,6 +313,14 @@ export function MeetingStartFlow({
             />
           )}
         </div>
+
+        {(toggleAttendanceMutation.error || startMeetingMutation.error) && (
+          <p className="px-6 pb-2 text-sm text-destructive" role="alert">
+            {toggleAttendanceMutation.error
+              ? refusalMessage(toggleAttendanceMutation.error, "record attendance")
+              : refusalMessage(startMeetingMutation.error, "call this meeting to order")}
+          </p>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t px-6 py-4">

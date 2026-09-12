@@ -1413,11 +1413,18 @@ describe("agendaItem.instantiateFromTemplate", () => {
 });
 
 /**
- * The two procedures nothing calls yet — wave 5's `live.tsx` is the caller.
- * Tested exactly like the wired writes, so wave 5 inherits a guard that is
- * already proven rather than one that has only ever been read.
+ * The two procedures wave 5, Task 4 wired. They were written a wave ahead of
+ * their caller and tested exactly like the wired writes, so `live.tsx`'s
+ * `AgendaItemDetailPanel` inherited a guard that was already proven rather
+ * than one that had only ever been read.
+ *
+ * The "(unwired — wave 5)" these two `describe`s carried until Task 4's fix
+ * round is what conventions item 14 calls a stale CLAIM behind an unchanged
+ * file: Task 4's close-out struck the identical claim in the conventions' own
+ * Known-gaps bullet and missed these two labels, one directory over, in a
+ * file the same task edited.
  */
-describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
+describe("agendaItem.setOperatorNotes (wired — live.tsx's AgendaItemDetailPanel)", () => {
   it("lets a caller holding A2 record and clear operator notes", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
@@ -1450,7 +1457,61 @@ describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
     });
   });
 
-  it("refuses a caller with no A2 on this board, and writes nothing", async () => {
+  /**
+   * The wave 5, Task 2 decision, as a test: `operator_notes` is a live-run
+   * column, so M1 (`start_run_meeting`) reaches it and A2 is not required.
+   * This caller holds M1 on one board and nothing else anywhere — the shape
+   * `TEMPLATE_BOARD_SPECIFIC_STAFF` produces — and would have been REFUSED by
+   * the `requireBoardPermission("A2", …)` this procedure shipped with.
+   */
+  it("lets a presiding officer holding M1 and NO A2 record operator notes", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const officer = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, officer));
+
+        await caller.agendaItem.setOperatorNotes({
+          boardId: town.boardId,
+          itemId,
+          operatorNotes: "Chair reads the letter",
+        });
+        expect((await readItems(db, town, meetingId))[0]?.operator_notes).toBe(
+          "Chair reads the letter",
+        );
+
+        // ...and that M1 does NOT leak into the agenda's contents: the same
+        // caller still cannot edit the item itself.
+        const err = await expectTrpcError(() =>
+          caller.agendaItem.update({
+            boardId: town.boardId,
+            itemId,
+            title: "Renamed",
+            description: null,
+            presenter: null,
+            estimatedDuration: null,
+            staffResource: null,
+            background: null,
+            recommendation: null,
+            suggestedMotion: null,
+          }),
+        );
+        expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A2 nor M1 on this board, and writes nothing", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -1530,7 +1591,7 @@ describe("agendaItem.setOperatorNotes (unwired — wave 5)", () => {
   });
 });
 
-describe("agendaItem.markComplete (unwired — wave 5)", () => {
+describe("agendaItem.markComplete (wired — live.tsx's AgendaItemDetailPanel)", () => {
   it("lets a caller holding A2 mark an item complete", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
@@ -1550,7 +1611,31 @@ describe("agendaItem.markComplete (unwired — wave 5)", () => {
     });
   });
 
-  it("refuses a caller with no A2 on this board, and leaves the status alone", async () => {
+  /** The other half of the wave 5, Task 2 decision — see `setOperatorNotes`. */
+  it("lets a presiding officer holding M1 and NO A2 mark an item complete", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const officer = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { M1: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, officer));
+
+        await caller.agendaItem.markComplete({ boardId: town.boardId, itemId });
+        expect((await readItems(db, town, meetingId))[0]?.status).toBe("completed");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses a caller with neither A2 nor M1 on this board, and leaves the status alone", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -1611,6 +1696,171 @@ describe("agendaItem.markComplete (unwired — wave 5)", () => {
           caller.agendaItem.markComplete({ boardId: town.boardId, itemId: "not-a-uuid" }),
         );
         expect(err.code).toBe("FORBIDDEN");
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * ─── Phase E, wave 5, Task 3 — the two live-run columns, and the publishes ──
+ *
+ * Two changes this wave made to a router wave 4 finished:
+ *
+ *   - `byMeeting` now returns `status` and `operator_notes`. The procedure's
+ *     own doc comment had listed them as deliberately absent, "wave 5's live
+ *     screen does read `status`, and adds it the day it needs it". This is
+ *     that day.
+ *   - All seven writes call `publishRealtimeEvent`, discharging seven of the
+ *     eleven `AWAITING_PUBLISH` entries. `router-wiring.test.ts` checks that
+ *     each one publishes AT ALL; what it cannot check is that the topic
+ *     matches the table and names the right meeting, which is what the test
+ *     below does for a representative write.
+ */
+
+import { captureRealtimeEvents } from "./live-fixtures.js";
+
+describe("agendaItem.byMeeting — the live-run columns", () => {
+  it("returns status and operator_notes", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId, { title: "Budget" });
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A2: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+        await caller.agendaItem.setOperatorNotes({
+          boardId: town.boardId,
+          itemId,
+          operatorNotes: "chair asked for the Q3 figures",
+        });
+        await caller.agendaItem.markComplete({ boardId: town.boardId, itemId });
+
+        const rows = await caller.agendaItem.byMeeting({ meetingId });
+        expect(rows[0]).toMatchObject({
+          status: "completed",
+          operator_notes: "chair asked for the Q3 figures",
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+/**
+ * ─── Phase E, wave 5, Task 4 — `source_minutes_document_id` ────────────────
+ *
+ * Added to `byMeeting`'s column list when `routes/meetings.$meetingId.live.tsx`
+ * moved its reads onto this procedure. That screen's minutes-approval effect
+ * is the column's only reader in the repo, and without it the effect silently
+ * matched nothing: `item.source_minutes_document_id` on a payload that does
+ * not carry it is `undefined`, every item filters out, and minutes approved by
+ * motion during a meeting quietly never move to `approved`.
+ */
+describe("agendaItem.byMeeting — the minutes-approval link", () => {
+  it("returns source_minutes_document_id, and null when there is no link", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const linkedId = await seedAgendaItem(db, town, meetingId, {
+          title: "Approve the minutes of February 10",
+          sortOrder: 0,
+        });
+        const plainId = await seedAgendaItem(db, town, meetingId, {
+          title: "Budget",
+          sortOrder: 1,
+        });
+        const docId = randomUUID();
+        await inTown(db, town, async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO minutes_document (id, meeting_id, town_id, board_id, status)
+            VALUES (${docId}, ${meetingId}, ${town.townId}, ${town.boardId}, 'review')
+          `);
+          await tx.execute(sql`
+            UPDATE agenda_item SET source_minutes_document_id = ${docId} WHERE id = ${linkedId}
+          `);
+        });
+
+        const reader = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, reader));
+        const rows = await caller.agendaItem.byMeeting({ meetingId });
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        expect(byId.get(linkedId)?.source_minutes_document_id).toBe(docId);
+        expect(byId.get(plainId)?.source_minutes_document_id).toBeNull();
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
+
+describe("agendaItem writes announce themselves", () => {
+  it("publishes the agenda_item topic for this meeting on insert", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A2: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        const { topics, events } = await captureRealtimeEvents(client, 1, () =>
+          caller.agendaItem.insert({
+            boardId: town.boardId,
+            meetingId,
+            parentItemId: null,
+            sectionType: "action",
+            sortOrder: 0,
+            ...VALID_ITEM_FIELDS,
+          }),
+        );
+        expect(topics).toEqual(["agenda_item"]);
+        expect(events[0]?.meetingId).toBe(meetingId);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("publishes on a delete, keyed to the deleted item's meeting", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const itemId = await seedAgendaItem(db, town, meetingId);
+        const clerk = await seedActor(db, town, {
+          role: "staff",
+          global: [],
+          boardOverrides: [{ boardId: town.boardId, permissions: { A2: true } }],
+        });
+        const caller = appRouter.createCaller(contextFor(db, town, clerk));
+
+        // The meeting id here cannot come from input — `delete` takes only an
+        // item id — so this also pins that it comes from the row the guard
+        // already read rather than from a second query after the delete.
+        const { topics, events } = await captureRealtimeEvents(client, 1, () =>
+          caller.agendaItem.delete({ boardId: town.boardId, itemId }),
+        );
+        expect(topics).toEqual(["agenda_item"]);
+        expect(events[0]?.meetingId).toBe(meetingId);
       } finally {
         await app.end();
       }

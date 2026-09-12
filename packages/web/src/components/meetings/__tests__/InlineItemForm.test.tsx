@@ -57,6 +57,9 @@ const existing: AgendaItem = {
   id: "item-1",
   section_type: "new_business",
   sort_order: 0,
+  status: "pending",
+  operator_notes: null,
+  source_minutes_document_id: null,
   title: "Site Plan Review",
   description: null,
   presenter: null,
@@ -225,6 +228,17 @@ describe("InlineItemForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "You don't have permission to add an item to this agenda.",
+    );
+  });
+
+  it("shows a refusal when the update is FORBIDDEN, rather than a Save that does nothing", async () => {
+    server.updateRefuses = true;
+    const { user } = renderForm(existing);
+
+    await typeTitleAndSubmit(user, "Site Plan Review (revised)", "Save");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You don't have permission to edit this agenda item.",
     );
   });
 

@@ -14,8 +14,8 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useSupabase } from "@/hooks/useSupabase";
 import { queryKeys } from "@/lib/queryKeys";
+import { trpc, refusalMessage, type RouterInputs } from "@/lib/trpc";
 import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -37,26 +37,42 @@ interface MemberInfo {
   seatTitle?: string | null;
 }
 
+/**
+ * The eight `motion_type` values `motion.insert` accepts, taken from the
+ * procedure rather than restated — see `lib/trpc.ts`'s `RouterInputs`. The
+ * `<select>` below is built from `MOTION_TYPE_OPTIONS`, which is now checked
+ * against this union, so an option the server would refuse is a compile error
+ * instead of a BAD_REQUEST during a live meeting.
+ */
+export type MotionType = RouterInputs["motion"]["insert"]["motionType"];
+
 export type MotionDialogMode =
   | { type: "main"; suggestedMotion?: string | null }
   | { type: "amendment"; parentMotionId: string; parentMotionText: string }
   | { type: "table"; itemTitle: string }
   | { type: "untable"; itemTitle: string }
-  | { type: "custom"; motionType: string; prefillText?: string };
+  | { type: "custom"; motionType: MotionType; prefillText?: string };
 
 interface MotionCaptureDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode: MotionDialogMode;
   meetingId: string;
-  townId: string;
+  /**
+   * The board this meeting belongs to — required by `motion.insert`, whose
+   * guard (`requireBoardPermission("M3", boardIdFrom())`) runs BEFORE
+   * `.input()` and so has nothing but the request body to authorize on. The
+   * resolver re-derives the meeting's REAL board inside its own transaction
+   * and refuses a mismatch. Conventions item 2 names this cost.
+   */
+  boardId: string;
   agendaItemId: string;
   presentMembers: MemberInfo[];
 }
 
 // ─── Motion Type Labels ─────────────────────────────────────────────
 
-const MOTION_TYPE_OPTIONS: { value: string; label: string }[] = [
+const MOTION_TYPE_OPTIONS: { value: MotionType; label: string }[] = [
   { value: "main", label: "Main Motion" },
   { value: "amendment", label: "Amendment" },
   { value: "substitute", label: "Substitute Motion" },
@@ -74,11 +90,10 @@ export function MotionCaptureDialog({
   onOpenChange,
   mode,
   meetingId,
-  townId,
+  boardId,
   agendaItemId,
   presentMembers,
 }: MotionCaptureDialogProps) {
-  const supabase = useSupabase();
   const queryClient = useQueryClient();
 
   // ─── Derive initial values from mode ─────────────────────────
@@ -87,28 +102,28 @@ export function MotionCaptureDialog({
       case "main":
         return {
           text: mode.suggestedMotion ?? "",
-          motionType: "main",
+          motionType: "main" as MotionType,
           parentMotionId: null as string | null,
           showSuggestedBanner: !!mode.suggestedMotion,
         };
       case "amendment":
         return {
           text: "",
-          motionType: "amendment",
+          motionType: "amendment" as MotionType,
           parentMotionId: mode.parentMotionId,
           showSuggestedBanner: false,
         };
       case "table":
         return {
           text: `to table ${mode.itemTitle}`,
-          motionType: "table",
+          motionType: "table" as MotionType,
           parentMotionId: null,
           showSuggestedBanner: false,
         };
       case "untable":
         return {
           text: `to untable ${mode.itemTitle}`,
-          motionType: "untable",
+          motionType: "untable" as MotionType,
           parentMotionId: null,
           showSuggestedBanner: false,
         };
@@ -124,12 +139,11 @@ export function MotionCaptureDialog({
 
   // ─── Form state ──────────────────────────────────────────────
   const [text, setText] = useState("");
-  const [motionType, setMotionType] = useState("main");
+  const [motionType, setMotionType] = useState<MotionType>("main");
   const [movedBy, setMovedBy] = useState("");
   const [secondedBy, setSecondedBy] = useState("");
   const [parentMotionId, setParentMotionId] = useState<string | null>(null);
   const [showSuggestedBanner, setShowSuggestedBanner] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Reset form when dialog opens / mode changes
   useEffect(() => {
@@ -141,7 +155,7 @@ export function MotionCaptureDialog({
       setShowSuggestedBanner(init.showSuggestedBanner);
       setMovedBy("");
       setSecondedBy("");
-      setError(null);
+      insertMotionMutation.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode]);
@@ -154,33 +168,36 @@ export function MotionCaptureDialog({
   const secondedByValid = isProceduralType || !!secondedBy;
   const noSamePerson = !secondedBy || secondedBy !== movedBy;
 
-  const insertMotionMutation = useMutation({
-    mutationFn: async () => {
-      const { error: insertError } = await supabase.from("motion").insert({
-        id: crypto.randomUUID(),
-        agenda_item_id: agendaItemId,
-        meeting_id: meetingId,
-        town_id: townId,
-        motion_text: text.trim(),
-        motion_type: motionType,
-        moved_by: movedBy,
-        seconded_by: secondedBy || null,
-        status: "seconded",
-        parent_motion_id: parentMotionId,
-        created_at: new Date().toISOString(),
-      });
-      if (insertError) throw insertError;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byItem(agendaItemId) });
-      toast.success("Motion recorded");
-      onOpenChange(false);
-    },
-    onError: (err) => {
-      setError(err instanceof Error ? err.message : "Failed to record motion");
-    },
-  });
+  /**
+   * Wave 5, Task 5 — `motion.insert` in place of the raw Supabase insert.
+   *
+   * `town_id`, `id` and `created_at` are no longer sent: the procedure takes
+   * the town from the caller's own session and lets the columns' own defaults
+   * (`gen_random_uuid()`, `now()`) supply the other two. The last of those is
+   * load-bearing rather than tidy — `motion.created_at` is what the live screen
+   * compares against `executive_session.exited_at` to decide which motions are
+   * post-session actions, and a skewed browser clock silently mis-sorted it.
+   *
+   * The write was unauthorized before (`motion_tenant_isolation` is
+   * tenancy-only), so FORBIDDEN is newly reachable and is rendered here, inside
+   * the `DialogContent`. That placement is the rule, not a coincidence: Radix
+   * marks everything outside an open dialog `aria-hidden`, and a refused insert
+   * leaves this dialog open — a message beside the trigger would be invisible
+   * for exactly the case it exists for (conventions item 2, wave 4 Task 3).
+   */
+  const insertMotionMutation = useMutation(
+    trpc.motion.insert.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byMeeting(meetingId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.motions.byItem(agendaItemId) });
+        // The live screen reads motions through `trpc.motion.byMeeting` as of
+        // wave 5, Task 4; neither legacy key above reaches it.
+        void queryClient.invalidateQueries(trpc.motion.pathFilter());
+        toast.success("Motion recorded");
+        onOpenChange(false);
+      },
+    }),
+  );
 
   const canSubmit =
     textValid && movedByValid && secondedByValid && noSamePerson && !insertMotionMutation.isPending;
@@ -188,8 +205,16 @@ export function MotionCaptureDialog({
   // ─── Submit ──────────────────────────────────────────────────
   const handleSubmit = () => {
     if (!canSubmit) return;
-    setError(null);
-    insertMotionMutation.mutate();
+    insertMotionMutation.mutate({
+      boardId,
+      meetingId,
+      agendaItemId,
+      motionText: text.trim(),
+      motionType,
+      movedBy,
+      secondedBy: secondedBy || null,
+      parentMotionId,
+    });
   };
 
   // ─── Computed title ──────────────────────────────────────────
@@ -264,7 +289,7 @@ export function MotionCaptureDialog({
                 id="motion-type"
                 className="mt-1 w-full rounded-md border bg-background px-3 py-1.5 text-sm"
                 value={motionType}
-                onChange={(e) => setMotionType(e.target.value)}
+                onChange={(e) => setMotionType(e.target.value as MotionType)}
               >
                 {MOTION_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -324,7 +349,11 @@ export function MotionCaptureDialog({
             </div>
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {insertMotionMutation.error && (
+            <p className="text-sm text-destructive" role="alert">
+              {refusalMessage(insertMotionMutation.error, "record a motion")}
+            </p>
+          )}
         </div>
 
         <DialogFooter>

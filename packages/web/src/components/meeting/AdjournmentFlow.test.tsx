@@ -1,44 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { renderWithProviders, screen, waitFor } from "@/test/render";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { AdjournmentControls } from "./AdjournmentControls";
 import { AdjournWithoutObjectionDialog } from "./AdjournWithoutObjectionDialog";
-
-const { mockChain, mockFrom } = vi.hoisted(() => {
-  const chain: Record<string, unknown> = {};
-  chain["then"] = (resolve: any, reject?: any) =>
-    Promise.resolve({ data: null, error: null }).then(resolve, reject);
-  chain["catch"] = (reject: any) =>
-    Promise.resolve({ data: null, error: null }).catch(reject as any);
-  const methods = [
-    "select",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "eq",
-    "neq",
-    "in",
-    "gte",
-    "lte",
-    "order",
-    "limit",
-    "single",
-    "maybeSingle",
-    "throwOnError",
-    "or",
-    "filter",
-  ];
-  for (const m of methods) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  const mockFrom = vi.fn().mockReturnValue(chain);
-  return { mockChain: chain as Record<string, ReturnType<typeof vi.fn>>, mockFrom };
-});
-
-vi.mock("@/lib/supabase", () => ({
-  supabase: { from: mockFrom },
-}));
 
 // ─── AdjournmentControls ────────────────────────────────────────────
 
@@ -134,5 +98,45 @@ describe("AdjournWithoutObjectionDialog", () => {
     renderWithProviders(<AdjournWithoutObjectionDialog {...defaultProps} />);
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(defaultProps.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  /**
+   * Phase E, wave 5, Task 5 — the placement half of the adjournment refusal.
+   *
+   * `meeting.adjourn` can answer FORBIDDEN now (the raw write it replaces had
+   * no authorization check of any kind), and a refused destructive write leaves
+   * this dialog OPEN while Radix marks everything outside it `aria-hidden`. So
+   * the message has to be rendered in here, and it has to carry `role="alert"`
+   * — which is what the test asserts, not the string.
+   *
+   * `routes/meetings.$meetingId.live.test.tsx` asserts the other half: that the
+   * route hands the message down rather than rendering it on the page.
+   */
+  it("renders a refusal INSIDE the dialog, where the rest of the page is aria-hidden", () => {
+    renderWithProviders(
+      <AdjournWithoutObjectionDialog
+        {...defaultProps}
+        error="You don't have permission to adjourn this meeting."
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    const alert = within(dialog).getByRole("alert");
+    expect(alert).toHaveTextContent(/permission to adjourn this meeting/i);
+  });
+
+  it("disables the confirm button from the caller's pending state, not a local flag", () => {
+    // The local `confirming` flag this dialog used to set was never cleared —
+    // correct only while adjourning could not fail. A refused adjournment left
+    // a permanently disabled button with nothing to explain it.
+    const { rerender } = renderWithProviders(
+      <AdjournWithoutObjectionDialog {...defaultProps} isPending />,
+    );
+    expect(screen.getByRole("button", { name: /adjourning/i })).toBeDisabled();
+
+    rerender(
+      <AdjournWithoutObjectionDialog {...defaultProps} isPending={false} error="Refused." />,
+    );
+    expect(screen.getByRole("button", { name: /confirm adjournment/i })).toBeEnabled();
   });
 });
