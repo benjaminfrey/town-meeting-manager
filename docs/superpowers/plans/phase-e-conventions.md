@@ -322,7 +322,8 @@ subject-carrying rule like `assertCanUpdateUserAccount`. The FIRST version of th
 `cancel` a local, one-off middleware (`requireCanUpdateMeeting`) for exactly this — but the review
 round that found this item's own count inconsistency also asked why it should stay local: a full
 audit of `rules.ts`'s `BoardScope` rules — **eighteen** at the time, nineteen since wave 4's Task 2
-added `assertCanPublishAgenda`, twenty-nine since wave 5's Task 2 added ten more; quote the grep
+added `assertCanPublishAgenda`, twenty-nine since wave 5's Task 2 added ten more, THIRTY since
+wave 6's Task 1 added `assertCanPublishMinutes`; quote the grep
 below, not any of the three numbers — found
 `assertCanUpdateMeeting` is not alone.
 ~~All but two~~ **All but THREE, as of wave 5** ARE exactly one `assertPermission` call — use
@@ -354,6 +355,16 @@ $ grep -cE ": BoardScope" packages/api/src/trpc/authorization/rules.ts
      # that had no rule at all (executive_session M6, guest_speaker M7,
      # agenda_item_transition M1, future_item_queue M1), the missing
      # vote_record DELETE (M3), and assertCanUpdateAgendaItemProgress
+30   # at f6a7ecf, after wave 6 Task 1 added assertCanPublishMinutes — R5,
+     # publish_approved_minutes, the THIRD consecutive wave to find a defined
+     # code enforced nowhere, and the first whose absence WIDENS rather than
+     # simply leaving a write unguarded: the nearest existing minutes-write
+     # rule is R1, and TEMPLATE_RECORDING_SECRETARY grants R1 without R5 by
+     # design, so migrating publish behind it would have compiled, stayed
+     # green, and handed a recording secretary the public portal. The same
+     # task decided R6 (export_minutes) gets NO rule; the reasoning is beside
+     # rule 13a in rules.ts, so that a fourth sweep finds a decision rather
+     # than re-deriving one.
 ```
 
 `rules.ts`'s own header said **SIXTEEN** from Stage 1 until that commit, three counts out of date —
