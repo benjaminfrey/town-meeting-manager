@@ -2758,6 +2758,13 @@ of this document as well as against the tree — if another section narrates the
 it.** The cheapest form of this is a grep of this file for the symbol a bullet's claim turns on
 (here, `trpc.test.ts`), which would have surfaced the contradiction immediately.
 
+**Widened a third time in wave 6, Task 0's fix round: a claim that a file is absent from "any"
+list in a multi-section document needs a grep of the WHOLE of that document for the filename, not
+a read of the one section already open.** See wave 6, Task 0's own fix-round paragraph below for
+the incident that found it, and for the more useful finding underneath it — whether either of the
+two widenings above should already have caught this, and why the answer turns out to be no for a
+reason worth knowing rather than a reason to shrug at.
+
 **Wave 5, Task 0 — run now, before any wave-5 code, per this task's own brief ("now, not at the
 end").** Method: walked every Known-gaps bullet and every present-tense status claim in items 2, 9
 and 11 for the specific ASSERTION it makes (not for whether it names a file this task touched — the
@@ -3078,6 +3085,41 @@ the Known-gaps list all agree with each other and with the code at HEAD.
 **No other false claim found.** Stated with the method above rather than as a
 bare assertion, per this item's own standing rule that an unstated method is
 what produced two of this project's five sweep failures.
+
+**Wave 6, Task 0's fix round — this same task's own sweep, immediately above, produced a false
+absence claim, and it is the incident behind this item's third widening.** The sweep's Known-gaps
+bullet (`2d5a704`) asserted `SourceDataPanel.tsx` "is not on any wave-6 task's file list ... not
+Task 5, and not Task 3/4." That is false: Task 3's own file list, in the wave-6 plan document
+(`docs/superpowers/plans/2026-09-12-phase-e-wave-6-minutes-and-completion.md`), names the file
+directly ("`routes/meetings.$meetingId.minutes.tsx`, `components/minutes/SourceDataPanel.tsx`, and
+whatever `MinutesEditor` needs"), eight lines from the Task 5 text the sweep had just quoted. The
+claim was produced by reading Task 5's twelve-file list, seeing the name absent from those twelve,
+and stopping there — writing "not Task 3/4" as if that had been checked the same way, when it had
+not been grepped at all.
+
+Neither of this item's first two widenings would have caught it, and the reason is more useful
+than the miss. The first widening (every numbered item's own prose, not only Known-gaps bullets)
+is about WHERE in `phase-e-conventions.md` a present-tense claim can hide; the false claim here
+was already sitting inside a Known-gaps bullet, the one shape every version of this step has
+always read, so that widening was never in play. The second widening — check each assertion
+against the rest of THIS document, because another section can contradict it — comes closer, but
+its own text scopes the check to another section of THIS FILE, `phase-e-conventions.md`, and its
+worked example is accordingly a code-claim contradicted by this file's own section on the SSE
+test. The contradiction here lived in a different file entirely: the wave-6 plan document, which
+a claim about "any wave-6 task's file list" is _about_ but which is not a section of
+`phase-e-conventions.md` for the second widening's check to reach. So this is a genuine scope gap
+in what the second widening's text covers, not only an execution lapse inside an already-adequate
+rule — a claim whose subject is another document's contents needs THAT document searched, and
+nothing above ever named the plan document as something to grep.
+
+**The method that works: before writing that a file, symbol, or claim is absent from every list or
+section of a document, `grep -n "<the exact string>" <that document>` for it — the whole document,
+not only the one section already open — and write "absent" only once that grep comes back empty.**
+Applied here, `grep -n "SourceDataPanel" docs/superpowers/plans/2026-09-12-phase-e-wave-6-minutes-and-completion.md`
+surfaces Task 3's line immediately. This is the same discipline item 11's own corrected count (a
+few sections above, from this same task) already used for a claim about the CODE — reading each
+candidate file directly rather than trusting a grep's mention count — applied to a claim about a
+PLAN DOCUMENT instead of the codebase.
 
 ---
 
