@@ -777,6 +777,43 @@ describe("PostMeetingReviewPage — minutes generation", () => {
     expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
   });
 
+  // Fix round 2, REQUIRED: `generateError` is shared by both dialogs, and
+  // until now it was cleared only by each dialog's own Cancel button — not
+  // by Radix's own close paths (Escape, outside click), and not on open. A
+  // clerk refused on Generate who dismisses that way, then opens Regenerate
+  // once a minutes document exists (e.g. someone else's realtime write),
+  // would see the GENERATE refusal rendered inside the REGENERATE dialog:
+  // accurate for a different action, which reads as a refusal of the one
+  // they are currently attempting. Same shape Task 3 fixed on
+  // `minutes.tsx`'s `actionError`; fixed here the same way — each dialog's
+  // own open transition clears `generateError` first.
+  it("clears a stale Generate refusal when Regenerate is opened without Cancel", async () => {
+    apiJson.mockRejectedValueOnce(new Error("Minutes generation failed"));
+    const { user } = renderRoute();
+
+    await user.click(await screen.findByRole("button", { name: /generate minutes draft/i }));
+    await user.click(await screen.findByRole("button", { name: /^generate draft$/i }));
+    await screen.findByRole("alert");
+
+    // Dismissed via Escape, not Cancel — the one path that used to leave
+    // `generateError` standing.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // A minutes document now exists, so the action bar swaps Generate for
+    // Regenerate — set directly on the cache, the same way the pathFilter
+    // test above controls it, rather than round-tripping another `apiJson`
+    // call.
+    queryClient.setQueryData(
+      trpc.minutesDocument.byMeeting.queryOptions({ meetingId: "meeting-1" }).queryKey,
+      { id: "md-1", status: "draft" },
+    );
+
+    await user.click(await screen.findByRole("button", { name: /regenerate/i }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("posts to the regenerate route from the regenerate dialog", async () => {
     server.minutesDoc = { id: "md-1", status: "draft" };
     const { user } = renderRoute();

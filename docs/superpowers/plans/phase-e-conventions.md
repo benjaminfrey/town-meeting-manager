@@ -730,6 +730,34 @@ because item 2's coverage procedure was adopted in wave 4 specifically to catch 
 branches, over a CI gate; a false positive on exactly the case it was chosen for is worse than the
 procedure not existing, since it reads as confirmation rather than as silence.
 
+**A shared error `useState` rendered into more than one dialog is a defect shape in itself, not
+just a coverage gap.** Two confirmed instances, both wave 6 Task 3/4, both the identical shape:
+`meetings.$meetingId.minutes.tsx`'s `actionError` fed four render sites (the outer paragraph plus
+the submit/publish/return dialogs) and `meetings.$meetingId.review.tsx`'s `generateError` fed two
+(the generate and regenerate dialogs). In both, the state was cleared only by each dialog's own
+Cancel button — never by opening a DIFFERENT dialog, and never by Radix's own close paths (Escape,
+an outside click) on the SAME one. A refusal from one write survives to be shown, accurately
+worded, inside a different action's dialog — worse than useless, because it reads as a refusal of
+the action the user is currently attempting. `minutes.tsx` was fixed first (fix round 1, fresh
+`onOpenChange` handlers that clear the shared error whenever a dialog OPENS, wired to both the
+trigger buttons and each `Dialog`/`AlertDialog`'s own `onOpenChange`); `review.tsx` had the
+identical shape, unnoticed by an implementer and a reviewer who had both just read that fix,
+until a coverage dispute forced a second look at the surrounding lines (task-4 fix round 2). Fixed
+the same way there. **Neither instance was split into per-dialog state** — clearing on open is
+still required per dialog even with separate variables (reopening the SAME dialog after a failed
+attempt must not show the stale message either), and once that clear is in place a shared error
+can no longer leak across dialogs, so a second variable would add nothing a case depends on.
+**Check for this shape whenever a screen has more than one dialog and one `useState` error feeds
+more than one `role="alert"` site** — grep the file for `useState<string | null>` (or similar)
+names ending in `Error`, then count how many `role="alert"` blocks read that same name. **Not
+proposed as a mechanical gate**: the two known instances are both files this document already
+names as reviewed line by line, so the population it would run against is small, and a grep for
+"one error name feeding N alert blocks" would also flag the ordinary, correct case of one error
+rendered at one site read by two tests (no leak at all) — false-positive rate not measured because
+no third instance has yet turned up to justify building it; if one does, measure the grep's hit
+rate against every dialog-bearing screen in the phase before treating it as a gate, the same way
+the branch-coverage-threshold idea above was measured and rejected rather than assumed.
+
 **Where a table has TWO creation paths, reconcile the authorization, not the transport.** `exhibit` is
 the first table in this phase reached by both a tRPC procedure and a Stage-1 Fastify route, and the
 answer was NOT to move one into the other. The file-upload path stays at `POST /api/files/exhibits`

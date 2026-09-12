@@ -469,6 +469,42 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
     [meetingId, styleOverride, effectiveMinutesStyle],
   );
 
+  /**
+   * `generateError` is one piece of state rendered inside BOTH generation
+   * dialogs' `{generateError && <p role="alert">...}` blocks below — only
+   * one of the two is ever open at a time, but that does not stop a
+   * refusal from ONE surviving to be shown inside the OTHER. Each dialog's
+   * own Cancel button already clears it, but that was the only path that
+   * did: Radix's own close paths (Escape, an outside
+   * click) called `setGenerateDialogOpen`/`setRegenerateDialogOpen` directly
+   * and left `generateError` standing. A clerk refused on Generate who
+   * dismissed that way, then opened Regenerate once a minutes document
+   * existed, was shown the GENERATE refusal inside the REGENERATE dialog —
+   * accurate for a different action, which reads as a refusal of the one
+   * they are currently attempting. Same shape as the `actionError` bug Task
+   * 3 fixed on `minutes.tsx`; fixed the same way, here: every open
+   * transition clears the stale error first, so the trigger buttons call
+   * these handlers with `true` instead of setting state directly, and both
+   * `Dialog`s' `onOpenChange` route through them rather than through the
+   * raw setter.
+   *
+   * Not split into `generateError`/`regenerateError`: clearing on open is
+   * still required per-dialog even with separate state (reopening the SAME
+   * dialog after a failed attempt must not show the old message either),
+   * and once that clear is in place a single shared error can no longer
+   * leak across dialogs — splitting the state would add a second variable
+   * with no case it alone would catch.
+   */
+  const handleGenerateDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setGenerateError(null);
+    setGenerateDialogOpen(open);
+  }, []);
+
+  const handleRegenerateDialogOpenChange = useCallback((open: boolean) => {
+    if (open) setGenerateError(null);
+    setRegenerateDialogOpen(open);
+  }, []);
+
   // ─── Export handler ────────────────────────────────────────────
 
   const handleExport = useCallback(() => {
@@ -983,7 +1019,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
         </Button>
         <div className="flex gap-2">
           {canGenerateMinutes && !hasMinutes && (
-            <Button onClick={() => setGenerateDialogOpen(true)}>
+            <Button onClick={() => handleGenerateDialogOpenChange(true)}>
               <FileText className="mr-1 h-4 w-4" />
               Generate Minutes Draft
             </Button>
@@ -1000,7 +1036,11 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
               {canGenerateMinutes &&
                 minutesDoc?.status !== "approved" &&
                 minutesDoc?.status !== "published" && (
-                  <Button variant="outline" size="sm" onClick={() => setRegenerateDialogOpen(true)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRegenerateDialogOpenChange(true)}
+                  >
                     <RefreshCw className="mr-1 h-4 w-4" />
                     Regenerate
                   </Button>
@@ -1015,7 +1055,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       </div>
 
       {/* Generate Minutes Dialog */}
-      <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+      <Dialog open={generateDialogOpen} onOpenChange={handleGenerateDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Generate Minutes Draft</DialogTitle>
@@ -1087,7 +1127,7 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
       </Dialog>
 
       {/* Regenerate Minutes Dialog */}
-      <Dialog open={regenerateDialogOpen} onOpenChange={setRegenerateDialogOpen}>
+      <Dialog open={regenerateDialogOpen} onOpenChange={handleRegenerateDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Regenerate Minutes Draft</DialogTitle>
