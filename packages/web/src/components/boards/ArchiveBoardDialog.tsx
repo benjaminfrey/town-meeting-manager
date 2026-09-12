@@ -97,9 +97,15 @@ export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: Archiv
 
   const isSaving = archiveMutation.isPending;
 
-  const handleArchive = useCallback(async () => {
+  // `mutate`, not `mutateAsync`. The button calls this through `void
+  // handleArchive()`, which discards the promise — so a rejected
+  // `mutateAsync` becomes an UNHANDLED rejection, which is exactly what the
+  // new refusal test surfaced (vitest reports it as an unhandled error even
+  // while the assertions pass). Nothing here awaited the result anyway: the
+  // UI is driven entirely by the mutation's own `isPending`/`isError` state.
+  const handleArchive = useCallback(() => {
     if (!isConfirmed) return;
-    await archiveMutation.mutateAsync({ boardId });
+    archiveMutation.mutate({ boardId });
   }, [isConfirmed, archiveMutation, boardId]);
 
   return (
@@ -162,11 +168,7 @@ export function ArchiveBoardDialog({ board, townId, open, onOpenChange }: Archiv
 
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isSaving}>Cancel</AlertDialogCancel>
-          <Button
-            variant="destructive"
-            onClick={() => void handleArchive()}
-            disabled={!isConfirmed || isSaving}
-          >
+          <Button variant="destructive" onClick={handleArchive} disabled={!isConfirmed || isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Archive Board
           </Button>

@@ -150,7 +150,11 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
 
   const isSaving = updateMutation.isPending;
 
-  const handleSave = useCallback(async () => {
+  // `mutate`, not `mutateAsync` — see `ArchiveBoardDialog`'s matching comment.
+  // `board.update` has been refusable since wave 2 and this call site has
+  // discarded its promise the whole time; the refusal test added with the
+  // `role="alert"` below is what made the unhandled rejection visible.
+  const handleSave = useCallback(() => {
     const data = validate();
     if (!data) return;
     // `board.update`'s schema wants `null`, not `""`, for "use the town
@@ -159,7 +163,7 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
     // needed: this form's own Zod schema keeps these two fields as bare
     // `z.string()` so the Select's `"__default__"` sentinel round-trips
     // through `setValue` cleanly.
-    await updateMutation.mutateAsync({
+    updateMutation.mutate({
       ...data,
       boardId,
       meeting_formality_override: (data.meeting_formality_override || null) as
@@ -415,7 +419,7 @@ export function EditBoardDialog({ townId, town, board, open, onOpenChange }: Edi
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={() => void handleSave()} disabled={!isValid || isSaving}>
+          <Button onClick={handleSave} disabled={!isValid || isSaving}>
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Save Changes
           </Button>
