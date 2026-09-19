@@ -27,7 +27,8 @@
  *        rows, not `user_account` rows). Authenticated by an HMAC over
  *        `person:town:eventType` with a timing-safe comparison, below.
  *
- * The other four routes in this file take a session.
+ * The other four routes in this file take a session. `send` and `resend` also
+ * require an administrator — see `assertMayIssueInvitations`.
  *
  * ─── Task D1c: every route here is now tenant-scoped ──────────────────────
  *
@@ -66,6 +67,9 @@ import { resolveInvitationTown } from "../db/invitation-bootstrap.js";
 import { toRows } from "../db/rows.js";
 import { renderEmailTemplate, EmailSenderService } from "../services/email-sender.js";
 import { getDefaultPostmarkClient } from "../lib/postmark.js";
+import { loadActor } from "../trpc/authorization/actor.js";
+import { assertCanInsertUserAccount } from "../trpc/authorization/rules.js";
+import { handleRouteErrors } from "./error-status.js";
 
 const APP_URL = process.env.APP_URL ?? "https://app.townmeetingmanager.com";
 const APP_SECRET = process.env.APP_SECRET ?? "default-secret-change-in-production";
@@ -84,6 +88,35 @@ function tenantOf(request: FastifyRequest): <T>(fn: (tx: TenantTx) => Promise<T>
     );
   }
   return run;
+}
+
+/**
+ * Refuse unless the caller may issue invitations — `send` and `resend` are the
+ * rest of issuing one.
+ *
+ * Both routes took a session and nothing else, so any signed-in user could
+ * re-send anyone's invitation — and `resend` REISSUES, writing a new token
+ * before it sends, which let them kill the link in an invitee's inbox at will
+ * (`docs/backlog.md` entry 14). The rule is the one every issuing procedure
+ * already uses (`invitation.insert`, `boardMember.addStaffMember`;
+ * `addBoardMember`'s own rule is the same `assertAdmin`), so the `/send` those
+ * callers make immediately afterward cannot be refused for anyone who got
+ * that far.
+ *
+ * Runs FIRST, before the invitation is read: an unauthorized caller gets 403
+ * whether or not the id exists, so this cannot be used to probe for ids, and
+ * `resend` never reaches its UPDATE.
+ */
+async function assertMayIssueInvitations(
+  request: FastifyRequest,
+  runInTenant: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>,
+): Promise<void> {
+  const tenant = request.tenant;
+  if (!tenant) {
+    throw new Error("invitation routes: no tenant on an authenticated route.");
+  }
+  const actor = await runInTenant((tx) => loadActor(tx, tenant));
+  assertCanInsertUserAccount(actor);
 }
 
 // ─── HMAC-based unsubscribe tokens ───────────────────────────────────
@@ -309,36 +342,38 @@ export async function invitationRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>(
     "/invitations/:id/send",
     { preHandler: [app.verifyAuth] },
-    async (request, reply) => {
-      const { id } = request.params;
-      const inviterAccountId = request.user!.id;
-      const runInTenant = tenantOf(request);
+    async (request, reply) =>
+      handleRouteErrors(request, reply, async () => {
+        const { id } = request.params;
+        const inviterAccountId = request.user!.id;
+        const runInTenant = tenantOf(request);
+        await assertMayIssueInvitations(request, runInTenant);
 
-      const context = await runInTenant((tx) => readSendContext(tx, id, inviterAccountId));
+        const context = await runInTenant((tx) => readSendContext(tx, id, inviterAccountId));
 
-      if (!context) return reply.notFound("Invitation not found");
-      if (context.invitation.status === "accepted") {
-        return reply.badRequest("Invitation already accepted");
-      }
-      if (!context.recipientEmail) {
-        return reply.badRequest("No email address found for this person");
-      }
-      if (!context.townName) return reply.notFound("Town not found");
+        if (!context) return reply.notFound("Invitation not found");
+        if (context.invitation.status === "accepted") {
+          return reply.badRequest("Invitation already accepted");
+        }
+        if (!context.recipientEmail) {
+          return reply.badRequest("No email address found for this person");
+        }
+        if (!context.townName) return reply.notFound("Town not found");
 
-      try {
-        const messageId = await sendInvitationEmail(
-          runInTenant,
-          context,
-          context.recipientEmail,
-          inviterAccountId,
-        );
-        return reply.status(200).send({ ok: true, message_id: messageId });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Email send failed";
-        app.log.error({ err, invitationId: id }, "Failed to send invitation email");
-        return reply.internalServerError(msg);
-      }
-    },
+        try {
+          const messageId = await sendInvitationEmail(
+            runInTenant,
+            context,
+            context.recipientEmail,
+            inviterAccountId,
+          );
+          return reply.status(200).send({ ok: true, message_id: messageId });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Email send failed";
+          app.log.error({ err, invitationId: id }, "Failed to send invitation email");
+          return reply.internalServerError(msg);
+        }
+      }),
   );
 
   // ── POST /api/invitations/:id/resend ─────────────────────────────
@@ -347,23 +382,25 @@ export async function invitationRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>(
     "/invitations/:id/resend",
     { preHandler: [app.verifyAuth] },
-    async (request, reply) => {
-      const { id } = request.params;
-      const inviterAccountId = request.user!.id;
-      const runInTenant = tenantOf(request);
+    async (request, reply) =>
+      handleRouteErrors(request, reply, async () => {
+        const { id } = request.params;
+        const inviterAccountId = request.user!.id;
+        const runInTenant = tenantOf(request);
+        await assertMayIssueInvitations(request, runInTenant);
 
-      const newToken = crypto.randomUUID();
+        const newToken = crypto.randomUUID();
 
-      // Reissue and re-read in one transaction. `RETURNING` rather than an
-      // UPDATE followed by a SELECT: the previous version did both, and
-      // between them the row could have changed — or, under RLS, the UPDATE
-      // could have matched nothing while the code carried on with the values
-      // it had already read. `status <> 'accepted'` in the WHERE means a
-      // race with acceptance loses here rather than reopening a closed
-      // invitation.
-      const reissued = await runInTenant(async (tx) =>
-        rows<{ id: string }>(
-          await tx.execute(sql`
+        // Reissue and re-read in one transaction. `RETURNING` rather than an
+        // UPDATE followed by a SELECT: the previous version did both, and
+        // between them the row could have changed — or, under RLS, the UPDATE
+        // could have matched nothing while the code carried on with the values
+        // it had already read. `status <> 'accepted'` in the WHERE means a
+        // race with acceptance loses here rather than reopening a closed
+        // invitation.
+        const reissued = await runInTenant(async (tx) =>
+          rows<{ id: string }>(
+            await tx.execute(sql`
             UPDATE invitation
                SET token = ${newToken},
                    expires_at = now() + interval '7 days',
@@ -373,31 +410,31 @@ export async function invitationRoutes(app: FastifyInstance) {
                AND status <> 'accepted'
             RETURNING id
           `),
-          "invitation resend",
-        ),
-      );
+            "invitation resend",
+          ),
+        );
 
-      if (reissued.length !== 1) {
-        // Either it does not exist, it belongs to another town (invisible), or
-        // it is already accepted. All three are "there is nothing here to
-        // resend"; distinguishing them for the caller would disclose whether a
-        // row exists in a town they cannot see.
-        return reply.notFound("No pending invitation to resend");
-      }
+        if (reissued.length !== 1) {
+          // Either it does not exist, it belongs to another town (invisible), or
+          // it is already accepted. All three are "there is nothing here to
+          // resend"; distinguishing them for the caller would disclose whether a
+          // row exists in a town they cannot see.
+          return reply.notFound("No pending invitation to resend");
+        }
 
-      const context = await runInTenant((tx) => readSendContext(tx, id, inviterAccountId));
-      if (!context) return reply.internalServerError();
-      if (!context.recipientEmail) return reply.badRequest("No email address found");
-      if (!context.townName) return reply.notFound("Town not found");
+        const context = await runInTenant((tx) => readSendContext(tx, id, inviterAccountId));
+        if (!context) return reply.internalServerError();
+        if (!context.recipientEmail) return reply.badRequest("No email address found");
+        if (!context.townName) return reply.notFound("Town not found");
 
-      try {
-        await sendInvitationEmail(runInTenant, context, context.recipientEmail, inviterAccountId);
-        return reply.send({ ok: true });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Email send failed";
-        return reply.internalServerError(msg);
-      }
-    },
+        try {
+          await sendInvitationEmail(runInTenant, context, context.recipientEmail, inviterAccountId);
+          return reply.send({ ok: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Email send failed";
+          return reply.internalServerError(msg);
+        }
+      }),
   );
 
   // ── GET /api/invitations/validate ────────────────────────────────
