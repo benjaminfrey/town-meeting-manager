@@ -15,13 +15,28 @@
 #
 # So the base is named here and asserted, rather than inherited and hoped for.
 #
-# It also copies the two gitignored env files a fresh worktree does not inherit.
-# `packages/web/.env` matters most: without it `packages/web/src/lib/supabase.ts`
-# throws at import time, inside the SPA prerender, which surfaces as
-# "[react-router] Cannot convert undefined or null to object" in
-# groupRoutesByParentId — an error naming neither the variable nor Supabase.
-# One session lost real time to that and bisected four commits before finding it.
-# CI does the same copy (.github/workflows/ci.yml) for the same reason.
+# It copies NO env files, deliberately. It used to copy two gitignored ones,
+# and both are now worse than useless in a worktree:
+#
+#   packages/web/.env — needed only while `packages/web/src/lib/supabase.ts`
+#     existed, because that module threw at import without it. Phase E wave 6
+#     deleted it; the web app now reads only `DEV` and the optional
+#     `VITE_API_URL` / `VITE_VAPID_PUBLIC_KEY`, and CI dropped its copy step. A
+#     leftover copy holds an old Supabase anon JWT that developers were told to
+#     delete — copying it would spread that file into every worktree.
+#
+#   docker/.env — read only by `docker compose` in `docker/` (the legacy
+#     Supabase stack behind `pnpm supabase:*`). That stack has a fixed project
+#     name and a fixed `container_name` on all nine services, so running it
+#     from a worktree would take over the main checkout's containers rather
+#     than start its own. Nothing on the test or dev path reads the file, and it
+#     holds the stack's secrets.
+#
+# API tests need only DATABASE_URL — on a Homebrew Postgres,
+# DATABASE_URL="postgres://$USER@localhost:5432/postgres"; the harness's default
+# is CI's `postgres` role, which a local cluster usually lacks. A task
+# that runs the API dev server needs `packages/api/.env`, which is not copied
+# either: create it from `packages/api/.env.example` in the worktree.
 #
 # Usage:  scripts/dev/new-agent-worktree.sh <name> [base]
 #         base defaults to the current branch's HEAD, which is almost always
@@ -61,22 +76,14 @@ if [ "$ACTUAL" != "$BASE_SHA" ]; then
   exit 1
 fi
 
-for ENV_FILE in packages/web/.env docker/.env; do
-  if [ -f "$ENV_FILE" ]; then
-    cp "$ENV_FILE" "${WT_PATH}/${ENV_FILE}"
-  elif [ -f "${ENV_FILE}.example" ]; then
-    cp "${ENV_FILE}.example" "${WT_PATH}/${ENV_FILE}"
-  fi
-done
-
 cat <<EOF
 worktree : ${WT_PATH}
 branch   : ${BRANCH}
 base     : ${BASE_SHA}  ($(git log --format=%s -1 "$BASE_SHA"))
-env      : $(ls "${WT_PATH}/packages/web/.env" >/dev/null 2>&1 && echo "web/.env present" || echo "web/.env MISSING")
 
 Dependencies are not installed. Run 'pnpm install' inside the worktree if the
-task needs to build or test.
+task needs to build or test. API tests also need DATABASE_URL, e.g.
+  DATABASE_URL="postgres://\$USER@localhost:5432/postgres" pnpm exec turbo run test
 
 Remove when finished:
   git worktree remove ${WT_PATH} && git branch -D ${BRANCH}
