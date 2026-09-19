@@ -56,6 +56,10 @@
  *    before; this router never reads `better_auth.invitation_tenant` itself,
  *    only ever writes rows that its trigger keeps in sync.
  *
+ *    Keeping the token out of the client's hands on the WRITE side is only
+ *    half of it: `roster` below used to select it straight back out, to any
+ *    signed-in user. See that procedure's comment.
+ *
  * ─── Why person creation is NOT inlined here ───────────────────────────────
  *
  * `AddMemberDialog.tsx`'s original `mutationFn`s created a brand-new person
@@ -337,11 +341,11 @@ export const boardMemberRouter = router({
    * `roster.filter((r) => r.status === "active").length` would answer the same
    * number — and that is why this is a new procedure rather than a reuse.
    * `roster` returns the person's name and email, their account's role and
-   * archived state, and their most recent **invitation id, token and status**;
+   * archived state, and their most recent invitation's id and status;
    * `CreateMeetingDialog` renders a scheduling form and needs one integer.
-   * Sending a board's live invitation tokens to every user who opens that
-   * dialog, to count rows the server can count, is not a trade worth making to
-   * avoid a nine-line procedure.
+   * (`roster` also returned each invitation's live TOKEN when this was
+   * written — the concern this paragraph raised was real, and wider than this
+   * dialog. See `roster`'s own comment.)
    *
    * The query this replaces, as a specification (conventions item 1):
    * `.from("board_member").select("*", {count: "exact", head: true})
@@ -398,6 +402,17 @@ export const boardMemberRouter = router({
    * board-scoped member list; narrowing the invitation lookup to the people
    * actually on this board's roster is the same answer with no town-wide
    * scan).
+   *
+   * NEVER SELECT `invitation.token` HERE. The token is the whole credential
+   * for `POST /api/invitations/accept`, which is public and asks for nothing
+   * else — whoever presents it chooses the password for the invited account,
+   * at the invitation's role, admin included. This procedure has no
+   * permission guard (the live screen and the minutes panel read it for any
+   * signed-in user), so a token here is an account takeover for anyone in the
+   * town. It did return `invitation_token` until this was fixed; no client
+   * ever read it. The token's only legitimate destination is the invitee's
+   * inbox, via `routes/invitations.ts`. `board-member.test.ts` checks the
+   * serialized response, so reintroducing it under another name fails too.
    */
   roster: protectedProcedure
     .input(z.object({ boardId: z.string().uuid() }))
@@ -420,7 +435,6 @@ export const boardMemberRouter = router({
           gov_title: string | null;
           user_account_archived_at: string | null;
           invitation_id: string | null;
-          invitation_token: string | null;
           invitation_status: string | null;
           invitation_sent_at: string | null;
           invitation_expires_at: string | null;
@@ -432,14 +446,14 @@ export const boardMemberRouter = router({
               p.name, p.email,
               ua.id AS user_account_id, ua.role, ua.gov_title,
               ua.archived_at AS user_account_archived_at,
-              inv.id AS invitation_id, inv.token AS invitation_token,
+              inv.id AS invitation_id,
               inv.status AS invitation_status, inv.sent_at AS invitation_sent_at,
               inv.expires_at AS invitation_expires_at
             FROM board_member bm
             JOIN person p ON p.id = bm.person_id
             LEFT JOIN user_account ua ON ua.person_id = p.id
             LEFT JOIN LATERAL (
-              SELECT id, token, status, sent_at, expires_at
+              SELECT id, status, sent_at, expires_at
               FROM invitation
               WHERE person_id = bm.person_id
               ORDER BY created_at DESC

@@ -200,7 +200,6 @@ function seat(
     gov_title: null,
     user_account_archived_at: null,
     invitation_id: null,
-    invitation_token: null,
     invitation_status: null,
     invitation_sent_at: null,
     invitation_expires_at: null,
