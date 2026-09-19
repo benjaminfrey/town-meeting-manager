@@ -28,12 +28,14 @@
  * trigger `drizzle/0002_invitation_tenant_bootstrap.sql` installs) keeps the
  * hint table in sync automatically, the same way it already does for
  * `board-member.ts`'s two invitation writes — nothing here needs to know
- * that trigger exists, only not to fight it by writing the token from
- * outside the database. Generating `token` with `gen_random_uuid()` here
- * (never from client input) can only make the hint HARDER to guess than the
- * client-generated token this replaces; it does not touch, and cannot
- * weaken, the "used but not trusted" property `invitation-bootstrap.ts`
- * itself is responsible for.
+ * that trigger exists.
+ *
+ * This write carries NO token. Since `drizzle/0004_hash_invitation_tokens.sql`
+ * the table stores only `sha256(token)`, and a token must exist in plaintext
+ * long enough to be emailed — so it is minted by `routes/invitations.ts`
+ * when the invitation is SENT (`issueToken`), never here. An invitation fresh
+ * from this procedure has `token_sha256 = NULL`: it matches nothing, writes no
+ * hint row, and cannot be accepted until an administrator sends it.
  *
  * ─── The two FKs, and why one check answers both ──────────────────────────
  *
@@ -137,9 +139,9 @@ export const invitationRouter = router({
 
         const rows = toRows<{ id: string }>(
           await tx.execute(sql`
-            INSERT INTO invitation (person_id, user_account_id, town_id, token, status, expires_at)
+            INSERT INTO invitation (person_id, user_account_id, town_id, status, expires_at)
             VALUES (${input.personId}, ${input.userAccountId}, ${ctx.tenant.townId},
-                    gen_random_uuid()::text, 'pending', now() + interval '7 days')
+                    'pending', now() + interval '7 days')
             RETURNING id
           `),
           (message) => new Error(`invitation.insert: ${message}`),

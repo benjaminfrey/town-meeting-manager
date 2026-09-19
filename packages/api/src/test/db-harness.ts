@@ -134,12 +134,33 @@ function explainConnectionFailure(err: unknown): Error {
   );
 }
 
+export interface WithTestDbOptions {
+  /**
+   * Stop BEFORE this migration file (e.g. `"0004_hash_invitation_tokens.sql"`)
+   * instead of applying the whole corpus. For testing a migration's backfill
+   * against rows that exist before it runs: seed, then `applyMigrationFile`.
+   * The journal cross-check still runs against the full corpus.
+   */
+  before?: string;
+}
+
+/**
+ * Apply one migration file from the corpus to `sql`. Pairs with
+ * `withTestDb(fn, { before })`.
+ */
+export async function applyMigrationFile(sql: postgres.Sql, file: string): Promise<void> {
+  await sql.file(path.join(MIGRATIONS_DIR, file));
+}
+
 /**
  * Provision an isolated Postgres database, apply the migration corpus to
  * it, run `fn` against a live client, and drop the database afterward —
  * even if `fn` throws.
  */
-export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Promise<T> {
+export async function withTestDb<T>(
+  fn: (sql: postgres.Sql) => Promise<T>,
+  opts: WithTestDbOptions = {},
+): Promise<T> {
   const databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL;
   const dbName = generateTestDbName();
 
@@ -166,7 +187,7 @@ export async function withTestDb<T>(fn: (sql: postgres.Sql) => Promise<T>): Prom
       // database instead of the maintenance one.
       sql = postgres(databaseUrl, { database: dbName, max: 1, onnotice: () => {} });
 
-      await applyMigrations(sql);
+      await applyMigrations(sql, opts.before);
 
       return await fn(sql);
     } finally {
@@ -238,7 +259,7 @@ export async function connectAsAppRole(ownerSql: postgres.Sql): Promise<postgres
   });
 }
 
-async function applyMigrations(sql: postgres.Sql): Promise<void> {
+async function applyMigrations(sql: postgres.Sql, before?: string): Promise<void> {
   // Same file list, same order, and the same journal cross-check that
   // scripts/build-db-from-repo.sh uses, so this harness and the Stage 1 gate
   // can never quietly diverge on which migrations exist or what order they
@@ -270,7 +291,11 @@ async function applyMigrations(sql: postgres.Sql): Promise<void> {
     );
   }
 
+  if (before !== undefined && !files.includes(before)) {
+    throw new Error(`db-harness: no migration named ${before} to stop before.`);
+  }
   for (const file of files) {
+    if (before !== undefined && file >= before) break;
     await sql.file(path.join(MIGRATIONS_DIR, file));
   }
 }

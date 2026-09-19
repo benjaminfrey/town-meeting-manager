@@ -148,8 +148,8 @@ async function seedInvitation(
   const token = randomUUID();
   await inTown(db, town, async (tx) => {
     await tx.execute(sql`
-      INSERT INTO invitation (id, person_id, user_account_id, town_id, token, status, created_at, role)
-      VALUES (${id}, ${personId}, ${userAccountId}, ${town.townId}, ${token}, 'pending',
+      INSERT INTO invitation (id, person_id, user_account_id, town_id, token_sha256, status, created_at, role)
+      VALUES (${id}, ${personId}, ${userAccountId}, ${town.townId}, sha256(convert_to(${token}, 'UTF8')), 'pending',
               ${createdAt}::timestamptz, ${role})
     `);
   });

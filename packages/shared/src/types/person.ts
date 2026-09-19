@@ -45,7 +45,6 @@ export interface Invitation {
   person_id: string;
   user_account_id: string;
   town_id: string;
-  token: string;
   expires_at: string;
   status: "pending" | "accepted" | "expired";
   created_at: string;
