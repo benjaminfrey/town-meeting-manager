@@ -57,9 +57,9 @@ async function seedTown(app: postgres.Sql, name: string): Promise<Town> {
              VALUES (${town.personId}, ${town.townId}, ${`${name} Invitee`}, ${`invitee@${name.toLowerCase()}.gov`})`;
     await tx`INSERT INTO user_account (id, person_id, town_id, role)
              VALUES (${town.userAccountId}, ${town.personId}, ${town.townId}, 'board_member')`;
-    await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+    await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token_sha256, status, expires_at, role, email)
              VALUES (${town.invitationId}, ${town.townId}, ${town.personId}, ${town.userAccountId},
-                     ${town.token}, 'pending', now() + interval '7 days', 'board_member',
+                     sha256(convert_to(${town.token}, 'UTF8')), 'pending', now() + interval '7 days', 'board_member',
                      ${`invitee@${name.toLowerCase()}.gov`})`;
   });
 
@@ -162,7 +162,9 @@ describe("resolveInvitationTown", () => {
         // This is what "the bootstrap cannot be widened into a general query"
         // means concretely: there is no general query to widen it into.
         expect(await app`SELECT id FROM invitation`).toHaveLength(0);
-        expect(await app`SELECT id FROM invitation WHERE token = ${alpha.token}`).toHaveLength(0);
+        expect(
+          await app`SELECT id FROM invitation WHERE token_sha256 = sha256(convert_to(${alpha.token}, 'UTF8'))`,
+        ).toHaveLength(0);
         expect(await app`SELECT id FROM person`).toHaveLength(0);
         expect(await app`SELECT id FROM town`).toHaveLength(0);
 
@@ -203,7 +205,7 @@ describe("resolveInvitationTown", () => {
           { townId: proposed! },
           async (tx) =>
             (await tx.execute(
-              sql`SELECT id, person_id, email FROM invitation WHERE token = ${beta.token}`,
+              sql`SELECT id, person_id, email FROM invitation WHERE token_sha256 = sha256(convert_to(${beta.token}, 'UTF8'))`,
             )) as unknown[],
         );
         expect(found).toHaveLength(0);
@@ -232,7 +234,7 @@ describe("the hint table's trigger", () => {
         const newToken = `tok-${randomUUID()}`;
         await app.begin(async (tx) => {
           await tx`SELECT set_config('app.town_id', ${alpha.townId}, true)`;
-          await tx`UPDATE invitation SET token = ${newToken} WHERE id = ${alpha.invitationId}`;
+          await tx`UPDATE invitation SET token_sha256 = sha256(convert_to(${newToken}, 'UTF8')) WHERE id = ${alpha.invitationId}`;
         });
         expect(await resolveInvitationTown(db, newToken)).toBe(alpha.townId);
         // The superseded token resolves to nothing rather than lingering.

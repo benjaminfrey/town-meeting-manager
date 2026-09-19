@@ -98,6 +98,14 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
+// Same reason as `tsvector`: drizzle-orm@0.45.2's pg-core has no `bytea`
+// builder. Used for `invitation.token_sha256` (0004) — a raw 32-byte digest.
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
 export const agendaItemStatus = pgEnum("agenda_item_status", [
   "pending",
   "active",
@@ -1326,7 +1334,9 @@ export const invitation = pgTable(
     personId: uuid("person_id").notNull(),
     userAccountId: uuid("user_account_id"),
     townId: uuid("town_id").notNull(),
-    token: text().notNull(),
+    // sha256 of the token — the token itself is never stored. NULL until the
+    // invitation is first sent. See drizzle/0004_hash_invitation_tokens.sql.
+    tokenSha256: bytea("token_sha256"),
     status: text().default("pending").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
     email: text(),
@@ -1344,9 +1354,6 @@ export const invitation = pgTable(
       table.personId.asc().nullsLast(),
       table.status.asc().nullsLast(),
     ),
-    index("idx_invitation_token")
-      .using("btree", table.token.asc().nullsLast())
-      .where(sql`(status = 'pending'::text)`),
     foreignKey({
       columns: [table.personId],
       foreignColumns: [person.id],
@@ -1367,7 +1374,11 @@ export const invitation = pgTable(
       foreignColumns: [userAccount.id],
       name: "invitation_invited_by_fkey",
     }).onDelete("set null"),
-    unique("invitation_token_key").on(table.token),
+    unique("invitation_token_sha256_key").on(table.tokenSha256),
+    check(
+      "invitation_token_sha256_is_a_digest",
+      sql`(token_sha256 IS NULL) OR (octet_length(token_sha256) = 32)`,
+    ),
     check(
       "invitation_status_check",
       sql`status = ANY (ARRAY['pending'::text, 'accepted'::text, 'expired'::text, 'cancelled'::text])`,

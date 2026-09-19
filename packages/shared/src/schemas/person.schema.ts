@@ -70,7 +70,6 @@ export const InvitationSchema = z.object({
   person_id: z.string().uuid(),
   user_account_id: z.string().uuid(),
   town_id: z.string().uuid(),
-  token: z.string().uuid(),
   expires_at: z.string().datetime(),
   status: z.enum(["pending", "accepted", "expired"]),
   created_at: z.string().datetime(),

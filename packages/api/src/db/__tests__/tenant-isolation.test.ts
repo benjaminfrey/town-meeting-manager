@@ -201,8 +201,9 @@ async function seedTown(app: postgres.Sql, prefix: string, label: string): Promi
     await tx`INSERT INTO guest_speaker (id, meeting_id, town_id, name)
              VALUES (${id.guest_speaker}, ${id.meeting}, ${id.town}, ${`Guest ${label}`})`;
 
-    await tx`INSERT INTO invitation (id, person_id, town_id, token)
-             VALUES (${id.invitation}, ${id.person}, ${id.town}, ${`invite-token-${lower}`})`;
+    await tx`INSERT INTO invitation (id, person_id, town_id, token_sha256)
+             VALUES (${id.invitation}, ${id.person}, ${id.town},
+                     sha256(convert_to(${`invite-token-${lower}`}, 'UTF8')))`;
 
     await tx`INSERT INTO meeting_attendance (id, meeting_id, town_id, person_id)
              VALUES (${id.meeting_attendance}, ${id.meeting}, ${id.town}, ${id.person})`;

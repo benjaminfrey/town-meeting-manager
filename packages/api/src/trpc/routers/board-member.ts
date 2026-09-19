@@ -40,9 +40,15 @@
  *    the same way two of five permission templates were already broken for
  *    five months.
  *
- * 3. INVITATIONS. Every invitation this router writes gets its `token` from
- *    `gen_random_uuid()`, generated IN THE DATABASE — never from client
- *    input. The code this replaces (`AddMemberDialog.tsx`'s two `mutationFn`s)
+ * 3. INVITATIONS. Every invitation this router writes is created WITHOUT a
+ *    token — never one from client input, and since
+ *    `drizzle/0004_hash_invitation_tokens.sql` not one from the database
+ *    either: the table stores only `sha256(token)`, so the token is minted by
+ *    `routes/invitations.ts` at send time, the one moment it has to exist in
+ *    plaintext. What follows is the history that led here.
+ *
+ *    Until 0004 the token came from `gen_random_uuid()`, generated IN THE
+ *    DATABASE. The code this replaces (`AddMemberDialog.tsx`'s two `mutationFn`s)
  *    generated the token with `crypto.randomUUID()` IN THE BROWSER and sent
  *    it up as part of the insert payload: a client that controlled its own
  *    invitation token, for a token whose entire security property (per
@@ -56,9 +62,10 @@
  *    before; this router never reads `better_auth.invitation_tenant` itself,
  *    only ever writes rows that its trigger keeps in sync.
  *
- *    Keeping the token out of the client's hands on the WRITE side is only
+ *    Keeping the token out of the client's hands on the WRITE side was only
  *    half of it: `roster` below used to select it straight back out, to any
- *    signed-in user. See that procedure's comment.
+ *    signed-in user (see that procedure's comment). 0004 closes the class:
+ *    there is no longer a token in the table for any read to leak.
  *
  * ─── Why person creation is NOT inlined here ───────────────────────────────
  *
@@ -230,9 +237,9 @@ async function getPersonName(tx: TenantTx, personId: string): Promise<string> {
 }
 
 /**
- * Every invitation this router issues, in one place. `token` is
- * `gen_random_uuid()` — generated IN THE DATABASE, never from client input;
- * see this file's header, hazard 3. `id`/`status` are database defaults
+ * Every invitation this router issues, in one place. It carries NO token —
+ * see this file's header, hazard 3: the token is minted when the invitation
+ * is sent, and only its digest is ever stored. `id`/`status` are database defaults
  * except `expires_at`, which has none (nullable, no default) and is set
  * explicitly to 7 days out — the same window `AddMemberDialog.tsx`'s
  * original code used.
@@ -248,9 +255,9 @@ async function insertInvitation(
 ): Promise<string> {
   const rows = toRows<{ id: string }>(
     await tx.execute(sql`
-      INSERT INTO invitation (person_id, user_account_id, town_id, token, status, expires_at)
+      INSERT INTO invitation (person_id, user_account_id, town_id, status, expires_at)
       VALUES (${params.personId}, ${params.userAccountId}, ${params.townId},
-              gen_random_uuid()::text, 'pending', now() + interval '7 days')
+              'pending', now() + interval '7 days')
       RETURNING id
     `),
     (message) => new Error(`boardMember.insertInvitation: ${message}`),
@@ -403,7 +410,10 @@ export const boardMemberRouter = router({
    * actually on this board's roster is the same answer with no town-wide
    * scan).
    *
-   * NEVER SELECT `invitation.token` HERE. The token is the whole credential
+   * NEVER SELECT A TOKEN HERE. (Since `drizzle/0004_hash_invitation_tokens.sql`
+   * there is none to select — the table holds only `token_sha256`, which
+   * cannot be presented to anything — but the history below is why that
+   * migration exists.) The token is the whole credential
    * for `POST /api/invitations/accept`, which is public and asks for nothing
    * else — whoever presents it chooses the password for the invited account,
    * at the invitation's role, admin included. This procedure has no

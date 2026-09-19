@@ -114,9 +114,9 @@ async function seed(app: postgres.Sql, overrides: { userAccountTownId?: string }
 
   await app.begin(async (tx) => {
     await tx`SELECT set_config('app.town_id', ${fixture.townId}, true)`;
-    await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+    await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token_sha256, status, expires_at, role, email)
              VALUES (${fixture.invitationId}, ${fixture.townId}, ${fixture.personId},
-                     ${fixture.userAccountId}, ${fixture.token}, 'pending',
+                     ${fixture.userAccountId}, sha256(convert_to(${fixture.token}, 'UTF8')), 'pending',
                      now() + interval '7 days', 'board_member', ${INVITEE_EMAIL})`;
   });
 
@@ -356,9 +356,9 @@ describe("POST /api/invitations/accept", () => {
       try {
         const fixture = await seed(client);
         const secondToken = `tok-${randomUUID()}`;
-        await owner`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+        await owner`INSERT INTO invitation (id, town_id, person_id, user_account_id, token_sha256, status, expires_at, role, email)
                     VALUES (${randomUUID()}, ${fixture.townId}, ${fixture.personId},
-                            ${fixture.userAccountId}, ${secondToken}, 'pending',
+                            ${fixture.userAccountId}, sha256(convert_to(${secondToken}, 'UTF8')), 'pending',
                             now() + interval '7 days', 'board_member', ${INVITEE_EMAIL})`;
 
         const { server } = await buildApp(client, []);
@@ -510,9 +510,9 @@ describe("invitation acceptance and the town next door (Task D1c)", () => {
                    VALUES (${beta.personId}, ${beta.townId}, 'Neighbour', 'neighbour@example.gov')`;
           await tx`INSERT INTO user_account (id, person_id, town_id, role)
                    VALUES (${beta.userAccountId}, ${beta.personId}, ${beta.townId}, 'board_member')`;
-          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token_sha256, status, expires_at, role, email)
                    VALUES (${beta.invitationId}, ${beta.townId}, ${beta.personId}, ${beta.userAccountId},
-                           ${beta.token}, 'pending', now() + interval '7 days', 'board_member',
+                           sha256(convert_to(${beta.token}, 'UTF8')), 'pending', now() + interval '7 days', 'board_member',
                            'neighbour@example.gov')`;
         });
 
@@ -582,9 +582,9 @@ describe("invitation acceptance and the town next door (Task D1c)", () => {
             INSERT INTO user_account (id, person_id, town_id, role)
             VALUES (${randomUUID()}, ${person!.id}, ${otherTownId}, 'board_member')
             RETURNING id`;
-          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token, status, expires_at, role, email)
+          await tx`INSERT INTO invitation (id, town_id, person_id, user_account_id, token_sha256, status, expires_at, role, email)
                    VALUES (${randomUUID()}, ${otherTownId}, ${person!.id}, ${account!.id},
-                           ${strangerToken}, 'pending', now() + interval '7 days', 'board_member',
+                           sha256(convert_to(${strangerToken}, 'UTF8')), 'pending', now() + interval '7 days', 'board_member',
                            'neighbour@example.gov')`;
         });
 

@@ -50,7 +50,7 @@ interface InvitationRow {
   person_id: string;
   user_account_id: string | null;
   town_id: string;
-  token: string;
+  token_sha256: Buffer | null;
   status: string;
   expires_at: string | null;
 }
@@ -63,7 +63,7 @@ async function readInvitation(
   const rows = await inTown(db, town, (tx) =>
     tx
       .execute(
-        sql`SELECT id, person_id, user_account_id, town_id, token, status, expires_at
+        sql`SELECT id, person_id, user_account_id, town_id, token_sha256, status, expires_at
               FROM invitation WHERE id = ${invitationId}`,
       )
       .then((r) => toRows<InvitationRow>(r, (m) => new Error(m))),
@@ -134,7 +134,7 @@ describe("invitation.insert", () => {
     });
   });
 
-  it("lets an administrator invite a person, with a server-generated token", async () => {
+  it("lets an administrator invite a person, and issues no token until it is sent", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
       try {
@@ -157,14 +157,16 @@ describe("invitation.insert", () => {
           status: "pending",
         });
         expect(row?.expires_at).not.toBeNull();
-        // The write takes no `token` field at all — there is no client value
-        // to compare against. What is checkable is that the database
-        // produced one (a `gen_random_uuid()` cast to text is a real UUID
-        // string), matching `board-member.ts`'s identical `insertInvitation`
-        // helper's own token-generation shape.
-        expect(row?.token).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        // No token exists yet. The table stores only `sha256(token)`, so a
+        // token has to be minted where it can be emailed — `/send` — and an
+        // invitation that has never been sent carries no credential at all
+        // (`drizzle/0004_hash_invitation_tokens.sql`). Nor does it have a
+        // hint row, so there is nothing to resolve.
+        expect(row?.token_sha256).toBeNull();
+        const hints = await inTown(db, town, (tx) =>
+          tx.execute(sql`SELECT count(*)::int AS n FROM better_auth.invitation_tenant`),
         );
+        expect(toRows<{ n: number }>(hints, (m) => new Error(m))[0]?.n).toBe(0);
       } finally {
         await app.end();
       }

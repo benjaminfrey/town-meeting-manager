@@ -1,7 +1,7 @@
 /**
  * Invitation routes.
  *
- * POST /api/invitations/:id/send      — send invitation email
+ * POST /api/invitations/:id/send      — issue a token + send invitation email
  * POST /api/invitations/:id/resend    — generate new token + resend
  * GET  /api/invitations/validate      — public: validate token, return details
  * POST /api/invitations/accept        — public: accept invitation, set up account
@@ -26,6 +26,11 @@
  *        someone who may have no account at all (subscribers are `person`
  *        rows, not `user_account` rows). Authenticated by an HMAC over
  *        `person:town:eventType` with a timing-safe comparison, below.
+ *
+ * Tokens are never stored — only `sha256(token)`, since
+ * `drizzle/0004_hash_invitation_tokens.sql`. `send` and `resend` mint one
+ * (`issueToken`), store its digest and email the only copy; `validate` and
+ * `accept` hash what they are given and look the row up by digest.
  *
  * The other four routes in this file take a session. `send` and `resend` also
  * require an administrator — see `assertMayIssueInvitations`.
@@ -70,6 +75,7 @@ import { getDefaultPostmarkClient } from "../lib/postmark.js";
 import { loadActor } from "../trpc/authorization/actor.js";
 import { assertCanInsertUserAccount } from "../trpc/authorization/rules.js";
 import { handleRouteErrors } from "./error-status.js";
+import { mintInvitationToken, invitationTokenDigest } from "../db/invitation-token.js";
 
 const APP_URL = process.env.APP_URL ?? "https://app.townmeetingmanager.com";
 const APP_SECRET = process.env.APP_SECRET ?? "default-secret-change-in-production";
@@ -174,7 +180,6 @@ interface InvitationRow {
   person_id: string;
   user_account_id: string | null;
   town_id: string;
-  token: string;
   status: string;
   expires_at: string | null;
   role: string | null;
@@ -212,7 +217,6 @@ async function readSendContext(
     person_id: string;
     user_account_id: string | null;
     town_id: string;
-    token: string;
     status: string;
     expires_at: string | null;
     role: string | null;
@@ -225,7 +229,7 @@ async function readSendContext(
     inviter_email: string | null;
   }>(
     await tx.execute(sql`
-      SELECT i.id, i.person_id, i.user_account_id, i.town_id, i.token, i.status,
+      SELECT i.id, i.person_id, i.user_account_id, i.town_id, i.status,
              i.expires_at, i.role, i.email,
              p.name  AS person_name,
              p.email AS person_email,
@@ -251,7 +255,6 @@ async function readSendContext(
       person_id: String(row.person_id),
       user_account_id: row.user_account_id ? String(row.user_account_id) : null,
       town_id: String(row.town_id),
-      token: row.token,
       status: row.status,
       expires_at: row.expires_at,
       role: row.role,
@@ -280,6 +283,10 @@ export async function invitationRoutes(app: FastifyInstance) {
   /**
    * Render and send one invitation email, then record that it was sent.
    *
+   * `token` is the plaintext the caller just minted and stored the digest of
+   * (`issueToken`). It is a parameter because it exists nowhere else: the
+   * database holds only `sha256(token)`, so there is nothing to read back.
+   *
    * The send is deliberately outside any transaction — see `auth/fastify.ts`
    * on why a transaction is not held across a network call — so the `sent_at`
    * write opens its own.
@@ -289,13 +296,14 @@ export async function invitationRoutes(app: FastifyInstance) {
     context: SendContext,
     recipientEmail: string,
     inviterAccountId: string,
+    token: string,
   ): Promise<string | undefined> {
     const { html, text, subject } = renderEmailTemplate("invite-user", {
       recipientName: context.recipientName,
       townName: context.townName,
       role: context.invitation.role ?? "board_member",
       inviterName: context.inviterName,
-      setupUrl: `${APP_URL}/invite/accept?token=${context.invitation.token}`,
+      setupUrl: `${APP_URL}/invite/accept?token=${encodeURIComponent(token)}`,
       expiresAt: formatExpiry(context.invitation.expires_at),
       isBroadcast: false,
     });
@@ -325,6 +333,55 @@ export async function invitationRoutes(app: FastifyInstance) {
     });
 
     return result.MessageID;
+  }
+
+  /**
+   * Mint a token for one invitation and store its digest, replacing any
+   * earlier one. Returns the plaintext — its only copy — or `null` when no
+   * row matched.
+   *
+   * Both `send` and `resend` issue a fresh token; there is no other way to
+   * obtain one to email, because the database keeps only the digest
+   * (`drizzle/0004_hash_invitation_tokens.sql`). An invitation is created
+   * with no token at all and gets its first here.
+   *
+   * `status <> 'accepted'` in the WHERE means a race with acceptance loses
+   * here rather than reopening a closed invitation. `reissue` additionally
+   * resets the expiry, status and `sent_at`, which is what makes `resend`
+   * a resend.
+   */
+  async function issueToken(
+    runInTenant: <T>(fn: (tx: TenantTx) => Promise<T>) => Promise<T>,
+    id: string,
+    opts: { reissue: boolean },
+  ): Promise<string | null> {
+    const token = mintInvitationToken();
+    const matched = await runInTenant(async (tx) =>
+      rows<{ id: string }>(
+        await tx.execute(
+          opts.reissue
+            ? sql`
+                UPDATE invitation
+                   SET token_sha256 = ${invitationTokenDigest(token)},
+                       expires_at = now() + interval '7 days',
+                       status = 'pending',
+                       sent_at = NULL
+                 WHERE id = ${id}::uuid
+                   AND status <> 'accepted'
+                RETURNING id
+              `
+            : sql`
+                UPDATE invitation
+                   SET token_sha256 = ${invitationTokenDigest(token)}
+                 WHERE id = ${id}::uuid
+                   AND status <> 'accepted'
+                RETURNING id
+              `,
+        ),
+        "invitation token issue",
+      ),
+    );
+    return matched.length === 1 ? token : null;
   }
 
   // ── POST /api/invitations/:id/send ───────────────────────────────
@@ -360,12 +417,19 @@ export async function invitationRoutes(app: FastifyInstance) {
         }
         if (!context.townName) return reply.notFound("Town not found");
 
+        // Minted only after every check above has passed, so a refused send
+        // does not rotate the token of an invitation it then declines to
+        // deliver.
+        const token = await issueToken(runInTenant, id, { reissue: false });
+        if (!token) return reply.badRequest("Invitation already accepted");
+
         try {
           const messageId = await sendInvitationEmail(
             runInTenant,
             context,
             context.recipientEmail,
             inviterAccountId,
+            token,
           );
           return reply.status(200).send({ ok: true, message_id: messageId });
         } catch (err) {
@@ -389,32 +453,8 @@ export async function invitationRoutes(app: FastifyInstance) {
         const runInTenant = tenantOf(request);
         await assertMayIssueInvitations(request, runInTenant);
 
-        const newToken = crypto.randomUUID();
-
-        // Reissue and re-read in one transaction. `RETURNING` rather than an
-        // UPDATE followed by a SELECT: the previous version did both, and
-        // between them the row could have changed — or, under RLS, the UPDATE
-        // could have matched nothing while the code carried on with the values
-        // it had already read. `status <> 'accepted'` in the WHERE means a
-        // race with acceptance loses here rather than reopening a closed
-        // invitation.
-        const reissued = await runInTenant(async (tx) =>
-          rows<{ id: string }>(
-            await tx.execute(sql`
-            UPDATE invitation
-               SET token = ${newToken},
-                   expires_at = now() + interval '7 days',
-                   status = 'pending',
-                   sent_at = NULL
-             WHERE id = ${id}::uuid
-               AND status <> 'accepted'
-            RETURNING id
-          `),
-            "invitation resend",
-          ),
-        );
-
-        if (reissued.length !== 1) {
+        const token = await issueToken(runInTenant, id, { reissue: true });
+        if (!token) {
           // Either it does not exist, it belongs to another town (invisible), or
           // it is already accepted. All three are "there is nothing here to
           // resend"; distinguishing them for the caller would disclose whether a
@@ -428,7 +468,13 @@ export async function invitationRoutes(app: FastifyInstance) {
         if (!context.townName) return reply.notFound("Town not found");
 
         try {
-          await sendInvitationEmail(runInTenant, context, context.recipientEmail, inviterAccountId);
+          await sendInvitationEmail(
+            runInTenant,
+            context,
+            context.recipientEmail,
+            inviterAccountId,
+            token,
+          );
           return reply.send({ ok: true });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Email send failed";
@@ -466,7 +512,7 @@ export async function invitationRoutes(app: FastifyInstance) {
               FROM invitation i
               LEFT JOIN person p ON p.id = i.person_id
               LEFT JOIN town   t ON t.id = i.town_id
-             WHERE i.token = ${token}
+             WHERE i.token_sha256 = ${invitationTokenDigest(token)}
           `),
           "invitation validate",
         ),
@@ -535,7 +581,7 @@ export async function invitationRoutes(app: FastifyInstance) {
                  p.name AS person_name, p.email AS person_email
             FROM invitation i
             LEFT JOIN person p ON p.id = i.person_id
-           WHERE i.token = ${token}
+           WHERE i.token_sha256 = ${invitationTokenDigest(token)}
         `),
         "invitation accept",
       ),

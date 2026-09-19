@@ -32,7 +32,7 @@
  *   3. It CANNOT GRANT ACCESS. This is the property that matters most, and it
  *      is why the two above are enough. The value returned here is a hint that
  *      is then USED, not trusted: the caller opens `withTenant(townId)` and
- *      reads `SELECT ... FROM invitation WHERE token = $1`. If the hint names
+ *      reads `SELECT ... FROM invitation WHERE token_sha256 = sha256($1)`. If the hint names
  *      the wrong town, RLS returns zero rows and the route answers 404. A
  *      corrupted or tampered hint table can therefore deny service to a
  *      specific token; it cannot disclose another town's row.
@@ -54,6 +54,7 @@
 
 import { sql } from "drizzle-orm";
 import { toRows } from "./rows.js";
+import { invitationTokenDigest } from "./invitation-token.js";
 
 /**
  * The database surface this module needs: a top-level `execute`, outside any
@@ -87,12 +88,12 @@ interface HintRow {
  * whose invitation has been deleted. Callers must treat `null` as "no such
  * invitation" and stop; there is no wider query to fall back to.
  *
- * The token is hashed IN THE DATABASE rather than here, so the digest
- * convention lives in exactly one place — the trigger in
- * `drizzle/0002_invitation_tenant_bootstrap.sql` writes rows with
- * `sha256(convert_to(token,'UTF8'))` and this reads them with the same
- * expression. A mismatch between the two would silently resolve nothing, which
- * is the failure mode most worth designing out.
+ * The token is hashed IN THE DATABASE, through `invitationTokenDigest` — the
+ * one TypeScript spelling of the expression 0002's and 0004's backfills used
+ * to compute every stored digest. Since 0004 the trigger no longer hashes: it
+ * copies `invitation.token_sha256`, which the routes write through the same
+ * helper. A mismatch would silently resolve nothing, which is the failure mode
+ * most worth designing out.
  */
 export async function resolveInvitationTown(
   db: InvitationBootstrapDb,
@@ -108,7 +109,7 @@ export async function resolveInvitationTown(
     await db.execute(sql`
       SELECT town_id
         FROM better_auth.invitation_tenant
-       WHERE token_sha256 = sha256(convert_to(${token}, 'UTF8'))
+       WHERE token_sha256 = ${invitationTokenDigest(token)}
     `),
     (message) => new InvitationBootstrapError(`invitation bootstrap: ${message}`),
   );

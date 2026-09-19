@@ -33,6 +33,13 @@
  * `loadActor` and `rules.ts`. Only the Postmark client is replaced — the
  * assertions are about who may cause a send, and a refused request must cause
  * none, which a spy can say and a real network call cannot.
+ *
+ * ─── Tokens are stored as digests (drizzle/0004) ──────────────────────────
+ *
+ * The last describe block is about that, not about authorization: the token
+ * is minted at send time, only its sha256 is stored, and the copy in the
+ * email is the only copy. It reads the token out of the email the route
+ * actually sent and presents it to the real `validate` route.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -41,7 +48,7 @@ import sensible from "@fastify/sensible";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import type postgres from "postgres";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { withTestDb, connectAsAppRole } from "../../test/db-harness.js";
 import { createAuth } from "../../auth/auth.js";
 import { betterAuthPlugin } from "../../auth/fastify.js";
@@ -67,7 +74,8 @@ const PASSWORD = "correct-horse-battery-staple";
 type CallerRole = "admin" | "staff" | "board_member";
 
 interface InvitationState {
-  token: string;
+  /** Hex of `token_sha256`, or null for a never-sent invitation. */
+  digest: string | null;
   status: string;
   sent_at: string | null;
   invited_by: string | null;
@@ -76,9 +84,38 @@ interface InvitationState {
 interface Harness {
   /** POST `url` as the signed-in caller; returns the status code. */
   post: (url: string) => Promise<number>;
+  /** GET the public validate route with `token`, unauthenticated. */
+  validate: (token: string) => Promise<{ status: number; valid?: boolean }>;
   invitationId: string;
   callerAccountId: string;
+  /** The plaintext of the seeded token, or null when seeded unsent. */
+  seededToken: string | null;
   readInvitation: () => Promise<InvitationState>;
+  /** The whole invitation row, as JSON text. */
+  rowText: () => Promise<string>;
+}
+
+interface Options {
+  /**
+   * `true` (default): the invitation was already sent, so it has a digest and
+   * someone holds the matching link. `false`: freshly created, no token yet.
+   */
+  sent?: boolean;
+}
+
+const sha256Hex = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
+
+/** The token in the Nth email the route sent, read out of its link. */
+function emailedToken(n: number): string {
+  // Decoded the way a browser decodes an `href`: Handlebars escapes the `=`
+  // in `?token=` as `&#x3D;`.
+  const body = (sendEmail.mock.calls[n]![0] as { HtmlBody: string }).HtmlBody.replace(
+    /&#x3D;/g,
+    "=",
+  ).replace(/&amp;/g, "&");
+  const match = /\/invite\/accept\?token=([^"&\s<]+)/.exec(body);
+  expect(match, "the email carries an acceptance link").not.toBeNull();
+  return decodeURIComponent(match![1]!);
 }
 
 /**
@@ -86,7 +123,13 @@ interface Harness {
  * DIFFERENT person — so every case is a caller acting on someone else's
  * invitation, which is the only case the routes exist for.
  */
-async function withCaller(role: CallerRole, fn: (h: Harness) => Promise<void>): Promise<void> {
+async function withCaller(
+  role: CallerRole,
+  fn: (h: Harness) => Promise<void>,
+  opts: Options = {},
+): Promise<void> {
+  const sent = opts.sent ?? true;
+  const seededToken = sent ? `tok-${randomUUID()}` : null;
   await withTestDb(async (owner) => {
     const client: postgres.Sql = await connectAsAppRole(owner);
     try {
@@ -150,10 +193,12 @@ async function withCaller(role: CallerRole, fn: (h: Harness) => Promise<void>): 
                     'admin'::user_role, '{"global":{},"board_overrides":[]}'::jsonb)
           `);
           await tx.execute(sql`
-            INSERT INTO invitation (id, person_id, user_account_id, town_id, token, status,
-                                    expires_at, role)
+            INSERT INTO invitation (id, person_id, user_account_id, town_id, token_sha256,
+                                    status, expires_at, role, sent_at)
             VALUES (${invitationId}, ${inviteePersonId}, ${inviteeAccountId}, ${onboarded.townId},
-                    ${randomUUID()}, 'pending', now() + interval '7 days', 'admin')
+                    ${seededToken === null ? null : sql`sha256(convert_to(${seededToken}, 'UTF8'))`},
+                    'pending', now() + interval '7 days', 'admin',
+                    ${sent ? sql`now() - interval '1 day'` : null})
           `);
         });
 
@@ -169,16 +214,34 @@ async function withCaller(role: CallerRole, fn: (h: Harness) => Promise<void>): 
         await fn({
           post: async (url) =>
             (await server.inject({ method: "POST", url, headers: { cookie } })).statusCode,
+          validate: async (token) => {
+            const res = await server.inject({
+              method: "GET",
+              url: `/api/invitations/validate?token=${encodeURIComponent(token)}`,
+            });
+            const body = res.statusCode === 200 ? (res.json() as { valid?: boolean }) : {};
+            return { status: res.statusCode, valid: body.valid };
+          },
           invitationId,
           callerAccountId: onboarded.userAccountId,
+          seededToken,
           readInvitation: async () => {
             const rows = (await seed((tx) =>
               tx.execute(sql`
-                SELECT token, status, sent_at::text AS sent_at, invited_by::text AS invited_by
+                SELECT encode(token_sha256, 'hex') AS digest, status,
+                       sent_at::text AS sent_at, invited_by::text AS invited_by
                   FROM invitation WHERE id = ${invitationId}
               `),
             )) as unknown as InvitationState[];
             return rows[0]!;
+          },
+          rowText: async () => {
+            const rows = (await seed((tx) =>
+              tx.execute(sql`
+                SELECT row_to_json(i)::text AS t FROM invitation i WHERE id = ${invitationId}
+              `),
+            )) as unknown as { t: string }[];
+            return rows[0]!.t;
           },
         });
       } finally {
@@ -238,7 +301,52 @@ describe("an administrator is not blocked by the guard", () => {
       expect(await h.post(`/api/invitations/${h.invitationId}/resend`)).toBe(200);
 
       expect(sendEmail).toHaveBeenCalledTimes(1);
-      expect((await h.readInvitation()).token).not.toBe(before.token);
+      expect((await h.readInvitation()).digest).not.toBe(before.digest);
+    });
+  });
+});
+
+describe("tokens are stored as digests, and the email holds the only copy", () => {
+  it("a never-sent invitation has no token; /send mints one and stores only its hash", async () => {
+    await withCaller(
+      "admin",
+      async (h) => {
+        expect((await h.readInvitation()).digest).toBeNull();
+
+        expect(await h.post(`/api/invitations/${h.invitationId}/send`)).toBe(200);
+
+        const token = emailedToken(0);
+        // 256 random bits, base64url — not a UUID from the database.
+        expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        // Stored as its sha256, computed independently here…
+        expect((await h.readInvitation()).digest).toBe(sha256Hex(token));
+        // …and the token itself is nowhere in the row.
+        expect(await h.rowText()).not.toContain(token);
+        // The emailed link works end to end through the public route.
+        expect(await h.validate(token)).toEqual({ status: 200, valid: true });
+      },
+      { sent: false },
+    );
+  });
+
+  it("an existing link keeps working — stored digests are looked up by hashing what is presented", async () => {
+    await withCaller("admin", async (h) => {
+      expect(await h.validate(h.seededToken!)).toEqual({ status: 200, valid: true });
+      // Presenting the digest instead of the token gets nothing: the stored
+      // value is not a credential.
+      expect((await h.validate((await h.readInvitation()).digest!)).status).toBe(404);
+    });
+  });
+
+  it("/resend kills the old link and the new one works", async () => {
+    await withCaller("admin", async (h) => {
+      expect(await h.post(`/api/invitations/${h.invitationId}/resend`)).toBe(200);
+
+      const fresh = emailedToken(0);
+      expect(fresh).not.toBe(h.seededToken);
+      expect((await h.readInvitation()).digest).toBe(sha256Hex(fresh));
+      expect(await h.validate(fresh)).toEqual({ status: 200, valid: true });
+      expect((await h.validate(h.seededToken!)).status).toBe(404);
     });
   });
 });
