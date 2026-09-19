@@ -133,8 +133,8 @@ is set by what ACCEPTS it, so follow the value to its consumer before rating it.
 
 **What remains, and it is no longer a security item:** `SourceDataPanel` and
 `live.tsx` still fetch the full roster to map ids to names. A narrower
-`boardMember.namesForBoard` would be smaller, not safer. Adjacent and still
-open: entry 14.
+`boardMember.namesForBoard` would be smaller, not safer. Adjacent, and
+since closed: entry 14.
 
 ---
 
@@ -509,29 +509,27 @@ grep -rn "SUPABASE" packages/api/src --include='*.ts'
 
 ---
 
-## 14. Any signed-in user can rotate, and re-send, anyone's pending invitation
+## 14. ~~Any signed-in user can rotate, and re-send, anyone's pending invitation~~ — CLOSED
 
-**Where:** `packages/api/src/routes/invitations.ts` —
-`POST /api/invitations/:id/send` and `POST /api/invitations/:id/resend`.
+**Closed by** `fix-invitation-send-resend-permission`: `POST
+/api/invitations/:id/send` and `/resend` now require an administrator
+(`assertCanInsertUserAccount`, via `assertMayIssueInvitations` in
+`packages/api/src/routes/invitations.ts`), checked before the invitation is
+read, so `resend` never reaches its reissue `UPDATE` for a refused caller.
+`routes/__tests__/invitations-send-resend.test.ts` covers a board member with
+no grants and a staff account holding every global grant (both 403, token
+unchanged, no email) and an administrator (both 200, token rotated on resend).
 
-**What the gap is:** both take `app.verifyAuth` and nothing else — no
-permission check. `resend` generates a new token and resets the expiry, so any
-signed-in user in a town who knows (or is shown) an invitation's id can
-invalidate the link sitting in the invitee's inbox, and either route re-sends
-the email with `invited_by` set to the caller. `boardMember.roster` still
-returns `invitation_id` to every signed-in user, so ids are not hard to come by.
+**Why that rule:** every procedure that issues an invitation already requires
+an administrator, so the `/send` each of them makes immediately afterward can
+never be refused by this guard.
 
-**Why it is not a takeover:** the new token goes only to the invitee's
-`person.email`, and changing that email goes through `person.update`, which is
-guarded (`assertCanUpdatePerson`). Found while closing entry 4, and kept out of
-that fix deliberately.
+**Ordering is what the test is really about.** With the guard moved below the
+`UPDATE`, the route still answered 403 — and had already rotated the token.
+Only the token assertion caught it.
 
-**Condition that retires this entry:** both routes check the same permission
-the client uses to offer "Resend" (or whatever the owner decides governs
-inviting), with a test that a board member with no grants gets 403.
-
-**Verification command:**
-
-```
-grep -n -A2 '"/invitations/:id/send"\|"/invitations/:id/resend"' packages/api/src/routes/invitations.ts
-```
+**Left open, deliberately:** `MemberRoster` shows Send/Resend to every
+signed-in user, as it does Transition, Archive and Edit title — all
+admin-only on the server. A non-admin who clicks one gets the rule's message
+in a toast. Hiding admin-only row actions is a roster-wide UX decision, not
+part of this fix.
