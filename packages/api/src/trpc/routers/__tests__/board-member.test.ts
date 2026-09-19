@@ -142,15 +142,18 @@ async function seedInvitation(
   personId: string,
   userAccountId: string | null,
   createdAt: string,
-): Promise<string> {
+  role: string | null = null,
+): Promise<{ id: string; token: string }> {
+  const id = randomUUID();
   const token = randomUUID();
   await inTown(db, town, async (tx) => {
     await tx.execute(sql`
-      INSERT INTO invitation (person_id, user_account_id, town_id, token, status, created_at)
-      VALUES (${personId}, ${userAccountId}, ${town.townId}, ${token}, 'pending', ${createdAt}::timestamptz)
+      INSERT INTO invitation (id, person_id, user_account_id, town_id, token, status, created_at, role)
+      VALUES (${id}, ${personId}, ${userAccountId}, ${town.townId}, ${token}, 'pending',
+              ${createdAt}::timestamptz, ${role})
     `);
   });
-  return token;
+  return { id, token };
 }
 
 describe("boardMember.memberCount", () => {
@@ -359,7 +362,7 @@ describe("boardMember.roster", () => {
         );
         // Older invitation, then a newer one — the newer must win.
         await seedInvitation(db, town, personId, staff.userAccountId, "2026-01-01T00:00:00Z");
-        const latestToken = await seedInvitation(
+        const latest = await seedInvitation(
           db,
           town,
           personId,
@@ -378,8 +381,72 @@ describe("boardMember.roster", () => {
           email: "jamie@example.test",
           status: "active",
           user_account_id: staff.userAccountId,
-          invitation_token: latestToken,
+          invitation_id: latest.id,
         });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  /**
+   * The roster used to return each seat's most recent `invitation_token`.
+   * `roster` needs no permission — the live screen and the minutes panel read
+   * it for any signed-in user — and `POST /api/invitations/accept` is public
+   * and asks for nothing but `{token, password}`. Together: any signed-in
+   * user in the town could read a pending invitation's token and claim that
+   * account, at whatever role the invitation carried. The web never read the
+   * field.
+   *
+   * Modelled as the attack: the caller is a board member with no grants, and
+   * the invitation on the roster is a pending ADMIN invitation. Checked
+   * against the serialized response rather than one key, so the token
+   * returning under another alias — or nested — fails this too.
+   */
+  it("never returns an invitation token, to any caller", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const boardId = await seedBoard(db, town, { name: "Budget Committee" });
+        const personId = await seedPerson(db, town, "Pat Pending", "pat@example.test");
+        await seedBoardMember(db, town, boardId, personId, "active");
+        const invitee = await seedActor(db, town, { role: "admin" });
+        await inTown(db, town, (tx) =>
+          tx.execute(
+            sql`UPDATE user_account SET person_id = ${personId} WHERE id = ${invitee.userAccountId}`,
+          ),
+        );
+        const older = await seedInvitation(
+          db,
+          town,
+          personId,
+          invitee.userAccountId,
+          "2026-01-01T00:00:00Z",
+          "admin",
+        );
+        const pending = await seedInvitation(
+          db,
+          town,
+          personId,
+          invitee.userAccountId,
+          "2026-06-01T00:00:00Z",
+          "admin",
+        );
+        const attacker = await seedActor(db, town, { role: "board_member", global: [] });
+
+        const caller = appRouter.createCaller(contextFor(db, town, attacker));
+        const rows = await caller.boardMember.roster({ boardId });
+
+        expect(rows).toHaveLength(1);
+        // The status the UI does use still arrives — this is a narrowing,
+        // not a lost field.
+        expect(rows[0]).toMatchObject({ invitation_id: pending.id, invitation_status: "pending" });
+        expect(rows[0]).not.toHaveProperty("invitation_token");
+        const body = JSON.stringify(rows);
+        expect(body).not.toContain(pending.token);
+        expect(body).not.toContain(older.token);
       } finally {
         await app.end();
       }

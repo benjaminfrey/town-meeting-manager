@@ -69,7 +69,6 @@ interface MemberRow {
   // Invitation
   invitation_id: string | null;
   invitation_status: string | null;
-  invitation_token: string | null;
   invitation_sent_at: string | null;
 }
 
@@ -150,7 +149,6 @@ export function MemberRoster({
       user_account_archived: bm.user_account_archived_at,
       invitation_id: bm.invitation_id,
       invitation_status: effectiveStatus,
-      invitation_token: bm.invitation_token,
       invitation_sent_at: bm.invitation_sent_at,
     };
   });

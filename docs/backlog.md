@@ -112,41 +112,29 @@ re-verification ran._
 
 ---
 
-## 4. The minutes editor's source panel downloads every seat's live invitation token to resolve names
+## 4. ~~The minutes editor's source panel downloads every seat's live invitation token to resolve names~~ — CLOSED
 
-**Where:** `packages/web/src/components/minutes/SourceDataPanel.tsx` (the
-`boardMember.roster` read and its `memberNames` map) and
-`packages/api/src/trpc/routers/board-member.ts` (`roster`'s `SELECT`, which
-returns `invitation_token` per seat).
+**Closed by** `fix-roster-invitation-token-leak`: `boardMember.roster` no
+longer selects `invitation.token`, the web's unused `invitation_token` field is
+gone, and `board-member.test.ts` ("never returns an invitation token, to any
+caller") checks the serialized response, so the token coming back under another
+alias fails too.
 
-**What the gap is:** `boardMember.roster` is the only procedure that maps a
-`board_member_id`/mover/seconder id to a person's name, and its row shape
-includes each seat's most recent invitation id, token and status —
-`activeCountForBoard`'s own doc comment in the same file states the trade
-explicitly: "Sending a board's live invitation tokens to every user who opens
-that dialog, to count rows the server can count, is not a trade worth making
-to avoid a nine-line procedure." `SourceDataPanel` needs names, not a count,
-but it pays the same price: every clerk who opens the minutes editor now
-receives every board seat's live invitation token in the `roster` response,
-to read `.name` off it.
+**This entry under-rated what it described.** It was filed as token
+minimisation. It was an account takeover: `roster` has no permission guard (the
+live screen and the minutes panel read it for any signed-in user), and
+`POST /api/invitations/accept` is public and asks for nothing but
+`{token, password}` — the caller chooses the password for the invited account,
+at the invitation's role, admin included, and the login is marked verified. Any
+signed-in user in a town could claim any pending invitation on any board. It
+predated Phase E; `SourceDataPanel` was the second screen to read `roster`, not
+the cause. The lesson for the next entry like this: a leaked value's severity
+is set by what ACCEPTS it, so follow the value to its consumer before rating it.
 
-**Why it wasn't closed in Phase E:** this widens an EXISTING pattern rather
-than opening a new hole — `meetings.$meetingId.live.tsx` already fetches
-`boardMember.roster` for the identical reason (`VotePanel`'s
-board-member-id-to-name mapping), so wave 6 Task 3 is the second screen to
-make this trade, not the first. Closing it means adding a narrower procedure
-(`boardMember.namesForBoard`, returning `id`/`name` only) and moving both
-callers onto it — a real fix, but a new procedure plus two call-site
-migrations is out of scope for a task whose brief was "wire the six writes
-Task 1 already built," and no Phase E wave task owns a token-minimization pass
-across the app.
-
-**Verification command:**
-
-```
-grep -n "invitation_token" packages/api/src/trpc/routers/board-member.ts
-grep -rln "boardMember.roster" packages/web/src/routes/meetings.\$meetingId.live.tsx packages/web/src/components/minutes/SourceDataPanel.tsx
-```
+**What remains, and it is no longer a security item:** `SourceDataPanel` and
+`live.tsx` still fetch the full roster to map ids to names. A narrower
+`boardMember.namesForBoard` would be smaller, not safer. Adjacent and still
+open: entry 14.
 
 ---
 
@@ -517,4 +505,33 @@ question, not a `docker compose down`.
 ```
 git grep -n "@supabase/supabase-js" -- . ':!pnpm-lock.yaml' ':!docs' ':!.superpowers'
 grep -rn "SUPABASE" packages/api/src --include='*.ts'
+```
+
+---
+
+## 14. Any signed-in user can rotate, and re-send, anyone's pending invitation
+
+**Where:** `packages/api/src/routes/invitations.ts` —
+`POST /api/invitations/:id/send` and `POST /api/invitations/:id/resend`.
+
+**What the gap is:** both take `app.verifyAuth` and nothing else — no
+permission check. `resend` generates a new token and resets the expiry, so any
+signed-in user in a town who knows (or is shown) an invitation's id can
+invalidate the link sitting in the invitee's inbox, and either route re-sends
+the email with `invited_by` set to the caller. `boardMember.roster` still
+returns `invitation_id` to every signed-in user, so ids are not hard to come by.
+
+**Why it is not a takeover:** the new token goes only to the invitee's
+`person.email`, and changing that email goes through `person.update`, which is
+guarded (`assertCanUpdatePerson`). Found while closing entry 4, and kept out of
+that fix deliberately.
+
+**Condition that retires this entry:** both routes check the same permission
+the client uses to offer "Resend" (or whatever the owner decides governs
+inviting), with a test that a board member with no grants gets 403.
+
+**Verification command:**
+
+```
+grep -n -A2 '"/invitations/:id/send"\|"/invitations/:id/resend"' packages/api/src/routes/invitations.ts
 ```
