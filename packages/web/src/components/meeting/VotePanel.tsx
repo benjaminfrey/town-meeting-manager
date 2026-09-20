@@ -239,19 +239,30 @@ export function VotePanel({
 
           // Re-render the PDF without the DRAFT watermark, fire-and-forget.
           //
-          // **Preserved, including its defect.** This names the LIVE meeting,
-          // which is not the meeting whose minutes were just approved — see
-          // `routers/minutes-document.ts`'s `approveMinutesForPassedMotion`.
-          // The live meeting usually has no minutes document, so the request
-          // 404s into the `catch` below and the watermark is never removed.
-          // Fixing it means deciding what a re-render of another meeting's
-          // legal record should do, which is wave 6's surface, not a
-          // migration's.
-          void apiFetch(`/api/meetings/${meetingId}/minutes/render`, {
+          // **Fixed (backlog 11, defect B).** This used to post the LIVE
+          // meeting's id to the meeting-keyed route, but the document just
+          // approved belongs to an EARLIER meeting — reached through
+          // `agenda_item.source_minutes_document_id`, never the live one —
+          // so that request always 404d into a swallowed `.catch(() => {})`
+          // and the watermark was never removed. `data.minutesApproved` is
+          // the approved document's own id (`approveMinutesForPassedMotion`'s
+          // return value, threaded back through `recordForMotion`), so post
+          // THAT to the document-keyed route instead — it derives
+          // authorization from the document's own meeting's board, not the
+          // live meeting's, so it does not matter that the two meetings (and
+          // possibly boards) differ.
+          //
+          // A failure here is surfaced, not swallowed: it means a legal
+          // record keeps a DRAFT watermark, which is not "non-critical" the
+          // way an on-demand re-render can paper over — the clerk needs to
+          // know so they can re-render it by hand.
+          void apiFetch(`/api/minutes/${data.minutesApproved}/render`, {
             method: "POST",
             json: { is_draft: false },
           }).catch(() => {
-            // Non-critical — the minutes screen can re-render on demand.
+            toast.error(
+              "Minutes were approved, but the draft watermark could not be removed automatically. Re-render the document from the minutes screen.",
+            );
           });
         }
 

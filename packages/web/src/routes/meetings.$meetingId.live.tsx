@@ -815,11 +815,13 @@ export default function LiveMeetingPage({ loaderData }: Route.ComponentProps) {
    * the same rows), in one transaction, behind
    * `requireBoardActor(assertCanUpdateMeeting)`.
    *
-   * The `adjournment` JSONB's five keys are unchanged, INCLUDING the
-   * `adjourned_by` misattribution `meeting.ts` documents: it holds a
-   * `person.id` while the minutes assembler looks it up in a `board_member.id`
-   * map, so the generated record silently names the presiding officer. That is
-   * a legal-record semantics change and wave 6 owns both of its readers.
+   * The `adjournment` JSONB's five keys are unchanged. `adjourned_by` still
+   * holds a `person.id`, as `meeting.ts` documents — that write was always
+   * correct. The misattribution this used to note here was in the READER:
+   * `minutes-assembler.ts`'s `buildAdjournment` used to look `adjourned_by`
+   * up in a `board_member.id` map and silently name the presiding officer
+   * instead. Fixed in backlog 11, defect A — the assembler now resolves it
+   * with `personName`, the `person.id` map it already builds.
    */
   const adjournMutation = useMutation(
     trpc.meeting.adjourn.mutationOptions({

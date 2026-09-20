@@ -627,23 +627,33 @@ function formatAdjournmentText(
   if (!adj) return null;
 
   const time = formatTime(adj.timestamp);
-  const officer = adj.adjourned_by
-    ? memberRef(adj.adjourned_by, null, options.member_reference_style, firstUseTracker)
-    : memberRef(
-        contentJson.attendance.presiding_officer,
-        null,
-        options.member_reference_style,
-        firstUseTracker,
-      );
+  const timeClause = time ? ` at ${time}` : "";
 
   if (adj.method === "without_objection") {
-    const timeClause = time ? ` at ${time}` : "";
+    // A real individual declared this, without objection from the body — the
+    // clerk-adjourns case backlog 11's defect A was about, and `officer` is
+    // only ever computed here, where it names a real adjourner.
+    const officer = adj.adjourned_by
+      ? memberRef(adj.adjourned_by, null, options.member_reference_style, firstUseTracker)
+      : memberRef(
+          contentJson.attendance.presiding_officer,
+          null,
+          options.member_reference_style,
+          firstUseTracker,
+        );
     return `There being no objection, ${officer} adjourned the meeting${timeClause}.`;
   }
 
-  // method === "motion"
-  const timeClause = time ? ` at ${time}` : "";
-  let text = `${officer} declared the meeting adjourned${timeClause}.`;
+  // method === "motion" — owner decision, backlog 11 fix round 2: the body
+  // adjourned ITSELF by carrying a motion. No individual declared it, and
+  // `adjourned_by` on this path is whoever happened to be recording the vote
+  // (`voteRecord.recordForMotion`'s caller) — not a declaration by anyone,
+  // and not who the minutes should say adjourned the meeting. Rendered
+  // impersonally; the motion block immediately below already names the
+  // mover and seconder, so the attribution is not lost, only moved to where
+  // it is actually true. Already-generated PDFs are not re-rendered by this
+  // change — it takes effect on the next render of each document.
+  let text = `The meeting adjourned${timeClause}.`;
 
   if (adj.motion) {
     const motionText =

@@ -220,7 +220,8 @@ const MINUTES_STYLE_LABELS: Record<string, string> = {
  * hand back either shape; `meeting.detail` cannot — `meeting.test.ts`'s
  * "returns the adjournment JSONB, parsed, not as text" pins that it arrives
  * as an object. Its five keys are documented on `meeting.adjourn`, including
- * the `adjourned_by` misattribution this screen does not read.
+ * `adjourned_by` — its read-side misattribution (fixed in backlog 11,
+ * defect A) never applied to this screen, which does not read that key.
  */
 function adjournmentOf(stored: unknown): Record<string, unknown> | null {
   if (typeof stored !== "object" || stored === null) return null;
