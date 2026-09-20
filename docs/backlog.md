@@ -532,47 +532,24 @@ part of this fix.
 
 ---
 
-## 15. Rule 10's guard is unwired — minutes creation is gated on R2, not R1
+## 15. ~~Rule 10's guard is unwired — minutes creation is gated on R2, not R1~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/authorization/rules.ts`
-(`assertCanInsertMinutesDocument`, rules 10–13's block) and
-`packages/api/src/routes/minutes.ts:334` (`assertCanGenerateMinutes`) with the
-`INSERT INTO minutes_document` it guards at `:416`.
+**Closed 2026-09-20** by wiring the guard in, per the owner's decision that
+creation needs BOTH codes: `POST /meetings/:id/minutes/generate` now calls
+`assertCanGenerateMinutes` (R2 — who may run the generator) **and**
+`assertCanInsertMinutesDocument` (R1 — who may create the document), restoring
+what the deleted policy `minutes_document_insert` required.
+`POST /meetings/:id/minutes/regenerate` overwrites an existing draft, so it
+takes `assertCanUpdateMinutesDocument` (rule 11, also R1).
 
-**What the gap is:** the deleted policy `minutes_document_insert`
-(`supabase/migrations/20260308000034_rls_minutes_exhibit.sql`, recoverable at
-`8b1e9c4^`) required **R1** to create a minutes document.
-`assertCanInsertMinutesDocument` restates that rule and
-`trpc/__tests__/permission.test.ts:265` pins it, but nothing calls the function:
-`git grep` finds zero production call sites. The only path that inserts a
-`minutes_document` row is the generation route, and its guard resolves **R2**
-(`generate_minutes`) instead. Across all five shipped permission templates R2 is
-never granted without R1, so no account the product creates today gets a
-different answer — but a hand-built matrix holding R2 and not R1 is admitted
-where the policy refused it, and the named guard for this rule is dead code that
-a completeness grep reads as coverage.
+**Blast radius: none for shipped templates.** All four templates that grant R2
+grant R1 as well; `TEMPLATE_GENERAL_STAFF` has neither. Only a hand-built matrix
+holding R2 without R1 is newly refused — the case the policy existed to refuse.
 
-**Why it was not closed in Phase F:** Phase F is a decommission, and the spec's
-decision 6 scopes Task 8 to verify-and-report. Closing it is also a real
-decision rather than a wiring change: either R1 is added to the generation
-route's check (narrowing it for an R2-without-R1 matrix), or rule 10 is restated
-as R2 and the divergence from the policy is recorded deliberately. That choice
-belongs to whoever owns the minutes workflow, not to a deletion phase.
-
-**Retirement condition:** either `assertCanInsertMinutesDocument` has a
-production caller on the `minutes_document` INSERT path, or the function is
-deleted and rules.ts records that R2 governs creation, with
-`permission.test.ts`'s case 10 updated to match.
-
-**Verification command:**
-
-```
-# the guard, and its zero callers:
-git grep -n "assertCanInsertMinutesDocument" -- packages/api/src | grep -v __tests__
-# the only INSERT, and the R2 check above it:
-grep -n "INSERT INTO minutes_document" packages/api/src/routes/minutes.ts
-grep -n "assertCanGenerateMinutes" packages/api/src/routes/minutes.ts
-```
+**Pinned by** `routes/__tests__/board-scoped-legacy-routes.test.ts`, describe
+block "creating a minutes document needs R1 as well as R2 (backlog 15)": three
+cases (generate refused, generate allowed with both, regenerate refused).
+Mutation-checked — removing either guard turns its own named test red.
 
 ---
 

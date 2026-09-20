@@ -288,6 +288,51 @@ const R1 = "R1";
 const R2 = "R2";
 const R3 = "R3";
 
+describe("creating a minutes document needs R1 as well as R2 (backlog 15)", () => {
+  /**
+   * The deleted policy `minutes_document_insert`
+   * (`20260308000034_rls_minutes_exhibit.sql`, recoverable at `8b1e9c4^`) required
+   * **R1** to create a `minutes_document` row. The generation route checked only
+   * **R2**, and `assertCanInsertMinutesDocument` — the guard that restates the
+   * policy — had no caller at all: dead code that a completeness grep read as
+   * coverage.
+   *
+   * No shipped template notices: all four that grant R2 grant R1 too. The case
+   * that matters is a hand-built matrix holding R2 WITHOUT R1, which is exactly
+   * what the policy refused and what the route admitted.
+   */
+  const generateButNotEdit: Matrix = {
+    global: { [A6]: true, [R1]: false, [R2]: true, [R3]: true },
+    override: {},
+  };
+
+  it("refuses generation to an actor holding R2 but not R1", async () => {
+    await withTwoBoards(generateButNotEdit, async (ctx) => {
+      expect(await ctx.post(`/api/meetings/${ctx.otherBoardMeetingId}/minutes/generate`)).toBe(403);
+    });
+  });
+
+  it("still allows generation when the actor holds both", async () => {
+    await withTwoBoards(
+      { global: { [A6]: true, [R1]: true, [R2]: true, [R3]: true }, override: {} },
+      async (ctx) => {
+        expect(await ctx.post(`/api/meetings/${ctx.otherBoardMeetingId}/minutes/generate`)).toBe(
+          200,
+        );
+      },
+    );
+  });
+
+  it("refuses regeneration to an actor holding R2 but not R1", async () => {
+    await withTwoBoards(generateButNotEdit, async (ctx) => {
+      await seedDraftMinutes(ctx, ctx.otherBoardMeetingId);
+      expect(await ctx.post(`/api/meetings/${ctx.otherBoardMeetingId}/minutes/regenerate`)).toBe(
+        403,
+      );
+    });
+  });
+});
+
 describe("a board_override that REVOKES is now honoured — the live bypass", () => {
   // Global grant, revoked on the named board. Before D1f every one of these
   // answered as if the override did not exist. Each assertion fails — turning
