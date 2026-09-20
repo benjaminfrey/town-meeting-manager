@@ -529,3 +529,250 @@ signed-in user, as it does Transition, Archive and Edit title — all
 admin-only on the server. A non-admin who clicks one gets the rule's message
 in a toast. Hiding admin-only row actions is a roster-wide UX decision, not
 part of this fix.
+
+---
+
+## 15. Rule 10's guard is unwired — minutes creation is gated on R2, not R1
+
+**Where:** `packages/api/src/trpc/authorization/rules.ts`
+(`assertCanInsertMinutesDocument`, rules 10–13's block) and
+`packages/api/src/routes/minutes.ts:334` (`assertCanGenerateMinutes`) with the
+`INSERT INTO minutes_document` it guards at `:416`.
+
+**What the gap is:** the deleted policy `minutes_document_insert`
+(`supabase/migrations/20260308000034_rls_minutes_exhibit.sql`, recoverable at
+`8b1e9c4^`) required **R1** to create a minutes document.
+`assertCanInsertMinutesDocument` restates that rule and
+`trpc/__tests__/permission.test.ts:265` pins it, but nothing calls the function:
+`git grep` finds zero production call sites. The only path that inserts a
+`minutes_document` row is the generation route, and its guard resolves **R2**
+(`generate_minutes`) instead. Across all five shipped permission templates R2 is
+never granted without R1, so no account the product creates today gets a
+different answer — but a hand-built matrix holding R2 and not R1 is admitted
+where the policy refused it, and the named guard for this rule is dead code that
+a completeness grep reads as coverage.
+
+**Why it was not closed in Phase F:** Phase F is a decommission, and the spec's
+decision 6 scopes Task 8 to verify-and-report. Closing it is also a real
+decision rather than a wiring change: either R1 is added to the generation
+route's check (narrowing it for an R2-without-R1 matrix), or rule 10 is restated
+as R2 and the divergence from the policy is recorded deliberately. That choice
+belongs to whoever owns the minutes workflow, not to a deletion phase.
+
+**Retirement condition:** either `assertCanInsertMinutesDocument` has a
+production caller on the `minutes_document` INSERT path, or the function is
+deleted and rules.ts records that R2 governs creation, with
+`permission.test.ts`'s case 10 updated to match.
+
+**Verification command:**
+
+```
+# the guard, and its zero callers:
+git grep -n "assertCanInsertMinutesDocument" -- packages/api/src | grep -v __tests__
+# the only INSERT, and the R2 check above it:
+grep -n "INSERT INTO minutes_document" packages/api/src/routes/minutes.ts
+grep -n "assertCanGenerateMinutes" packages/api/src/routes/minutes.ts
+```
+
+---
+
+## 16. Rules 12 and 13 guard a table nothing writes
+
+**Where:** `packages/api/src/trpc/authorization/rules.ts`
+(`assertCanInsertMinutesSection`, `assertCanUpdateMinutesSection`) and the
+absence of any `minutes_section` writer anywhere in `packages/api/src` or
+`packages/web/src`.
+
+**What the gap is:** the corpus carried `minutes_section_insert` and
+`minutes_section_update`, both R1. Both are restated in `rules.ts` and both are
+pinned by `trpc/__tests__/permission.test.ts:265`. Neither has a production
+caller, because the product has no `minutes_section` router, no route and no
+raw write — the only `INSERT INTO minutes_section` in the repository is in
+`db/__tests__/tenant-isolation.test.ts`'s fixture. Minutes content lives in
+`minutes_document.content_json` instead. This is not a live hole (an unwritten
+table cannot be written past its guard) but it is a rule whose enforcement is
+supplied by absence, which stops being true the first time a section writer is
+added.
+
+**Why it was not closed in Phase F:** there is nothing to fix. Deleting the two
+guards would remove the only record that R1 governs sections, and the two
+numbered test cases with them; wiring them needs a writer that does not exist
+and that no screen asks for. Recorded so the next task that builds a sectioned
+minutes editor finds the rule already decided instead of inventing one.
+
+**Retirement condition:** either a `minutes_section` write path exists and calls
+both guards, or a decision is recorded that `minutes_document.content_json` is
+the permanent shape and the table (with its two guards) is dropped.
+
+**Verification command:**
+
+```
+# no writer outside the test fixture:
+git grep -n "INSERT INTO minutes_section\|UPDATE minutes_section" -- packages/
+# the two guards, and their zero callers:
+git grep -n "assertCanInsertMinutesSection\|assertCanUpdateMinutesSection" \
+  -- packages/api/src | grep -v __tests__
+```
+
+---
+
+## 17. `minutesDocument.byMeeting` returns a draft document's id and status with no R4 check
+
+**Where:** `packages/api/src/trpc/routers/minutes-document.ts:322`
+(`byMeeting`), against
+`packages/api/src/trpc/authorization/rules.ts`'s rule 9
+(`canSelectMinutesDocument` / `assertCanSelectMinutesDocument`).
+
+**What the gap is:** rule 9 restores `minutes_document_select`, which gated
+**every** column of a draft or in-review minutes row behind R4. Two of the three
+read paths apply it — `detail` calls `assertCanSelectMinutesDocument` at `:428`,
+`pendingByTown` filters through `visibleMinutesDocuments` at `:491` — and
+`storage/documents.ts:146` applies it to the PDF download. `byMeeting` does not:
+it runs `SELECT id, status FROM minutes_document WHERE meeting_id = …` inside
+the tenant context and returns the row to any signed-in member of the town. No
+content leaks, but the existence and workflow state of an unadopted minutes
+document does, including for an executive session — which `rules.ts`'s own rule
+9 comment calls "the single most sensitive document this product holds."
+
+**Why it was not closed in Phase F:** Task 8 is verify-and-report, and this is a
+behaviour change to a procedure with callers: `byMeeting` is how the web client
+decides whether to offer "Generate minutes" or "Open minutes" for a meeting, so
+returning `null` to a caller without R4 changes what that screen renders. The
+fix is probably to return `null` rather than to throw — a list-shaped decision
+rule 9's three forms already anticipate — but it needs the screen checked, not
+just the procedure.
+
+**Retirement condition:** `byMeeting` routes its row through
+`canSelectMinutesDocument` (joining `meeting` for the board, as `detail` does),
+and a test asserts that a caller without R4 gets `null` for a `draft` row and
+the row for an `approved` one.
+
+**Verification command:**
+
+```
+# the unguarded read:
+sed -n '322,336p' packages/api/src/trpc/routers/minutes-document.ts
+# the two siblings that do apply the rule:
+grep -n "assertCanSelectMinutesDocument\|visibleMinutesDocuments" \
+  packages/api/src/trpc/routers/minutes-document.ts
+```
+
+---
+
+## 18. Rule 18's self branch has no caller — a person cannot read their own notification deliveries
+
+**Where:** `packages/api/src/trpc/authorization/rules.ts`
+(`canSelectNotificationDelivery`, `assertCanSelectNotificationDelivery`,
+`visibleNotificationDeliveries`) and `packages/api/src/routes/notifications.ts`,
+whose delivery reads at `:270`, `:342`, `:370` and `:393` all sit behind the
+`notificationAdmin` preHandler (`:110`, `requirePermission(PERMISSIONS.C2)`).
+
+**What the gap is:** the deleted `notification_delivery_select` policy admitted
+`has_permission('C2') OR subscriber_id = get_current_person_id()`. The restored
+rule keeps both branches and `trpc/__tests__/permission.test.ts:392` pins both,
+but only the C2 branch is reachable: there is no surface anywhere that shows a
+person their own notification history, so the three self-scoped functions have
+zero production callers. The direction is safe — the running system is
+**narrower** than the policy, not wider — but the rule is half-enforced and a
+grep for "is rule 18 wired" answers yes on the C2 half alone.
+
+**Why it was not closed in Phase F:** wiring the self branch means building a
+screen (a "your notifications" view) that no plan has asked for, which is
+product work and not decommissioning. Deleting the branch would discard a rule
+the corpus actually carried, before anyone has decided that residents never get
+a delivery history.
+
+**Retirement condition:** either a procedure exists that serves a person their
+own deliveries through `visibleNotificationDeliveries`, or a decision is
+recorded that delivery history is administrator-only and the self branch is
+removed from the rule and its test.
+
+**Verification command:**
+
+```
+git grep -n "canSelectNotificationDelivery\|visibleNotificationDeliveries" \
+  -- packages/api/src | grep -v __tests__
+grep -n "notificationAdmin" packages/api/src/routes/notifications.ts
+```
+
+---
+
+## 19. Rule 19's C2 branch has no caller — C2 cannot read anyone's notification preferences
+
+**Where:** `packages/api/src/trpc/authorization/rules.ts`
+(`canSelectSubscriberPreference`, `assertCanSelectSubscriberPreference`,
+`visibleSubscriberPreferences`) and
+`packages/api/src/trpc/routers/notification-preference.ts`'s `mine`.
+
+**What the gap is:** the deleted `subscriber_pref_select` policy admitted
+`person_id = get_current_person_id() OR has_permission('C2')`. `mine` enforces
+the first half by construction — it has no `personId` input and reads
+`WHERE person_id = ${ctx.tenant.personId}` — which the router's header argues is
+stronger than a runtime check. The C2 half has no caller: nothing lets a
+notification administrator see who has opted out of what, so the three rule
+functions are unreferenced outside `permission.test.ts:439`. Again narrower than
+the policy, so not a hole; again half-enforced.
+
+**Why it was not closed in Phase F:** the same reason as entry 18. An
+administrator-facing preferences view is product work, and the C2 branch exposes
+one person's communication choices to another, which is a privacy decision
+rather than a wiring one.
+
+**Retirement condition:** either a C2-gated procedure reads preferences through
+`visibleSubscriberPreferences`, or a decision is recorded that preferences are
+self-service only and the C2 branch is removed from the rule and its test.
+
+**Verification command:**
+
+```
+git grep -n "canSelectSubscriberPreference\|visibleSubscriberPreferences" \
+  -- packages/api/src | grep -v __tests__
+grep -n "person_id = " packages/api/src/trpc/routers/notification-preference.ts
+```
+
+---
+
+## 20. Stage 1's "feature parity on CI" criterion has no baseline and no test
+
+**Where:** `docs/superpowers/plans/2026-08-26-stage-1-platform.md`'s exit-criteria
+list (the eighth item), `docs/superpowers/specs/2026-08-26-tmm-revival-design.md:480`,
+and `.github/workflows/ci.yml`.
+
+**What the gap is:** the criterion asks CI to demonstrate feature parity. CI
+demonstrates that typecheck, lint, format:check, build, the dev bootstrap and
+the full test suite pass; it does not and cannot demonstrate parity, because
+there is no predecessor to be at parity with.
+`docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md:25` states
+it plainly — "there is no parity baseline" — and explains why: the web client
+was already inert before Phase E, since the browser sent no credential and
+`get_current_town_id()` could not resolve, so every PostgREST read returned zero
+rows. Phase E was a restoration. The criterion is left unticked in the Stage 1
+plan and in `docs/superpowers/plans/phase-f-stage-1-gate.md` because ticking it
+would assert something no artefact supports.
+
+**Why it was not closed in Phase F:** it cannot be closed by any amount of
+deleting. The nearest thing to an answer already exists and is not wired up:
+`playwright.config.ts` and four specs under `e2e/` (`smoke`, `onboarding`,
+`member-management`, `meeting-lifecycle`) are in the repository, `pnpm test:e2e`
+runs them, and **CI runs none of them** — `.github/workflows/ci.yml` has no
+Playwright step. Whether those four still pass against the post-Phase-F stack is
+itself unknown; they were last touched before the decommission, and their
+`baseURL` assumes a dev server nobody starts in CI. Standing them up is a body
+of work, not a decommissioning step, and it would still not be _parity_ — it
+would be a functional suite, which is the thing worth having.
+
+**Retirement condition:** the owner either (a) restates the criterion as
+something CI answers — the suggestion the evidence supports is "CI green on
+typecheck, lint, format:check, build, dev bootstrap and the full test suite,
+with the tenant-isolation and route-access gates among them" — and ticks it
+against that, or (b) gets the four `e2e/` specs running green against a seeded
+database in CI and ticks it against that instead.
+
+**Verification command:**
+
+```
+grep -n "Feature parity on CI" docs/superpowers/plans/2026-08-26-stage-1-platform.md
+grep -n "no parity baseline" docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md
+ls e2e/*.spec.ts                                    # four specs exist
+grep -n "e2e\|playwright" .github/workflows/ci.yml  # and CI runs none of them
+```
