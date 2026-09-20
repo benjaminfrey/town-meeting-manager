@@ -138,36 +138,31 @@ since closed: entry 14.
 
 ---
 
-## 5. The web client's `isAdmin` includes sys_admin; the server's authorization does not
+## 5. ~~The web client's `isAdmin` includes sys_admin; the server's authorization does not~~ — CLOSED
 
-**Where:** `packages/web/src/routes/meetings.$meetingId.minutes.tsx:341`
-(`const isAdmin = user?.role === "admin" || user?.role === "sys_admin";`) and
-`packages/api/src/trpc/authorization/permission.ts` (`resolvePermission`:
-line 156 `if (actor.role === "admin") return true;`, line 162
-`if (actor.role === "sys_admin") return false;`).
+**Closed 2026-09-20** by aligning the client to the server, per the owner. The
+server's line is deliberate and documented: a platform operator administers the
+deployment and is not a clerk of any town, so `resolvePermission` short-circuits
+`admin` to true and then denies `sys_admin` outright — as the deleted
+`has_permission()` did. Nothing on the server changed; nobody gained access.
 
-**What the gap is:** the minutes screen shows Approve, Return for Amendments
-and Unpublish to any `isAdmin` caller, which the client computes as
-`admin || sys_admin`. The server's `resolvePermission` short-circuits `admin`
-to true but explicitly denies `sys_admin` — the removed `has_permission()`
-function denied sys_admin on purpose, per `permission.ts`'s own comment. So a
-sys_admin sees all three buttons and is refused on every one.
+Three client checks dropped `sys_admin`:
+`hooks/usePermission.ts`'s `checkPermission`,
+`routes/meetings.$meetingId.review.tsx`'s `canGenerateMinutes`, and
+`routes/meetings.$meetingId.minutes.tsx`'s `isAdmin` — the last being the one
+that offered Approve, Return for Amendments and Unpublish to a caller the
+server then refused on every one.
 
-**Why it wasn't closed in Phase E:** this is pre-existing — `resolvePermission`
-already drew this line before wave 6 touched the file — and reconciling the
-client and server definitions of "admin" is a product decision (should
-sys_admin be able to approve/return/unpublish a town's minutes, or is the
-denial intentional platform-operator scoping?), not a wiring gap this task's
-brief covered. Wave 6 Task 3's own contribution is that the refusal is now
-VISIBLE (the button submits and shows a FORBIDDEN toast) rather than silent,
-which is a strict improvement but not a fix.
+**Pinned by** `hooks/__tests__/usePermission.test.ts` (new): a `sys_admin` is
+denied the operational codes, an `admin` still holds them, a `sys_admin` is
+denied even a code their matrix carries (matching the server's outright denial,
+not a fall-through), and a signed-out caller gets nothing. Mutation-checked —
+restoring `sys_admin` to the short-circuit turns two of them red.
 
-**Verification command:**
-
-```
-grep -n "isAdmin = user" packages/web/src/routes/meetings.\$meetingId.minutes.tsx
-sed -n '150,165p' packages/api/src/trpc/authorization/permission.ts
-```
+**Noted while writing those tests:** `checkPermission` reads the matrix by
+ACTION NAME while the database stores it by CODE, so a code-keyed matrix reads
+as empty in the browser. That is entry 6, untouched here; the test uses the
+name spelling deliberately so the two defects cannot hide each other.
 
 ---
 
@@ -445,37 +440,26 @@ grep -n "minutes/render" packages/web/src/components/meeting/VotePanel.tsx
 
 ---
 
-## 12. The "minutes approved" email queued from a live meeting reaches nobody
+## 12. ~~The "minutes approved" email queued from a live meeting reaches nobody~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/routers/minutes-document.ts`
-(`approveMinutesForPassedMotion`'s `INSERT INTO notification_event`) and
-`packages/api/src/services/notification-service.ts`
-(`getSubscribersForEvent`).
+**Closed 2026-09-20.** `approveMinutesForPassedMotion` built its payload by
+hand — `{minutes_document_id, meeting_id, approved_by_motion_id}` — and
+`getSubscribersForEvent` returns `[]` without `board_id`, so the notification a
+board raised by voting its own minutes through reached nobody.
 
-**What the gap is:** `getSubscribersForEvent` reads `payload.board_id` and
-returns NO subscribers without it. `approveMinutesForPassedMotion` queues
-`{minutes_document_id, meeting_id, approved_by_motion_id}` — no `board_id` — so
-the notification raised when a board votes its minutes through during a live
-meeting is delivered to nobody. The three procedures wave 6 Task 1 built
-(`submitForReview`, `approve`, `publish`) all carry `board_id` for exactly this
-reason, and three tests assert it; this one path does not.
+It now uses `minutesApprovedPayload`, the same helper `submitForReview`,
+`approve` and `publish` use, adding `approved_by_motion_id` on top as this
+path's own fact. That fixes the recipients AND the message: the helper also
+carries the town name, board name, meeting date and URL the email template
+renders, none of which the hand-built payload had. A null context now throws
+rather than queueing an event nobody can be found for.
 
-**Why it wasn't closed in Phase E:** it was found in wave 6 Task 1 while
-building the sibling procedures, in a function that belongs to wave 5's diff and
-sat outside every subsequent task's file list. The fix is probably one line, but
-it changes who receives mail about an adopted legal record, and it needs a test
-that proves delivery rather than one that proves the row was written — which is
-what the existing coverage proves. The defect is named in the payload itself so
-it is not rediscovered a third time.
-
-**Verification command:**
-
-```
-# the queued payload — three keys, no board_id:
-grep -n "'minutes_approved'," -A 6 packages/api/src/trpc/routers/minutes-document.ts
-# the reader — minutes_approved shares the branch that returns [] without one:
-grep -n 'case "minutes_approved"' -A 9 packages/api/src/services/notification-service.ts
-```
+**Pinned by** `vote-record.test.ts`'s minutes-approval case, which no longer
+stops at the row: it asserts `payload.board_id`, then calls
+`getBoardSubscribers` — the lookup the pipeline actually performs — and
+requires at least one deliverable subscriber. Asserting the payload's shape
+alone is exactly what let this survive. Mutation-checked: stripping `board_id`
+turns it red with "the subscriber lookup returns []".
 
 ---
 

@@ -56,16 +56,6 @@ registerRoute(
   }),
 );
 
-// Legacy: Supabase's REST/Auth path prefixes (`/rest/v1/`, `/auth/v1/`). The
-// app no longer talks to Supabase, so these paths are never requested and
-// this route matches nothing — left as a harmless no-op rather than removed
-// here, since deleting service-worker routing is a behaviour change out of
-// scope for this pass.
-registerRoute(
-  ({ url }) => url.pathname.startsWith("/rest/v1/") || url.pathname.startsWith("/auth/v1/"),
-  new NetworkFirst({ networkTimeoutSeconds: 5 }),
-);
-
 // Images — StaleWhileRevalidate
 registerRoute(
   ({ request }) => request.destination === "image",
