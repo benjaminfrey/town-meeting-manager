@@ -14,14 +14,33 @@
  * because item 8's per-file credit would let three of the four ride in on the
  * first, and because the branches are genuinely independent: the procedure can
  * report any combination of them.
+ *
+ * **Backlog 11, defect B** adds two more: the watermark re-render posts the
+ * APPROVED DOCUMENT's own id (`data.minutesApproved`) to the document-keyed
+ * route, not `meetingId` to the meeting-keyed one — proved here by mocking
+ * `apiFetch` directly rather than going through `installTRPCFetchStub`, which
+ * (correctly) rejects any non-`/api/trpc` URL and so cannot distinguish WHICH
+ * REST url was requested — and a failure of that re-render is surfaced with a
+ * toast rather than swallowed.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, setupAppQueryClient } from "@/test/render";
 import { installTRPCFetchStub, trpcTestError } from "@/test/trpc";
 import { trpc } from "@/lib/trpc";
 import { VotePanel } from "../VotePanel";
+
+const { toastSuccess, toastError } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}));
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }));
+
+const { apiFetch } = vi.hoisted(() => ({
+  apiFetch: vi.fn().mockResolvedValue({}),
+}));
+vi.mock("@/lib/api-client", () => ({ apiFetch }));
 
 const queryClient = setupAppQueryClient();
 
@@ -94,6 +113,9 @@ describe("VotePanel", () => {
     server.executiveSession = null;
     server.minutesApproved = null;
     server.adjourned = false;
+    apiFetch.mockReset().mockResolvedValue({});
+    toastSuccess.mockClear();
+    toastError.mockClear();
   });
 
   it("invalidates BOTH trpc.voteRecord.pathFilter() and trpc.motion.pathFilter() when a vote is recorded", async () => {
@@ -134,6 +156,40 @@ describe("VotePanel", () => {
     await recordVote(user);
 
     await waitFor(() => expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+  });
+
+  // ─── Backlog 11, defect B ────────────────────────────────────────────
+
+  it("re-renders the APPROVED DOCUMENT, not the live meeting, when minutes are approved", async () => {
+    // `meetingId="m1"` below is the LIVE meeting this panel is rendered for.
+    // `minutesApproved` is a DIFFERENT id — the approved document's own,
+    // reached through `agenda_item.source_minutes_document_id` on an EARLIER
+    // meeting — which is exactly why posting `meetingId` (the old defect)
+    // could never reach the right document.
+    server.minutesApproved = "doc-1";
+
+    const { user } = renderPanel();
+    await recordVote(user);
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/minutes/doc-1/render",
+        expect.objectContaining({ method: "POST", json: { is_draft: false } }),
+      ),
+    );
+    // The old, defective target must NOT be requested.
+    expect(apiFetch).not.toHaveBeenCalledWith("/api/meetings/m1/minutes/render", expect.anything());
+  });
+
+  it("surfaces a toast, rather than swallowing the error, when the watermark re-render fails", async () => {
+    server.minutesApproved = "doc-1";
+    apiFetch.mockRejectedValueOnce(new Error("404 Not Found"));
+
+    const { user } = renderPanel();
+    await recordVote(user);
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError.mock.calls[0]?.[0]).toMatch(/draft watermark/i);
   });
 
   it("invalidates all FOUR routers the adjournment touches when the call reports it", async () => {
