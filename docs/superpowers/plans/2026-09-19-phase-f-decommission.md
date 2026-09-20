@@ -18,6 +18,7 @@
 - The seed's canonical ids are fixed and must not change: town `a1b2c3d4-e5f6-7890-abcd-ef1234567890` (Newcastle, subdomain `newcastle`); `user_account` ids `aaaa1111-…` through `aaaa6666-…`; person ids `11111111-…` through `66666666-…`.
 - `supabase/seed.sql` is **not** idempotent: no `ON CONFLICT`, no `TRUNCATE`. Every bootstrap starts from an empty database.
 - Migrations are hand-written SQL in `packages/api/drizzle/NNNN_name.sql` with a matching `meta/_journal.json` entry. Phase F adds no migration.
+- The seed lives in the SUBDIRECTORY `packages/api/drizzle/seed/`. Never directly in `packages/api/drizzle/`: `db-harness.ts` and `build-db-from-repo.sh` both glob `*.sql` there and cross-check the list against the journal, so a seed beside the migrations makes every database build refuse (measured: 784 tests failed). Both globs are non-recursive, so a subdirectory is safe.
 - Keep the reserved subdomain `"supabase"` in `packages/shared/src/utils/subdomain.ts`. It must stay reserved.
 - `docs/` history (`workflow/`, `audit/`, `advisory-resolutions/`, `superpowers/`) is the historical record and is not rewritten by this plan. Four exceptions only: `docs/deployment.md`, `README.md`, Task 8 ticking the exit criteria in `docs/superpowers/plans/2026-08-26-stage-1-platform.md`, and Task 8 adding `docs/superpowers/plans/phase-f-stage-1-gate.md` plus `docs/backlog.md` entries.
 
@@ -27,7 +28,7 @@
 
 | Path                                                     | Responsibility                                                                                                                     |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/api/drizzle/seed.sql`                          | The demo/dev dataset, moved from `supabase/seed.sql`, beside the schema it seeds                                                   |
+| `packages/api/drizzle/seed/seed.sql`                     | The demo/dev dataset, moved from `supabase/seed.sql`, beside the schema it seeds                                                   |
 | `packages/api/src/dev/seed-dev-logins.ts`                | `seedDevLogins()` — creates a Better Auth identity per seeded `user_account` and links it, the same way invitation acceptance does |
 | `packages/api/src/dev/__tests__/seed-dev-logins.test.ts` | Proves a seeded account can sign in afterwards                                                                                     |
 | `packages/api/src/dev/seed-dev-logins-cli.ts`            | Thin `tsx` entry point: builds the db handle and `auth`, calls `seedDevLogins()`, prints results                                   |
@@ -60,7 +61,7 @@
 
 **Files:**
 
-- Create: `packages/api/drizzle/seed.sql` (git mv of `supabase/seed.sql`, 364 lines, content unchanged)
+- Create: `packages/api/drizzle/seed/seed.sql` (git mv of `supabase/seed.sql`, 364 lines, content unchanged)
 - Modify: `scripts/build-db-from-repo.sh:130`
 - Modify: `package.json` (the `db:seed` script only)
 - Modify: the comments that cite the old path (exact list in Step 4)
@@ -68,12 +69,12 @@
 **Interfaces:**
 
 - Consumes: nothing.
-- Produces: the seed lives at `packages/api/drizzle/seed.sql`. Tasks 2, 3 and 6 use that path.
+- Produces: the seed lives at `packages/api/drizzle/seed/seed.sql`. Tasks 2, 3 and 6 use that path.
 
 - [ ] **Step 1: Move the file with git, so history follows**
 
 ```bash
-git mv supabase/seed.sql packages/api/drizzle/seed.sql
+git mv supabase/seed.sql packages/api/drizzle/seed/seed.sql
 ```
 
 - [ ] **Step 2: Point the build script at it**
@@ -87,7 +88,7 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
 Replace with:
 
 ```bash
-psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed.sql
+psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed/seed.sql
 ```
 
 Also update the echo above it if it names the old path.
@@ -103,7 +104,7 @@ In `package.json`, replace the `db:seed` line:
 with:
 
 ```json
-"db:seed": "psql \"${DATABASE_URL:?set DATABASE_URL}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed.sql",
+"db:seed": "psql \"${DATABASE_URL:?set DATABASE_URL}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed/seed.sql",
 ```
 
 - [ ] **Step 4: Rewrite the comments that cite the old path**
@@ -114,7 +115,7 @@ Find them:
 git grep -n "supabase/seed.sql"
 ```
 
-Every hit is a comment. Rewrite the path to `packages/api/drizzle/seed.sql`. **Two of them also carry a wrong line number**: comments citing `supabase/seed.sql:116` say that line writes permission CODES. Line 116 is a town id; the code-keyed matrices are at lines 126 and 134 of the moved file. Cite `packages/api/drizzle/seed.sql:126` instead. Known hits at the time of writing:
+Every hit is a comment. Rewrite the path to `packages/api/drizzle/seed/seed.sql`. **Two of them also carry a wrong line number**: comments citing `supabase/seed.sql:116` say that line writes permission CODES. Line 116 is a town id; the code-keyed matrices are at lines 126 and 134 of the moved file. Cite `packages/api/drizzle/seed/seed.sql:126` instead. Known hits at the time of writing:
 
 - `packages/api/src/plugins/__tests__/permission-guards.test.ts:19` and `:201`
 - `packages/api/src/trpc/__tests__/fixtures.ts:13`
@@ -156,7 +157,7 @@ git add -A && git commit -m "Move the seed beside the schema it seeds"
 
 **Interfaces:**
 
-- Consumes: `packages/api/drizzle/seed.sql` (Task 1); `createAuth` from `../auth/auth.js`; `withTenant` from `../db/with-tenant.js`.
+- Consumes: `packages/api/drizzle/seed/seed.sql` (Task 1); `createAuth` from `../auth/auth.js`; `withTenant` from `../db/with-tenant.js`.
 - Produces:
 
 ```ts
@@ -285,7 +286,7 @@ Create `packages/api/src/dev/seed-dev-logins.ts`:
 /**
  * Give each seeded `user_account` a Better Auth identity.
  *
- * `packages/api/drizzle/seed.sql` creates towns, people and accounts but no
+ * `packages/api/drizzle/seed/seed.sql` creates towns, people and accounts but no
  * logins — it never did, and the logins developers actually used lived in the
  * Supabase stack's `docker/volumes/db/data`, which Phase F retires. This is
  * their replacement.
@@ -413,7 +414,7 @@ git add -A && git commit -m "Add seedDevLogins: Better Auth identities for seede
 
 **Interfaces:**
 
-- Consumes: `seedDevLogins()` (Task 2), `packages/api/drizzle/seed.sql` (Task 1), `scripts/build-db-from-repo.sh`.
+- Consumes: `seedDevLogins()` (Task 2), `packages/api/drizzle/seed/seed.sql` (Task 1), `scripts/build-db-from-repo.sh`.
 - Produces: `pnpm db:reset`, the command the README and CLAUDE.md will point at.
 
 - [ ] **Step 1: Write the CLI entry point**
@@ -543,7 +544,7 @@ In `package.json`, delete all six `supabase:*` scripts and replace the three `db
 ```json
 "db:reset": "scripts/dev/reset-local-db.sh",
 "db:migrate": "./scripts/build-db-from-repo.sh \"${DATABASE_URL:?set DATABASE_URL}\"",
-"db:seed": "psql \"${DATABASE_URL:?set DATABASE_URL}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed.sql",
+"db:seed": "psql \"${DATABASE_URL:?set DATABASE_URL}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed/seed.sql",
 ```
 
 - [ ] **Step 5: Add the CI step**
