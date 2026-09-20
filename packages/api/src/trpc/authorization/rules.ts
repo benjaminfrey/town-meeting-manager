@@ -805,14 +805,26 @@ export function visibleNotificationDeliveries<T extends { subscriberId: string |
   return rows.filter((row) => canSelectNotificationDelivery(actor, row));
 }
 
-// ─── 19 — subscriber_notification_preference SELECT: own, or C2 ───────
+// ─── 19 — subscriber_notification_preference SELECT: OWN ONLY ─────────
+//
+// DELIBERATELY NARROWER THAN THE POLICY THIS RESTORES. The deleted
+// `subscriber_pref_select` admitted
+// `person_id = get_current_person_id() OR has_permission('C2')`. The C2 half is
+// gone (owner decision 2026-09-20, backlog 19): nothing ever called it — no
+// screen shows an administrator who has opted out of what — and a person's
+// communication choices are theirs. An administrator-facing view is a privacy
+// decision to take deliberately, with a rule written for it then, rather than a
+// permission inherited from a policy no surface ever used.
+//
+// `notification-preference.ts`'s `mine` enforces this by construction: it has
+// no `personId` input and reads `WHERE person_id = ctx.tenant.personId`. These
+// functions exist for a future reader that takes rows it did not scope itself.
 
 export function canSelectSubscriberPreference(
   actor: Actor,
   row: { personId: string | null },
 ): boolean {
-  if (actor.personId !== null && row.personId === actor.personId) return true;
-  return resolvePermission(actor, "C2");
+  return actor.personId !== null && row.personId === actor.personId;
 }
 
 export function assertCanSelectSubscriberPreference(
@@ -821,8 +833,8 @@ export function assertCanSelectSubscriberPreference(
 ): void {
   if (canSelectSubscriberPreference(actor, row)) return;
   throw new AuthorizationError(
-    "Reading another person's notification preferences requires C2 " +
-      "(manage_notification_settings).",
+    "Notification preferences are readable only by the person they belong to. " +
+      "There is no administrator override: see backlog 19.",
     { code: "C2" },
   );
 }

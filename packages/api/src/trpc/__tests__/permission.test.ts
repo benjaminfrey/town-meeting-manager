@@ -436,7 +436,15 @@ describe("the 21 authorization rules", () => {
   });
 
   // ─── Rule 19: subscriber_notification_preference SELECT ──────────────
-  it("19: subscriber preferences are readable by their owner, or with C2", async () => {
+  //
+  // SELF-SERVICE ONLY, deliberately NARROWER than the policy it restores. The
+  // deleted `subscriber_pref_select` admitted `person_id = get_current_person_id()
+  // OR has_permission('C2')`, but nothing ever called the C2 half: no screen
+  // shows an administrator who has opted out of what. Owner decision
+  // 2026-09-20 (backlog 19): a person's communication choices are theirs, and
+  // an administrator-facing view would be a privacy decision taken on purpose,
+  // not a permission inherited from a policy no product surface used.
+  it("19: subscriber preferences are readable ONLY by their owner — not with C2", async () => {
     await withTestDb(async (client) => {
       const db = testDb(client);
       const town = await seedTown(db);
@@ -449,13 +457,23 @@ describe("the 21 authorization rules", () => {
       expect(
         rules.canSelectSubscriberPreference(denied.actor, { personId: stranger.personId }),
       ).toBe(false);
+      // C2 no longer opens another person's preferences. This is the
+      // assertion that changed: it read `true` while the C2 branch existed.
       expect(
         rules.canSelectSubscriberPreference(granted.actor, { personId: stranger.personId }),
-      ).toBe(true);
+      ).toBe(false);
 
       await expectRefusal(() =>
         rules.assertCanSelectSubscriberPreference(denied.actor, { personId: stranger.personId }),
       );
+      await expectRefusal(() =>
+        rules.assertCanSelectSubscriberPreference(granted.actor, { personId: stranger.personId }),
+      );
+
+      // The owner still reads their own, C2 or not.
+      expect(
+        rules.canSelectSubscriberPreference(granted.actor, { personId: granted.personId }),
+      ).toBe(true);
 
       const rows = [
         { id: "mine", personId: denied.personId },

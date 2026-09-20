@@ -616,76 +616,56 @@ test red (`expected { …(2) } to be null`).
 
 ---
 
-## 18. Rule 18's self branch has no caller — a person cannot read their own notification deliveries
+## 18. ~~Rule 18's self branch has no caller — a person cannot read their own notification deliveries~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/authorization/rules.ts`
-(`canSelectNotificationDelivery`, `assertCanSelectNotificationDelivery`,
-`visibleNotificationDeliveries`) and `packages/api/src/routes/notifications.ts`,
-whose delivery reads at `:270`, `:342`, `:370` and `:393` all sit behind the
-`notificationAdmin` preHandler (`:110`, `requirePermission(PERMISSIONS.C2)`).
+**Closed 2026-09-20.** Owner decision: the self branch stays. A person-facing
+delivery history is a plausible feature whose authorization is already settled;
+deleting the branch would mean deciding residents never get one, which nobody
+has decided.
 
-**What the gap is:** the deleted `notification_delivery_select` policy admitted
-`has_permission('C2') OR subscriber_id = get_current_person_id()`. The restored
-rule keeps both branches and `trpc/__tests__/permission.test.ts:392` pins both,
-but only the C2 branch is reachable: there is no surface anywhere that shows a
-person their own notification history, so the three self-scoped functions have
-zero production callers. The direction is safe — the running system is
-**narrower** than the policy, not wider — but the rule is half-enforced and a
-grep for "is rule 18 wired" answers yes on the C2 half alone.
+**Closing it found something this entry had not.**
+`NotificationService.getSubscriberDeliveryHistory(personId)` already existed,
+read **any** person's deliveries by id, applied no rule, and had no caller — an
+unguarded reader waiting for a route. It now takes the actor and calls
+`assertCanSelectNotificationDelivery` itself, so the rule is enforced at the
+read rather than trusted to whoever wires it later. That is the self branch's
+first real caller, and three tests in
+`services/__tests__/notification-service.test.ts` pin it: own history served,
+another person's refused without C2, allowed with C2.
 
-**Why it was not closed in Phase F:** wiring the self branch means building a
-screen (a "your notifications" view) that no plan has asked for, which is
-product work and not decommissioning. Deleting the branch would discard a rule
-the corpus actually carried, before anyone has decided that residents never get
-a delivery history.
+**And the absence is now mechanical.**
+`trpc/__tests__/notification-delivery-rules.test.ts` fails if a production file
+reads `notification_delivery` without either the `notificationAdmin` preHandler
+or rule 18, and fails if the self branch disappears from the rule. Its header
+names the two reads it cannot distinguish (`getDeliverySummary`, C2-gated by its
+only caller; `processRetries`, the background sender with no actor).
 
-**Retirement condition:** either a procedure exists that serves a person their
-own deliveries through `visibleNotificationDeliveries`, or a decision is
-recorded that delivery history is administrator-only and the self branch is
-removed from the rule and its test.
-
-**Verification command:**
-
-```
-git grep -n "canSelectNotificationDelivery\|visibleNotificationDeliveries" \
-  -- packages/api/src | grep -v __tests__
-grep -n "notificationAdmin" packages/api/src/routes/notifications.ts
-```
+Mutation-checked: stripping the guard from the service method turns a named test
+red, and deleting the self branch turns the tripwire red.
 
 ---
 
-## 19. Rule 19's C2 branch has no caller — C2 cannot read anyone's notification preferences
+## 19. ~~Rule 19's C2 branch has no caller — C2 cannot read anyone's notification preferences~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/authorization/rules.ts`
-(`canSelectSubscriberPreference`, `assertCanSelectSubscriberPreference`,
-`visibleSubscriberPreferences`) and
-`packages/api/src/trpc/routers/notification-preference.ts`'s `mine`.
+**Closed 2026-09-20** by removing the branch. Owner decision: notification
+preferences are **self-service only**.
 
-**What the gap is:** the deleted `subscriber_pref_select` policy admitted
-`person_id = get_current_person_id() OR has_permission('C2')`. `mine` enforces
-the first half by construction — it has no `personId` input and reads
-`WHERE person_id = ${ctx.tenant.personId}` — which the router's header argues is
-stronger than a runtime check. The C2 half has no caller: nothing lets a
-notification administrator see who has opted out of what, so the three rule
-functions are unreferenced outside `permission.test.ts:439`. Again narrower than
-the policy, so not a hole; again half-enforced.
+The deleted policy `subscriber_pref_select` admitted
+`person_id = get_current_person_id() OR has_permission('C2')`, but nothing ever
+called the C2 half — no screen shows an administrator who has opted out of what.
+A person's communication choices are theirs, and an administrator-facing view is
+a privacy decision to take deliberately, with a rule written for it then, rather
+than a permission inherited from a policy no surface used.
 
-**Why it was not closed in Phase F:** the same reason as entry 18. An
-administrator-facing preferences view is product work, and the C2 branch exposes
-one person's communication choices to another, which is a privacy decision
-rather than a wiring one.
+`canSelectSubscriberPreference` now returns true only for the row's owner, and
+its refusal message says there is no administrator override. `permission.test.ts`
+case 19 was rewritten to assert the narrowing: a C2 holder is refused another
+person's preferences, and still reads their own. Mutation-checked — restoring
+the C2 branch turns that case red.
 
-**Retirement condition:** either a C2-gated procedure reads preferences through
-`visibleSubscriberPreferences`, or a decision is recorded that preferences are
-self-service only and the C2 branch is removed from the rule and its test.
-
-**Verification command:**
-
-```
-git grep -n "canSelectSubscriberPreference\|visibleSubscriberPreferences" \
-  -- packages/api/src | grep -v __tests__
-grep -n "person_id = " packages/api/src/trpc/routers/notification-preference.ts
-```
+`notification-preference.ts`'s `mine` still enforces self-access by construction
+(no `personId` input), which is stronger than a runtime check; these rule
+functions exist for a future reader that takes rows it did not scope itself.
 
 ---
 
