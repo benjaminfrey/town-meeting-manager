@@ -30,7 +30,10 @@ const server = {
   presidingName: "Jordan Presiding",
   secretaryName: "Sam Secretary",
   agendaItemCount: 3,
-  minutesStatus: null as string | null,
+  // The union `minutesDocument.byMeeting` actually returns. It narrowed when
+  // that procedure started applying rule 9 (backlog 17); `string` no longer
+  // type-checks against the real procedure's output.
+  minutesStatus: null as "draft" | "review" | "approved" | "published" | null,
   attendanceCount: 0,
 };
 

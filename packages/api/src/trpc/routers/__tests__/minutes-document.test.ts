@@ -175,6 +175,68 @@ describe("minutesDocument.byMeeting", () => {
     });
   });
 
+  /**
+   * Rule 9 (`minutes_document_select`) gated EVERY column of an unadopted
+   * minutes row behind R4. `detail` and `pendingByTown` applied it; `byMeeting`
+   * did not, so the existence and workflow state of a draft — including an
+   * executive session's — reached any signed-in member of the town.
+   *
+   * It answers `null` rather than throwing: `byMeeting` is how
+   * `meetings.$meetingId.tsx` and `review.tsx` decide which minutes affordance
+   * to render, and both already treat `null` as "nothing to show". A throw
+   * would turn a routine screen into an error for a caller who simply may not
+   * see a draft yet. Backlog 17.
+   */
+  it("answers null for a DRAFT to a caller with no R4, and the row once it is adopted", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const docId = await seedMinutesDocument(db, town, meetingId, town.boardId, "draft");
+        const actor = await seedActor(db, town, { role: "staff", global: [] });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        // The draft is invisible: not even its id or status.
+        expect(await caller.minutesDocument.byMeeting({ meetingId })).toBeNull();
+
+        // Adoption makes it readable by any signed-in member, per rule 9's
+        // `ADOPTED_MINUTES_STATUSES` branch — nothing here depends on R4.
+        await inTown(db, town, (tx) =>
+          tx.execute(sql`UPDATE minutes_document SET status = 'approved' WHERE id = ${docId}`),
+        );
+        expect(await caller.minutesDocument.byMeeting({ meetingId })).toEqual({
+          id: docId,
+          status: "approved",
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("returns a DRAFT to a caller holding R4 for the meeting's board", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        const meetingId = await seedMeeting(db, town, town.boardId);
+        const docId = await seedMinutesDocument(db, town, meetingId, town.boardId, "draft");
+        const actor = await seedActor(db, town, staffOn(town, { R4: true }));
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        expect(await caller.minutesDocument.byMeeting({ meetingId })).toEqual({
+          id: docId,
+          status: "draft",
+        });
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("answers NOT_FOUND for a meeting in another town", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
