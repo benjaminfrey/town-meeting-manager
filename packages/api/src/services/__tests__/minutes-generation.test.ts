@@ -869,6 +869,78 @@ describe("assembleMinutesJson", () => {
       const formatted = formatMinutes(content, BASE_OPTIONS);
       expect(formatted.adjournment_text).toContain("Johnson adjourned the meeting");
     });
+
+    // ─── Backlog 11, fix round 2 — owner decision on the MOTION path ───
+    //
+    // On the motion path `adjourned_by` is whoever recorded the vote
+    // (`voteRecord.recordForMotion`'s caller), never a declaration by
+    // anyone — the body adjourned ITSELF by carrying a motion. The owner
+    // decided the sentence should name nobody there; attribution moves to
+    // the motion block, which already names the mover and seconder.
+    //
+    // The other two cases the decision asked for are NOT duplicated here:
+    // "adjourned WITHOUT OBJECTION by [a] clerk[,] the text still names the
+    // clerk" is exactly "names the actual adjourner, not the presiding
+    // officer, when a non-board-member clerk adjourns" above, and "the
+    // absent-adjourned_by fallback on the without_objection path still
+    // reads as the presiding officer" is exactly "falls back to the
+    // presiding officer when adjourned_by is absent" immediately above —
+    // both already exercise the without_objection path, which this change
+    // does not touch.
+    it("adjourned by MOTION names NEITHER the recorded operator nor the presiding officer — attribution moves to the motion block", async () => {
+      const CLERK_PERSON_ID = "person-pat-reyes";
+      const ADJOURN_MOTION_ID = "motion-adjourn";
+      const adjournMotion = {
+        id: ADJOURN_MOTION_ID,
+        agenda_item_id: SEC_ADJ,
+        meeting_id: MEETING_ID,
+        motion_text: "Move to adjourn.",
+        motion_type: "main",
+        moved_by: BM_BOB,
+        seconded_by: BM_CAROL,
+        status: "passed",
+        parent_motion_id: null,
+        created_at: "2026-03-13T20:44:00.000Z",
+      };
+      const tx = createMockTx({
+        meeting: {
+          ...baseMeeting,
+          presiding_officer_id: BM_ALICE, // Alice Johnson presides
+          adjournment: {
+            method: "motion",
+            timestamp: "2026-03-13T20:45:00.000Z",
+            // The clerk who RECORDED the vote — not a declaration, and
+            // exactly the value this path always carries here.
+            adjourned_by: CLERK_PERSON_ID,
+            motion_id: ADJOURN_MOTION_ID,
+          },
+        },
+        board: baseBoard,
+        town: baseTown,
+        agenda_item: sectionItems,
+        meeting_attendance: attendance,
+        motion: [adjournMotion],
+        vote_record: [],
+        executive_session: [],
+        agenda_item_transition: [],
+        guest_speaker: [],
+        board_member: boardMembers,
+        person: [...persons, { id: CLERK_PERSON_ID, name: "Pat Reyes" }],
+        agenda_template: null,
+        exhibit: [],
+      });
+
+      const content = await assembleMinutesJson(tx, MEETING_ID);
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+
+      // Names neither the recorded-vote clerk nor the presiding officer.
+      expect(formatted.adjournment_text).not.toContain("Reyes");
+      expect(formatted.adjournment_text).not.toContain("Johnson");
+      expect(formatted.adjournment_text).toMatch(/^The meeting adjourned/);
+      // The motion block still names the mover and seconder.
+      expect(formatted.adjournment_text).toContain("Smith moved");
+      expect(formatted.adjournment_text).toContain("Davis seconded");
+    });
   });
 
   describe("certification", () => {
@@ -1555,7 +1627,12 @@ describe("formatMinutes", () => {
       expect(formatted.adjournment_text).toBeNull();
     });
 
-    it("motion adjournment includes inline motion text", () => {
+    it("motion adjournment is impersonal and includes inline motion text (backlog 11, fix round 2)", () => {
+      // `adjourned_by` is populated here exactly as the real pipeline
+      // populates it on this path (whoever recorded the vote) to prove the
+      // formatter ignores it on the motion path — the sentence names
+      // neither that person nor anyone else; the owner's decision was that
+      // nobody declared this adjournment, the body did, by motion.
       const content = makeContent({
         adjournment: {
           method: "motion",
@@ -1583,7 +1660,8 @@ describe("formatMinutes", () => {
 
       const formatted = formatMinutes(content, BASE_OPTIONS);
 
-      expect(formatted.adjournment_text).toContain("Johnson declared the meeting adjourned");
+      expect(formatted.adjournment_text).toContain("The meeting adjourned");
+      expect(formatted.adjournment_text).not.toContain("Johnson");
       expect(formatted.adjournment_text).toContain("moved Move to adjourn");
     });
   });
