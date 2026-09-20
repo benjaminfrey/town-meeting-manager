@@ -66,8 +66,18 @@ export function checkPermission(
 
   const { role, permissions } = currentUser;
 
-  // 1. Admins bypass all checks
-  if (role === "admin" || role === "sys_admin") return true;
+  // 1. Town administrators bypass all checks — `sys_admin` does NOT.
+  //
+  // The server draws this line deliberately: `resolvePermission` short-circuits
+  // `admin` to true and then denies `sys_admin` in its own branch, because a
+  // platform operator administers the deployment and is not a clerk of any
+  // town. The deleted `has_permission()` said the same. This client used to
+  // disagree, so a sys_admin was offered Approve / Return for Amendments /
+  // Unpublish on the minutes screen and refused on every one (backlog 5).
+  //
+  // A sys_admin still holds any code their matrix actually carries: what is
+  // denied is the admin short-circuit, not the matrix.
+  if (role === "admin") return true;
 
   // Resolve action code → action value
   const actionValue = ALL_ACTION_MAP[actionCode];

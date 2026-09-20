@@ -236,24 +236,31 @@ export async function approveMinutesForPassedMotion(
   );
   if (!approved[0]) return null;
 
-  // A second live defect, not the one named in this function's header: this
-  // payload carries no `board_id`, and `NotificationService.getSubscribersForEvent`
-  // returns `[]` without one (`if (!boardId) return []`) — so the "minutes
-  // approved" email a board vote queues here reaches nobody. Contrast wave 6
-  // Task 1's `submitForReview`/`approve`/`publish` payloads below in this file,
-  // which all carry `board_id` for exactly this reason. Not fixed here — this
-  // is wave 5's procedure, outside this task's diff — but recorded at the
-  // payload itself rather than only in a report; see `task-3-brief.md` and
-  // `progress.md`, since Task 3's minutes screen will hit this.
+  // The payload comes from `minutesApprovedPayload`, the same helper
+  // `submitForReview`/`approve`/`publish` use, and not from a hand-built object
+  // — because a hand-built one is how this path shipped without `board_id`, and
+  // `getSubscribersForEvent` returns NO subscribers without it: the "minutes
+  // approved" email a board vote queued here reached nobody (backlog 12, fixed
+  // 2026-09-20). The helper also carries the town, board and date the email
+  // template renders. `approved_by_motion_id` is added on top: it is this
+  // path's own fact, and nothing else queues it.
+  //
+  // A null payload means the meeting vanished between the UPDATE above and
+  // here, inside one transaction — impossible without a concurrent delete that
+  // RLS would have to allow. Queuing an event nobody can be found for is the
+  // bug this fixes, so it throws rather than writing one.
+  const payload = await minutesApprovedPayload(tx, args.meetingId, documentId);
+  if (!payload) {
+    throw new Error(
+      `minutesDocument.approveMinutesForPassedMotion: meeting ${args.meetingId} has no ` +
+        "notification context, so the minutes_approved event would reach nobody",
+    );
+  }
   await tx.execute(sql`
     INSERT INTO notification_event (town_id, event_type, payload, status)
     VALUES (
       ${args.townId}, 'minutes_approved',
-      jsonb_build_object(
-        'minutes_document_id', ${documentId}::text,
-        'meeting_id', ${args.meetingId}::text,
-        'approved_by_motion_id', ${args.motionId}::text
-      ),
+      ${JSON.stringify({ ...payload, approved_by_motion_id: args.motionId })}::jsonb,
       'pending'::notification_status
     )
   `);

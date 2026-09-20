@@ -338,7 +338,10 @@ export default function MinutesReviewPage({ loaderData }: Route.ComponentProps) 
     role,
   );
   const canExport = hasPermission(permissions, "export_minutes", boardId || undefined, role);
-  const isAdmin = user?.role === "admin" || user?.role === "sys_admin";
+  // Town administrator only. `sys_admin` administers the deployment, not a
+  // town, and the server refuses it these actions — this screen used to offer
+  // all three anyway (backlog 5).
+  const isAdmin = user?.role === "admin";
 
   // ─── Permission gate ───────────────────────────────────────────
   //

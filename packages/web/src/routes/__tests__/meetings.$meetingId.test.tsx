@@ -144,6 +144,12 @@ describe("meeting detail", () => {
     // board-scoped link on this page is built from `meeting.detail`'s own
     // `board_id`, not a prop or a second read.
     renderRoute("m1");
+    // Wait for the shell's own data FIRST. The breadcrumb is built from
+    // `meeting.detail`'s `board_id`, so the title appearing means that query
+    // resolved and the link is in the same render pass. Going straight to
+    // `findByRole` raced its 1s default timeout on a loaded CI runner — twice,
+    // at ~1.1s, while passing locally every time.
+    await screen.findAllByText("Annual Town Meeting");
     const boardLink = await screen.findByRole("link", { name: "Select Board" });
     expect(boardLink).toHaveAttribute("href", `/boards/${BOARD_ID}`);
   });
