@@ -37,7 +37,6 @@ export default tseslint.config(
       "**/coverage/**",
       "**/.turbo/**",
       "**/.react-router/**",
-      "**/docker/volumes/**",
       "**/playwright-report/**",
       "**/.superpowers/**",
       // `.claude/` is Claude Code's directory, not application source. Two

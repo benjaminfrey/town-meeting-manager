@@ -43,10 +43,6 @@ import {
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../../..");
 const NGINX = fs.readFileSync(path.join(REPO_ROOT, "infrastructure/nginx/nginx.conf"), "utf-8");
-const COMPOSE = fs.readFileSync(
-  path.join(REPO_ROOT, "infrastructure/docker-compose.production.yml"),
-  "utf-8",
-);
 
 describe("the public asset root is exposed as a subtree, not as a root", () => {
   it("serves /public-assets/seals/ and never /public-assets/ itself", () => {
@@ -251,11 +247,13 @@ describe("the portal serves public exhibits only", () => {
  * unprivileged and got `EACCES` on every read. Correct in every test, dead
  * behind nginx.
  *
- * The fix has two halves and this pins both: the modes here, and the shared
- * group in the compose file. There is no test that can open a file as the
- * `nginx` user, so what is asserted is the pair of facts that make the read
- * work — group-readable bits on this side, nginx's group as the API's primary
- * group on that side.
+ * The fix had two halves: the modes here, and the shared group the API
+ * container ran with under the Docker Compose deployment. Phase F (Task 6)
+ * deleted that deployment outright rather than replacing it, so the second
+ * half no longer exists to pin — a future non-Docker deployment spec (Stage 2)
+ * will need to re-establish whatever grants nginx's workers read access. What
+ * remains here is the half that is still true regardless of deployment
+ * mechanism: the modes these writes produce.
  */
 describe("what the API writes is readable by nginx and by nothing else", () => {
   async function writeInto(root: string, relative: string) {
@@ -331,17 +329,13 @@ describe("what the API writes is readable by nginx and by nothing else", () => {
     }
   });
 
-  it("runs the API container in nginx's group, which is the other half", () => {
-    // The modes above are only readable by nginx if the files are GROUP-OWNED
-    // by nginx. Nothing in this process can assert a container's group, so the
-    // compose declaration is pinned instead — the same way this file pins the
-    // nginx locations. 101 is the `nginx` uid/gid in `nginx:*-alpine`, which
-    // the compose file also names.
-    expect(COMPOSE).toMatch(/user:\s*"\$\{TMM_ASSET_UID:-0\}:\$\{TMM_ASSET_GID:-101\}"/);
-    expect(COMPOSE).toContain("image: nginx:1.27-alpine");
-    // And nginx must still drop its workers to an unprivileged user — if it
-    // ever ran them as root the group would not matter, but neither would any
-    // of the rest of this file.
+  it("still has nginx drop its workers to an unprivileged user", () => {
+    // The modes above are only readable by nginx if nginx's workers are not
+    // root and are in the right group — a fact this repository can no longer
+    // pin end-to-end now that the deployment that granted that group is gone
+    // (see the comment above this describe block). What remains checkable
+    // from here is nginx's own half: it must still not run its workers as
+    // root, or the group question would be moot regardless.
     expect(NGINX).toMatch(/^user\s+nginx;/m);
   });
 });

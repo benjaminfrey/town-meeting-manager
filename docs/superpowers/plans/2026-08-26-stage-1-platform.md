@@ -490,14 +490,19 @@ Each phase's plan is written when its inputs exist.
 
 ## Stage 1 exit criteria
 
-- [ ] `./scripts/build-db-from-repo.sh` exits 0 with no shim, seed applied, ≥26 tables
-- [ ] The isolation test passes **as `tmm_app`**, covering all 26 RLS-enabled tables plus the three adversarial cases
-- [ ] All 26 RLS-enabled tables have `FORCE ROW LEVEL SECURITY`, and `push_subscription`'s exemption or policy is recorded
-- [ ] All 14 `SECURITY DEFINER` functions have an explicit `SET search_path`
-- [ ] Each of the 21 permission rules has a named guard and a test
-- [ ] No `supabase` import remains in `packages/web` or `packages/api`
-- [ ] No API route is reachable unauthenticated unless explicitly marked public
-- [ ] Feature parity on CI
+Verified by Phase F, Task 8 (2026-09-20). Every tick points at the evidence —
+the command and its real output — in
+[`phase-f-stage-1-gate.md`](phase-f-stage-1-gate.md). The one unticked criterion
+points at its backlog entry instead.
+
+- [x] `./scripts/build-db-from-repo.sh` exits 0 with no shim, seed applied, ≥26 tables — _(gate doc, criterion 1: exit 0 as the non-superuser `tmm_owner`, `scripts/dev/auth-shim.sql` absent, seed applied, 27 tables)_
+- [x] The isolation test passes **as `tmm_app`**, covering all 26 RLS-enabled tables plus the three adversarial cases — _(gate doc, criterion 2: `db/__tests__/tenant-isolation.test.ts`, which asserts `current_user = 'tmm_app'` at `:339`, enumerates tables from the catalog, and carries five adversarial cases, not three)_
+- [x] All 26 RLS-enabled tables have `FORCE ROW LEVEL SECURITY`, and `push_subscription`'s exemption or policy is recorded — _(gate doc, criterion 3: `27 tables, 27 enabled, 27 forced`; the schema grew past 26. No exemption — `push_subscription_tenant_isolation` joins through `user_account`, and the policy is quoted there)_
+- [x] All 14 `SECURITY DEFINER` functions have an explicit `SET search_path` — _(gate doc, criterion 4: `7 SECURITY DEFINER functions, 7 with explicit SET search_path`. Fourteen was a count of `SECURITY DEFINER` occurrences across the deleted corpus; the seven helpers survive and are hardened, and the four Supabase-auth and onboarding functions the rest belonged to went with Supabase. Closes audit finding A8)_
+- [x] Each of the 21 permission rules has a named guard and a test — _(gate doc, criterion 5 and the 21-rule table: each rule's originating policy, code, guard function, call site and test, no row unknown. Five wiring gaps reported separately as backlog entries 15–19; every rule has both a guard and a test)_
+- [x] No `supabase` import remains in `packages/web` or `packages/api` — _(gate doc, criterion 6: zero import statements, and every surviving occurrence of the string is a doc comment or a test fixture)_
+- [x] No API route is reachable unauthenticated unless explicitly marked public — _(gate doc, criterion 7: `auth/__tests__/route-access.test.ts` proves deny-by-default structurally; `routes/__tests__/public-route-inventory.test.ts` pins the exception list against the real route table)_
+- [ ] Feature parity on CI — **not met, and not verifiable as written.** There is no parity baseline (`docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md:25`); the web client was already inert before Phase E, so Phase E was a restoration, not a migration. See [backlog entry 20](../../backlog.md) for the retirement condition and the substitute criterion the evidence supports.
 
 ---
 

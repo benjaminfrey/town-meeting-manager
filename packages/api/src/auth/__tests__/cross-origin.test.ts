@@ -206,10 +206,11 @@ describe("cross-origin requests to authenticated routes", () => {
   });
 
   it("still serves a request with NO Origin — non-browser callers are not browsers", async () => {
-    // `scripts/health-check.sh`, orchestrator probes and any server-to-server
-    // client send no `Origin`. A caller that sets none is not a page acting on
-    // a signed-in user's behalf, which is the only thing this guard defends
-    // against.
+    // An external health-check script (`infrastructure/scripts/health-check.sh`
+    // was deleted in Phase F, but a future one would behave the same way),
+    // orchestrator probes and any server-to-server client send no `Origin`.
+    // A caller that sets none is not a page acting on a signed-in user's
+    // behalf, which is the only thing this guard defends against.
     await withTestDb(async (owner) => {
       const client = await connectAsAppRole(owner);
       try {

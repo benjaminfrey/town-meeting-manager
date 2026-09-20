@@ -2,8 +2,8 @@
  * E2E Test: Full Meeting Lifecycle
  *
  * Tests the complete meeting flow from creation through adjournment
- * and post-meeting review. Requires Docker Supabase running with
- * seed data loaded.
+ * and post-meeting review. Requires a local Postgres database built and
+ * seeded via `pnpm db:reset` (see README.md).
  *
  * Steps: Create meeting → Set agenda → Start meeting → Take attendance →
  * Navigate items → Make motion → Vote → Adjourn → Review

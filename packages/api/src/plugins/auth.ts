@@ -247,7 +247,7 @@ const CODE_BY_ACTION = new Map<PermissionAction, PermissionCode>(
  *
  *   2. It took an action NAME and resolved it against a matrix that was passed
  *      through verbatim — and `user_account.permissions` is code-keyed for
- *      every account `supabase/seed.sql` wrote. So for every non-admin it
+ *      every account `packages/api/drizzle/seed/seed.sql` wrote. So for every non-admin it
  *      answered `false` unconditionally. That failed closed and was never a
  *      disclosure, but it meant the route's stated policy and its actual
  *      policy differed, and that the short-circuit in (1) was the WHOLE of the

@@ -14,13 +14,14 @@
  * Under Phase B's tenancy-only RLS, any session with a valid tenant context
  * can read both. This file is what closes that.
  *
- * Transcribed from the policies Phase B deleted:
- *   supabase/migrations/20260308000029_rls_town.sql
- *   supabase/migrations/20260308000030_rls_person_user_account.sql
- *   supabase/migrations/20260308000031_rls_board.sql
- *   supabase/migrations/20260308000035_rls_notification.sql
- *   supabase/migrations/20260308000036_rls_audit_template.sql
- *   supabase/migrations/20260310000002_rls_onboarding_inserts.sql
+ * Transcribed from the policies Phase B deleted, in migrations
+ *   20260308000029_rls_town.sql
+ *   20260308000030_rls_person_user_account.sql
+ *   20260308000031_rls_board.sql
+ *   20260308000035_rls_notification.sql
+ *   20260308000036_rls_audit_template.sql
+ *   20260310000002_rls_onboarding_inserts.sql
+ * of the Supabase corpus deleted in Phase F — see git history.
  */
 
 import { describe, it, expect } from "vitest";

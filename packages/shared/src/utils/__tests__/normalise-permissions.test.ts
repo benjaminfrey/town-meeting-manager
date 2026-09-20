@@ -4,7 +4,7 @@
  * The same thirty actions are written into `user_account.permissions` in two
  * different key spellings by two different parts of this product:
  *
- *   - `supabase/seed.sql:116` writes CODES  (`{"A2": true}`)
+ *   - `packages/api/drizzle/seed/seed.sql:126` writes CODES  (`{"A2": true}`)
  *   - `StaffAccountFlow.tsx` → `buildPermissionsFromTemplate()` returns
  *     `Record<PermissionAction, boolean>` — NAMES — and
  *     `AddPersonDialog.tsx:117` / `AddMemberDialog.tsx:423` persist it as-is

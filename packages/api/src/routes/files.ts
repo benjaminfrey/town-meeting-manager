@@ -16,8 +16,9 @@
  *   GET    /api/files/meeting-notice/:meetingId  rule 9b
  *
  * "Never worked" is literal and was checked before anything was ported: the
- * only bucket any migration creates is `documents`
- * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:8`).
+ * only bucket any migration ever created was `documents`
+ * (migration 20260311000003_session_0603_storage_bucket.sql:8, in the
+ * Supabase corpus deleted in Phase F — see git history).
  * `town-seals` (`web/src/components/dashboard/TownSealUpload.tsx:34`) and
  * `exhibits` (`web/src/hooks/useExhibitUpload.ts:33`) appear in no migration
  * and no seed, so every upload through either has always failed. There was no

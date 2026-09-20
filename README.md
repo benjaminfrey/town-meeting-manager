@@ -13,7 +13,7 @@ Meeting lifecycle management for New England's Select Board / Town Meeting form 
 
 Town Meeting Manager is a purpose-built civic platform that covers the full meeting lifecycle for small New England towns: agenda drafting, meeting notice compliance, live meeting management, minutes drafting, public records archiving, and resident civic engagement — all tuned to the Select Board / Town Meeting form of government and Maine open meetings law. (Minutes drafting is currently deterministic — assembled from database rows through Handlebars templates, not AI. AI-assisted drafting is a planned Phase 2 feature; see the Tech Stack table below.)
 
-The application is **online-first** — TanStack Query v5 handles data fetching and caching, and Supabase Realtime powers live multi-device sync for the live meeting manager. (A Stage 1 revival plan targets moving the sync layer to tRPC and Server-Sent Events; that migration has not started — see `docs/superpowers/` for the current plan.)
+The application is **online-first** — TanStack Query v5 handles data fetching and caching, and a single tRPC subscription over Server-Sent Events powers live multi-device sync for the live meeting manager. (The Stage 1 revival plan that moved the sync layer off Supabase Realtime onto tRPC/SSE, and decommissioned Supabase entirely, has been carried out — see `docs/superpowers/` for the record.)
 
 It serves four internal roles and one public audience:
 
@@ -45,7 +45,7 @@ town-meeting-manager/
 │   │   ├── 2.3-parcel-data-architecture.md  #   Maine GeoLibrary, PostGIS, parcel/E911 data
 │   │   ├── 2.4-notification-providers.md    #   Postmark (email) + Twilio (SMS)
 │   │   ├── 3.1-monorepo-structure.md        #   pnpm workspaces + Turborepo
-│   │   ├── 3.2-supabase-hosting.md          #   Self-hosted Docker Compose
+│   │   ├── 3.2-supabase-hosting.md          #   Original hosting pick (self-hosted Supabase via Docker Compose) — superseded, see Tech Stack below
 │   │   ├── 3.3-document-generation.md       #   Puppeteer + pdf-lib
 │   │   └── 4-simple-decisions.md            #   TypeScript, subdomains, JSON→HTML→PDF
 │   └── workflow/                            # 56-session development workflow
@@ -97,11 +97,11 @@ town-meeting-manager/
 | **Language**       | TypeScript                                  | Across all packages — shared types via monorepo                                                                                                                                                                  |
 | **Frontend (Web)** | React 19 + React Router v7                  | Framework mode with clientLoader/clientAction pattern                                                                                                                                                            |
 | **Styling**        | Tailwind CSS v4 + shadcn/ui                 | CSS-first config (Rust engine), Radix UI primitives                                                                                                                                                              |
-| **Data / Sync**    | TanStack Query v5 + Supabase Realtime       | Server state, caching, and live multi-device sync                                                                                                                                                                |
+| **Data / Sync**    | TanStack Query v5 + tRPC over SSE           | Server state and caching via tRPC; live multi-device sync via one Server-Sent Events subscription (replaced Supabase Realtime — see `docs/superpowers/`)                                                         |
 | **Forms**          | React Hook Form + Zod                       | Shared validation schemas in `packages/shared`                                                                                                                                                                   |
-| **Database**       | PostgreSQL + PostGIS                        | Self-hosted via Supabase Docker Compose                                                                                                                                                                          |
-| **Auth**           | Supabase Auth (GoTrue)                      | Email/password today (`signInWithPassword`); magic links + MFA are planned, not built                                                                                                                            |
-| **API**            | Supabase (PostgREST) + Fastify              | PostgREST for CRUD, Fastify for custom endpoints                                                                                                                                                                 |
+| **Database**       | PostgreSQL + PostGIS                        | Plain Postgres via Drizzle ORM; self-hosted deployment path is being redesigned (the Docker Compose / Supabase deployment was deleted in Phase F — see `docs/superpowers/`)                                      |
+| **Auth**           | Better Auth                                 | Email/password today; magic links + MFA are planned, not built (replaced Supabase Auth/GoTrue)                                                                                                                   |
+| **API**            | tRPC + Fastify                              | tRPC procedures for all reads/writes, Fastify for the HTTP server and a handful of REST routes (files, PDFs, the public portal) (replaced Supabase PostgREST)                                                    |
 | **AI**             | _Not built — Phase 2_                       | Minutes are currently assembled deterministically from DB rows via Handlebars (no AI, no `@anthropic-ai` dependency in this repo). Anthropic Claude API integration for minutes drafting is planned for Phase 2. |
 | **PDF Generation** | Puppeteer + pdf-lib                         | Puppeteer for complex layouts, pdf-lib for simple docs                                                                                                                                                           |
 | **Email**          | Postmark                                    | Transactional + broadcast message streams                                                                                                                                                                        |
@@ -110,7 +110,7 @@ town-meeting-manager/
 | **PWA**            | Vite PWA plugin                             | Phase 1 mobile strategy before React Native                                                                                                                                                                      |
 | **Testing**        | Vitest + React Testing Library + Playwright | Unit/component + E2E                                                                                                                                                                                             |
 | **Monorepo**       | pnpm workspaces + Turborepo                 | 4 packages: web, mobile, api, shared                                                                                                                                                                             |
-| **Infrastructure** | Docker Compose + Nginx                      | Self-hosted Supabase stack                                                                                                                                                                                       |
+| **Infrastructure** | Nginx                                       | Reverse proxy config lives in `infrastructure/nginx/`; the Docker Compose production deployment was deleted in Phase F, and a replacement deployment path is a separate, not-yet-written spec                    |
 | **Source Control** | GitHub                                      | Monorepo with conventional commits                                                                                                                                                                               |
 
 ---
@@ -169,6 +169,31 @@ Maine Municipal Association (MMA) as primary institutional channel. Pilot deploy
 | 1,000–2,500  | $900/year    |
 | 2,500–5,000  | $1,200/year  |
 | 5,000–10,000 | $1,800/year  |
+
+---
+
+## Local Development
+
+The database is a plain, locally-installed PostgreSQL — there is no Docker stack to start. (Phase F
+retired the Supabase-based local stack and its `pnpm supabase:up`/`supabase:reset` commands; see
+`docs/superpowers/` for the record.)
+
+1. `pnpm install`
+2. Build a local development database from the repository: `pnpm db:reset`. This drops and
+   recreates a `tmm_dev` database owned by a `tmm_owner` role against
+   `postgres://$USER@localhost:5432/postgres` by default (override with `ADMIN_URL`), applies the
+   schema and seed data, grants the `tmm_app` runtime role to `tmm_owner` and verifies that grant
+   actually works (`SET ROLE tmm_app` — see `packages/api/.env.example` for why the API must run
+   as this non-owner role, not as the owner), and creates a Better Auth login for every seeded
+   account with the password `TownMeeting!Dev1` (override with `DEV_PASSWORD`).
+3. The script prints two connection strings: an **owner URL** (for tooling and migrations — never
+   point the API at it, it bypasses row-level security) and a **runtime URL**
+   (`postgres://tmm_owner@.../tmm_dev?options=-c%20role%3Dtmm_app`, connecting as the owner but
+   running as `tmm_app`). Copy `packages/api/.env.example` to `packages/api/.env` and set
+   `DATABASE_URL` to the **runtime URL** — the script's closing line
+   (`Put this in packages/api/.env: DATABASE_URL=...`) is exactly that value.
+4. Start the API and web dev servers (see `.claude/launch.json`'s `api-dev`/`web-dev`
+   configurations, or `pnpm dev`).
 
 ---
 

@@ -32,7 +32,7 @@
  *      transactions on one pooled connection and asserts the second does not
  *      inherit the first's town.
  *
- * The one legitimate session-scoped use is `supabase/seed.sql`, which runs a
+ * The one legitimate session-scoped use is `packages/api/drizzle/seed/seed.sql`, which runs a
  * whole file as one tenant outside any request. It is SQL, not TypeScript, so
  * the lint rule does not reach it; it carries a comment saying why.
  *

@@ -24,7 +24,8 @@ interface SeededTown {
 }
 
 // Default test credentials — match the seed data admin account.
-// These require Docker Supabase to be running with seed data loaded.
+// These require a local Postgres database built and seeded via `pnpm db:reset`
+// (see README.md).
 const TEST_EMAIL = "mbragdon@newcastle.me.us";
 const TEST_PASSWORD = "TestPassword123!";
 
@@ -53,7 +54,7 @@ export const test = base.extend<TestFixtures>({
 
   /**
    * Returns test town/board/user IDs from the seed data.
-   * These match supabase/seed.sql values.
+   * These match packages/api/drizzle/seed/seed.sql values.
    */
   seededTown: async (_fixtures, use) => {
     await use({

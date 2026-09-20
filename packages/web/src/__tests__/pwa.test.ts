@@ -355,9 +355,10 @@ describe("Push notification API routes (packages/api/src/routes/notifications.ts
 // ─── push_subscription Migration Tests ───────────────────────────────
 
 describe("push_subscription database migration", () => {
-  // Reads packages/api/drizzle/, not supabase/migrations/. Since Stage 1's
-  // baseline (Task B2) the corpus is a historical record that nothing applies,
-  // so asserting against it would prove the table is defined somewhere that
+  // Reads packages/api/drizzle/, not the old Supabase migration corpus.
+  // Stage 1's baseline (Task B2) made that corpus a historical record that
+  // nothing applies, and Phase F deleted it outright (see git history), so
+  // asserting against it would prove the table is defined somewhere that
   // never reaches a database.
   const migrationsDir = path.join(PROJECT_ROOT, "packages/api/drizzle");
 

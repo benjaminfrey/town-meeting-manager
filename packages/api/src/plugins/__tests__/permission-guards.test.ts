@@ -16,7 +16,7 @@
  *
  *   2. `requirePermission` takes an action NAME (`edit_agenda`) but the matrix
  *      it read was passed through verbatim, and half the accounts in this
- *      product store action CODES (`A2`) — `supabase/seed.sql:116` writes
+ *      product store action CODES (`A2`) — `packages/api/drizzle/seed/seed.sql:126` writes
  *      codes, `StaffAccountFlow.tsx` writes names. A code-keyed account
  *      therefore resolved to `false` for every action. That failed closed, so
  *      it was never a disclosure; it was a silent, total outage of one half of
@@ -198,7 +198,7 @@ async function withAccount(
   });
 }
 
-/** `{"global": {"A6": true}}` — the spelling `supabase/seed.sql` writes. */
+/** `{"global": {"A6": true}}` — the spelling `packages/api/drizzle/seed/seed.sql` writes. */
 function codeKeyed(...codes: string[]): unknown {
   return { global: Object.fromEntries(codes.map((c) => [c, true])), board_overrides: [] };
 }

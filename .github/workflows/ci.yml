@@ -74,6 +74,20 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # The dev bootstrap is a standing gate, not a one-time demonstration:
+      # it is the only path a new developer has to a working local database
+      # since Phase F retired the Supabase stack. CI's postgres role is a
+      # superuser, so build-db-from-repo.sh is given ALLOW_SUPERUSER_BUILD=1
+      # here — it still proves the corpus applies and the logins link, which
+      # is what this step is for. The non-superuser path is exercised by
+      # developers running scripts/dev/reset-local-db.sh.
+      - name: Dev bootstrap
+        env:
+          ALLOW_SUPERUSER_BUILD: "1"
+        run: |
+          ./scripts/build-db-from-repo.sh "$DATABASE_URL"
+          pnpm --filter @town-meeting/api exec tsx src/dev/seed-dev-logins-cli.ts
+
       # Run tests alone. Concurrent execution with other turbo tasks
       # overloads the runner and produces spurious timeouts in
       # unrelated test files.

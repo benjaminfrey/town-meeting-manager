@@ -12,17 +12,18 @@
 #
 # ─── What changed in Stage 1, Task B2 ────────────────────────────────────
 #
-# This script used to apply supabase/migrations/*.sql and could not reach a
-# clean exit, because 4 of those 58 files reference Supabase GoTrue's `auth`
-# schema and Storage's `storage` schema, which do not exist on plain
-# PostgreSQL. The first of them (`user_account.auth_user_id REFERENCES
-# auth.users`, 20260308000004:26) aborted the build at file 4 of 58.
+# This script used to apply the Supabase migration corpus's *.sql files and
+# could not reach a clean exit, because 4 of those 58 files reference
+# Supabase GoTrue's `auth` schema and Storage's `storage` schema, which do
+# not exist on plain PostgreSQL. The first of them
+# (`user_account.auth_user_id REFERENCES auth.users`, migration
+# 20260308000004:26) aborted the build at file 4 of 58.
 #
 # The schema now lives in packages/api/drizzle/, as a single squashed
 # baseline with no auth.* or storage.* dependency of any kind. That is what
-# this script applies. supabase/migrations/ stays in the repository,
-# unmodified, purely as the historical record of how the schema got here —
-# nothing applies it any more, and nothing can.
+# this script applies. The Supabase corpus was deleted outright in Phase F
+# (see git history) rather than kept as a historical record — nothing
+# applied it any more, and nothing could.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -127,7 +128,7 @@ for file in "${migrations[@]}"; do
 done
 
 echo "==> Applying seed"
-psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed/seed.sql
 
 echo "==> Table count"
 psql "$DB_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"

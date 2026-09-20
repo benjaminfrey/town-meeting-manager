@@ -424,7 +424,7 @@ function MotionCard({
     ? (memberNameMap.get(motion.secondedBy) ?? "Unknown")
     : null;
 
-  // Vote summary — Supabase returns JSONB as a native object; no JSON.parse needed.
+  // Vote summary — the API returns JSONB as a native object; no JSON.parse needed.
   // Defensive: if it's still a string (legacy), parse it.
   const voteSummary = motion.voteSummary
     ? (() => {

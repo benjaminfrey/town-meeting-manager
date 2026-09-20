@@ -1,3 +1,10 @@
+# Nothing in this repository builds this image today. The Docker Compose
+# file that used to (repo-root `docker-compose.yml`) was deleted in Phase F
+# along with the rest of the Supabase-based local/production stack. Whether
+# a future deployment runs the API in a container at all — and if so, from
+# this Dockerfile or a rewritten one — is owned by the Stage 2 deploy spec,
+# not decided here. This file is kept because the Chromium/Puppeteer setup
+# below is knowledge worth keeping regardless of how that's decided.
 FROM node:20-slim
 
 # Install Chromium dependencies for Puppeteer

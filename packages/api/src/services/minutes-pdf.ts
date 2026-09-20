@@ -5,9 +5,10 @@
  *
  * ─── Stage 1, Task D1e — where these bytes now live ───────────────────────
  *
- * This used to upload to the Supabase `documents` bucket, which is declared
+ * This used to upload to the Supabase `documents` bucket, which was declared
  * `public = true`
- * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:9`), at
+ * (migration 20260311000003_session_0603_storage_bucket.sql:9, in the
+ * Supabase corpus deleted in Phase F — see git history), at
  * `${townId}/meetings/${meetingId}/minutes-${Date.now()}.pdf`. Both ids are
  * published by the public portal, so the only thing standing between an
  * anonymous fetch and a town's DRAFT minutes — the unadopted record of an

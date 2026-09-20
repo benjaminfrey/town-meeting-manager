@@ -31,7 +31,6 @@
     "@fastify/helmet": "^13.0.2",
     "@fastify/multipart": "^10.1.1",
     "@fastify/sensible": "^6.0.4",
-    "@supabase/supabase-js": "^2.99.0",
     "@town-meeting/shared": "workspace:*",
     "@trpc/server": "11.18.0",
     "better-auth": "^1.7.2",

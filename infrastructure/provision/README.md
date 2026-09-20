@@ -25,9 +25,7 @@ this task — see task-6-report.md for full output.
 
 Docker 29.6.2 was already installed and running, but with **zero**
 containers, images, or volumes (`docker ps -a`, `docker images`, `docker
-volume ls` all empty, verified both before and after this task). There was
-no Supabase stack to remove — the "drop the eight Supabase containers"
-framing in the master plan assumed a state this box was never actually in.
+volume ls` all empty, verified both before and after this task).
 
 **Update 2026-08-26 — Docker has since been removed entirely.** At the
 owner's request, so that nothing can accidentally be deployed to this box
@@ -319,7 +317,7 @@ below in the same script, and were never printed to a terminal or committed
 anywhere in cleartext.
 
 **Why the two-role split matters**: PostgreSQL table owners bypass row-level
-security unconditionally. Under the old Supabase stack this never surfaced
+security unconditionally. Under the previous stack this never surfaced
 because PostgREST connected as a role that did not own the tables. If the
 application ever connects as the schema owner, all 83 RLS policies become
 silent no-ops — no error, every town can read every other town's rows.

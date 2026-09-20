@@ -22,12 +22,15 @@
  * of, say, a query parameter.
  *
  * But that property belongs to nginx, not to this process. Nothing in this
- * codebase proves the API is unreachable except through nginx.
- * `infrastructure/docker-compose.production.yml` publishes nginx alone and the
- * API listens on the private network, which is what makes it true today — the
- * same assumption `server.ts`'s `trustProxy: true` already rests on, and it
- * carries the same warning. Anyone with a route to port 3001 can set this
- * header to anything.
+ * codebase proves the API is unreachable except through nginx. Under the
+ * Docker Compose deployment, `infrastructure/docker-compose.production.yml`
+ * published nginx alone and kept the API on the private network, which is
+ * what made it true then — the same assumption `server.ts`'s `trustProxy:
+ * true` already rested on, and it carried the same warning. Phase F deleted
+ * that deployment (see git history) rather than replacing it; a Stage 2
+ * deployment spec owns re-establishing (and re-verifying) whichever network
+ * topology makes this true again. Anyone with a route to port 3001 can set
+ * this header to anything.
  *
  * **So what does a forged header get you?** Exactly one thing: a tenant
  * context for a town of your choosing. That is not a privilege escalation
