@@ -553,43 +553,30 @@ Mutation-checked — removing either guard turns its own named test red.
 
 ---
 
-## 16. Rules 12 and 13 guard a table nothing writes
+## 16. ~~Rules 12 and 13 guard a table nothing writes~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/authorization/rules.ts`
-(`assertCanInsertMinutesSection`, `assertCanUpdateMinutesSection`) and the
-absence of any `minutes_section` writer anywhere in `packages/api/src` or
-`packages/web/src`.
+**Closed 2026-09-20** by decision, not by code: `minutes_document.content_json`
+is today's shape, and `minutes_section` is a deferred design whose
+authorization is already settled — R1, board-scoped, as the corpus policies had
+it. The two guards stay. The table stays.
 
-**What the gap is:** the corpus carried `minutes_section_insert` and
-`minutes_section_update`, both R1. Both are restated in `rules.ts` and both are
-pinned by `trpc/__tests__/permission.test.ts:265`. Neither has a production
-caller, because the product has no `minutes_section` router, no route and no
-raw write — the only `INSERT INTO minutes_section` in the repository is in
-`db/__tests__/tenant-isolation.test.ts`'s fixture. Minutes content lives in
-`minutes_document.content_json` instead. This is not a live hole (an unwritten
-table cannot be written past its guard) but it is a rule whose enforcement is
-supplied by absence, which stops being true the first time a section writer is
-added.
+**What changed is that the enforcement is no longer incidental.**
+`packages/api/src/trpc/__tests__/minutes-section-rules.test.ts` fails in both
+directions:
 
-**Why it was not closed in Phase F:** there is nothing to fix. Deleting the two
-guards would remove the only record that R1 governs sections, and the two
-numbered test cases with them; wiring them needs a writer that does not exist
-and that no screen asks for. Recorded so the next task that builds a sectioned
-minutes editor finds the rule already decided instead of inventing one.
+- a production writer to `minutes_section` appears that does not reference the
+  guards — the case that would otherwise ship unguarded, since "nothing writes
+  the table" is a fact about today only;
+- either guard is deleted from `rules.ts` as dead code, taking with it the only
+  record that R1 governs sections.
 
-**Retirement condition:** either a `minutes_section` write path exists and calls
-both guards, or a decision is recorded that `minutes_document.content_json` is
-the permanent shape and the table (with its two guards) is dropped.
+Both were proven by mutation: an unguarded writer fails the first test, a writer
+that calls a guard passes, and deleting a guard fails the second. `rules.ts`
+carries the decision above the guards so the next reader finds it there.
 
-**Verification command:**
-
-```
-# no writer outside the test fixture:
-git grep -n "INSERT INTO minutes_section\|UPDATE minutes_section" -- packages/
-# the two guards, and their zero callers:
-git grep -n "assertCanInsertMinutesSection\|assertCanUpdateMinutesSection" \
-  -- packages/api/src | grep -v __tests__
-```
+**If the sectioned editor is ever built:** wire both guards with the board
+derived from the section's `minutes_document`, and update that test's
+expectation deliberately.
 
 ---
 
