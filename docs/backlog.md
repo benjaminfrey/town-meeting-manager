@@ -928,3 +928,44 @@ longer has a reason to exist.
 ```
 grep -n "test.skip\|test.describe.skip" e2e/onboarding.spec.ts e2e/member-management.spec.ts e2e/meeting-lifecycle.spec.ts
 ```
+
+---
+
+## 24. Inline motion text doubles a period when the motion already ends with one
+
+**Where:** `packages/api/src/services/minutes-formatters.ts`'s `formatMotionInline`
+(`let text = \`${mover} moved ${motion.text}\``, then `text += ". "` for the
+seconder, the vote result and the final period).
+
+**What the gap is:** the formatter appends its own punctuation to
+`motion.text` without checking whether that text already ends with one. A
+motion stored as "Move to adjourn." renders as:
+
+> Smith moved Move to adjourn.. Davis seconded. Passed unanimously.
+
+Two defects in one sentence, both in a document a town files as its legal
+record: the doubled period, and "moved Move to adjourn", where the stored
+text's leading capital reads as a sentence rather than a clause. Neither
+affects meaning, and neither is caught by any test — the generation suite
+asserts that names and phrases APPEAR, not that the sentence reads correctly.
+
+Pre-existing and unrelated to entry 11's two fixes: `formatMotionInline` is
+byte-identical to what it was before them. Found while reviewing the
+motion-path attribution change, in an example rendered by the new test.
+
+**Why it is not fixed here:** trimming a trailing period is a one-line change,
+but deciding what the sentence should read — whether motion text is a clause
+("moved to adjourn") or a sentence quoted verbatim, and whether existing
+stored text should be normalised — is an editorial decision about the record's
+voice, and `block_format` renders the same text differently again.
+
+**Retirement condition:** `formatMotionInline` and `formatMotionBlock` produce
+one sentence-final period regardless of how `motion.text` was stored, pinned by
+a test that asserts the rendered STRING rather than the presence of substrings.
+
+**Verification command:**
+
+```
+grep -n "moved \${motion.text}" packages/api/src/services/minutes-formatters.ts
+grep -rn "moved Move to adjourn" packages/api/src/services/__tests__/
+```
