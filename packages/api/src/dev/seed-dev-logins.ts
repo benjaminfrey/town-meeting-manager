@@ -48,8 +48,8 @@ import type { createAuth } from "../auth/auth.js";
 
 /**
  * The one town `packages/api/drizzle/seed/seed.sql` creates (Newcastle, ME).
- * Task 3's CLI passes this by default, overridable by a `DEV_TOWN_ID`
- * environment variable for a seed that someday creates more than one town.
+ * Callers pass whichever town id they want logins seeded for; this is the
+ * one this repository's seed actually creates.
  */
 export const SEED_TOWN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 
@@ -95,31 +95,66 @@ export async function seedDevLogins(
     });
     const authUserId = created.user.id;
 
-    await withTenant(db, { townId }, async (tx) => {
-      await tx.execute(
-        sql`UPDATE better_auth."user" SET "emailVerified" = true WHERE id = ${authUserId}`,
-      );
-      const linked = toRows<{ id: string }>(
-        await tx.execute(sql`
-          UPDATE user_account
-             SET auth_user_id = ${authUserId}, email = ${row.email}
-           WHERE id = ${row.user_account_id}::uuid
-             AND auth_user_id IS NULL
-          RETURNING id
-        `),
-        (message) => new Error(`seedDevLogins: ${message}`),
-      );
-      if (linked.length !== 1) {
-        throw new Error(
-          `seedDevLogins: expected to link exactly 1 user_account, matched ${linked.length} ` +
-            `for ${row.email}. An identity now exists that nothing points at.`,
+    try {
+      await withTenant(db, { townId }, async (tx) => {
+        await tx.execute(
+          sql`UPDATE better_auth."user" SET "emailVerified" = true WHERE id = ${authUserId}`,
         );
-      }
-      await tx.execute(sql`
-        INSERT INTO better_auth.user_tenant (auth_user_id, town_id)
-        VALUES (${authUserId}, ${townId}::uuid)
-      `);
-    });
+        const linked = toRows<{ id: string }>(
+          await tx.execute(sql`
+            UPDATE user_account
+               SET auth_user_id = ${authUserId}, email = ${row.email}
+             WHERE id = ${row.user_account_id}::uuid
+               AND auth_user_id IS NULL
+            RETURNING id
+          `),
+          (message) => new Error(`seedDevLogins: ${message}`),
+        );
+        if (linked.length !== 1) {
+          throw new Error(
+            `seedDevLogins: expected to link exactly 1 user_account, matched ${linked.length} ` +
+              `for ${row.email}. An identity now exists that nothing points at.`,
+          );
+        }
+        await tx.execute(sql`
+          INSERT INTO better_auth.user_tenant (auth_user_id, town_id)
+          VALUES (${authUserId}, ${townId}::uuid)
+        `);
+      });
+    } catch (err) {
+      // ─── The compensating delete ─────────────────────────────────────
+      //
+      // Mirrors `POST /api/invitations/accept` (routes/invitations.ts). The
+      // transaction rolled back, so `user_account` is untouched — but the
+      // Better Auth identity created above is OUTSIDE it and survives. Left
+      // alone, a re-run of this script would rediscover the same pending
+      // `user_account` row, call `signUpEmail` for the same email again, and
+      // get `USER_ALREADY_EXISTS` — a stack trace naming a duplicate email
+      // and nothing about the real, underlying failure, with no way out but
+      // hand-editing the database.
+      //
+      // Deleting it puts the world back where it was. It is safe precisely
+      // because it is unreachable: nothing links to it (that is what just
+      // failed), it has never been signed into, and `user_account.auth_user_id`
+      // is ON DELETE SET NULL so no historical record could be taken with it.
+      await db
+        .execute(sql`DELETE FROM better_auth."user" WHERE id = ${authUserId}`)
+        .catch((cleanupErr: unknown) => {
+          console.error(
+            `seedDevLogins: could not remove the orphaned identity ${authUserId} for ` +
+              `${row.email} after a failed link; a retry will report the email as ` +
+              "already registered until it is deleted by hand.",
+            cleanupErr,
+          );
+        });
+
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `seedDevLogins: failed to link user_account ${row.user_account_id} (${row.email}): ` +
+          `${message}`,
+        { cause: err },
+      );
+    }
 
     seeded.push({ email: row.email, userAccountId: row.user_account_id, authUserId });
   }

@@ -92,4 +92,67 @@ describe("seedDevLogins", () => {
       }
     });
   });
+
+  it("cleans up the identity instead of stranding it when the link fails", async () => {
+    await withTestDb(async (owner) => {
+      await owner.file(SEED);
+      const app = await connectAsAppRole(owner);
+      try {
+        const db = drizzle(app);
+        const realAuth = createAuth({
+          db,
+          secret: "0123456789abcdef0123456789abcdef",
+          baseURL: "http://localhost:5173",
+          sendAuthEmail: async () => {},
+        });
+
+        // Force the `auth_user_id IS NULL` guard inside `withTenant` to match
+        // no row for exactly one account — David Chen, first alphabetically
+        // (`ORDER BY p.email`), so nothing else has been processed yet when
+        // this happens. The moment Better Auth's sign-up succeeds for his
+        // email — but before seedDevLogins's own linking transaction runs —
+        // link that user_account to the identity out from under it, exactly
+        // as a concurrent invitation acceptance or a second seed run would.
+        // seedDevLogins's guard must then see the row is already spoken for.
+        const targetEmail = "dchen@newcastle.me.us";
+        const spiedAuth = {
+          ...realAuth,
+          api: {
+            ...realAuth.api,
+            signUpEmail: async (args: {
+              body: { email: string; password: string; name: string };
+            }) => {
+              const result = await realAuth.api.signUpEmail(args);
+              if (args.body.email === targetEmail) {
+                await owner`
+                  UPDATE user_account SET auth_user_id = ${result.user.id}
+                   WHERE person_id = (SELECT id FROM person WHERE email = ${targetEmail})`;
+              }
+              return result;
+            },
+          },
+        } as unknown as ReturnType<typeof createAuth>;
+
+        await expect(seedDevLogins(db, spiedAuth, PASSWORD, SEED_TOWN_ID)).rejects.toThrow(
+          /dchen@newcastle\.me\.us/,
+        );
+
+        // Nothing succeeded before David Chen (he sorts first), and his own
+        // identity — created, then immediately orphaned by the guard failure
+        // above — was deleted rather than left stranded. Net change: zero.
+        const rows = await owner<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM better_auth."user"`;
+        expect(rows[0]!.n).toBe(0);
+
+        // Deleting that identity also reverted the account this test
+        // sabotaged — `user_account.auth_user_id` is `ON DELETE SET NULL` —
+        // so a subsequent run finds all six accounts pending again and
+        // succeeds for every one of them, David Chen included.
+        const seeded = await seedDevLogins(db, realAuth, PASSWORD, SEED_TOWN_ID);
+        expect(seeded).toHaveLength(6);
+      } finally {
+        await app.end();
+      }
+    });
+  });
 });
