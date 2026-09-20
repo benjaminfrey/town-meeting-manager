@@ -681,51 +681,36 @@ entry 22.
 
 ---
 
-## 21. `serving-surface.test.ts` no longer pins the group half of nginx's read access to API-written files
+## 21. ~~`serving-surface.test.ts` no longer pins the group half of nginx's read access to API-written files~~ — CLOSED
 
-**Where:** `packages/api/src/storage/__tests__/serving-surface.test.ts`, the
-`describe("what the API writes is readable by nginx and by nothing else", ...)`
-block and its JSDoc comment immediately above.
+**Closed 2026-09-20.** The property still cannot be pinned — it belongs to a
+deployment, and no artefact in the repository starts the API process — so
+instead of pretending otherwise, the requirement is now attached to the moment
+someone builds one.
 
-**What the gap is:** the property this suite exists to protect has two
-halves — the mode bits `writeFileDurably` sets on files and directories, and
-the shared group that let nginx's unprivileged workers actually read files
-owned by a different Linux user (the API process). Before Phase F, the second
-half was pinned by reading `infrastructure/docker-compose.production.yml` at
-module load and asserting it ran the API container with
-`TMM_ASSET_UID`/`TMM_ASSET_GID` (default `101`), matching nginx's own primary
-group in that image. Phase F (Task 6) deleted that compose file outright — the
-owner decision was remove, not replace, since no non-Docker deployment was
-being built in this phase — which left the test reading a file that no longer
-exists. It was fixed minimally in the same task: the `COMPOSE`
-`fs.readFileSync` and the one test asserting against it were removed, leaving
-only the still-true half (nginx still drops its workers to an unprivileged
-`user nginx;`) and a comment explaining why the group-side pin is gone.
+**`packages/api/src/storage/__tests__/deployment-group-pin.test.ts`** passes
+vacuously today and fails as soon as a file that starts the API (a compose
+file, a systemd unit, a Procfile, a Dockerfile) appears without encoding how
+the API process shares nginx's group. Its failure message carries what the
+deleted compose file knew: the mechanism (`user: "${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}"`,
+101 being the `nginx` uid/gid in `nginx:*-alpine`), the reason
+(`storage/store.ts` writes group-readable; nginx's workers are a different
+user), and the symptom of skipping it (403 on every document and seal, with the
+application's logs clean). A second test fails if `store.ts`'s paragraph
+stating the requirement is tidied away.
 
-**Why it wasn't closed in Phase F:** there is nothing in this phase to pin it
-against. The group relationship is a property of a _deployment_, not of this
-application's source — with the compose file gone and no replacement
-deployment artefact in the repository, there is no file left to read an
-assertion out of. Re-establishing the pin is deployment design work that
-belongs to whichever phase next defines how the API and nginx actually run
-together, not to a decommissioning task.
+**It found something on its first run.** `packages/api/Dockerfile` — kept by
+Phase F as inert, and the most likely seed of a future deployment — ran the API
+as root and said nothing about groups. It now carries the requirement in a
+header addressed to whoever deploys from it.
 
-**Retirement condition:** the Stage 2 deploy spec re-establishes how the API
-and nginx's workers share group access to written files (containers, systemd
-`SupplementaryGroups`, or otherwise), and pins that relationship the same way
-the deleted compose-file test did — a structural assertion against whatever
-artefact encodes the deployment, not a comment. Until then this is recorded
-only in this file; the task-6 report it was first written down in
-(`.superpowers/sdd/2026-09-19-phase-f-decommission/task-6-report.md`) is
-git-ignored SDD scratch space and would vanish on merge.
+Mutation-checked in both directions: a silent systemd unit fails the first
+test, the same unit with `SupplementaryGroups=nginx` passes, and removing
+`store.ts`'s paragraph fails the second.
 
-**Verification command:**
-
-```
-git grep -n "TMM_ASSET_GID" -- packages/api/src   # only the writer's own comment remains
-git log --diff-filter=D --name-only --format=%H -- 'infrastructure/docker-compose.production.yml'
-sed -n '1,30p;230,340p' packages/api/src/storage/__tests__/serving-surface.test.ts
-```
+**What is still owed to Stage 2:** an actual deployment that grants the access,
+and a structural assertion against whatever artefact encodes it. This entry
+guarantees the question gets asked; it does not answer it.
 
 ---
 
