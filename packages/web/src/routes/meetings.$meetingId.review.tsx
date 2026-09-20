@@ -310,7 +310,10 @@ export default function PostMeetingReviewPage({ loaderData }: Route.ComponentPro
   const canGenerateMinutes = useMemo(() => {
     if (!currentUser) return false;
     const role = currentUser.role;
-    if (role === "admin" || role === "sys_admin") return true;
+    // `sys_admin` is not a town administrator — the server denies it
+    // (`resolvePermission`), so offering the action here would only produce a
+    // refusal. See backlog 5.
+    if (role === "admin") return true;
     return hasPermission(
       currentUser.permissions,
       "generate_ai_minutes",

@@ -37,6 +37,7 @@ import {
   type TownFixture,
 } from "../../__tests__/fixtures.js";
 import { appRouter } from "../../router.js";
+import { getBoardSubscribers } from "../../../services/notification-service.js";
 import {
   seedMeeting,
   seedAgendaItem,
@@ -992,6 +993,32 @@ describe("voteRecord.recordForMotion — the minutes-approval consequence", () =
             meeting_id: meetingId,
             approved_by_motion_id: motionId,
           },
+        });
+
+        // ── The event must reach someone (backlog 12) ──────────────────
+        //
+        // The row existing is not the guarantee: `getSubscribersForEvent`
+        // reads `payload.board_id` and returns `[]` without it, so this
+        // notification was queued and delivered to nobody. Asserting the
+        // payload's shape alone is what let that survive — this asserts the
+        // lookup the pipeline actually performs.
+        const payload = events[0]!.payload;
+        expect(payload.board_id, "no board_id: the subscriber lookup returns []").toBe(
+          town.boardId,
+        );
+        const subscribers = await inTown(db, town, (tx) =>
+          getBoardSubscribers(tx, payload.board_id as string),
+        );
+        expect(
+          subscribers.map((s) => s.email).filter(Boolean).length,
+          "the queued minutes_approved event resolves to no deliverable subscriber",
+        ).toBeGreaterThan(0);
+
+        // The email template renders these; without them the message goes out
+        // naming neither the town nor the meeting.
+        expect(payload).toMatchObject({
+          townName: expect.any(String),
+          boardName: expect.any(String),
         });
       } finally {
         await app.end();
