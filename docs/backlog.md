@@ -714,50 +714,142 @@ guarantees the question gets asked; it does not answer it.
 
 ---
 
-## 22. No end-to-end suite runs in CI, and the four specs that exist are stale
+## 22. ~~No end-to-end suite runs in CI, and the four specs that exist are stale~~ — CLOSED
 
-**Where:** `playwright.config.ts`, `e2e/fixtures.ts`, `e2e/*.spec.ts` (420 lines
-across `smoke`, `onboarding`, `member-management`, `meeting-lifecycle`), and
-`.github/workflows/ci.yml`.
+**Closed 2026-09-20.** CI now runs a real Chromium browser against a real
+bootstrap-seeded Postgres database on every pull request, in a new `e2e` job
+(`.github/workflows/ci.yml`) that runs in parallel with `verify` rather than
+after it, so it does not slow that job's feedback. It brings up its own
+`postgres:17` service (mirroring `verify`'s, plus
+`POSTGRES_HOST_AUTH_METHOD=trust` — see the job's own comment for why the
+non-owner bootstrap needs that and `verify` doesn't), installs deps, builds,
+runs `scripts/dev/reset-local-db.sh`, installs Playwright's Chromium build,
+runs `pnpm test:e2e:ci` (`playwright test --project=chromium` —
+`playwright.config.ts`'s `projects` still lists firefox/webkit for local use,
+per the owner decision that CI is Chromium-only), and uploads the HTML report
+as an artifact on failure.
 
-**What the gap is:** nothing exercises the running product in a browser on any
-automated path. `pnpm test:e2e` exists and CI never calls it. This is the
-substitute that entry 20's restatement explicitly does not provide, and the
-reason it matters is on the record: Phase E wave 5 had 1725 green tests and a
-live meeting screen that rendered blank, an SSE resume that lost every write in
-a quiet gap, and a 404 on every page load — three defects that only ~20 minutes
-in a real browser found.
+**The three measured breaks are fixed, all in `e2e/fixtures.ts`:**
 
-**The four specs cannot pass as they stand.** Measured 2026-09-20:
+1. The password now reads `process.env.DEV_PASSWORD ?? "TownMeeting!Dev1"`,
+   matching the bootstrap.
+2. `seededTown` now points at real seed rows:
+   `boardId: "bbbb1111-bbbb-4bbb-8bbb-bbbbbbbbbbbb"` (Select Board — the
+   governing board, and the one the seed's meeting belongs to) and
+   `adminUserId: "aaaa1111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"`.
+3. `playwright.config.ts`'s `webServer` is now an array: `@town-meeting/api`
+   (via `tsx src/index.ts`, `DATABASE_URL` required and validated at config
+   load — see its top-of-file comment for the local-loop invocation) plus
+   `@town-meeting/web`. The API runs against the runtime URL
+   `scripts/dev/reset-local-db.sh` prints — the non-owner `tmm_app` role via
+   `options=-c role=tmm_app` — never the owner connection.
 
-1. `e2e/fixtures.ts:30` logs in with `TestPassword123!`; the dev bootstrap
-   (`scripts/dev/reset-local-db.sh`) creates logins with `TownMeeting!Dev1`.
-2. `e2e/fixtures.ts:62-63` names `boardId: "bbbb0001-0000-0000-0000-000000000000"`
-   and `adminUserId: "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"`; the seed has
-   `bbbb1111-bbbb-4bbb-8bbb-…` / `bbbb2222-…` and
-   `aaaa1111-aaaa-4aaa-8aaa-…` (note the UUID version and variant nibbles).
-3. `playwright.config.ts:34` starts only `@town-meeting/web`; nothing serves the
-   API, so any spec that reads data fails regardless of the first two.
+Fixing these also surfaced one bug in `e2e/fixtures.ts` itself, not listed in
+the original three: `seededTown`'s fixture function took `(_fixtures, use)`,
+which Playwright rejects outright (`First argument must use the object
+destructuring pattern`) — this file had never actually been run by anything
+before this entry, so nothing had caught it. Now `({}, use)`.
 
-Whether the specs' assertions still describe the current screens is unknown —
-they were last touched before Phase E's later waves rewrote those screens.
+**The smoke spec was rewritten** (requirement 4): it no longer asserts
+`hasLogin || hasHeading`, which is true on any page with any heading and
+could not fail. It now asserts, against `packages/web/src/routes/login.tsx`'s
+real markup: the "Email" and "Password" labeled fields and the "Sign in"
+button render, and a wrong password against the real seeded admin renders
+`describeAuthError`'s "Invalid email or password" text rather than doing
+nothing or redirecting.
 
-**Why it was not closed with entry 20:** repairing fixtures, standing up two
-servers and a seeded database in CI, and re-deriving 420 lines of assertions
-against screens that changed is a body of work, not a restatement. It also
-slows every CI run, which is a trade to make deliberately.
+**A new spec, `e2e/dashboard-data.spec.ts`, proves data reaches the browser**
+(requirement 5): it signs in as the seeded admin and asserts the page renders
+an `<h1>` reading "Newcastle" — `routes/home.tsx`'s town-name header, sourced
+from `trpc.town.detail` through the tenant-scoped `tmm_app` role. This is the
+shape of assertion that would have caught wave 5's blank live-meeting screen.
 
-**Retirement condition:** CI runs at least the smoke spec against a
-bootstrap-seeded database with both servers up, green, on every pull request —
-and the specs it runs assert something a developer would notice breaking.
+**Local result** (`./scripts/dev/reset-local-db.sh tmm_e2e` then
+`DATABASE_URL=<runtime URL> pnpm test:e2e:ci`): `5 skipped / 4 passed (8.5s)`.
+
+**What did not survive — quarantined, not rewritten**, because their failures
+turned out to be real screen changes since these specs were last touched, not
+typos to fix (`test.skip` / `test.describe.skip`, each with the measured
+reason inline):
+
+- `e2e/onboarding.spec.ts`'s full-wizard test — the sign-up link text is
+  "Create one", not something matching `/sign up|register|create account/i`,
+  so it always falls through to a sign-in with the seed admin (who is already
+  onboarded, so there is no wizard to walk with the only real account this
+  suite has).
+- Both `e2e/member-management.spec.ts` tests — the board detail page is now a
+  tabbed layout (Overview/Members/Meetings/Templates/Settings) defaulting to
+  Overview; "member roster" as text does not appear anywhere in the DOM until
+  the Members tab is selected, which the spec never does.
+- Both `e2e/meeting-lifecycle.spec.ts` tests — the Kanban board
+  (`routes/meetings.tsx`) renders each meeting as a `<button>` driven by an
+  action object, not an `<a href="/meetings/...">`; the spec's own
+  `a[href*='/meetings/']` locator matches nothing, so both tests have been
+  silently self-skipping via their own `test.skip()` bailout since that
+  rewrite — the same cannot-fail shape this entry closed in the smoke spec,
+  just not CI-visible until now.
+
+These three specs' staleness is tracked as entry 23, its own follow-up rather
+than folded back into this one, since fixing them for real means driving the
+current screens (a tab click, a button, a real sign-up flow), not a fixture
+repair.
 
 **Verification command:**
 
 ```
-grep -n "e2e\|playwright" .github/workflows/ci.yml   # currently no hit
-grep -n "TEST_PASSWORD\|boardId:\|adminUserId:" e2e/fixtures.ts
-grep -n "DEV_PASSWORD" scripts/dev/reset-local-db.sh
-grep -n "aaaa1111\|bbbb1111\|bbbb2222" packages/api/drizzle/seed/seed.sql
+grep -n "e2e:" .github/workflows/ci.yml
+DATABASE_URL="postgres://$USER@localhost:5432/postgres" pnpm exec turbo run test --force   # Tasks: 5 successful, 5 total
 ```
 
 ---
+
+## 23. Three e2e specs are stale against redesigned screens and are quarantined
+
+**Where:** `e2e/onboarding.spec.ts` (one test), `e2e/member-management.spec.ts`
+(both tests), `e2e/meeting-lifecycle.spec.ts` (both tests).
+
+**What the gap is:** entry 22 wired CI to a real browser and a real seeded
+database, fixed the three measured fixture/config breaks, and rewrote the
+one spec whose assertion could never fail. It deliberately did not repair
+these five tests' own assertions, because their failures turned out to be
+real screens changed out from under them, not typos:
+
+1. `onboarding.spec.ts`'s full-wizard test looks for a sign-up link matching
+   `/sign up|register|create account/i`; `login.tsx`'s actual link text is
+   "Create one". It always falls through to signing in with the seed admin,
+   who already has a town, so there is no wizard left to walk with the only
+   real account this suite has. A real fix needs an actual fresh-signup path
+   exercised end to end, not a regex tweak.
+2. `member-management.spec.ts` asserts `getByText(/member roster/i)` is
+   visible right after opening a board detail page. That page is now a
+   tabbed layout (Overview/Members/Meetings/Templates/Settings, default
+   Overview); no "member roster" text exists anywhere in the DOM until the
+   Members tab is explicitly selected. Confirmed in a real browser against
+   `/boards/bbbb1111-bbbb-4bbb-8bbb-bbbbbbbbbbbb` as the seeded admin.
+3. `meeting-lifecycle.spec.ts` locates meetings via
+   `page.locator("a[href*='/meetings/']")`. The Kanban board
+   (`routes/meetings.tsx`) renders each meeting as a `<button>` with an
+   onClick handler built from an action object that merely has an `href`
+   _field_ — never spread onto a real anchor. The locator matches zero
+   elements, so both tests trip their own `test.skip()` bailout on every
+   run and have asserted nothing since that rewrite.
+
+**Why this is its own entry:** re-deriving these assertions against the
+current UI (driving a tab click, a button instead of a link, a genuine
+sign-up flow with a fresh, unseeded account) is new spec-writing, not a
+fixture repair — entry 22's scope was standing up CI's browser + database
+path and fixing what was measurably broken about doing that. Both are now
+`test.skip`/`test.describe.skip` with the reasoning above inline, so CI
+does not silently under-report what it covers.
+
+**Retirement condition:** each spec is rewritten against the actual current
+screen (tab navigation for member management, the Kanban button for meeting
+lifecycle, a real unseeded sign-up for onboarding) and the `test.skip` is
+lifted, or the spec is deleted with a note explaining why the assertion no
+longer has a reason to exist.
+
+**Verification command:**
+
+```
+grep -n "test.skip\|test.describe.skip" e2e/onboarding.spec.ts e2e/member-management.spec.ts e2e/meeting-lifecycle.spec.ts
+```
