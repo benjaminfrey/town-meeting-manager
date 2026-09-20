@@ -166,41 +166,31 @@ name spelling deliberately so the two defects cannot hide each other.
 
 ---
 
-## 6. The web client never normalises a code-keyed permissions matrix
+## 6. ~~The web client never normalises a code-keyed permissions matrix~~ — CLOSED
 
-**Where:** `packages/shared/src/utils/permissions.ts` (`hasPermission`'s own
-doc comment: "It takes an ALREADY-NORMALISED matrix: pass a raw database row
-through normalisePermissionsMatrix first, or half the accounts in the system
-silently resolve to no permissions at all.") `normalisePermissionsMatrix` has
-zero call sites anywhere under `packages/web/src` (production code — the sole
-web-package hit is a mock in `StaffAccountFlow.test.tsx`); the server's
-`authorization/permission.ts` calls it on every resolution.
+**Closed 2026-09-20.** `fetchCurrentUser` now runs `normalisePermissionsMatrix`
+on the matrix `GET /api/me` returns — the one boundary a matrix crosses into
+the browser, so every consumer (`usePermission`, `PermissionGate`, and every
+screen calling `hasPermission`) is fixed at once and a new screen cannot
+reintroduce the gap by forgetting a step.
 
-**What the gap is:** `packages/api/drizzle/seed/seed.sql` (formerly
-`supabase/seed.sql`, before Phase F's decommission) writes at least one account's
-`permissions` keyed by action CODE (`{"global": {"A2": true, "A3": true, ...}}`,
-the Sarah Mitchell / Deputy Clerk row) rather than by action NAME. The server
-normalises this before resolving and allows the action; the web client passes
-`user.permissions` straight to `hasPermission` with no normalisation step, so
-the same code-keyed matrix resolves to nothing client-side — every
-button gated on `hasPermission(...)` for that account is hidden even though
-the server would allow the write.
+`hasPermission`'s own comment had said what would happen: "It takes an
+ALREADY-NORMALISED matrix … or half the accounts in the system silently resolve
+to no permissions at all." The server obeyed it; the client was the half that
+did not, so a code-keyed account — the Deputy Clerk row the seed writes — had
+every permission-gated button hidden for writes the server would have allowed.
 
-**Why it wasn't closed in Phase E:** repo-wide, not specific to any one
-screen or wave-6 task — every web caller of `hasPermission` (this task's
-`minutes.tsx` included) shares the same gap, so fixing it belongs in
-`useCurrentUser` or wherever `user.permissions` is first read, not in an
-individual screen. It limits how much of wave 6 Task 3's `hasPermission`
-widening (passing `boardId`/`role`, matching the server) a seeded staff
-account can actually exercise: the buttons are correctly computed FROM the
-matrix the client has, but the matrix itself is wrong for a code-keyed row.
+**Pinned by** `lib/__tests__/current-user.test.ts`: a code-keyed matrix
+resolves (and a code it does NOT carry still does not), a name-keyed one still
+resolves, `board_overrides` are normalised too and stay board-scoped, and a
+missing matrix stays `null` rather than becoming an empty object.
+Mutation-checked — removing the normalisation turns the code-keyed and
+override cases red.
 
-**Verification command:**
-
-```
-git grep -n "normalisePermissionsMatrix" -- packages/web/src
-grep -n "global.*A2.*true" packages/api/drizzle/seed/seed.sql
-```
+**Sibling sweep, since this class of gap repeats:** every other `hasPermission`
+caller in the client reads the current user's matrix, now normalised.
+`PermissionMatrixEditor` builds its matrix locally from templates for NEW
+accounts and never reads a stored row, so it was not affected.
 
 ---
 
