@@ -25,12 +25,6 @@
 #     leftover copy holds an old Supabase anon JWT that developers were told to
 #     delete — copying it would spread that file into every worktree.
 #
-#   docker/.env — read only by `docker compose` in `docker/` (the legacy
-#     Supabase stack behind `pnpm supabase:*`). That stack has a fixed project
-#     name and a fixed `container_name` on all nine services, so running it
-#     from a worktree would take over the main checkout's containers rather
-#     than start its own. Nothing on the test or dev path reads the file, and it
-#     holds the stack's secrets.
 #
 # API tests need only DATABASE_URL — on a Homebrew Postgres,
 # DATABASE_URL="postgres://$USER@localhost:5432/postgres"; the harness's default

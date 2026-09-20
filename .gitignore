@@ -38,10 +38,6 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 
-# Docker — persistent data (local only)
-docker/volumes/db/data/
-docker/volumes/storage/
-docker/.env
 
 # Claude Code. Note this excludes the CONTENTS, not the directory itself:
 # `.claude/` would stop git descending at all, and a negation cannot re-include
