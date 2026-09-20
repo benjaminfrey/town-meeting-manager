@@ -329,12 +329,10 @@ route table including inline routes, `:169` keeps the public and tenant-exempt
 sets disjoint, and `:211` keeps every notification route except the Postmark
 webhook behind a session.
 
-### 8. Feature parity on CI — **NOT MET, and not verifiable as written**
+### 8. Feature parity on CI — **RESTATED, and met as restated**
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, build, the
-dev bootstrap and the tests, and the five gates below are green. That is not
-feature parity, and no artefact in the repository proves feature parity, because
-there is nothing to compare against:
+**As written, this criterion cannot be met by anything.** It asks CI to
+demonstrate parity with a predecessor, and there is no predecessor:
 
 > **there is no parity baseline.**
 > — `docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md:25`
@@ -342,20 +340,32 @@ there is nothing to compare against:
 The web client was already inert before Phase E began: the browser sent no
 credential, so `get_current_town_id()` could not resolve and every PostgREST
 read returned zero rows. Phase E was a restoration, not a migration, and its
-plans say so repeatedly (`2026-08-29-phase-e-unit-0-boards-slice.md:20`). A
-criterion phrased as parity with a predecessor has no predecessor to be at
-parity with.
+plans say so repeatedly (`2026-08-29-phase-e-unit-0-boards-slice.md:20`). No
+artefact can compare the current product against a predecessor that never ran.
 
-The nearest available substitute is also not wired up: `playwright.config.ts`
-and four specs under `e2e/` (`smoke`, `onboarding`, `member-management`,
-`meeting-lifecycle`) exist and `pnpm test:e2e` runs them, but
-`.github/workflows/ci.yml` has no Playwright step, so CI runs none of them.
+**Restated 2026-09-20 (owner decision, backlog 20) as what CI does answer:**
 
-Left unticked. **Backlog entry 20** records what would have to exist for the
-criterion to become answerable, and proposes the substitute the evidence already
-supports.
+> CI is green on typecheck, lint, format:check, build, the dev bootstrap and the
+> full test suite, with the tenant-isolation and route-access gates among them.
 
----
+Met. The evidence is this document's own gate run (§ "The five gates"):
+`Tasks: 5 successful, 5 total`, `Cached: 0 cached`, exit 0 — deliberately cited
+as a run rather than a test count, which moves with every commit. The two gates
+the restatement names by hand are inside that suite:
+`db/__tests__/tenant-isolation.test.ts` (cross-tenant reads return zero rows as
+the application role) and `routes/__tests__/public-route-inventory.test.ts` (no
+route is reachable unauthenticated unless explicitly marked public). The
+`Dev bootstrap` step is a CI step in its own right.
+
+**What this deliberately does NOT claim.** A green unit and integration suite is
+not a functional guarantee: Phase E wave 5 shipped 1725 passing tests over a
+live screen that rendered blank in a browser. The thing worth having is an
+end-to-end suite, and it does not exist yet. `playwright.config.ts` and four
+specs under `e2e/` are in the repository but CI runs none of them, and they are
+stale in three concrete ways (wrong password, wrong seed ids, no API server in
+the Playwright config) — recorded with those specifics as **backlog entry 22**
+so it is actionable rather than aspirational. Restating this criterion closes a
+question that was unanswerable; it does not close that one.
 
 ## The 21 permission rules
 
@@ -437,14 +447,14 @@ future reader auditing one of these should find the comparison already made:
 
 ## Gaps filed
 
-| Gap                                                                    | Backlog entry |
-| ---------------------------------------------------------------------- | ------------- |
-| Rule 10's guard is unwired; minutes creation is gated on R2            | 15            |
-| Rules 12/13's guards have no caller — nothing writes `minutes_section` | 16            |
-| Rule 9 is bypassed by `minutesDocument.byMeeting`                      | 17            |
-| Rule 18's self branch has no caller                                    | 18            |
-| Rule 19's C2 branch has no caller                                      | 19            |
-| Criterion 8 has no parity baseline and no test                         | 20            |
+| Gap                                                                      | Backlog entry   |
+| ------------------------------------------------------------------------ | --------------- |
+| Rule 10's guard is unwired; minutes creation is gated on R2              | 15              |
+| Rules 12/13's guards have no caller — nothing writes `minutes_section`   | 16              |
+| Rule 9 is bypassed by `minutesDocument.byMeeting`                        | 17              |
+| Rule 18's self branch has no caller                                      | 18              |
+| Rule 19's C2 branch has no caller                                        | 19              |
+| Criterion 8 restated (no parity baseline exists); e2e suite still absent | 20 (closed), 22 |
 
 No gap was fixed in this task.
 
