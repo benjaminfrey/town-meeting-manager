@@ -31,7 +31,12 @@
  *      grant that would also happen to cover board B — proved by a matrix
  *      that grants R1 on board A via a `board_overrides` entry and nothing
  *      globally, the exact shape `TEMPLATE_BOARD_SPECIFIC_STAFF` produces;
- *   3. refuse a caller who holds no R1 anywhere.
+ *   3. refuse a caller who holds no R1 anywhere;
+ *   4. answer 404, not 403, both for a document RLS makes invisible (a real
+ *      row in a SEPARATE town, `foreignDocumentId` below — fix round 1
+ *      correction: this used to be a random uuid, which pins "unknown id",
+ *      not cross-tenant isolation) and for a document id that never existed
+ *      at all.
  *
  * ─── Why Puppeteer is mocked ────────────────────────────────────────────
  *
@@ -101,6 +106,12 @@ interface Scenario {
   documentBId: string;
   boardAId: string;
   boardBId: string;
+  /**
+   * A minutes document belonging to a SEPARATE town entirely — the caller's
+   * session never resolves into that town's tenant context, so RLS makes the
+   * row invisible rather than merely forbidden.
+   */
+  foreignDocumentId: string;
 }
 
 /**
@@ -202,6 +213,31 @@ async function withDocumentOnTwoBoards(
           `);
         });
 
+        // A genuinely SEPARATE town — not a board this caller merely lacks a
+        // grant on, but a tenant their session never resolves into at all.
+        // Seeded on the raw `tmm_app` connection with `app.town_id` set to
+        // the foreign town, exactly as `db/__tests__/tenant-isolation.test.ts`
+        // seeds cross-tenant fixtures: RLS enforces the boundary, not this
+        // test, so the insert itself only succeeds because the session's
+        // `app.town_id` matches the row being written.
+        const foreignTownId = randomUUID();
+        const foreignBoardId = randomUUID();
+        const foreignMeetingId = randomUUID();
+        const foreignDocumentId = randomUUID();
+        await client.begin(async (tx) => {
+          await tx`SELECT set_config('app.town_id', ${foreignTownId}, true)`;
+          await tx`INSERT INTO town (id, name, subdomain)
+                    VALUES (${foreignTownId}, 'Elsewhere', 'elsewhere')`;
+          await tx`INSERT INTO board (id, town_id, name)
+                    VALUES (${foreignBoardId}, ${foreignTownId}, 'Select Board')`;
+          await tx`INSERT INTO meeting (id, board_id, town_id, title, scheduled_date)
+                    VALUES (${foreignMeetingId}, ${foreignBoardId}, ${foreignTownId},
+                            'Regular Meeting', DATE '2026-03-01')`;
+          await tx`INSERT INTO minutes_document (id, meeting_id, town_id, board_id)
+                    VALUES (${foreignDocumentId}, ${foreignMeetingId}, ${foreignTownId},
+                            ${foreignBoardId})`;
+        });
+
         const signIn = await auth.api.signInEmail({
           body: { email, password: PASSWORD },
           asResponse: true,
@@ -220,6 +256,7 @@ async function withDocumentOnTwoBoards(
           documentBId,
           boardAId,
           boardBId,
+          foreignDocumentId,
         });
       } finally {
         await server.close();
@@ -296,10 +333,21 @@ describe("POST /api/minutes/:documentId/render (backlog 11, defect B)", () => {
     });
   });
 
-  it("answers 404, not 403, for a document id from another town", async () => {
+  it("answers 404, not 403, for a document belonging to another town", async () => {
+    // A caller holding R1 everywhere in THEIR town still gets 404, not 403,
+    // for a document RLS never lets their tenant transaction see at all —
+    // 403 would say "that document exists but you may not touch it", which
+    // is a membership oracle over every other town's document ids.
     await withDocumentOnTwoBoards({ global: { [R1]: true }, override: {} }, async (ctx) => {
-      const foreign = randomUUID();
-      const { status } = await ctx.post(`/api/minutes/${foreign}/render`);
+      const { status } = await ctx.post(`/api/minutes/${ctx.foreignDocumentId}/render`);
+      expect(status).toBe(404);
+    });
+  });
+
+  it("answers 404, not 403, for a document id that does not exist at all", async () => {
+    await withDocumentOnTwoBoards({ global: { [R1]: true }, override: {} }, async (ctx) => {
+      const nonexistent = randomUUID();
+      const { status } = await ctx.post(`/api/minutes/${nonexistent}/render`);
       expect(status).toBe(404);
     });
   });

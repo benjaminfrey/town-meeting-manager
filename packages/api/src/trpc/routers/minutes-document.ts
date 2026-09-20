@@ -188,19 +188,23 @@ const AS_AMENDED_PHRASES = ["as amended", "with corrections"] as const;
  * unchanged. `approved_by_motion_id` is the motion that carried; `updated_at`
  * is written explicitly because this column has no trigger behind it.
  *
- * **The PDF re-render is NOT here, and its target is wrong today.**
- * `live.tsx` followed the two writes with
+ * **The PDF re-render is NOT here — fixed in backlog 11, defect B.**
+ * `live.tsx` (now `VotePanel.tsx`) used to follow the two writes with
  * `POST /api/meetings/${meetingId}/minutes/render` using the id of the LIVE
  * meeting — but the document being approved belongs to an EARLIER meeting
- * (it is reached through `agenda_item.source_minutes_document_id`). So the
- * un-watermarked re-render has always been requested for the wrong meeting,
- * and the live meeting usually has no minutes document at all, so the call
- * 404s into the `.catch(() => {})` that swallows it. That is a live defect;
- * it is reproduced rather than repaired, because the render endpoint is a
- * Fastify multipart/Puppeteer route that cannot join this transaction and
- * because which document should be re-rendered is a minutes-surface question,
- * which is wave 6's. See `VotePanel.tsx`, which still issues exactly the call
- * the browser issued before, against exactly the same meeting id.
+ * (it is reached through `agenda_item.source_minutes_document_id`). The
+ * un-watermarked re-render was always requested for the wrong meeting, and
+ * the live meeting usually has no minutes document at all, so the call
+ * 404d into the `.catch(() => {})` that swallowed it. That render still
+ * cannot happen inside THIS transaction — the render endpoint is a Fastify
+ * multipart/Puppeteer route — so the fix is still a second, client-driven
+ * request; it just posts the right id now. `VotePanel.tsx` posts the
+ * `minutesApproved` id THIS function returns (below) to
+ * `POST /api/minutes/:documentId/render` (`routes/minutes.ts`), which
+ * derives its authorization from the DOCUMENT's own meeting's board — not
+ * the live meeting's — via the same `assertCanUpdateMinutesDocument` (R1)
+ * the meeting-keyed route uses, so the two cannot drift on who may
+ * re-render. A failure is surfaced with a toast rather than swallowed.
  */
 export async function approveMinutesForPassedMotion(
   tx: TenantTx,
