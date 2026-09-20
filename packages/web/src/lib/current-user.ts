@@ -34,6 +34,7 @@
  */
 
 import type { UserRole, PermissionsMatrix } from "@town-meeting/shared";
+import { normalisePermissionsMatrix } from "@town-meeting/shared";
 import { apiJson } from "./api-client";
 
 export interface CurrentUser {
@@ -106,7 +107,22 @@ export async function fetchCurrentUser(): Promise<CurrentUser> {
     // defaulted to "admin", so an absent claim was a full administrator.
     role: role !== null && VALID_ROLES.has(role as UserRole) ? (role as UserRole) : null,
     govTitle: response.govTitle,
-    permissions: isPermissionsMatrix(response.permissions) ? response.permissions : null,
+    // NORMALISED HERE, at the only boundary a matrix crosses into the browser.
+    //
+    // The database holds both spellings: `drizzle/seed/seed.sql` writes the
+    // Deputy Clerk's grants keyed by action CODE (`{"A2": true, …}`), other
+    // rows use action NAMES. `hasPermission` takes an already-normalised
+    // matrix — its own comment warns that otherwise "half the accounts in the
+    // system silently resolve to no permissions at all" — and the server obeys
+    // that, normalising on every resolution. This client did not, so a
+    // code-keyed account had every `hasPermission` button hidden for writes
+    // the server would have allowed (backlog 6).
+    //
+    // Doing it here rather than per screen means every consumer is fixed at
+    // once and a new screen cannot reintroduce the gap by forgetting a step.
+    permissions: isPermissionsMatrix(response.permissions)
+      ? normalisePermissionsMatrix(response.permissions)
+      : null,
   };
 }
 
