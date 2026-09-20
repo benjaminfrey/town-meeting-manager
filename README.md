@@ -182,11 +182,16 @@ retired the Supabase-based local stack and its `pnpm supabase:up`/`supabase:rese
 2. Build a local development database from the repository: `pnpm db:reset`. This drops and
    recreates a `tmm_dev` database owned by a `tmm_owner` role against
    `postgres://$USER@localhost:5432/postgres` by default (override with `ADMIN_URL`), applies the
-   schema and seed data, and creates a Better Auth login for every seeded account with the password
-   `TownMeeting!Dev1` (override with `DEV_PASSWORD`).
-3. The script's last line is `Put this in packages/api/.env: DATABASE_URL=...` — copy
-   `packages/api/.env.example` to `packages/api/.env` and set `DATABASE_URL` to exactly what it
-   printed.
+   schema and seed data, grants the `tmm_app` runtime role to `tmm_owner` and verifies that grant
+   actually works (`SET ROLE tmm_app` — see `packages/api/.env.example` for why the API must run
+   as this non-owner role, not as the owner), and creates a Better Auth login for every seeded
+   account with the password `TownMeeting!Dev1` (override with `DEV_PASSWORD`).
+3. The script prints two connection strings: an **owner URL** (for tooling and migrations — never
+   point the API at it, it bypasses row-level security) and a **runtime URL**
+   (`postgres://tmm_owner@.../tmm_dev?options=-c%20role%3Dtmm_app`, connecting as the owner but
+   running as `tmm_app`). Copy `packages/api/.env.example` to `packages/api/.env` and set
+   `DATABASE_URL` to the **runtime URL** — the script's closing line
+   (`Put this in packages/api/.env: DATABASE_URL=...`) is exactly that value.
 4. Start the API and web dev servers (see `.claude/launch.json`'s `api-dev`/`web-dev`
    configurations, or `pnpm dev`).
 

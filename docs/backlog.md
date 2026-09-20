@@ -776,3 +776,51 @@ grep -n "no parity baseline" docs/superpowers/specs/2026-08-29-phase-e-web-resto
 ls e2e/*.spec.ts                                    # four specs exist
 grep -n "e2e\|playwright" .github/workflows/ci.yml  # and CI runs none of them
 ```
+
+---
+
+## 21. `serving-surface.test.ts` no longer pins the group half of nginx's read access to API-written files
+
+**Where:** `packages/api/src/storage/__tests__/serving-surface.test.ts`, the
+`describe("what the API writes is readable by nginx and by nothing else", ...)`
+block and its JSDoc comment immediately above.
+
+**What the gap is:** the property this suite exists to protect has two
+halves — the mode bits `writeFileDurably` sets on files and directories, and
+the shared group that let nginx's unprivileged workers actually read files
+owned by a different Linux user (the API process). Before Phase F, the second
+half was pinned by reading `infrastructure/docker-compose.production.yml` at
+module load and asserting it ran the API container with
+`TMM_ASSET_UID`/`TMM_ASSET_GID` (default `101`), matching nginx's own primary
+group in that image. Phase F (Task 6) deleted that compose file outright — the
+owner decision was remove, not replace, since no non-Docker deployment was
+being built in this phase — which left the test reading a file that no longer
+exists. It was fixed minimally in the same task: the `COMPOSE`
+`fs.readFileSync` and the one test asserting against it were removed, leaving
+only the still-true half (nginx still drops its workers to an unprivileged
+`user nginx;`) and a comment explaining why the group-side pin is gone.
+
+**Why it wasn't closed in Phase F:** there is nothing in this phase to pin it
+against. The group relationship is a property of a _deployment_, not of this
+application's source — with the compose file gone and no replacement
+deployment artefact in the repository, there is no file left to read an
+assertion out of. Re-establishing the pin is deployment design work that
+belongs to whichever phase next defines how the API and nginx actually run
+together, not to a decommissioning task.
+
+**Retirement condition:** the Stage 2 deploy spec re-establishes how the API
+and nginx's workers share group access to written files (containers, systemd
+`SupplementaryGroups`, or otherwise), and pins that relationship the same way
+the deleted compose-file test did — a structural assertion against whatever
+artefact encodes the deployment, not a comment. Until then this is recorded
+only in this file; the task-6 report it was first written down in
+(`.superpowers/sdd/2026-09-19-phase-f-decommission/task-6-report.md`) is
+git-ignored SDD scratch space and would vanish on merge.
+
+**Verification command:**
+
+```
+git grep -n "TMM_ASSET_GID" -- packages/api/src   # only the writer's own comment remains
+git log --diff-filter=D --name-only --format=%H -- 'infrastructure/docker-compose.production.yml'
+sed -n '1,30p;230,340p' packages/api/src/storage/__tests__/serving-surface.test.ts
+```

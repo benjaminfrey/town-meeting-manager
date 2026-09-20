@@ -266,19 +266,43 @@ without rule 9's check. Backlog entries 15–19.
 
 ### 6. No `supabase` import remains in `packages/web` or `packages/api` — **MET**
 
+**Corrected 2026-09-20, final fix wave:** this criterion's own wording says "no
+supabase import remains" with no package scope, but the recorded grep below was
+scoped to `packages/web/src packages/api/src` — narrower than the criterion,
+and narrower than the repo. That gap is exactly why a real surviving artifact,
+a repo-root `docker-compose.yml` injecting `SUPABASE_URL`/
+`SUPABASE_SERVICE_ROLE_KEY` into the API container and pointing at a
+`docker/docker-compose.yml` deleted in Task 4, passed this gate undetected —
+it lives outside both scanned directories. It has since been deleted (final
+fix wave, blocking finding 1). The command is widened here to the whole repo,
+excluding `docs/` (which legitimately narrates Supabase history), and re-run:
+
 ```
-$ git grep -nE "^\s*(import|require|from).*supabase" -- packages/web/src packages/api/src
+$ git grep -nE "^\s*(import|require|from).*supabase" -- ':!docs/**'
 (no output)
 
-$ git grep -n "supabase" -- packages/web/src packages/api/src \
-    | grep -vE ':\s*\*|:\s*//|__tests__|\.test\.'
-(no output)
+$ git grep -n "supabase" -- ':!docs/**' | grep -vE ':\s*\*|:\s*//|__tests__|\.test\.'
+.github/workflows/ci.yml:58:      # `packages/web/src/lib/supabase.ts` — which threw at import time when
+README.md:48:│   │   ├── 3.2-supabase-hosting.md          #   Original hosting pick (self-hosted Supabase via Docker Compose) — superseded, see Tech Stack below
+README.md:178:retired the Supabase-based local stack and its `pnpm supabase:up`/`supabase:reset` commands; see
+packages/api/drizzle/0003_portal_tenant.sql:14:-- (`plugins/supabase.ts`), which bypasses RLS outright — the portal, the one
+packages/shared/src/utils/subdomain.ts:65:  "supabase",
+scripts/dev/baseline-transform.sql:7:-- was derived from the historical supabase/migrations corpus. It is committed
+scripts/dev/baseline-transform.sql:262:-- 20260308000039_configure_auth_hooks.sql granted supabase_auth_admin
+scripts/dev/baseline-transform.sql:270:  FOREACH r IN ARRAY ARRAY['anon','authenticated','service_role','supabase_auth_admin'] LOOP
+scripts/dev/new-agent-worktree.sh:21:#   packages/web/.env — needed only while `packages/web/src/lib/supabase.ts`
+scripts/dev/reset-local-db.sh:5:# Replaces `pnpm supabase:up` and the nine-container Supabase stack, which
 ```
 
-Every surviving occurrence of the string is a doc comment recording what a file
-used to do, or a test fixture (`resolvePortalTenant(db, "supabase")` checking a
-reserved subdomain, a stored-URL parser fixture, a reserved-subdomain list).
-Nothing resolves to a module.
+Every one of the ten lines above is a `#`/`--`-style comment narrating what a
+file used to do or naming a deleted file/script, a one-time baseline-migration
+script's literal Postgres role names being dropped (`scripts/dev/baseline-transform.sql:270`,
+not an application dependency), or the pre-existing test fixture/reserved-word
+occurrences already accounted for (`resolvePortalTenant(db, "supabase")`
+checking a reserved subdomain, a stored-URL parser fixture,
+`subdomain.ts`'s reserved-subdomain list). None is an import, a require, or a
+reference that resolves to a module. Still **MET** — now against the wording
+the criterion actually states.
 
 ### 7. No API route is reachable unauthenticated unless explicitly marked public — **MET**
 

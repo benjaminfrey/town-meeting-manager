@@ -357,8 +357,10 @@ export const betterAuthPlugin = fp<BetterAuthPluginOptions>(async (fastify, opts
     // answer" is not a defence.
     //
     // An absent `Origin` is allowed, deliberately: that is what a non-browser
-    // caller looks like (curl, an orchestrator, `scripts/health-check.sh`),
-    // and a caller that sets no `Origin` is not a page acting on a user's
+    // caller looks like (curl, an orchestrator, an external health-check
+    // script — `infrastructure/scripts/health-check.sh` was deleted in
+    // Phase F, but the shape of the caller is unchanged), and a caller that
+    // sets no `Origin` is not a page acting on a user's
     // behalf. Browsers send `Origin` on every cross-origin fetch and on
     // form POSTs, which is the shape this guard exists for. `Referer` is
     // deliberately not consulted — referrer policies strip it, so trusting it

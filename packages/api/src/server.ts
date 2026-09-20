@@ -189,8 +189,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // Health check — verifies database connectivity so orchestrators and the
   // monitoring script can detect a degraded API. Returns 503 if the DB is
   // unreachable.
-  // Public: an orchestrator's liveness probe and `scripts/health-check.sh`
-  // have no session and must not need one — a health endpoint that returns 401
+  // Public: an orchestrator's liveness probe and any external health-check
+  // script (the repo's own `infrastructure/scripts/health-check.sh` was
+  // deleted in Phase F along with the deployment it monitored; a future one
+  // is Stage 2's concern) have no session and must not need one — a health
+  // endpoint that returns 401
   // when auth is misconfigured reports "unhealthy" for the wrong reason, or
   // (worse) reports healthy because the probe treats any response as up. It
   // discloses only up/degraded and a process uptime.
