@@ -51,6 +51,8 @@ import {
   renderEmailTemplate,
 } from "./email-sender.js";
 import { dispatchPushToTown, type PushEventType } from "../lib/push.js";
+import { assertCanSelectNotificationDelivery } from "../trpc/authorization/rules.js";
+import type { Actor } from "../trpc/authorization/actor.js";
 
 // ─── Retry backoff schedule (seconds after failure) ──────────────────
 
@@ -576,7 +578,21 @@ export class NotificationService {
     };
   }
 
-  async getSubscriberDeliveryHistory(personId: string, limit = 20): Promise<DeliveryHistoryRow[]> {
+  /**
+   * One person's notification history.
+   *
+   * Rule 18 (`notification_delivery_select`) is applied HERE rather than left
+   * to the caller, because this method takes a `personId` and had no caller at
+   * all: an unguarded by-id reader of anyone's delivery history, waiting for a
+   * route to be wired to it. A delivery row names who was contacted and about
+   * what. C2 reads anyone's; a person reads their own (backlog 18).
+   */
+  async getSubscriberDeliveryHistory(
+    actor: Actor,
+    personId: string,
+    limit = 20,
+  ): Promise<DeliveryHistoryRow[]> {
+    assertCanSelectNotificationDelivery(actor, { subscriberId: personId });
     return this.job.run(async (tx) =>
       rows<DeliveryHistoryRow>(
         await tx.execute(sql`
