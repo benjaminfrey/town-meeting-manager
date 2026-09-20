@@ -32,9 +32,23 @@ SEED_TOWN_ID="${SEED_TOWN_ID:-a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# Both roles are created HERE, on the admin connection, because both need
+# privileges the owner does not have.
+#
+# `tmm_app` is the runtime role. `0000_baseline.sql` creates it itself IF the
+# connecting role may — and `tmm_owner` is deliberately NOSUPERUSER with no
+# CREATEROLE, so it may not. On a cluster that already has `tmm_app` (any
+# machine that has built this database before) the migration's guard is a
+# no-op and nobody notices; on a FRESH cluster the build aborts at migration
+# 0000 with "role tmm_app does not exist and tmm_owner cannot create it".
+# That is exactly what happened the first time CI ran this script — a
+# developer with a new laptop would have hit the same wall.
 psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -qAt <<SQL
 DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE);
 DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tmm_app') THEN
+    CREATE ROLE tmm_app NOLOGIN;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${OWNER_ROLE}') THEN
     CREATE ROLE ${OWNER_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS;
   END IF;
