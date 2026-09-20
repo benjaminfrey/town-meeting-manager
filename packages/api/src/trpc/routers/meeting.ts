@@ -563,9 +563,10 @@ export const meetingRouter = router({
    * `unknown`, matching every other `jsonb` column this codebase returns
    * (`motion.vote_summary`, `executiveSession.post_session_action_motion_ids`):
    * nothing here validates its shape, and `unknown` is the honest declaration
-   * for a value the database does not constrain. Its five keys and the
-   * `adjourned_by` misattribution they carry are documented on `adjourn`
-   * below — a reader of this column should start there.
+   * for a value the database does not constrain. Its five keys, and the
+   * `adjourned_by` misattribution that lived in the assembler's read of one of
+   * them (fixed in backlog 11), are documented on `adjourn` below — a reader
+   * of this column should start there.
    *
    * **`board_name` ADDED in wave 6, Task 5, for a FOURTH caller**, and it is
    * the first column here that is not a `meeting` column at all.
@@ -1065,26 +1066,38 @@ export const meetingRouter = router({
    *     change what `routes/meetings.$meetingId.review.tsx` lists.
    *   - **The `adjournment` JSONB's five keys**, with their current meanings.
    *
-   * ─── One preserved defect, named rather than fixed — and it is a
-   * misattribution, not a blank field ─────────────────────────────────────
+   * ─── A misattribution that lived in the READER, not this write — fixed in
+   * backlog 11, decided at the wave-6 close-out ────────────────────────────
    *
-   * `adjournment.adjourned_by` receives a **`person.id`** (the acting user's),
-   * and `services/minutes-assembler.ts`'s `buildAdjournment` reads it with
+   * `adjournment.adjourned_by` receives a **`person.id`** (the acting user's)
+   * below, and always has, for every row this procedure has ever written.
+   * `services/minutes-assembler.ts`'s `buildAdjournment` used to read it with
    * `memberName(adjData.adjourned_by)`, whose lookup is
-   * `boardMemberById.get(...)` — a **`board_member.id`** map. So the lookup
-   * resolves to `null`, and `minutes-formatters.ts`'s `formatAdjournmentText`
-   * treats a null `adjourned_by` as "not recorded" and falls back to
-   * `attendance.presiding_officer` (`minutes-formatters.ts`'s `formatAdjournmentText`) — it does
-   * **not** print a blank. So when the clerk adjourns and the chair presides,
-   * the generated legal record states that the chair adjourned the meeting,
-   * silently, with nothing anywhere flagging it as wrong. That is live today,
-   * and it is reproduced here rather than repaired: the fix is a change to
-   * what a column of a legal record MEANS, its only readers are the assembler
-   * and the formatter, and the minutes surface is wave 6's. `adjourned_by_name`
-   * is written (the presiding officer's name, which is a different person
-   * from `adjourned_by` whenever the clerk is not the chair) and is read by
-   * nothing at all — the formatter independently recomputes the same value as
-   * its own fallback instead.
+   * `boardMemberById.get(...)` — a **`board_member.id`** map, the wrong map
+   * for a `person.id`. That lookup always resolved to `null`, and
+   * `minutes-formatters.ts`'s `formatAdjournmentText` treats a null
+   * `adjourned_by` as "not recorded" and falls back to
+   * `attendance.presiding_officer` — it does **not** print a blank. So when
+   * the clerk adjourns and the chair presides, the generated legal record
+   * stated that the chair adjourned the meeting, silently, with nothing
+   * anywhere flagging it as wrong.
+   *
+   * The owner decision (backlog 11): fix the READ, not this write.
+   * `buildAdjournment` now resolves `adjourned_by` with `personName`, the
+   * `person.id` map the assembler already builds, instead of `memberName`.
+   * Two reasons this write stays exactly as it is: every existing row already
+   * holds a `person.id`, so historical records become correct with no data
+   * migration; and a clerk who adjourns may have no `board_member` row at all
+   * on this board, which is precisely the case that produced the wrong name —
+   * a `board_member.id` could not have represented them even in principle.
+   * The presiding-officer fallback in `formatAdjournmentText` is unchanged and
+   * still applies when `adjourned_by` is genuinely absent (a row from before
+   * this field existed, or a method that never records one).
+   *
+   * `adjourned_by_name` (the presiding officer's name, a different person from
+   * `adjourned_by` whenever the clerk is not the chair) is written below and
+   * read by nothing at all — the formatter independently recomputes the same
+   * value as its own fallback instead. Left as-is; not part of this fix.
    *
    * ─── A second cache comment that does not reproduce ──────────────────────
    *

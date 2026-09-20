@@ -2115,6 +2115,12 @@ describe("meeting.adjourn", () => {
         expect(meeting?.status).toBe("adjourned");
         expect(meeting?.ended_at).not.toBeNull();
         expect(meeting?.current_agenda_item_id).toBeNull();
+        // `adjourned_by` is a `person.id` — the acting user's — and always has been. This is not a
+        // pin of a defective shape: the write here was always correct (backlog 11, defect A). The
+        // defect lived entirely in `minutes-assembler.ts`'s READ of this same column, which used to
+        // look `adjourned_by` up in a `board_member.id` map and always got `null` back; that read is
+        // fixed now (`buildAdjournment` uses `personName`, not `memberName`), so this assertion needs
+        // no change.
         expect(meeting?.adjournment).toMatchObject({
           method: "without_objection",
           adjourned_by: operator.personId,

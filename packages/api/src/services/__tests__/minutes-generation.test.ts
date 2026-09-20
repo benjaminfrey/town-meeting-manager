@@ -781,6 +781,94 @@ describe("assembleMinutesJson", () => {
       const { adjournment } = await assembleMinutesJson(tx, MEETING_ID);
       expect(adjournment).toBeNull();
     });
+
+    // ─── Backlog 11, defect A ──────────────────────────────────────────
+    //
+    // `adjourned_by` is a `person.id`, written by `meeting.ts`'s
+    // `performAdjournment` — and always has been, for every existing row.
+    // Before the fix, `buildAdjournment` looked it up with `memberName`, a
+    // `board_member.id` map, so the lookup always came back `null` and
+    // `formatAdjournmentText` silently substituted the presiding officer.
+    // The case below — a clerk with no `board_member` row on this board
+    // adjourns while the chair presides — is exactly the case that produced
+    // a wrong name: a `board_member.id` could not have represented a clerk
+    // who holds no seat, so no board-member-keyed fix could ever have
+    // worked. It fails today (before the fix in this commit) with
+    // `adjourned_by` resolving to `null` and the formatted text naming the
+    // chair ("Johnson") instead of the clerk ("Reyes").
+    it("names the actual adjourner, not the presiding officer, when a non-board-member clerk adjourns", async () => {
+      const CLERK_PERSON_ID = "person-pat-reyes";
+      const tx = createMockTx({
+        meeting: {
+          ...baseMeeting,
+          presiding_officer_id: BM_ALICE, // the chair presides
+          adjournment: {
+            method: "without_objection",
+            timestamp: "2026-03-13T20:45:00.000Z",
+            adjourned_by: CLERK_PERSON_ID, // a person.id — the clerk who actually adjourned
+            motion_id: null,
+          },
+        },
+        board: baseBoard,
+        town: baseTown,
+        agenda_item: sectionItems,
+        meeting_attendance: attendance,
+        motion: [],
+        vote_record: [],
+        executive_session: [],
+        agenda_item_transition: [],
+        guest_speaker: [],
+        // The clerk holds NO board_member row on this board — deliberately, since that
+        // is precisely the case a board_member.id lookup could never resolve.
+        board_member: boardMembers,
+        person: [...persons, { id: CLERK_PERSON_ID, name: "Pat Reyes" }],
+        agenda_template: null,
+        exhibit: [],
+      });
+
+      const content = await assembleMinutesJson(tx, MEETING_ID);
+      expect(content.adjournment!.adjourned_by).toBe("Pat Reyes");
+      expect(content.adjournment!.adjourned_by).not.toBeNull();
+      expect(content.adjournment!.adjourned_by).not.toBe("Alice Johnson");
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      expect(formatted.adjournment_text).toContain("Reyes adjourned the meeting");
+      expect(formatted.adjournment_text).not.toContain("Johnson adjourned the meeting");
+    });
+
+    it("falls back to the presiding officer when adjourned_by is absent (old rows predating the field)", async () => {
+      const tx = createMockTx({
+        meeting: {
+          ...baseMeeting,
+          presiding_officer_id: BM_ALICE,
+          adjournment: {
+            method: "without_objection",
+            timestamp: "2026-03-13T20:45:00.000Z",
+            adjourned_by: null,
+            motion_id: null,
+          },
+        },
+        board: baseBoard,
+        town: baseTown,
+        agenda_item: sectionItems,
+        meeting_attendance: attendance,
+        motion: [],
+        vote_record: [],
+        executive_session: [],
+        agenda_item_transition: [],
+        guest_speaker: [],
+        board_member: boardMembers,
+        person: persons,
+        agenda_template: null,
+        exhibit: [],
+      });
+
+      const content = await assembleMinutesJson(tx, MEETING_ID);
+      expect(content.adjournment!.adjourned_by).toBeNull();
+
+      const formatted = formatMinutes(content, BASE_OPTIONS);
+      expect(formatted.adjournment_text).toContain("Johnson adjourned the meeting");
+    });
   });
 
   describe("certification", () => {

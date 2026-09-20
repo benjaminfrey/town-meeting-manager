@@ -700,12 +700,16 @@ export async function assembleMinutesJson(
     if (!adjData) return null;
 
     const method = (adjData.method as MinutesAdjournment["method"]) ?? "without_objection";
-    // KNOWN DEFECT (live, not fixed here — see meeting.ts's `adjourn` doc comment): `adjourned_by`
-    // is written as a `person.id` but `memberName` looks it up in a `board_member.id` map, so this
-    // always resolves to null; `minutes-formatters.ts`'s `formatAdjournmentText` then silently
-    // substitutes `attendance.presiding_officer`, misattributing adjournment when the clerk (not
-    // the chair) adjourned — not a blank field.
-    const adjournedBy = adjData.adjourned_by ? memberName(adjData.adjourned_by as string) : null;
+    // FIXED (backlog 11, defect A): `adjourned_by` is written by `meeting.ts`'s
+    // `performAdjournment` as a `person.id` — and always has been, for every existing row — not a
+    // `board_member.id`. It used to be read with `memberName`, a `board_member.id` lookup, which
+    // always resolved to null and made `minutes-formatters.ts`'s `formatAdjournmentText` silently
+    // substitute `attendance.presiding_officer`, misattributing adjournment whenever the clerk (not
+    // the chair) adjourned. The fix is here, in the read: use `personName` (the `person.id` map
+    // this function already has), not the write. The write is correct as-is — a clerk who adjourns
+    // may have no `board_member` row at all on this board, which is exactly the case that produced
+    // the wrong name, so a `board_member.id` could never have represented them.
+    const adjournedBy = adjData.adjourned_by ? personName(adjData.adjourned_by as string) : null;
     const timestamp = (adjData.timestamp as string) ?? null;
 
     let adjMotion: MinutesMotion | null = null;
