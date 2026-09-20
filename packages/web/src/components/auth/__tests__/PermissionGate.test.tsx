@@ -108,7 +108,7 @@ describe("checkPermission", () => {
     });
   });
 
-  describe("admin / sys_admin role", () => {
+  describe("admin and sys_admin roles", () => {
     it("admin bypasses all permission checks → true for every action code", () => {
       const admin = createAdminUser();
       // Spot-check representative codes from each group
@@ -122,10 +122,20 @@ describe("checkPermission", () => {
       expect(checkPermission(admin, "C5")).toBe(true);
     });
 
-    it("sys_admin also bypasses all checks", () => {
+    /**
+     * This case asserted the opposite until 2026-09-20 — that `sys_admin`
+     * bypassed every check like an admin. It was pinning a defect: the server
+     * denies `sys_admin` outright (`resolvePermission`), as the deleted
+     * `has_permission()` did, because a platform operator administers the
+     * deployment and is not a clerk of any town. The client's disagreement was
+     * user-visible — the minutes screen offered Approve, Return for
+     * Amendments and Unpublish to a caller the server then refused every time
+     * (backlog 5).
+     */
+    it("sys_admin does NOT bypass checks — it is not a town administrator", () => {
       const sysAdmin = createMockUser({ role: "sys_admin" });
-      expect(checkPermission(sysAdmin, "T1")).toBe(true);
-      expect(checkPermission(sysAdmin, "R1")).toBe(true);
+      expect(checkPermission(sysAdmin, "T1")).toBe(false);
+      expect(checkPermission(sysAdmin, "R1")).toBe(false);
     });
   });
 
