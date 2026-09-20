@@ -11,7 +11,28 @@
 
 import { test, expect } from "./fixtures";
 
-test.describe("Full Meeting Lifecycle", () => {
+// QUARANTINED 2026-09-20 (docs/backlog.md entry 22/23) — measured broken
+// against the current app, confirmed in a real browser (not guessed):
+//
+//   Asserted: after navigating to /meetings, `a[href*='/meetings/']` locates
+//   at least one meeting link, which the test then clicks through.
+//   Found: the Kanban board (packages/web/src/routes/meetings.tsx) renders
+//   each meeting as a `<button>` with an onClick handler driven by a
+//   `{ label, icon, href }` action object — `href` is data passed to a
+//   click handler, never spread onto an actual anchor. There is no
+//   `<a href="/meetings/...">` on this page. Confirmed by loading /meetings
+//   as the seeded admin (one seeded "Select Board Regular Meeting" card,
+//   status Noticed, a "Start Meeting" *button*) and reading the interactive
+//   element tree — zero links match the selector, only buttons.
+//
+//   Both tests already "pass" today, silently: `meetingLinks.count() === 0`
+//   trips their own `test.skip()` bailout on every run, so neither has
+//   asserted anything since the Kanban rewrite. That is the same
+//   cannot-fail shape entry 22 flagged in the old smoke spec, so leaving it
+//   as an implicit skip would misreport this suite's coverage. Recorded as
+//   its own follow-up in docs/backlog.md entry 23 — fixing it for real means
+//   driving the Kanban card's button, not a locator swap.
+test.describe.skip("Full Meeting Lifecycle", () => {
   test.setTimeout(120_000);
 
   test("completes a full meeting from start to adjournment", async ({

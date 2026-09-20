@@ -16,7 +16,32 @@ test.describe("onboarding wizard", () => {
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
   });
 
-  test("full wizard flow: login → stages 1-5 → dashboard", async ({ page }) => {
+  // QUARANTINED 2026-09-20 (docs/backlog.md entry 22/23) — measured broken
+  // against the current app, not just the stale password below:
+  //
+  //   1. This test's sign-up detection looks for a link named
+  //      /sign up|register|create account/i. login.tsx's actual link text
+  //      is "Create one" (see packages/web/src/routes/login.tsx), which
+  //      matches none of those — so `hasSignUp` is always false and this
+  //      test never takes the fresh-signup path it's named for.
+  //   2. It falls through to signing in with the seed admin's credentials,
+  //      using a hard-coded password ("TestPassword123!") independent of
+  //      e2e/fixtures.ts's TEST_PASSWORD — wrong for the same reason entry
+  //      22 flagged fixtures.ts:30 (the dev bootstrap creates
+  //      `TownMeeting!Dev1`/`DEV_PASSWORD`), so the sign-in itself fails and
+  //      the subsequent `waitForURL(/\/(setup|dashboard)/)` times out.
+  //   3. Even with the password fixed, the seed admin already belongs to a
+  //      town, so login.tsx sends it straight past `/setup` — there is no
+  //      "walk the 5-stage wizard" path available with the only real
+  //      account this suite has. Exercising it for real needs a genuine
+  //      fresh-signup flow (Zod's `z.uuid()` etc. all currently untested
+  //      here), which is new spec authoring, not a fixture repair — out of
+  //      scope for backlog entry 22.
+  //
+  // Left in place rather than deleted so the intent (and the found breakage)
+  // stays visible; test("unauthenticated user is redirected to login") above
+  // still runs and covers the one assertion here that was actually sound.
+  test.skip("full wizard flow: login → stages 1-5 → dashboard", async ({ page }) => {
     // Sign up a unique test user for this run
     const uniqueEmail = `e2e-${Date.now()}@test.local`;
     const password = "TestPassword123!";

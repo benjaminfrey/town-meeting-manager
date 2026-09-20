@@ -93,3 +93,102 @@ jobs:
       # unrelated test files.
       - name: Test
         run: pnpm test
+
+  # A separate job, not a step tacked onto `verify` — bringing up two more
+  # servers plus a browser download would slow `verify`'s feedback on every
+  # PR (docs/backlog.md entry 22 says this trade has to be made
+  # deliberately). Running as its own job means it starts in parallel with
+  # `verify` instead of after it.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Same postgres:17 image `verify` uses, with one addition:
+    # POSTGRES_HOST_AUTH_METHOD=trust. scripts/dev/reset-local-db.sh — the
+    # bootstrap this job runs, unlike `verify`'s direct
+    # build-db-from-repo.sh — creates and connects as `tmm_owner`, a
+    # deliberately passwordless non-superuser role (see that script's own
+    # comments). That is exactly what a developer's local Postgres install
+    # already grants for free (peer/trust auth on localhost), which is why
+    # the script never had to carry a password for it — `verify` never hits
+    # this because it always connects as the `postgres` superuser with its
+    # own password instead. `trust` reproduces the local shape on this
+    # ephemeral CI-only database rather than changing the bootstrap script
+    # to carry a password it was never designed to have (out of this
+    # change's write scope besides).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ADMIN_URL: postgres://postgres@localhost:5432/postgres
+      # Playwright's webServer entry for the API needs these — see
+      # playwright.config.ts and packages/api/.env.example. Not production
+      # secrets: this process and every session it issues are discarded when
+      # the job ends.
+      BETTER_AUTH_SECRET: ci-e2e-secret-not-for-production-use-32-bytes-min
+      BETTER_AUTH_URL: http://localhost:5173
+      APP_URL: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # packages/web and packages/api both run from source (tsx / vite dev)
+      # against playwright.config.ts's webServer commands, but both import
+      # @town-meeting/shared by its built dist/ (see that package's
+      # package.json `exports`) — so shared has to be built first.
+      - name: Build
+        run: pnpm build
+
+      # Same bootstrap a developer runs locally (see docs/backlog.md entry
+      # 22's local loop and README.md) — builds the schema, applies the
+      # seed, and creates a Better Auth login for every seeded account as
+      # the NON-OWNER `tmm_app` role, not a superuser shortcut.
+      - name: Dev bootstrap
+        run: ./scripts/dev/reset-local-db.sh tmm_e2e
+
+      - name: Install Playwright (Chromium only)
+        run: npx playwright install --with-deps chromium
+
+      # CHROMIUM ONLY in CI by explicit decision (docs/backlog.md entry
+      # 22) — firefox/webkit stay configured in playwright.config.ts for
+      # local use.
+      - name: Run e2e specs
+        env:
+          # The runtime (non-owner) URL reset-local-db.sh prints — API
+          # connections go through tmm_app via `options=-c role=tmm_app`,
+          # same as production, never the tmm_owner connection above.
+          DATABASE_URL: postgres://tmm_owner@localhost:5432/tmm_e2e?options=-c%20role%3Dtmm_app
+        run: pnpm test:e2e:ci
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
