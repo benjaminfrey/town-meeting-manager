@@ -460,12 +460,62 @@ red (200 becomes 403); reverting `VotePanel`'s target back to the
 meeting-keyed URL and re-swallowing the error turns both of its named tests
 red.
 
+**Fix round 1 correction — a sweep for claims the fix left stale.** The
+authoritative doc comment for defect B
+(`minutes-document.ts`'s `approveMinutesForPassedMotion`) still said "its
+target is wrong today", "reproduced rather than repaired", and pointed at
+`VotePanel.tsx` as "still issu[ing] exactly the call the browser issued
+before" — all false once the fix above landed. Rewritten in past tense,
+keeping the history. Two other comments
+(`meetings.$meetingId.live.tsx`, `meetings.$meetingId.review.tsx`) still
+described the `adjourned_by` misattribution as live; corrected the same
+way. Also corrected the route test's "a document id from another town"
+case, which used a random nonexistent uuid — that pins unknown-id → 404,
+not cross-tenant isolation. It now seeds a genuinely separate town (a
+second town/board/meeting/document inserted directly, following
+`db/__tests__/tenant-isolation.test.ts`'s own pattern for cross-tenant
+fixtures) and keeps the nonexistent-id case as its own, correctly named
+test.
+
+**Fix round 2 — owner decision on the motion path, found by review.**
+Defect A's read-side fix (above) made `adjourned_by` resolve correctly for
+the first time — which surfaced a THIRD fact, invisible until then: on the
+path where a motion carries the adjournment (as opposed to "without
+objection"), `voteRecord.recordForMotion` passes `ctx.tenant.personId` —
+whoever happened to be recording the vote — as `adjourned_by`. Before the
+fix that value silently resolved to `null` and fell back to the presiding
+officer; after the fix it resolved correctly, so adopted-by-motion minutes
+started reading **"<the clerk> declared the meeting adjourned"** instead of
+naming the chair. That is a live change to what a legal record says, and
+the owner decided it, not the tool: **the body adjourned itself by
+carrying a motion; no individual declared it**, so the sentence should name
+nobody. `minutes-formatters.ts`'s `formatAdjournmentText` now renders the
+motion path impersonally — `"The meeting adjourned at TIME."` — and
+computes `officer` only inside the `without_objection` branch, which is
+unchanged and still names the real adjourner (the clerk-adjourns case
+defect A was about). The motion block immediately following already names
+the mover and seconder, so the attribution is not lost, only moved to
+where it is actually true. **Already-generated PDFs are not re-rendered by
+this change** — it takes effect on the next render of each document, same
+as every other formatter change.
+
+Pinned by two tests in `minutes-generation.test.ts`, beside the defect-A
+cases: an assembler-to-formatter pipeline test (the clerk recorded the
+vote, the chair presided, the rendered text names neither, and the motion
+block still names mover and seconder) and a formatter-unit test updated to
+the new wording. Example rendered sentence:
+`"The meeting adjourned at 4:45 PM. Smith moved Move to adjourn.. Davis
+seconded. Passed unanimously."` Mutation-checked: reintroducing `${officer}`
+into the motion-path sentence turns both named tests red; restored, all 61
+tests in the file pass.
+
 **Verification commands:**
 
 ```
 grep -n "personName(adjData" packages/api/src/services/minutes-assembler.ts
 grep -n "minutes/:documentId/render" packages/api/src/routes/minutes.ts
 grep -n "api/minutes/\${data.minutesApproved}" packages/web/src/components/meeting/VotePanel.tsx
+grep -n "The meeting adjourned" packages/api/src/services/minutes-formatters.ts
 ```
 
 ---
