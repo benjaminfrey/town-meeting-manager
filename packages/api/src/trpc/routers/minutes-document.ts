@@ -128,6 +128,7 @@ import {
   assertCanApproveMinutes,
   assertCanReturnMinutesForAmendments,
   assertCanSelectMinutesDocument,
+  canSelectMinutesDocument,
   visibleMinutesDocuments,
   type MinutesStatus,
 } from "../authorization/rules.js";
@@ -322,15 +323,49 @@ export const minutesDocumentRouter = router({
   byMeeting: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
+      const actor = await ctx.actor();
       return ctx.withTenant(async (tx) => {
         await assertMeetingExists(tx, input.meetingId);
-        const rows = toRows<{ id: string; status: string }>(
+        // `m.board_id` is read for rule 9 and never returned — the board is the
+        // meeting's, and a caller wanting one asks `meeting.detail`. Same join
+        // and same reason as `detail` below.
+        const rows = toRows<{
+          id: string;
+          // Written out rather than `MinutesStatus` for the reason `detail`
+          // records below: a named type from `authorization/rules.js` in a
+          // procedure's OUTPUT makes `packages/web`'s inferred `trpc` client
+          // unnameable (TS2742).
+          status: "draft" | "review" | "approved" | "published";
+          board_id: string;
+        }>(
           await tx.execute(sql`
-            SELECT id, status FROM minutes_document WHERE meeting_id = ${input.meetingId} LIMIT 1
+            SELECT md.id, md.status::text AS status, m.board_id
+              FROM minutes_document md
+              JOIN meeting m ON m.id = md.meeting_id
+             WHERE md.meeting_id = ${input.meetingId}
+             LIMIT 1
           `),
           (message) => new Error(`minutesDocument.byMeeting: ${message}`),
         );
-        return rows[0] ?? null;
+        const row = rows[0];
+        if (!row) return null;
+        // Rule 9 (`minutes_document_select`) gated EVERY column of an unadopted
+        // row behind R4, including the id and the status this returns: the
+        // existence and workflow state of a draft — an executive session's
+        // included — is not public to the town. `detail` and `pendingByTown`
+        // applied it; this read did not (backlog 17).
+        //
+        // NULL, not a throw, and that is a deliberate difference from `detail`:
+        // this procedure answers "is there a minutes document for this meeting"
+        // for `meetings.$meetingId.tsx` and `review.tsx`, both of which treat
+        // null as "nothing to show". A refusal would turn an ordinary screen
+        // into an error for a caller who merely may not see a draft yet. The
+        // caller that wants the document itself gets the refusal, from
+        // `detail`.
+        if (!canSelectMinutesDocument(actor, { status: row.status, boardId: row.board_id })) {
+          return null;
+        }
+        return { id: row.id, status: row.status };
       });
     }),
 

@@ -593,46 +593,26 @@ git grep -n "assertCanInsertMinutesSection\|assertCanUpdateMinutesSection" \
 
 ---
 
-## 17. `minutesDocument.byMeeting` returns a draft document's id and status with no R4 check
+## 17. ~~`minutesDocument.byMeeting` returns a draft document's id and status with no R4 check~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/routers/minutes-document.ts:322`
-(`byMeeting`), against
-`packages/api/src/trpc/authorization/rules.ts`'s rule 9
-(`canSelectMinutesDocument` / `assertCanSelectMinutesDocument`).
+**Closed 2026-09-20.** `byMeeting` now joins `meeting` for the board and routes
+its row through `canSelectMinutesDocument` (rule 9), the same rule `detail` and
+`pendingByTown` already applied. `m.board_id` is read for the rule and not
+returned, as in `detail`.
 
-**What the gap is:** rule 9 restores `minutes_document_select`, which gated
-**every** column of a draft or in-review minutes row behind R4. Two of the three
-read paths apply it — `detail` calls `assertCanSelectMinutesDocument` at `:428`,
-`pendingByTown` filters through `visibleMinutesDocuments` at `:491` — and
-`storage/documents.ts:146` applies it to the PDF download. `byMeeting` does not:
-it runs `SELECT id, status FROM minutes_document WHERE meeting_id = …` inside
-the tenant context and returns the row to any signed-in member of the town. No
-content leaks, but the existence and workflow state of an unadopted minutes
-document does, including for an executive session — which `rules.ts`'s own rule
-9 comment calls "the single most sensitive document this product holds."
+**It answers `null`, not a refusal** — the list-shaped form rule 9 anticipates.
+`byMeeting` is how `meetings.$meetingId.tsx` and `meetings.$meetingId.review.tsx`
+decide which minutes affordance to render, and both already treat `null` as
+"nothing to show" (`minutes?.status`, `hasMinutes = !!minutesDoc`). A throw
+would turn an ordinary screen into an error for a caller who simply may not see
+a draft yet; the caller that wants the document itself still gets the refusal,
+from `detail`.
 
-**Why it was not closed in Phase F:** Task 8 is verify-and-report, and this is a
-behaviour change to a procedure with callers: `byMeeting` is how the web client
-decides whether to offer "Generate minutes" or "Open minutes" for a meeting, so
-returning `null` to a caller without R4 changes what that screen renders. The
-fix is probably to return `null` rather than to throw — a list-shaped decision
-rule 9's three forms already anticipate — but it needs the screen checked, not
-just the procedure.
-
-**Retirement condition:** `byMeeting` routes its row through
-`canSelectMinutesDocument` (joining `meeting` for the board, as `detail` does),
-and a test asserts that a caller without R4 gets `null` for a `draft` row and
-the row for an `approved` one.
-
-**Verification command:**
-
-```
-# the unguarded read:
-sed -n '322,336p' packages/api/src/trpc/routers/minutes-document.ts
-# the two siblings that do apply the rule:
-grep -n "assertCanSelectMinutesDocument\|visibleMinutesDocuments" \
-  packages/api/src/trpc/routers/minutes-document.ts
-```
+**Pinned by** two cases in `trpc/routers/__tests__/minutes-document.test.ts`: a
+caller with no R4 gets `null` for a `draft` and the row once it is `approved`
+(rule 9's adopted branch needs no R4), and a caller holding R4 for the board
+gets the draft. Mutation-checked — removing the rule-9 call turns the first
+test red (`expected { …(2) } to be null`).
 
 ---
 
