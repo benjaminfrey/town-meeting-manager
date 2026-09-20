@@ -37,6 +37,7 @@ import { withTestDb, connectAsAppRole } from "../../test/db-harness.js";
 import { tenantJob } from "../../jobs/tenant-job.js";
 import { NotificationService, getBoardSubscribers } from "../notification-service.js";
 import { withTenant } from "../../db/with-tenant.js";
+import type { Actor } from "../../trpc/authorization/actor.js";
 
 // ─── The two external edges, and nothing else ─────────────────────────
 
@@ -665,6 +666,75 @@ describe("tenancy", () => {
 });
 
 // ─── Retries ──────────────────────────────────────────────────────────
+
+describe("getSubscriberDeliveryHistory", () => {
+  /**
+   * Rule 18: a delivery row is readable with C2, or by the subscriber
+   * themselves. This method takes a `personId` and had no production caller —
+   * a by-id reader of anyone's notification history, waiting for a route to be
+   * wired to it. It now applies the rule itself rather than trusting whoever
+   * wires it (backlog 18).
+   */
+  const actorFor = (townId: string, personId: string | null, c2: boolean): Actor => ({
+    kind: "user",
+    townId,
+    userAccountId: randomUUID(),
+    role: "staff",
+    personId,
+    permissions: { global: c2 ? { C2: true } : {}, board_overrides: [] },
+  });
+
+  it("serves a person their own history", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        const service = serviceFor(app, town.townId);
+        const self = actorFor(town.townId, town.adminPersonId, false);
+
+        await expect(
+          service.getSubscriberDeliveryHistory(self, town.adminPersonId),
+        ).resolves.toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("refuses another person's history to a caller without C2", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        const service = serviceFor(app, town.townId);
+        const stranger = actorFor(town.townId, town.accountlessPersonId, false);
+
+        await expect(
+          service.getSubscriberDeliveryHistory(stranger, town.adminPersonId),
+        ).rejects.toThrow(/notification deliveries requires C2/);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("allows another person's history to a caller with C2", async () => {
+    await withTestDb(async (owner) => {
+      const app = await connectAsAppRole(owner);
+      try {
+        const town = await seedTown(app, "alpha");
+        const service = serviceFor(app, town.townId);
+        const admin = actorFor(town.townId, town.accountlessPersonId, true);
+
+        await expect(
+          service.getSubscriberDeliveryHistory(admin, town.adminPersonId),
+        ).resolves.toEqual([]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+});
 
 describe("processRetries", () => {
   it("retries this town's due deliveries and clears the schedule on success", async () => {
