@@ -127,7 +127,7 @@ for file in "${migrations[@]}"; do
 done
 
 echo "==> Applying seed"
-psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f supabase/seed.sql
+psql "$DB_URL" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed/seed.sql
 
 echo "==> Table count"
 psql "$DB_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"

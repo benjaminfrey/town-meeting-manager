@@ -41,7 +41,7 @@
  *
  *   - SQL assembled from values a static read cannot see (`sql[key]`, an array
  *     `.join()`, a string returned by a function, a template built in a loop).
- *   - SQL in `.sql` files, which ESLint does not parse. `supabase/seed.sql` is
+ *   - SQL in `.sql` files, which ESLint does not parse. `packages/api/drizzle/seed/seed.sql` is
  *     the one deliberate session-scoped use in the repository — it applies one
  *     file as one tenant, outside any request — and carries a comment saying so.
  *   - A GUC whose *name* is dynamic (`set_config(gucName, v, false)`), since

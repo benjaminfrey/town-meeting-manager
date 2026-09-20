@@ -10,7 +10,7 @@
  *
  * BOTH are in the database, written by different parts of this product:
  *
- *   - `supabase/seed.sql:116` writes CODES.
+ *   - `packages/api/drizzle/seed/seed.sql:126` writes CODES.
  *   - `StaffAccountFlow.tsx:86,104` builds the matrix with
  *     `buildPermissionsFromTemplate()`, which returns
  *     `Record<PermissionAction, boolean>` — NAMES — and

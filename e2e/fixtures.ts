@@ -53,7 +53,7 @@ export const test = base.extend<TestFixtures>({
 
   /**
    * Returns test town/board/user IDs from the seed data.
-   * These match supabase/seed.sql values.
+   * These match packages/api/drizzle/seed/seed.sql values.
    */
   seededTown: async (_fixtures, use) => {
     await use({

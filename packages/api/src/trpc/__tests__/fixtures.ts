@@ -10,7 +10,7 @@
  * not one shape. `user_account.permissions` holds action keys in TWO spellings,
  * written by different parts of this product:
  *
- *   - `supabase/seed.sql:116` writes CODES — `{"global": {"A2": true}}`
+ *   - `packages/api/drizzle/seed/seed.sql:126` writes CODES — `{"global": {"A2": true}}`
  *   - `StaffAccountFlow.tsx:86,104` builds the matrix with
  *     `buildPermissionsFromTemplate()`, which returns
  *     `Record<PermissionAction, boolean>` — NAMES — and
