@@ -408,6 +408,14 @@ export function visibleMinutesDocuments<T extends MinutesDocumentRow>(
 // ─── 10, 11, 12, 13 — minutes writes: R1, BOARD-SCOPED ────────────────
 //
 // R1 is in both `designated_boards` templates.
+//
+// Rule 10's caller is the minutes GENERATION route (`routes/minutes.ts`), which
+// is the only path that inserts a `minutes_document`. It checks R2 first — who
+// may run the generator — and then this rule, because the deleted policy
+// `minutes_document_insert` required R1 to create the row. Both are needed:
+// R2 alone admitted a hand-built matrix the policy refused (backlog 15, closed
+// 2026-09-20). Regeneration overwrites an existing draft, so it takes rule 11
+// (`assertCanUpdateMinutesDocument`) instead.
 
 export function assertCanInsertMinutesDocument(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "R1", { boardId: scope.boardId, action: "to create minutes" });

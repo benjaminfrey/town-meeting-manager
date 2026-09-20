@@ -64,6 +64,7 @@ import { loadActor, type Actor } from "../trpc/authorization/actor.js";
 import { AuthorizationError } from "../trpc/authorization/permission.js";
 import {
   assertCanGenerateMinutes,
+  assertCanInsertMinutesDocument,
   assertCanSubmitMinutesForReview,
   assertCanUpdateMinutesDocument,
 } from "../trpc/authorization/rules.js";
@@ -332,6 +333,14 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             const actor = await loadActor(tx, tenant);
             const meeting = await loadMeeting(tx, meetingId);
             assertCanGenerateMinutes(actor, { boardId: meeting.board_id });
+            // R2 says who may run the generator; R1 says who may create the
+            // document it writes. The deleted policy `minutes_document_insert`
+            // (`20260308000034_rls_minutes_exhibit.sql`) required R1 for the
+            // INSERT, and this route is the only path that performs it — so
+            // both hold here. No shipped template is affected: all four that
+            // grant R2 grant R1. A hand-built matrix with R2 and not R1 is
+            // refused, which is what the policy existed to do. Backlog 15.
+            assertCanInsertMinutesDocument(actor, { boardId: meeting.board_id });
 
             // Meeting must be adjourned or later in the lifecycle
             const validStatuses = ["adjourned", "minutes_draft", "approved"];
@@ -484,6 +493,10 @@ export async function minutesRoutes(fastify: FastifyInstance) {
             const actor = await loadActor(tx, tenant);
             const meeting = await loadMeeting(tx, meetingId);
             assertCanGenerateMinutes(actor, { boardId: meeting.board_id });
+            // Regeneration overwrites an existing draft, so it is an edit: R1
+            // through the update rule, not the insert one. Same reasoning as
+            // /generate above. Backlog 15.
+            assertCanUpdateMinutesDocument(actor, { boardId: meeting.board_id });
 
             const existing = rows<{ id: string; status: string }>(
               await tx.execute(sql`
