@@ -19,7 +19,7 @@
 - `supabase/seed.sql` is **not** idempotent: no `ON CONFLICT`, no `TRUNCATE`. Every bootstrap starts from an empty database.
 - Migrations are hand-written SQL in `packages/api/drizzle/NNNN_name.sql` with a matching `meta/_journal.json` entry. Phase F adds no migration.
 - Keep the reserved subdomain `"supabase"` in `packages/shared/src/utils/subdomain.ts`. It must stay reserved.
-- `docs/` history (`workflow/`, `audit/`, `advisory-resolutions/`, `superpowers/`) is the historical record and is not edited by this plan, except `docs/deployment.md` and `README.md`.
+- `docs/` history (`workflow/`, `audit/`, `advisory-resolutions/`, `superpowers/`) is the historical record and is not rewritten by this plan. Four exceptions only: `docs/deployment.md`, `README.md`, Task 8 ticking the exit criteria in `docs/superpowers/plans/2026-08-26-stage-1-platform.md`, and Task 8 adding `docs/superpowers/plans/phase-f-stage-1-gate.md` plus `docs/backlog.md` entries.
 
 ## File Structure
 
@@ -103,7 +103,7 @@ In `package.json`, replace the `db:seed` line:
 with:
 
 ```json
-"db:seed": "psql \"${DATABASE_URL:-postgres://$USER@localhost:5432/postgres}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed.sql",
+"db:seed": "psql \"${DATABASE_URL:?set DATABASE_URL}\" -v ON_ERROR_STOP=1 -q -f packages/api/drizzle/seed.sql",
 ```
 
 - [ ] **Step 4: Rewrite the comments that cite the old path**
