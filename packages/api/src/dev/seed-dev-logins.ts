@@ -15,11 +15,28 @@
  *   3. link the account   — user_account.auth_user_id, inside withTenant
  *   4. bridge the tenant  — better_auth.user_tenant, inside the same transaction
  *
- * `db` must be a connection that owns the tables it seeds — `tmm_owner` in
- * every real environment, matching `scripts/dev/reset-local-db.sh` — because
- * discovering which towns need logins (below) briefly drops FORCE ROW LEVEL
- * SECURITY on two tables, and only the table owner may do that. It is never
- * the `tmm_app` runtime role a real HTTP request authenticates as.
+ * ─── `townId` is required, not discovered ──────────────────────────────────
+ *
+ * `public.user_account` and `public.person` are under FORCE ROW LEVEL
+ * SECURITY (`0000_baseline.sql` § 3), which binds the table OWNER too, so
+ * there is no way to find "every account with no login yet" by reading them
+ * with no tenant context set — that read returns zero rows, silently, for
+ * anyone who is not a superuser. An earlier version of this function tried to
+ * work around that by toggling `ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`
+ * for the length of the read. That is wrong: if anything between the two
+ * ALTERs throws — a Better Auth sign-up failure, a duplicate email, a dropped
+ * connection — FORCE stays off on both tables in that developer's database,
+ * silently, with no error pointing at it; it also demands a table-owner
+ * connection, a higher privilege than anything else in this codebase needs
+ * outside a migration; and `db/__tests__/schema-invariants.test.ts` pins
+ * FORCE on every table in `public`, so a bug that leaves it off surfaces as a
+ * confusing failure in an unrelated suite.
+ *
+ * The fix is to not need cross-tenant discovery at all: `townId` is a
+ * required parameter, and the discovery read runs inside `withTenant`, scoped
+ * to it, exactly like the linking writes already are. No privilege beyond
+ * what `resolveTenant()` itself needs (the `tmm_app` runtime role) is ever
+ * required.
  *
  * Dev-only. Never import this from application code.
  */
@@ -29,6 +46,13 @@ import type { TenantResolverDb } from "../auth/tenant-context.js";
 import { toRows } from "../db/rows.js";
 import type { createAuth } from "../auth/auth.js";
 
+/**
+ * The one town `packages/api/drizzle/seed/seed.sql` creates (Newcastle, ME).
+ * Task 3's CLI passes this by default, overridable by a `DEV_TOWN_ID`
+ * environment variable for a seed that someday creates more than one town.
+ */
+export const SEED_TOWN_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+
 export interface SeededLogin {
   email: string;
   userAccountId: string;
@@ -37,7 +61,6 @@ export interface SeededLogin {
 
 interface PendingRow {
   user_account_id: string;
-  town_id: string;
   email: string;
   name: string;
 }
@@ -46,36 +69,14 @@ export async function seedDevLogins(
   db: TenantResolverDb,
   auth: ReturnType<typeof createAuth>,
   password: string,
+  townId: string,
 ): Promise<SeededLogin[]> {
-  // Accounts with no identity yet, across every town in the seed. There is no
-  // tenant context to scope this by yet — discovering which towns exist is
-  // the whole problem — and `public.user_account`/`public.person` are under
-  // FORCE ROW LEVEL SECURITY (0000_baseline.sql § 3), which binds the table
-  // OWNER too. A plain cross-tenant SELECT here is not "deliberately outside
-  // a tenant context" the way reading `better_auth.user_tenant` is elsewhere
-  // in this codebase (tenant-context.ts, invitation-bootstrap.ts) — those
-  // tables carry no RLS at all. `person`/`user_account` do, so an unscoped
-  // read of them returns zero rows for anyone but a superuser — verified
-  // directly against this schema, and independently documented for the same
-  // shape of problem in
-  // `packages/api/drizzle/0002_invitation_tenant_bootstrap.sql`'s backfill
-  // ("a plain SELECT here would read zero rows... the wrong answer, with
-  // nothing to notice").
-  //
-  // The fix is that migration's own fix: drop FORCE for the length of this
-  // one read and restore it immediately after, in a `finally` so a throw
-  // mid-read cannot leave it off. That needs table-OWNER privilege — this
-  // script is meant to run as `tmm_owner` (see `scripts/dev/reset-local-db.sh`
-  // in the Phase F plan), never as the `tmm_app` runtime role a real request
-  // authenticates as. A lesser role gets a loud `must be owner of table`
-  // instead of a silent empty result, which is the correct failure here.
-  await db.execute(sql`ALTER TABLE public.user_account NO FORCE ROW LEVEL SECURITY`);
-  await db.execute(sql`ALTER TABLE public.person NO FORCE ROW LEVEL SECURITY`);
-  let pending: PendingRow[];
-  try {
-    pending = toRows<PendingRow>(
-      await db.execute(sql`
-        SELECT ua.id AS user_account_id, ua.town_id, p.email, p.name
+  // Accounts in `townId` with no identity yet. Scoped by a real tenant
+  // transaction — see the header for why this cannot be a cross-tenant read.
+  const pending = await withTenant(db, { townId }, async (tx) =>
+    toRows<PendingRow>(
+      await tx.execute(sql`
+        SELECT ua.id AS user_account_id, p.email, p.name
           FROM user_account ua
           JOIN person p ON p.id = ua.person_id
          WHERE ua.auth_user_id IS NULL
@@ -83,11 +84,8 @@ export async function seedDevLogins(
          ORDER BY p.email
       `),
       (message) => new Error(`seedDevLogins: ${message}`),
-    );
-  } finally {
-    await db.execute(sql`ALTER TABLE public.user_account FORCE ROW LEVEL SECURITY`);
-    await db.execute(sql`ALTER TABLE public.person FORCE ROW LEVEL SECURITY`);
-  }
+    ),
+  );
 
   const seeded: SeededLogin[] = [];
 
@@ -97,7 +95,7 @@ export async function seedDevLogins(
     });
     const authUserId = created.user.id;
 
-    await withTenant(db, { townId: row.town_id }, async (tx) => {
+    await withTenant(db, { townId }, async (tx) => {
       await tx.execute(
         sql`UPDATE better_auth."user" SET "emailVerified" = true WHERE id = ${authUserId}`,
       );
@@ -119,7 +117,7 @@ export async function seedDevLogins(
       }
       await tx.execute(sql`
         INSERT INTO better_auth.user_tenant (auth_user_id, town_id)
-        VALUES (${authUserId}, ${row.town_id}::uuid)
+        VALUES (${authUserId}, ${townId}::uuid)
       `);
     });
 
