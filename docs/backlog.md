@@ -391,56 +391,81 @@ grep -n "byTown" packages/api/src/trpc/routers/meeting.ts
 
 ---
 
-## 11. Two live defects in generated legal minutes, assigned to Phase E wave 6 and never decided
+## 11. ~~Two live defects in generated legal minutes, assigned to Phase E wave 6 and never decided~~ — CLOSED
 
-**Where:** `packages/api/src/trpc/routers/meeting.ts` (`performAdjournment`'s
-`jsonb_build_object`, `'adjourned_by', ${personId}`),
-`packages/api/src/services/minutes-assembler.ts` (`memberName(adjData.adjourned_by …)`),
-`packages/api/src/services/minutes-formatters.ts` (`formatAdjournmentText`'s
-`attendance.presiding_officer` fallback); and
-`packages/web/src/components/meeting/VotePanel.tsx` (the
-`POST /api/meetings/${meetingId}/minutes/render` inside the `data.adjourned`
-branch).
+**Closed 2026-09-20** on branch `fix-backlog-11-minutes-legal-record`, deciding
+both questions this entry left open.
 
-**What the gaps are:**
+**Defect A — the record named the wrong adjourner. Decision: fix the READ, not
+the write.** `performAdjournment` (`packages/api/src/trpc/routers/meeting.ts`)
+still writes `adjournment.adjourned_by` as a `person.id`, unchanged.
+`minutes-assembler.ts`'s `buildAdjournment` used to look that value up with
+`memberName`, a `board_member.id` map — the wrong map for a `person.id` — so it
+always resolved to `null`, and `minutes-formatters.ts`'s
+`formatAdjournmentText` silently substituted `attendance.presiding_officer`.
+The fix reads it with `personName` instead, the `person.id` map the assembler
+already builds. Two reasons the write stays exactly as it was, recorded in the
+code comment at both ends (`meeting.ts`'s `adjourn` doc comment and
+`minutes-assembler.ts`'s `buildAdjournment`): every existing row already holds
+a `person.id`, so historical records become correct with no data migration;
+and a clerk who adjourns may have no `board_member` row at all on that board —
+precisely the case that produced the wrong name — so a `board_member.id` could
+never have represented them, even in principle. The presiding-officer fallback
+in `formatAdjournmentText` is unchanged and still applies when `adjourned_by`
+is genuinely absent. `adjourned_by_name` remains written and read by nothing;
+left as-is, noted in a comment.
 
-- **The record names the wrong adjourner.** `adjourned_by` is written as a
-  `person.id` and looked up in a `board_member.id` map, so it always resolves to
-  `null`; `formatAdjournmentText` treats null as "not recorded" and falls back to
-  the presiding officer. The field is never blank — when a clerk adjourns and the
-  chair presides, the generated PDF states that the chair adjourned the meeting,
-  and nothing flags it. `adjourned_by_name` is written and read by nothing.
-  **There is a deliberate tripwire:** `meeting.test.ts` asserts
-  `adjourned_by: operator.personId`, pinning the DEFECTIVE shape. A correct fix
-  turns it red on purpose. A fix also needs `performAdjournment` to resolve the
-  actor's `board_member.id` on that board — it does not today — and a decision
-  about existing rows.
-- **The DRAFT watermark is never removed.** `VotePanel` posts the LIVE meeting's
-  id to a meeting-keyed render route, while the approved document belongs to an
-  EARLIER meeting (reached through `agenda_item.source_minutes_document_id`). The
-  request 404s into a swallowed `.catch(() => {})`, so the un-watermarked
-  re-render has never once happened. `approveMinutesForPassedMotion` already has
-  the right `documentId` in hand; a fix needs a document-keyed route or a
-  `document_id` param, plus a decision about which board the R5/R1 check derives
-  from when the two meetings differ. No pin of any kind exists today.
+`meeting.test.ts`'s existing assertion (`adjournment` matching
+`adjourned_by: operator.personId`) needed no change — it was pinning a shape
+that was always correct; only the reader was wrong. Its comment now says so.
 
-**Why it wasn't closed in Phase E:** wave 5 deliberately preserved both rather
-than change a legal record inside a migration, and the wave-6 plan assigned the
-DECISION to wave 6 in bold ("Wave 6 owns the reading surface, so this is where
-they get decided"). The two tasks positioned to make it — Task 3 (`minutes.tsx`)
-and Task 4 (`review.tsx`) — both judged it out of scope, correctly: each is a
-product decision about what a legal record says, not a wiring question, and
-neither task's brief covered it. No later task owned it, and the phase ended.
-Recorded here at the close-out so the decision does not die with the
-phase-scoped plan document that assigned it. **Both defects re-verified as live
-at `be61cfa`.**
+**Pinned by** `packages/api/src/services/__tests__/minutes-generation.test.ts`,
+describe block `assembleMinutesJson > adjournment`: "names the actual
+adjourner, not the presiding officer, when a non-board-member clerk adjourns"
+(the failing case — chair presides, a clerk with no `board_member` row
+adjourns, and the generated text must name the clerk) and "falls back to the
+presiding officer when adjourned_by is absent (old rows predating the field)".
+Mutation-checked: reverting `personName` back to `memberName` in
+`buildAdjournment` turns the first test red with `expected null to be 'Pat
+Reyes'`, confirming the read was the entire defect.
+
+**Defect B — the DRAFT watermark was never removed. Decision: a
+document-keyed render route, board derived from the document's own meeting,
+failures surfaced.** `packages/api/src/routes/minutes.ts` gains
+`POST /api/minutes/:documentId/render`, beside the existing
+`POST /api/meetings/:meetingId/minutes/render` (kept, unchanged, still used by
+other callers). The new route looks up the `minutes_document` row directly by
+id, loads its OWN meeting (not any "current" or live meeting), and guards with
+the same `assertCanUpdateMinutesDocument` (R1) the sibling route uses, so the
+two cannot drift on who may re-render — the same shape
+`board-derivation.ts`'s `resolveMinutesDocumentScope` embodies, decomposed
+into queries the route already makes. `VotePanel.tsx` now posts
+`data.minutesApproved` (the approved document's own id, already returned by
+`voteRecord.recordForMotion`) to the new route, only when it is non-null, and
+a failure is surfaced with `toast.error(...)` instead of swallowed by
+`.catch(() => {})` — a failure here means a legal record keeps a DRAFT
+watermark, which the clerk needs to know.
+
+**Pinned by** `packages/api/src/routes/__tests__/minutes-render-by-document.test.ts`
+(four cases against a real Fastify instance, real Better Auth session, real
+database: re-renders board A's document while an unrelated board-B meeting
+exists; derives authorization from the DOCUMENT's own board via a
+board-specific override rather than a global grant; refuses a caller holding
+R1 nowhere; 404s for a document id from another town) and by
+`packages/web/src/components/meeting/__tests__/VotePanel.test.tsx` (posts
+`data.minutesApproved`, not `meetingId`; surfaces a toast on failure rather
+than swallowing it). Mutation-checked: replacing `meeting.board_id` with a
+fresh random uuid in the new route's guard turns the board-derivation test
+red (200 becomes 403); reverting `VotePanel`'s target back to the
+meeting-keyed URL and re-swallowing the error turns both of its named tests
+red.
 
 **Verification commands:**
 
 ```
-grep -n "adjourned_by" packages/api/src/trpc/routers/meeting.ts
-grep -n "memberName(adjData" packages/api/src/services/minutes-assembler.ts
-grep -n "minutes/render" packages/web/src/components/meeting/VotePanel.tsx
+grep -n "personName(adjData" packages/api/src/services/minutes-assembler.ts
+grep -n "minutes/:documentId/render" packages/api/src/routes/minutes.ts
+grep -n "api/minutes/\${data.minutesApproved}" packages/web/src/components/meeting/VotePanel.tsx
 ```
 
 ---
