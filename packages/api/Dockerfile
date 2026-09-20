@@ -5,6 +5,30 @@
 # this Dockerfile or a rewritten one — is owned by the Stage 2 deploy spec,
 # not decided here. This file is kept because the Chromium/Puppeteer setup
 # below is knowledge worth keeping regardless of how that's decided.
+#
+# ─── IF YOU DEPLOY FROM THIS FILE, READ THIS FIRST (backlog 21) ────────────
+#
+# This image runs the API as root and says nothing about groups, which is
+# fine for building and fatal for serving. `packages/api/src/storage/store.ts`
+# writes documents and seals GROUP-READABLE on purpose: nginx serves them, its
+# workers run unprivileged (`user nginx;` in infrastructure/nginx/nginx.conf),
+# and they are a different Linux user from this process. Group-readable only
+# helps if the two share a group.
+#
+# The deleted Docker Compose deployment supplied that half by running this
+# container as `user: "${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}"` — 101 being
+# the `nginx` uid/gid in `nginx:*-alpine` — so every file this process created
+# was already group-owned by nginx, with no `chown` anywhere. Phase F deleted
+# that deployment; nothing in the repository encodes the relationship now.
+#
+# Re-establish it however the Stage 2 deployment is built (a container `user:`,
+# systemd `SupplementaryGroups=`, a `chgrp`), and pin it in
+# `packages/api/src/storage/__tests__/deployment-group-pin.test.ts`, which
+# fails until an artefact that starts the API mentions how it is done.
+#
+# The symptom of skipping it is not an error: nginx returns 403 for every
+# document and seal, and this application's logs stay clean. That is how the
+# bug presented the first time.
 FROM node:20-slim
 
 # Install Chromium dependencies for Puppeteer
