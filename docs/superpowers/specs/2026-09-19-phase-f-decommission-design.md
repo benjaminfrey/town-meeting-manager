@@ -31,7 +31,7 @@ Owner decisions taken 2026-09-19, during design:
 
 1. **Production: remove, don't replace.** Phase F deletes the Docker/Supabase production path. It already cannot run — Docker was removed from the VM and `migrate.sh` is marked INOPERATIVE. Designing a non-Docker deployment (process manager, deploy script, migrations applied as the owner) is a separate spec, expected in Stage 2. This also settles the plan's open question about a process manager: Phase F does not answer it.
 2. **Dev accounts: re-seed, don't migrate.** The volume is disposable. GoTrue password hashes are not portable to Better Auth, so migration could only preserve rows the seed already recreates. Phase F instead creates dev logins through Better Auth.
-3. **Old corpus: delete the migrations, move the seed.** `supabase/migrations/` and `supabase/tests/` go (git history keeps them); `supabase/seed.sql` moves to `packages/api/drizzle/seed.sql`. The ~30 comments citing individual migration files are rewritten to name the migration and note that it was removed in Phase F.
+3. **Old corpus: delete the migrations, move the seed.** `supabase/migrations/` and `supabase/tests/` go (git history keeps them); `supabase/seed.sql` moves to `packages/api/drizzle/seed/seed.sql`. The ~30 comments citing individual migration files are rewritten to name the migration and note that it was removed in Phase F.
 4. **Local database: native Postgres, no containers.** Replaced by one dev script. The schema needs no extensions (`CREATE EXTENSION` appears nowhere in `packages/api/drizzle/`), and CI already runs plain `postgres:17`.
 5. **Prose: fix only what Phase F makes false.** Sweep by claim, not by file. Comments that accurately record why code changed stay — that history is how several live defects were found.
 6. **The 21 permission rules: verify and report.** Produce the table; missing guards become findings with backlog entries, not silently absorbed work.
@@ -44,7 +44,7 @@ Three units, executed in order. The ordering is the design: Phase E's completene
 
 - **`scripts/dev/reset-local-db.sh`** — creates a `tmm_owner` role (`NOSUPERUSER NOBYPASSRLS`) and a database it owns, runs `scripts/build-db-from-repo.sh` against it (that script already refuses a superuser), applies the seed, then creates dev logins. Prints its postconditions: table count, RLS enabled/forced counts, seeded town and account counts.
 - **Dev logins** — a `tsx` script that, for each `user_account` the seed creates, calls Better Auth's sign-up and links the identity exactly as invitation acceptance does: `user_account.auth_user_id`, and the `better_auth.user_tenant` row. One documented dev password, used only here. Ends by signing in once and failing loudly if that does not work.
-- **`supabase/seed.sql` → `packages/api/drizzle/seed.sql`**, with `scripts/build-db-from-repo.sh` and `pnpm db:seed` following it.
+- **`supabase/seed.sql` → `packages/api/drizzle/seed/seed.sql`**, with `scripts/build-db-from-repo.sh` and `pnpm db:seed` following it.
 - **Root scripts:** `supabase:up|down|reset|logs|status|db` removed; `db:reset`, `db:migrate`, `db:seed` rewritten onto the new path.
 - **CI** gains one step that runs the bootstrap against its Postgres service, so the dev path cannot rot unnoticed.
 
