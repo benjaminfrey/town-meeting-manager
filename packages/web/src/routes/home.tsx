@@ -119,10 +119,7 @@ function primaryAction(status: string, id: string) {
       return { label: "Open agenda", to: `/meetings/${id}/agenda` };
     case "noticed":
       return { label: "Start meeting", to: `/meetings/${id}/live` };
-    // `"in_progress"` below is not a `meeting_status` value and never has
-    // been — see this file's header. Inert, named rather than deleted.
     case "open":
-    case "in_progress":
       return { label: "Rejoin meeting", to: `/meetings/${id}/live` };
     case "adjourned":
     case "minutes_draft":
@@ -154,6 +151,12 @@ interface ActionItem {
 
 // ─── Component ────────────────────────────────────────────────────────
 
+/**
+ * How many meetings this screen asks for. See the call site for why the cap
+ * lives here rather than in `meeting.byTown` (backlog 10).
+ */
+const HOME_MEETING_LIMIT = 200;
+
 export default function Home() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isWelcome = searchParams.get("welcome") === "true";
@@ -171,7 +174,14 @@ export default function Home() {
     isLoading: meetingsLoading,
     isError: isMeetingsError,
   } = useQuery({
-    ...trpc.meeting.byTown.queryOptions(),
+    // A cap this screen sets for itself (backlog 10). `meeting.byTown` is
+    // shared with the kanban and the command palette, and the palette searches
+    // the whole history — so the shared procedure stays unbounded and each
+    // caller asks for what it renders. This screen shows the next meeting, the
+    // lifecycle counts and the needs-action list; 200 is far more than any of
+    // them display and still bounds what a town with years of history sends to
+    // a browser on every load.
+    ...trpc.meeting.byTown.queryOptions({ limit: HOME_MEETING_LIMIT }),
     enabled: !!townId,
   });
 
@@ -231,7 +241,7 @@ export default function Home() {
       const date = m.scheduled_date;
       const status = m.status;
 
-      if (date === today && (status === "open" || status === "in_progress")) {
+      if (date === today && status === "open") {
         active.push(m);
         actions.push({
           meeting: m,
@@ -298,7 +308,7 @@ export default function Home() {
 
       // `"published"` is a `minutes_document_status`, not a `meeting_status`
       // — inert here. See this file's header.
-      if (date >= today && date <= thirtyDaysOut && !["approved", "published"].includes(status)) {
+      if (date >= today && date <= thirtyDaysOut && status !== "approved") {
         upcomingList.push(m);
       }
     }
@@ -548,8 +558,7 @@ export default function Home() {
 
 function NextMeetingHero({ meeting }: { meeting: MeetingRow }) {
   const status = meeting.status;
-  // `"in_progress"`: inert, see this file's header.
-  const isLive = status === "open" || status === "in_progress";
+  const isLive = status === "open";
   const action = primaryAction(status, meeting.id);
   const elapsed =
     meeting.started_at && isLive

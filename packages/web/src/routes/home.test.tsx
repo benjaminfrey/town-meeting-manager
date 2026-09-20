@@ -130,7 +130,11 @@ describe("Home (role-aware)", () => {
     expect(await screen.findByText("Your meeting pipeline")).toBeInTheDocument();
     expect(screen.getAllByText(/schedule meeting/i).length).toBeGreaterThan(0);
     // The lifecycle spine names every stage
-    expect(screen.getByText("Published")).toBeInTheDocument();
+    // "Approved", not "Published": the rail's last stage matches meetings whose
+    // minutes were adopted, and `published` is a minutes-document status the
+    // meeting enum never had. Renamed by owner decision 2026-09-20 so the label
+    // says what the stage shows — see MeetingLifecycle.tsx (backlog 9).
+    expect(screen.getByText("Approved")).toBeInTheDocument();
     // town.detail settled — the header shows the real town name, not the
     // "Your town" default.
     expect(await screen.findByText("Newcastle")).toBeInTheDocument();

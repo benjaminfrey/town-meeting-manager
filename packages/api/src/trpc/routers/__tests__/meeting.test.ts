@@ -179,6 +179,64 @@ describe("meeting.byTown", () => {
     });
   });
 
+  /**
+   * `limit` is OPTIONAL and each caller sets its own (backlog 10). The three
+   * screens that share this procedure want different amounts: home and the
+   * kanban render a bounded view, while `CommandPalette` searches the whole
+   * history — capping the shared procedure is what would reintroduce the bug
+   * dropping its `.limit(50)` fixed, a search that could not find the
+   * 51st-oldest meeting. So the cap lives at the call site, and omitting it
+   * still means "everything".
+   */
+  it("caps the result when a limit is given, keeping the oldest-first order", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        for (const [title, scheduledDate] of [
+          ["First", "2026-01-01"],
+          ["Second", "2026-02-01"],
+          ["Third", "2026-03-01"],
+        ] as const) {
+          await seedMeeting(db, town, town.boardId, { title, scheduledDate });
+        }
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        expect((await caller.meeting.byTown({ limit: 2 })).map((r) => r.title)).toEqual([
+          "First",
+          "Second",
+        ]);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  it("returns everything when no limit is given — the command palette depends on this", async () => {
+    await withTestDb(async (client) => {
+      const app = await connectAsAppRole(client);
+      try {
+        const db = testDb(app);
+        const town = await seedTown(db);
+        for (let i = 1; i <= 3; i += 1) {
+          await seedMeeting(db, town, town.boardId, {
+            title: `Meeting ${i}`,
+            scheduledDate: `2026-0${i}-01`,
+          });
+        }
+        const actor = await seedActor(db, town, { role: "admin" });
+        const caller = appRouter.createCaller(contextFor(db, town, actor));
+
+        expect(await caller.meeting.byTown()).toHaveLength(3);
+        expect(await caller.meeting.byTown({})).toHaveLength(3);
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
   it("does not return another town's meetings", async () => {
     await withTestDb(async (client) => {
       const app = await connectAsAppRole(client);
