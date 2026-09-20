@@ -425,6 +425,17 @@ export function assertCanUpdateMinutesDocument(actor: Actor, scope: BoardScope):
   assertPermission(actor, "R1", { boardId: scope.boardId, action: "to edit minutes" });
 }
 
+// Rules 12 and 13 have NO production caller, and that is a recorded decision
+// rather than an oversight (backlog 16, settled 2026-09-20): minutes content
+// lives in `minutes_document.content_json`, and the product has no section
+// router, route or raw write. `minutes_section` is a deferred design whose
+// authorization is already decided — R1, board-scoped, exactly as the corpus
+// policies `minutes_section_insert` and `minutes_section_update` had it.
+//
+// `trpc/__tests__/minutes-section-rules.test.ts` is what keeps that true: it
+// fails if a production writer appears without these guards, and equally if
+// these guards are deleted as dead code. Do not remove them without dropping
+// the table — that is a product decision, not a cleanup.
 export function assertCanInsertMinutesSection(actor: Actor, scope: BoardScope): void {
   assertPermission(actor, "R1", { boardId: scope.boardId, action: "to add a minutes section" });
 }
