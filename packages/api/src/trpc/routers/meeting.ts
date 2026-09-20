@@ -380,31 +380,34 @@ export const meetingRouter = router({
    * it. Invisible to `meetings.tsx`, which does not read it (`test/trpc.ts`'s
    * "the gap runs one way").
    */
-  byTown: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.withTenant(async (tx) =>
-      toRows<{
-        id: string;
-        title: string;
-        status: string;
-        meeting_type: string;
-        scheduled_date: string;
-        scheduled_time: string | null;
-        started_at: string | null;
-        board_id: string;
-        board_name: string;
-      }>(
-        await tx.execute(sql`
+  byTown: protectedProcedure
+    .input(z.object({ limit: z.number().int().positive().max(500).optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      return ctx.withTenant(async (tx) =>
+        toRows<{
+          id: string;
+          title: string;
+          status: string;
+          meeting_type: string;
+          scheduled_date: string;
+          scheduled_time: string | null;
+          started_at: string | null;
+          board_id: string;
+          board_name: string;
+        }>(
+          await tx.execute(sql`
           SELECT m.id, m.title, m.status, m.meeting_type, m.scheduled_date, m.scheduled_time,
                  m.started_at, m.board_id, b.name AS board_name
           FROM meeting m
           JOIN board b ON b.id = m.board_id
           WHERE m.status != 'cancelled'
           ORDER BY m.scheduled_date ASC, m.scheduled_time ASC, m.id
+          ${input?.limit ? sql`LIMIT ${input.limit}` : sql``}
         `),
-        (message) => new Error(`meeting.byTown: ${message}`),
-      ),
-    );
-  }),
+          (message) => new Error(`meeting.byTown: ${message}`),
+        ),
+      );
+    }),
 
   /**
    * Phase E, wave 6, Task 2 — `AppShell.tsx`'s sidebar live-meeting indicator:

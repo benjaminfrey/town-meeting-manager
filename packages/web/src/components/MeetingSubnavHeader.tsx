@@ -116,7 +116,7 @@ export function MeetingSubnavHeader({ meetingId }: { meetingId: string }) {
                 (tab.seg === "live" &&
                   (currentStage === "noticed" || currentStage === "meeting")) ||
                 ((tab.seg === "review" || tab.seg === "minutes") &&
-                  (currentStage === "minutes" || currentStage === "published")));
+                  (currentStage === "minutes" || currentStage === "approved")));
             return (
               <Link
                 key={tab.seg}

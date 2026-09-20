@@ -88,17 +88,16 @@ type UpdatableMeetingStatus =
 
 // ─── Column definitions (4 columns) ─────────────────────────────────
 
-// `"in_progress"` below (and in `getStatusDot`/`getCardAction`) is dead: the
-// real `meeting_status` enum (`db/schema.ts`) has no such value — only
-// `"open"` is ever actually written. Pre-existing, inert, and left as-is
-// (not this task's write path); noted here so it reads as audited rather
-// than missed, since this task's own fix round corrected the ADJACENT real
-// bug in this exact status mapping (the noticed→active drag sending the
-// literal column id `"active"` as a write — see this file's header).
+// The dead `"in_progress"` status these columns used to match is gone
+// (backlog 9, closed 2026-09-20). It was never a `meeting_status` value — the
+// enum has only `open` for a running meeting — so matching it changed nothing;
+// carrying it made three files describe a vocabulary the database does not
+// have. `MeetingLifecycle.tsx` carries the full history.
+
 const KANBAN_COLUMNS = [
   { id: "draft", label: "Draft", statuses: ["draft"] },
   { id: "noticed", label: "Noticed", statuses: ["noticed"] },
-  { id: "active", label: "Active", statuses: ["open", "in_progress"] },
+  { id: "active", label: "Active", statuses: ["open"] },
   { id: "done", label: "Done", statuses: ["adjourned", "minutes_draft", "approved"] },
 ] as const;
 
@@ -148,7 +147,6 @@ function getStatusDot(status: string): string {
     case "noticed":
       return "bg-amber-400";
     case "open":
-    case "in_progress":
       return "bg-emerald-500";
     case "adjourned":
       return "bg-blue-400";
@@ -168,7 +166,6 @@ function getCardAction(status: string, meetingId: string) {
     case "noticed":
       return { label: "Start Meeting", icon: Play, href: `/meetings/${meetingId}/live` };
     case "open":
-    case "in_progress":
       return { label: "Rejoin", icon: Play, href: `/meetings/${meetingId}/live` };
     case "adjourned":
     case "minutes_draft":
@@ -181,6 +178,13 @@ function getCardAction(status: string, meetingId: string) {
 }
 
 // ─── Component ───────────────────────────────────────────────────────
+
+/**
+ * How many meetings the board renders. A cap this screen sets for itself:
+ * `meeting.byTown` stays unbounded because the command palette searches the
+ * whole history through it (backlog 10).
+ */
+const KANBAN_MEETING_LIMIT = 200;
 
 export default function MeetingsPage() {
   const navigate = useNavigate();
@@ -212,7 +216,7 @@ export default function MeetingsPage() {
     data: meetingRows = [],
     isLoading,
     isError: isMeetingsError,
-  } = useQuery(trpc.meeting.byTown.queryOptions());
+  } = useQuery(trpc.meeting.byTown.queryOptions({ limit: KANBAN_MEETING_LIMIT }));
 
   // ~~TODO(phase-e-wave-6): board.listActive~~ — wired in wave 6, Task 5,
   // alongside `home.tsx`'s identical picker. The ordering difference that

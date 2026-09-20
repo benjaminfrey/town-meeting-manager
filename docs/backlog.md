@@ -305,44 +305,51 @@ grep -rn "trpc.futureItem.pathFilter()" packages/web/src | grep -v __tests__ | g
 
 ---
 
-## 9. `MeetingLifecycle.tsx` renders a stage no row can reach, and the values were unmarked in the one file where they're user-visible
+## 9. ~~`MeetingLifecycle.tsx` renders a stage no row can reach, and the values were unmarked in the one file where they're user-visible~~ — CLOSED
 
-**Where:** `packages/web/src/components/MeetingLifecycle.tsx:14,16` (`LIFECYCLE_STAGES`) and its
-`MEETING_STATUS_LABELS`-less "Published" stage.
+**Closed 2026-09-20**, all three files in one change as the retirement
+condition asked. `"in_progress"` and `"published"` are gone from
+`MeetingLifecycle.tsx`'s `LIFECYCLE_STAGES`, from `home.tsx`'s three branches
+and its `upcoming` exclusion, and from `meetings.tsx`'s `KANBAN_COLUMNS` and
+`getCardAction`. Neither is a `meeting_status` value, so nothing matched them
+and removing them changed no behaviour.
 
-**What the gap is:** `"in_progress"` (line 14, the `meeting` stage's `statuses`) and `"published"`
-(line 16, the `published` stage's `statuses`) are not `meeting_status` enum values — the enum is
-`draft, noticed, open, adjourned, minutes_draft, approved, cancelled`
-(`0000_baseline.sql`; `SELECT 'in_progress'::meeting_status` raises "invalid input value for enum
-meeting_status"). `home.tsx` and `meetings.tsx` both carry the identical two dead values and both
-NAME them in a header comment (wave 6 Task 5); `MeetingLifecycle.tsx` carries the same two and,
-until this fix round, named neither, even though this is the file where the dead vocabulary is
-user-visible rather than merely inert: `LIFECYCLE_STAGES` renders a "Published" stage no meeting row
-can ever reach, and `components/meetings/meeting-labels.ts`'s `MEETING_STATUS_LABELS` has no entry
-for `in_progress` or for the `approved`+`published` pair `published`'s stage would need, so a row
-that somehow reached either dead value would render with no label at all.
+**The label did change, by owner decision.** The last stage matches `approved` —
+a meeting whose minutes were adopted — and calling it "Published" promised a
+state the `meeting` table cannot represent: publication belongs to the minutes
+DOCUMENT, and this rail reads meetings. It now reads **"Approved"**, which is
+what it has always shown. Whether a genuine published-to-portal stage should
+exist is a separate product question rather than a mislabel.
 
-**Why it wasn't closed in Phase E:** deferring the three-file fix is correct — deciding what the
-lifecycle rail should actually show is a product decision (does "Published" get renamed, dropped, or
-does an `approved` meeting need a real post-adoption status the schema doesn't have yet?), not a
-transport change, and wave 6 Task 5 said so explicitly for `home.tsx` and `meetings.tsx`. Leaving the
-_shared_ file — the one both screens render through — unmarked while its two consumers are marked is
-an inconsistency, not a scope decision; annotated here rather than left for a later wave to
-rediscover a third time.
+The rename surfaced two places that had silently depended on the old key:
+`MeetingSubnavHeader.tsx` compared `currentStage === "published"` (a comparison
+TypeScript could now prove impossible), and `home.test.tsx` asserted the
+"Published" label. Both corrected, the test with the reasoning beside it.
 
-**Retirement condition:** whoever resolves `home.tsx`'s and `meetings.tsx`'s own dead-status
-comments (both point back at this file) fixes all three in one change — either by removing
-`"in_progress"`/`"published"` from `LIFECYCLE_STAGES`'s `statuses` arrays (they match nothing, so
-deleting them changes no observable behavior) or by giving the product decision behind them a real
-answer first. This entry retires the moment `MeetingLifecycle.tsx`'s `LIFECYCLE_STAGES` no longer
-contains either string.
+---
 
-**Verification command:**
+## 10. ~~`meeting.byTown` has no `LIMIT` and now feeds three screens~~ — CLOSED
 
-```
-grep -n '"in_progress"\|"published"' packages/web/src/components/MeetingLifecycle.tsx
-psql -c "SELECT 'in_progress'::meeting_status"   # confirms the enum still rejects it
-```
+**Closed 2026-09-20.** `byTown` takes an optional `limit` (1–500) and each
+caller sets its own, per the owner: `home.tsx` and `meetings.tsx` pass 200 —
+far more than either renders — while `CommandPalette` passes nothing and still
+searches the whole history.
+
+**That asymmetry is the point.** Capping the shared procedure is exactly what
+would reintroduce the bug that dropping the palette's `.limit(50)` fixed: a
+search that could not find the 51st-oldest meeting. The cap belongs at the call
+site, where the screen knows what it renders, and omitting it still means
+"everything".
+
+**Pinned by** two cases in `meeting.test.ts`: a limit caps the result and keeps
+the oldest-first order, and omitting it (or passing `{}`) returns everything —
+the case the palette depends on. Mutation-checked: removing the `LIMIT` clause
+turns the first red.
+
+**What this does NOT solve:** the palette still loads every meeting to search
+in the browser. Bounding that means moving search to the server, which is a new
+procedure with its own ranking and authorization surface — recorded here as the
+remaining half rather than implied by this entry's closure.
 
 ---
 
