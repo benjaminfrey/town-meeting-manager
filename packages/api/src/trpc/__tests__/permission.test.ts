@@ -9,14 +9,14 @@
  * tenancy in RLS, permissions in tested TypeScript. This file is the tested
  * half, and until it existed the permission half did not exist at all.
  *
- * The rules are transcribed from the policies Phase B deleted, which are still
- * in the repository as history:
- *   supabase/migrations/20260308000033_rls_agenda_motion_vote.sql
- *   supabase/migrations/20260308000034_rls_minutes_exhibit.sql
- *   supabase/migrations/20260308000035_rls_notification.sql
- *   supabase/migrations/20260308000036_rls_meeting.sql
+ * The rules are transcribed from the policies Phase B deleted, in migrations
+ *   20260308000033_rls_agenda_motion_vote.sql
+ *   20260308000034_rls_minutes_exhibit.sql
+ *   20260308000035_rls_notification.sql
+ *   20260308000036_rls_meeting.sql
  * and their helper semantics from
- *   supabase/migrations/20260308000027_create_rls_helper_functions.sql
+ *   20260308000027_create_rls_helper_functions.sql
+ * — all in the Supabase corpus deleted in Phase F; see git history.
  *
  * Each rule gets at least one caller that succeeds and one that is refused,
  * and each one has been mutation-verified: the check was deleted, the test was

@@ -28,8 +28,15 @@
  * shadow, or be shadowed by, an existing nginx server block, and which one
  * wins depends on nginx's matching order rather than on anything a town
  * administrator can see. `www.` and `mail.`/`smtp.` are the same problem for
- * the marketing site and for outbound mail; `supabase.` is the Kong host in
- * `infrastructure/nginx/nginx.conf`.
+ * the marketing site and for outbound mail.
+ *
+ * `supabase.` was the Kong host in `infrastructure/nginx/nginx.conf` before
+ * Phase F removed the Supabase deployment (see git history); nginx.conf no
+ * longer has that server block. The name STAYS reserved deliberately: this
+ * deployment has used it for infrastructure, a stale DNS record or cached
+ * client could still target it, and a Stage 2 deployment may reuse the name
+ * for something that is not a town again. Reserving it costs nothing and a
+ * town claiming it later would cost real confusion.
  *
  * The list is shared with `packages/web/src/lib/portal.ts`, which uses it for
  * the opposite purpose — deciding that the hostname in the browser is NOT a

@@ -3,9 +3,10 @@
  *
  * ─── Stage 1, Task D1e ────────────────────────────────────────────────────
  *
- * This used to call `supabase.storage.from("exhibits").upload(...)`. There is
- * no `exhibits` bucket: the only bucket any migration creates is `documents`
- * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:8`), so
+ * This used to call `supabase.storage.from("exhibits").upload(...)`. There
+ * was no `exhibits` bucket: the only bucket any migration ever created was
+ * `documents` (migration 20260311000003_session_0603_storage_bucket.sql:8,
+ * in the Supabase corpus deleted in Phase F — see git history), so
  * every exhibit upload this product has ever attempted failed at that line —
  * and then `ExhibitUploader` swallowed the error in a bare `catch {}`, which
  * is why nobody noticed.

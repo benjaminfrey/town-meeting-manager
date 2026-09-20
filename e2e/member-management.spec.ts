@@ -4,7 +4,7 @@ import { test, expect } from "./fixtures";
  * E2E test for member management on the board detail page.
  *
  * Requires:
- * - Local Supabase running with seed data
+ * - A local Postgres database built and seeded via `pnpm db:reset` (see README.md)
  * - Dev server (started by Playwright via webServer config)
  * - Test admin credentials from fixtures.ts
  */

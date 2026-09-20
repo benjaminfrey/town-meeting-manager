@@ -43,9 +43,10 @@ DROP FUNCTION IF EXISTS public.custom_access_token_hook(JSONB);
 DROP FUNCTION IF EXISTS public.invite_user(TEXT, UUID, UUID, UUID, TEXT, TEXT);
 
 -- ─── 2. The FK that halted every build ───────────────────────
--- supabase/migrations/20260308000004_create_user_account.sql:26 —
+-- Migration 20260308000004_create_user_account.sql:26 (Supabase corpus,
+-- deleted in Phase F — see git history) —
 -- `auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL`
--- — is file 4 of 58 and the reason the corpus could never be applied to
+-- — was file 4 of 58 and the reason the corpus could never be applied to
 -- plain Postgres. The COLUMN stays (dropping it would break ~40 TS call
 -- sites and three RLS policies for no benefit today); only the FK to the
 -- GoTrue-owned table goes. The UNIQUE constraint is retained.
@@ -138,9 +139,9 @@ ALTER FUNCTION agenda_item_search_update() SET search_path = pg_catalog, public;
 ALTER FUNCTION portal_search(UUID, TEXT, TEXT, UUID, DATE, DATE, INTEGER, INTEGER) SET search_path = pg_catalog, public;
 
 -- ─── 5. complete_onboarding: auth.uid() -> session setting ───
--- Body is otherwise byte-identical to
--- supabase/migrations/20260310000003_onboarding_rpc.sql. Only the
--- identity read changes.
+-- Body is otherwise byte-identical to migration
+-- 20260310000003_onboarding_rpc.sql (Supabase corpus, deleted in Phase F —
+-- see git history). Only the identity read changes.
 --
 -- KNOWN GAP, deliberately not solved here (see task-5-report.md §"Hand-offs"):
 -- this function is SECURITY DEFINER specifically so it could bypass RLS to
@@ -246,7 +247,8 @@ COMMENT ON FUNCTION complete_onboarding IS
   'Onboarding wizard completion: creates town, boards, person, and user_account in one transaction. Identity comes from the app.user_account_id session setting (was auth.uid()). NOTE: under FORCE ROW LEVEL SECURITY this no longer bypasses RLS — app.town_id must already equal the town id being created. Task C1/D1 owns the replacement procedure.';
 
 -- ─── 6. Supabase Storage ─────────────────────────────────────
--- supabase/migrations/20260311000003_session_0603_storage_bucket.sql
+-- Migration 20260311000003_session_0603_storage_bucket.sql (Supabase
+-- corpus, deleted in Phase F — see git history)
 -- registered a `documents` bucket in storage.buckets and put an RLS policy
 -- on storage.objects keyed on storage.foldername(). It is the second of the
 -- two migrations no builder could ever apply. Nothing in the public schema

@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test";
  * E2E test for the complete onboarding flow.
  *
  * Requires:
- * - Local Supabase running (supabase start)
+ * - A local Postgres database built via `pnpm db:reset` (see README.md)
  * - Dev server (started by Playwright via webServer config)
  * - A fresh user (not yet onboarded) or the ability to sign up
  */
@@ -25,7 +25,8 @@ test.describe("onboarding wizard", () => {
     await page.goto("/login");
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
 
-    // If there's a sign-up link, use it; otherwise use Supabase admin API
+    // If there's a sign-up link, use it; otherwise sign in with the existing
+    // seed credentials
     const signUpLink = page.getByRole("link", { name: /sign up|register|create account/i });
     const hasSignUp = await signUpLink.isVisible().catch(() => false);
 

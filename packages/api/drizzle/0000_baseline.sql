@@ -2,19 +2,19 @@
 -- ============================================================================
 -- Town Meeting Manager — BASELINE SCHEMA
 -- ============================================================================
--- Stage 1, Task B2. This file is the schema. It replaces supabase/migrations/
--- as the thing that gets applied: `scripts/build-db-from-repo.sh` and
+-- Stage 1, Task B2. This file is the schema. It replaces the Supabase
+-- migration corpus (58 files, deleted in Phase F — see git history) as the
+-- thing that gets applied: `scripts/build-db-from-repo.sh` and
 -- `packages/api/src/test/db-harness.ts` both apply
 -- packages/api/drizzle/*.sql in journal order and nothing else.
 --
--- supabase/migrations/ stays in the repository, unmodified, as the historical
--- record of how the schema got here. It is no longer applied by anything, and
--- it CANNOT be: 4 of its 58 files reference Supabase GoTrue's `auth` schema
--- and Storage's `storage` schema, which do not exist on plain PostgreSQL, and
--- the very first of those (`user_account.auth_user_id REFERENCES auth.users`,
--- 20260308000004:26) aborts the build at file 4 of 58. That is the wall this
--- baseline exists to get past. Migrations from here on are forward-only files
--- added alongside this one; this file is never edited in place.
+-- While the corpus existed it could no longer be applied: 4 of its 58 files
+-- referenced Supabase GoTrue's `auth` schema and Storage's `storage` schema,
+-- which do not exist on plain PostgreSQL, and the very first of those
+-- (`user_account.auth_user_id REFERENCES auth.users`, migration
+-- 20260308000004:26) aborted the build at file 4 of 58. That was the wall
+-- this baseline exists to get past. Migrations from here on are forward-only
+-- files added alongside this one; this file is never edited in place.
 --
 -- ─── How this file was produced ────────────────────────────────────────────
 --
@@ -3772,7 +3772,8 @@ ALTER TABLE ONLY public.vote_record
 -- SECTION 2 — DATA: system-default permission templates
 -- ============================================================================
 -- Five templates shared by every town (town_id IS NULL, is_system_default).
--- Verbatim from supabase/migrations/20260308000026_seed_permission_templates.sql.
+-- Verbatim from migration 20260308000026_seed_permission_templates.sql, in
+-- the Supabase corpus deleted in Phase F — see git history.
 --
 -- Position matters: these are inserted BEFORE section 3 turns on FORCE ROW
 -- LEVEL SECURITY. After that point even the table owner is bound by the

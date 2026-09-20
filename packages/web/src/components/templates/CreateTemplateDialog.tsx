@@ -61,8 +61,9 @@ const INITIAL_SECTIONS: AgendaTemplateSection[] = [
  * the one live path in the product that could still create a template as a
  * non-admin, and the deployed schema (`0000_baseline.sql`'s
  * `agenda_template_tenant_isolation`) has no `is_admin()` predicate to catch
- * it — only the legacy `supabase/migrations/` corpus does, and that is not
- * what this app's Postgres runs. Wired here, same procedure, same shape as
+ * it — only the legacy Supabase migration corpus did (deleted in Phase F —
+ * see git history), and that was never what this app's Postgres runs. Wired
+ * here, same procedure, same shape as
  * `DeleteTemplateDialog.tsx`'s `trpc.agendaTemplate.delete` call.
  *
  * `town_id` is no longer sent from the client at all: `agendaTemplate.insert`

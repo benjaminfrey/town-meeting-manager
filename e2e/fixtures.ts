@@ -24,7 +24,8 @@ interface SeededTown {
 }
 
 // Default test credentials — match the seed data admin account.
-// These require Docker Supabase to be running with seed data loaded.
+// These require a local Postgres database built and seeded via `pnpm db:reset`
+// (see README.md).
 const TEST_EMAIL = "mbragdon@newcastle.me.us";
 const TEST_PASSWORD = "TestPassword123!";
 

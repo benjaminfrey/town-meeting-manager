@@ -73,7 +73,7 @@ interface MotionData {
    * `motion.vote_summary` is a JSONB column, so the procedure declares it
    * `unknown` and this prop says the same. It was typed `string | null`, which
    * `MotionPanel`'s own reader has contradicted in a comment since it was
-   * written ("Supabase returns JSONB as a native object; no JSON.parse
+   * written ("the API returns JSONB as a native object; no JSON.parse
    * needed") — that reader already handles both shapes and is unchanged.
    */
   voteSummary: unknown;

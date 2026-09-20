@@ -3,9 +3,10 @@
  *
  * ─── Stage 1, Task D1e ────────────────────────────────────────────────────
  *
- * This used to call `supabase.storage.from("town-seals")`. There is no
- * `town-seals` bucket — the only bucket any migration creates is `documents`
- * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:8`) —
+ * This used to call `supabase.storage.from("town-seals")`. There was no
+ * `town-seals` bucket — the only bucket any migration ever created was
+ * `documents` (migration 20260311000003_session_0603_storage_bucket.sql:8,
+ * in the Supabase corpus deleted in Phase F — see git history) —
  * so every seal upload this product has ever attempted failed, and the error
  * surfaced as a raw storage message under the drop zone.
  *

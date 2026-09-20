@@ -55,17 +55,19 @@ import { publicAssetRoot, resolveWithin } from "./paths.js";
  * every nginx worker in production. The whole document delivery path was
  * dead behind nginx and no test could see it.
  *
- * The fix has two halves, one here and one in the compose file:
- *
- *   1. **A shared group.** `infrastructure/docker-compose.production.yml`
- *      runs the API as `${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}` — still
- *      root, so it can write into the volume, but with nginx's group as its
- *      PRIMARY group. Every file and directory it creates is therefore
- *      group-owned by nginx with no `chown` call anywhere. 101 is the `nginx`
- *      uid/gid in the official `nginx:*-alpine` images; it is a variable so a
- *      different base image is a compose edit, not a code change.
- *
- *   2. **Modes that say who may read, set here.** Below.
+ * The fix had two halves: the modes here, and a shared group the API
+ * container ran with under the Docker Compose deployment —
+ * `infrastructure/docker-compose.production.yml` ran the API as
+ * `${TMM_ASSET_UID:-0}:${TMM_ASSET_GID:-101}` (still root, so it could write
+ * into the volume, but with nginx's group as its PRIMARY group, so every file
+ * and directory it created was group-owned by nginx with no `chown` call
+ * anywhere; 101 is the `nginx` uid/gid in the official `nginx:*-alpine`
+ * images). Phase F (Task 6) deleted that deployment outright rather than
+ * replacing it, so that half no longer exists — a future non-Docker
+ * deployment spec (Stage 2) will need to re-establish whatever grants
+ * nginx's workers read access. What remains here, and is still true
+ * regardless of deployment mechanism, is the modes these writes produce, set
+ * below.
  *
  * ─── Two roots, two answers ───────────────────────────────────────────────
  *
@@ -79,11 +81,14 @@ import { publicAssetRoot, resolveWithin } from "./paths.js";
  * DOCUMENT ROOT — minutes and exhibits, including drafts and `board_only`
  * material. nginx marks this root `internal` and only reaches it after a
  * route has authorized the fetch. `0640`/`0750`: owner (the API) and group
- * (nginx) and nobody else. That last clause is load-bearing rather than
- * decorative, because the `storage-data` volume is mounted by a third
- * container — Supabase Storage, at `/var/lib/storage` — so "other" here is
- * not an empty set, and `0644` would hand that container every town's draft
- * minutes.
+ * (nginx) and nobody else. That last clause was load-bearing rather than
+ * decorative under the Docker Compose deployment (deleted in Phase F — see
+ * git history): the `storage-data` volume was also mounted by a third
+ * container, Supabase Storage, at `/var/lib/storage`, so "other" was
+ * not an empty set there, and `0644` would have handed that container every
+ * town's draft minutes. No replacement deployment topology exists yet
+ * (Stage 2), so this stays the conservative default rather than being
+ * loosened now that the specific third container is gone.
  *
  * Both are applied with `fchmod`/`chmod` AFTER creation rather than by the
  * `mode` argument to `open`/`mkdir`, which the process umask subtracts from.

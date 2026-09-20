@@ -60,12 +60,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // at nginx over TLS is seen here as `http://…` — the origins disagree and
   // sign-in is rejected in production while working perfectly in development.
   //
-  // Trusting the header is safe in this topology and only in this topology:
-  // `infrastructure/docker-compose.production.yml` publishes nginx alone
-  // ("the only host-published service"), the API listens on the private
-  // network, and nginx sets `X-Forwarded-Proto` itself — overwriting anything
-  // a client sent. If the API is ever exposed directly, this must be narrowed
-  // to the proxy's address.
+  // Trusting the header was safe in one specific topology and only that one:
+  // under the Docker Compose deployment (deleted in Phase F — see git
+  // history), `infrastructure/docker-compose.production.yml` published
+  // nginx alone ("the only host-published service"), the API listened on
+  // the private network, and nginx set `X-Forwarded-Proto` itself —
+  // overwriting anything a client sent. No replacement deployment topology
+  // exists yet (Stage 2 owns one); whatever replaces it must re-establish
+  // the same guarantee, or this must be narrowed to the proxy's address, or
+  // the API is directly exposed and this is unsafe.
   // `maxParamLength` — Phase E, wave 5, Task 7. Fastify's router
   // (`find-my-way`) defaults this to 100, sized for an id or a slug in a
   // dynamic path segment. `/api/trpc/*` puts something else there:

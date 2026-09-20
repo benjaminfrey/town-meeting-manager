@@ -101,7 +101,9 @@ export default function NotificationPreferencesPage() {
   const currentUser = useCurrentUser();
 
   // Fetch existing preferences. Subscribers are PERSON records, not
-  // user_account records (see supabase/migrations/20260827000001_canonicalize_notifications.sql) —
+  // user_account records (decided 2026-08-27; see migration
+  // 20260827000001_canonicalize_notifications.sql, in the Supabase corpus
+  // deleted in Phase F — see git history) —
   // `notificationPreference.mine` resolves the caller's `personId` through
   // the tenant-bridged session server-side, so there is no id for this
   // screen to pass at all.

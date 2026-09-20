@@ -12,8 +12,9 @@
  * the opposite: it must not be fetchable without a check.
  *
  * The Supabase `documents` bucket answered both questions with "public"
- * (`supabase/migrations/20260311000003_session_0603_storage_bucket.sql:9`,
- * `public = true`), which made the tenancy policy in that same file decorative
+ * (migration 20260311000003_session_0603_storage_bucket.sql:9, `public =
+ * true` — in the Supabase corpus deleted in Phase F, see git history), which
+ * made the tenancy policy in that same file decorative
  * and left draft minutes readable by anyone who could guess a path. The paths
  * were `${townId}/meetings/${meetingId}/minutes-${Date.now()}.pdf`, and the
  * public portal publishes both ids — so the only secret was a millisecond

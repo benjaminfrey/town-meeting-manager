@@ -181,7 +181,8 @@ zero call sites anywhere under `packages/web/src` (production code — the sole
 web-package hit is a mock in `StaffAccountFlow.test.tsx`); the server's
 `authorization/permission.ts` calls it on every resolution.
 
-**What the gap is:** `supabase/seed.sql` writes at least one account's
+**What the gap is:** `packages/api/drizzle/seed/seed.sql` (formerly
+`supabase/seed.sql`, before Phase F's decommission) writes at least one account's
 `permissions` keyed by action CODE (`{"global": {"A2": true, "A3": true, ...}}`,
 the Sarah Mitchell / Deputy Clerk row) rather than by action NAME. The server
 normalises this before resolving and allows the action; the web client passes
@@ -203,7 +204,7 @@ matrix the client has, but the matrix itself is wrong for a code-keyed row.
 
 ```
 git grep -n "normalisePermissionsMatrix" -- packages/web/src
-grep -n "global.*A2.*true" supabase/seed.sql
+grep -n "global.*A2.*true" packages/api/drizzle/seed/seed.sql
 ```
 
 ---
@@ -478,34 +479,29 @@ grep -n 'case "minutes_approved"' -A 9 packages/api/src/services/notification-se
 
 ---
 
-## 13. Phase F's inherited surface is written down in a phase-scoped document
+## 13. ~~Phase F's inherited surface is written down in a phase-scoped document~~ — CLOSED
 
-**Where:** `docs/superpowers/plans/phase-e-conventions.md`, the closing sections
-"What Phase E taught that the spec could not have known" and "What Phase F
-inherits, and what item 2 still does not say for it".
+**Closed by** Phase F Tasks 1–6: the local dev stack, the production Docker
+Compose stack, the Supabase migration corpus, the `@supabase/supabase-js`
+dependency and the generated `database.ts` types are all deleted, and
+`pnpm db:reset` replaces the local stack (see git history and
+`docs/superpowers/`). This entry existed so Phase F's plan would find the
+inherited-surface material in `docs/superpowers/plans/phase-e-conventions.md`;
+it did, and acted on it.
 
-**What the gap is:** Phase E's close-out measured what is actually left of the
+**What the gap was:** Phase E's close-out measured what was still left of the
 Supabase stack and sorted it into four kinds of work (the local dev stack, the
 production stack, the migration history, and prose that outlived its subject),
-along with three authorization questions item 2 does not cover for a
-decommissioning phase. That material is correct and current as of `be61cfa`, and
-it lives in a document this file's own preamble says nothing reads once Phase E
-ends. This entry exists so Phase F's plan finds it.
+along with three authorization questions item 2 did not cover for a
+decommissioning phase. That material was correct and current as of `be61cfa`.
 
-**Two facts from it worth repeating here, because they change the shape of the
-work:** `packages/api`'s entire remaining Supabase surface is **one unused
-dependency line in `package.json`** (nothing under `packages/api/src` imports the
-package or reads a `SUPABASE_*` variable); and the persisted volume
-`docker/volumes/db/data` holds every local developer's auth accounts, which
-`supabase/seed.sql` does not recreate — so retiring the `db` service is a data
-question, not a `docker compose down`.
-
-**Verification command:**
-
-```
-git grep -n "@supabase/supabase-js" -- . ':!pnpm-lock.yaml' ':!docs' ':!.superpowers'
-grep -rn "SUPABASE" packages/api/src --include='*.ts'
-```
+**Two facts from it, now historical:** `packages/api`'s entire remaining
+Supabase surface used to be one unused dependency line in `package.json`
+(nothing under `packages/api/src` imported the package or read a `SUPABASE_*`
+variable) — that line is gone; and the persisted volume
+`docker/volumes/db/data`, which used to hold every local developer's auth
+accounts and which the old `supabase/seed.sql` never recreated, is gone too —
+`pnpm db:reset` builds logins fresh every time instead.
 
 ---
 

@@ -42,10 +42,13 @@ Reading the result:
 - Migrations are hand-written SQL in `packages/api/drizzle/NNNN_name.sql`, each with an entry in
   `meta/_journal.json`; the test harness refuses a file the journal does not list. Never edit an
   applied migration — add the next one. Keep `packages/api/src/db/schema.ts` in step by hand.
-- **Nothing applies migrations to an existing database.** `infrastructure/scripts/migrate.sh` is
-  inoperative, `scripts/build-db-from-repo.sh` rebuilds from scratch, and `pnpm db:migrate` replays
-  every file as superuser against the legacy Docker container. A live database gets a new
-  migration applied by hand, as the table owner.
+- **Nothing applies migrations to an existing database.** `infrastructure/scripts/migrate.sh` was
+  deleted in Phase F along with the rest of the Docker Compose deployment (see git history). What
+  remains: `scripts/build-db-from-repo.sh` applies the drizzle corpus and seed to an already-existing
+  database named by `$DATABASE_URL`, refusing to run as a superuser; `pnpm db:migrate` calls it
+  directly; `pnpm db:reset` (`scripts/dev/reset-local-db.sh`) wraps both with the drop/create step
+  for a fresh local `tmm_dev`. A live database gets a new migration applied by hand, as the table
+  owner.
 - **CI connects as a superuser, which bypasses RLS** — so it cannot catch a migration that fails,
   or silently does nothing, for the real owner. A backfill on an RLS table: lift FORCE for the
   window, assert `NOT row_security_active('<table>')` **before** writing (a count afterwards is

@@ -128,7 +128,8 @@ async function assertMayIssueInvitations(
 // ─── HMAC-based unsubscribe tokens ───────────────────────────────────
 //
 // Encodes a PERSON id (notification subscribers are person, not user_account —
-// see supabase/migrations/20260827000001_canonicalize_notifications.sql) AND
+// decided 2026-08-27; see migration 20260827000001_canonicalize_notifications.sql,
+// in the Supabase corpus deleted in Phase F — see git history) AND
 // the town that person belongs to.
 //
 // The town is in the token because the route that consumes it has no session

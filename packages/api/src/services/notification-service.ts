@@ -28,7 +28,8 @@
  * ─── Subscribers are PERSON records ───────────────────────────────────────
  *
  * Not `user_account` records (decided 2026-08-27 — see the header of
- * supabase/migrations/20260827000001_canonicalize_notifications.sql). A person
+ * migration 20260827000001_canonicalize_notifications.sql, in the Supabase
+ * corpus deleted in Phase F — see git history). A person
  * can exist with no user_account ("directory-only" people — see
  * AddPersonDialog), and `notification_delivery.subscriber_id` /
  * `subscriber_notification_preference.person_id` both reference `person(id)`.
