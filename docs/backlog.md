@@ -676,50 +676,28 @@ grep -n "person_id = " packages/api/src/trpc/routers/notification-preference.ts
 
 ---
 
-## 20. Stage 1's "feature parity on CI" criterion has no baseline and no test
+## 20. ~~Stage 1's "feature parity on CI" criterion has no baseline and no test~~ — CLOSED
 
-**Where:** `docs/superpowers/plans/2026-08-26-stage-1-platform.md`'s exit-criteria
-list (the eighth item), `docs/superpowers/specs/2026-08-26-tmm-revival-design.md:480`,
-and `.github/workflows/ci.yml`.
+**Closed 2026-09-20 by restating the criterion**, per the owner. As written it
+could never be met: it asked CI to demonstrate parity with a predecessor, and
+the web client was already inert before Phase E — no credential reached
+PostgREST, `get_current_town_id()` could not resolve, every read returned zero
+rows. `2026-08-29-phase-e-web-restoration-design.md:25` states there is no
+parity baseline. Phase E was a restoration, not a migration.
 
-**What the gap is:** the criterion asks CI to demonstrate feature parity. CI
-demonstrates that typecheck, lint, format:check, build, the dev bootstrap and
-the full test suite pass; it does not and cannot demonstrate parity, because
-there is no predecessor to be at parity with.
-`docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md:25` states
-it plainly — "there is no parity baseline" — and explains why: the web client
-was already inert before Phase E, since the browser sent no credential and
-`get_current_town_id()` could not resolve, so every PostgREST read returned zero
-rows. Phase E was a restoration. The criterion is left unticked in the Stage 1
-plan and in `docs/superpowers/plans/phase-f-stage-1-gate.md` because ticking it
-would assert something no artefact supports.
+**The criterion now reads:** CI is green on typecheck, lint, format:check,
+build, the dev bootstrap and the full test suite, with the tenant-isolation and
+route-access gates among them. It is ticked in
+`docs/superpowers/plans/2026-08-26-stage-1-platform.md` against that wording,
+and `phase-f-stage-1-gate.md` § 8 carries the evidence and the reasoning —
+including what the restatement deliberately does not claim.
 
-**Why it was not closed in Phase F:** it cannot be closed by any amount of
-deleting. The nearest thing to an answer already exists and is not wired up:
-`playwright.config.ts` and four specs under `e2e/` (`smoke`, `onboarding`,
-`member-management`, `meeting-lifecycle`) are in the repository, `pnpm test:e2e`
-runs them, and **CI runs none of them** — `.github/workflows/ci.yml` has no
-Playwright step. Whether those four still pass against the post-Phase-F stack is
-itself unknown; they were last touched before the decommission, and their
-`baseURL` assumes a dev server nobody starts in CI. Standing them up is a body
-of work, not a decommissioning step, and it would still not be _parity_ — it
-would be a functional suite, which is the thing worth having.
+**Stage 1's exit criteria are now 8 of 8.**
 
-**Retirement condition:** the owner either (a) restates the criterion as
-something CI answers — the suggestion the evidence supports is "CI green on
-typecheck, lint, format:check, build, dev bootstrap and the full test suite,
-with the tenant-isolation and route-access gates among them" — and ticks it
-against that, or (b) gets the four `e2e/` specs running green against a seeded
-database in CI and ticks it against that instead.
-
-**Verification command:**
-
-```
-grep -n "Feature parity on CI" docs/superpowers/plans/2026-08-26-stage-1-platform.md
-grep -n "no parity baseline" docs/superpowers/specs/2026-08-29-phase-e-web-restoration-design.md
-ls e2e/*.spec.ts                                    # four specs exist
-grep -n "e2e\|playwright" .github/workflows/ci.yml  # and CI runs none of them
-```
+**This does not mean the product is verified end to end.** A green unit and
+integration suite is not a functional guarantee — Phase E wave 5 shipped 1725
+passing tests over a live screen that rendered blank in a browser. That work is
+entry 22.
 
 ---
 
@@ -768,3 +746,53 @@ git grep -n "TMM_ASSET_GID" -- packages/api/src   # only the writer's own commen
 git log --diff-filter=D --name-only --format=%H -- 'infrastructure/docker-compose.production.yml'
 sed -n '1,30p;230,340p' packages/api/src/storage/__tests__/serving-surface.test.ts
 ```
+
+---
+
+## 22. No end-to-end suite runs in CI, and the four specs that exist are stale
+
+**Where:** `playwright.config.ts`, `e2e/fixtures.ts`, `e2e/*.spec.ts` (420 lines
+across `smoke`, `onboarding`, `member-management`, `meeting-lifecycle`), and
+`.github/workflows/ci.yml`.
+
+**What the gap is:** nothing exercises the running product in a browser on any
+automated path. `pnpm test:e2e` exists and CI never calls it. This is the
+substitute that entry 20's restatement explicitly does not provide, and the
+reason it matters is on the record: Phase E wave 5 had 1725 green tests and a
+live meeting screen that rendered blank, an SSE resume that lost every write in
+a quiet gap, and a 404 on every page load — three defects that only ~20 minutes
+in a real browser found.
+
+**The four specs cannot pass as they stand.** Measured 2026-09-20:
+
+1. `e2e/fixtures.ts:30` logs in with `TestPassword123!`; the dev bootstrap
+   (`scripts/dev/reset-local-db.sh`) creates logins with `TownMeeting!Dev1`.
+2. `e2e/fixtures.ts:62-63` names `boardId: "bbbb0001-0000-0000-0000-000000000000"`
+   and `adminUserId: "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"`; the seed has
+   `bbbb1111-bbbb-4bbb-8bbb-…` / `bbbb2222-…` and
+   `aaaa1111-aaaa-4aaa-8aaa-…` (note the UUID version and variant nibbles).
+3. `playwright.config.ts:34` starts only `@town-meeting/web`; nothing serves the
+   API, so any spec that reads data fails regardless of the first two.
+
+Whether the specs' assertions still describe the current screens is unknown —
+they were last touched before Phase E's later waves rewrote those screens.
+
+**Why it was not closed with entry 20:** repairing fixtures, standing up two
+servers and a seeded database in CI, and re-deriving 420 lines of assertions
+against screens that changed is a body of work, not a restatement. It also
+slows every CI run, which is a trade to make deliberately.
+
+**Retirement condition:** CI runs at least the smoke spec against a
+bootstrap-seeded database with both servers up, green, on every pull request —
+and the specs it runs assert something a developer would notice breaking.
+
+**Verification command:**
+
+```
+grep -n "e2e\|playwright" .github/workflows/ci.yml   # currently no hit
+grep -n "TEST_PASSWORD\|boardId:\|adminUserId:" e2e/fixtures.ts
+grep -n "DEV_PASSWORD" scripts/dev/reset-local-db.sh
+grep -n "aaaa1111\|bbbb1111\|bbbb2222" packages/api/drizzle/seed/seed.sql
+```
+
+---
